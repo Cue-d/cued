@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { existsSync, rmSync } from "node:fs";
-import Database from "better-sqlite3";
+import type Database from "better-sqlite3-multiple-ciphers";
 import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import { type BetterSQLite3Database, drizzle } from "drizzle-orm/better-sqlite3";
 import type { SQLiteTable } from "drizzle-orm/sqlite-core";
@@ -15,11 +15,13 @@ import type {
   ProviderRawEventInput,
   RawEventEntityKind,
   SyncMode,
+  SyncProofInput,
   SyncRunStatus,
   SyncRunType,
 } from "../core/types/provider.js";
 import {
   normalizeRawEventProvenance,
+  parsePlatform,
   resolveRawEventNormalizedSchema,
 } from "../core/types/provider.js";
 import { normalizePhone, toE164 } from "../core/utils/phone.js";
@@ -33,6 +35,7 @@ import type {
 import { safeParseJson, safeStringifyJson } from "./codecs.js";
 import { MIGRATIONS } from "./migrations.js";
 import * as schema from "./schema.js";
+import { openSqliteDatabase } from "./sqlite.js";
 
 const {
   attachmentCache,
@@ -55,6 +58,8 @@ const {
   rawEvents,
   sourceAccounts,
   slackBackfillProofs,
+  syncProofs,
+  syncScopes,
   syncCheckpoints,
   syncRunErrors,
   syncRuns,
@@ -127,30 +132,43 @@ export interface MessagesAutomationVerificationState {
   summary: string | null;
 }
 
-export interface SlackBackfillProofRow {
+export interface SyncScopeRow {
   id: string;
+  platform: Platform;
   account_key: string;
-  team_id: string;
-  conversation_id: string;
-  conversation_name: string | null;
-  conversation_family: string;
-  sync_mode: string;
-  scan_started_at: number;
-  known_conversation_count: number;
-  conversation_phase: string;
-  history_complete: number;
-  history_cursor: string | null;
-  thread_root_count: number;
-  completed_thread_count: number;
-  pending_thread_count: number;
-  active_thread_ts: string | null;
-  replies_cursor: string | null;
-  oldest_message_ts: string | null;
-  newest_message_ts: string | null;
+  scope_kind: string;
+  scope_key: string;
+  parent_scope_id: string | null;
+  display_name: string | null;
+  metadata_json: string | null;
   first_discovered_at: number;
-  history_complete_at: number | null;
-  replies_complete_at: number | null;
   last_observed_at: number;
+  created_at: number;
+  updated_at: number;
+}
+
+export interface SyncProofRow {
+  id: string;
+  platform: Platform;
+  account_key: string;
+  scope_id: string;
+  scope_kind: string;
+  scope_key: string;
+  parent_scope_id: string | null;
+  display_name: string | null;
+  metadata_json: string | null;
+  proof_kind: string;
+  status: string;
+  sync_mode: SyncMode | null;
+  run_started_at: number | null;
+  last_observed_at: number;
+  completed_at: number | null;
+  fresh_until: number | null;
+  resume_cursor_json: string | null;
+  coverage_json: string | null;
+  stats_json: string | null;
+  error_json: string | null;
+  created_at: number;
   updated_at: number;
 }
 
@@ -165,48 +183,27 @@ export interface ContactMergeDecisionRow {
   created_at: number;
 }
 
-function compareSlackTs(left: string | null | undefined, right: string | null | undefined): number {
-  if (!left && !right) {
-    return 0;
-  }
-  if (!left) {
-    return -1;
-  }
-  if (!right) {
-    return 1;
-  }
-  const leftNumeric = Number(left);
-  const rightNumeric = Number(right);
-  if (Number.isFinite(leftNumeric) && Number.isFinite(rightNumeric)) {
-    return leftNumeric === rightNumeric ? 0 : leftNumeric < rightNumeric ? -1 : 1;
-  }
-  return left.localeCompare(right);
+function buildSyncScopeId(
+  platform: Platform,
+  accountKey: string,
+  scopeKind: string,
+  scopeKey: string,
+): string {
+  return `scope:${Buffer.from(JSON.stringify([platform, accountKey, scopeKind, scopeKey])).toString(
+    "base64url",
+  )}`;
 }
 
-function minSlackTs(
-  left: string | null | undefined,
-  right: string | null | undefined,
-): string | null {
-  if (!left) {
-    return right ?? null;
-  }
-  if (!right) {
-    return left;
-  }
-  return compareSlackTs(left, right) <= 0 ? left : right;
-}
-
-function maxSlackTs(
-  left: string | null | undefined,
-  right: string | null | undefined,
-): string | null {
-  if (!left) {
-    return right ?? null;
-  }
-  if (!right) {
-    return left;
-  }
-  return compareSlackTs(left, right) >= 0 ? left : right;
+function buildSyncProofId(
+  platform: Platform,
+  accountKey: string,
+  scopeKind: string,
+  scopeKey: string,
+  proofKind: string,
+): string {
+  return `proof:${Buffer.from(
+    JSON.stringify([platform, accountKey, scopeKind, scopeKey, proofKind]),
+  ).toString("base64url")}`;
 }
 
 export type RawEventInput = ProviderRawEventInput;
@@ -228,6 +225,12 @@ export interface IntegrationStateRow {
   last_seen_at: number;
   created_at: number;
   updated_at: number;
+}
+
+function hasKnownPlatform<T extends { platform: string | null }>(
+  row: T,
+): row is T & { platform: Platform } {
+  return typeof row.platform === "string" && parsePlatform(row.platform) !== null;
 }
 
 export interface AuthSessionRow {
@@ -338,6 +341,14 @@ export interface WhatsAppSendResolution {
   threadId: string;
   resolution: "whatsapp_jid" | "phone" | "group" | "passthrough";
   matchedContactIds: string[];
+  matchedName: string | null;
+}
+
+export interface DiscordSendResolution {
+  target: string;
+  threadId: string | null;
+  resolution: "channel_id" | "source_conversation_key" | "conversation_name";
+  matchedConversationId: string | null;
   matchedName: string | null;
 }
 
@@ -474,10 +485,7 @@ export class CuedDatabase {
     } = {},
   ) {
     ensureCuedDirs();
-    this.sqlite = new Database(
-      dbPath,
-      options.readonly ? { readonly: true, fileMustExist: true } : undefined,
-    );
+    this.sqlite = openSqliteDatabase(dbPath, { readonly: options.readonly });
     this.sqlite.exec("PRAGMA busy_timeout = 5000");
     this.sqlite.exec("PRAGMA foreign_keys = ON");
     if (!options.readonly) {
@@ -528,6 +536,21 @@ export class CuedDatabase {
 
   orm(): LocalDrizzleDatabase {
     return this.db;
+  }
+
+  executeReadOnlySql(query: string): unknown[] {
+    const trimmed = query.trim();
+    if (trimmed.length === 0) {
+      throw new Error("SQL query must not be empty");
+    }
+    if (!/^(select|with|pragma|explain)\b/i.test(trimmed)) {
+      throw new Error("Only read-only SELECT/PRAGMA/EXPLAIN queries are supported");
+    }
+    const statement = this.sqlite.prepare(trimmed) as Database.Statement & { reader?: boolean };
+    if (statement.reader === false) {
+      throw new Error("Only read-only queries are supported");
+    }
+    return statement.all();
   }
 
   listContactMergeDecisions(): ContactMergeDecisionRow[] {
@@ -991,6 +1014,14 @@ export class CuedDatabase {
         .delete(syncCheckpoints)
         .where(eq(syncCheckpoints.platform, platform))
         .run().changes;
+      const removedSyncProofs = tx
+        .delete(syncProofs)
+        .where(eq(syncProofs.platform, platform))
+        .run().changes;
+      const removedSyncScopes = tx
+        .delete(syncScopes)
+        .where(eq(syncScopes.platform, platform))
+        .run().changes;
       const removedSlackBackfillProofs =
         platform === "slack" ? tx.delete(slackBackfillProofs).run().changes : 0;
       return (
@@ -999,6 +1030,8 @@ export class CuedDatabase {
         Number(removedRuns) +
         Number(removedErrors) +
         Number(removedCheckpoints) +
+        Number(removedSyncProofs) +
+        Number(removedSyncScopes) +
         Number(removedSlackBackfillProofs)
       );
     });
@@ -1015,146 +1048,228 @@ export class CuedDatabase {
     return removed;
   }
 
-  listSlackBackfillProofs(accountKey: string): SlackBackfillProofRow[] {
+  listSyncScopes(platform: Platform, accountKey: string): SyncScopeRow[] {
     return this.db
       .select({
-        id: slackBackfillProofs.id,
-        account_key: slackBackfillProofs.accountKey,
-        team_id: slackBackfillProofs.teamId,
-        conversation_id: slackBackfillProofs.conversationId,
-        conversation_name: slackBackfillProofs.conversationName,
-        conversation_family: slackBackfillProofs.conversationFamily,
-        sync_mode: slackBackfillProofs.syncMode,
-        scan_started_at: slackBackfillProofs.scanStartedAt,
-        known_conversation_count: slackBackfillProofs.knownConversationCount,
-        conversation_phase: slackBackfillProofs.conversationPhase,
-        history_complete: slackBackfillProofs.historyComplete,
-        history_cursor: slackBackfillProofs.historyCursor,
-        thread_root_count: slackBackfillProofs.threadRootCount,
-        completed_thread_count: slackBackfillProofs.completedThreadCount,
-        pending_thread_count: slackBackfillProofs.pendingThreadCount,
-        active_thread_ts: slackBackfillProofs.activeThreadTs,
-        replies_cursor: slackBackfillProofs.repliesCursor,
-        oldest_message_ts: slackBackfillProofs.oldestMessageTs,
-        newest_message_ts: slackBackfillProofs.newestMessageTs,
-        first_discovered_at: slackBackfillProofs.firstDiscoveredAt,
-        history_complete_at: slackBackfillProofs.historyCompleteAt,
-        replies_complete_at: slackBackfillProofs.repliesCompleteAt,
-        last_observed_at: slackBackfillProofs.lastObservedAt,
-        updated_at: slackBackfillProofs.updatedAt,
+        id: syncScopes.id,
+        platform: syncScopes.platform,
+        account_key: syncScopes.accountKey,
+        scope_kind: syncScopes.scopeKind,
+        scope_key: syncScopes.scopeKey,
+        parent_scope_id: syncScopes.parentScopeId,
+        display_name: syncScopes.displayName,
+        metadata_json: syncScopes.metadataJson,
+        first_discovered_at: syncScopes.firstDiscoveredAt,
+        last_observed_at: syncScopes.lastObservedAt,
+        created_at: syncScopes.createdAt,
+        updated_at: syncScopes.updatedAt,
       })
-      .from(slackBackfillProofs)
-      .where(eq(slackBackfillProofs.accountKey, accountKey))
-      .orderBy(asc(slackBackfillProofs.conversationId))
-      .all() as SlackBackfillProofRow[];
+      .from(syncScopes)
+      .where(and(eq(syncScopes.platform, platform), eq(syncScopes.accountKey, accountKey)))
+      .orderBy(asc(syncScopes.scopeKind), asc(syncScopes.scopeKey))
+      .all() as SyncScopeRow[];
   }
 
-  upsertSlackBackfillProof(input: {
-    accountKey: string;
-    teamId: string;
-    conversationId: string;
-    conversationName?: string | null;
-    conversationFamily: string;
-    syncMode: string;
-    scanStartedAt: number;
-    knownConversationCount: number;
-    conversationPhase: string;
-    historyComplete: boolean;
-    historyCursor: string | null;
-    threadRootCount: number;
-    completedThreadCount: number;
-    pendingThreadCount: number;
-    activeThreadTs: string | null;
-    repliesCursor: string | null;
-    oldestMessageTs: string | null;
-    newestMessageTs: string | null;
-    observedAt: number;
-  }): void {
-    const id = `${input.accountKey}:${input.conversationId}`;
-    const existing = this.db
+  listSyncProofs(platform: Platform, accountKey: string): SyncProofRow[] {
+    return this.db
       .select({
-        firstDiscoveredAt: slackBackfillProofs.firstDiscoveredAt,
-        historyCompleteAt: slackBackfillProofs.historyCompleteAt,
-        repliesCompleteAt: slackBackfillProofs.repliesCompleteAt,
-        oldestMessageTs: slackBackfillProofs.oldestMessageTs,
-        newestMessageTs: slackBackfillProofs.newestMessageTs,
-        knownConversationCount: slackBackfillProofs.knownConversationCount,
-        threadRootCount: slackBackfillProofs.threadRootCount,
-        completedThreadCount: slackBackfillProofs.completedThreadCount,
+        id: syncProofs.id,
+        platform: syncProofs.platform,
+        account_key: syncProofs.accountKey,
+        scope_id: syncProofs.scopeId,
+        scope_kind: syncScopes.scopeKind,
+        scope_key: syncScopes.scopeKey,
+        parent_scope_id: syncScopes.parentScopeId,
+        display_name: syncScopes.displayName,
+        metadata_json: syncScopes.metadataJson,
+        proof_kind: syncProofs.proofKind,
+        status: syncProofs.status,
+        sync_mode: syncProofs.syncMode,
+        run_started_at: syncProofs.runStartedAt,
+        last_observed_at: syncProofs.lastObservedAt,
+        completed_at: syncProofs.completedAt,
+        fresh_until: syncProofs.freshUntil,
+        resume_cursor_json: syncProofs.resumeCursorJson,
+        coverage_json: syncProofs.coverageJson,
+        stats_json: syncProofs.statsJson,
+        error_json: syncProofs.errorJson,
+        created_at: syncProofs.createdAt,
+        updated_at: syncProofs.updatedAt,
       })
-      .from(slackBackfillProofs)
-      .where(eq(slackBackfillProofs.id, id))
-      .get();
-    const timestamp = now();
-    const historyCompleteAt =
-      input.historyComplete || input.conversationPhase === "complete"
-        ? (existing?.historyCompleteAt ?? input.observedAt)
-        : (existing?.historyCompleteAt ?? null);
-    const repliesCompleteAt =
-      input.conversationPhase === "complete"
-        ? (existing?.repliesCompleteAt ?? input.observedAt)
-        : (existing?.repliesCompleteAt ?? null);
+      .from(syncProofs)
+      .innerJoin(syncScopes, eq(syncProofs.scopeId, syncScopes.id))
+      .where(and(eq(syncProofs.platform, platform), eq(syncProofs.accountKey, accountKey)))
+      .orderBy(asc(syncScopes.scopeKind), asc(syncScopes.scopeKey), asc(syncProofs.proofKind))
+      .all() as SyncProofRow[];
+  }
 
-    const values = {
-      id,
-      accountKey: input.accountKey,
-      teamId: input.teamId,
-      conversationId: input.conversationId,
-      conversationName: input.conversationName ?? null,
-      conversationFamily: input.conversationFamily,
-      syncMode: input.syncMode,
-      scanStartedAt: input.scanStartedAt,
-      knownConversationCount: Math.max(
-        existing?.knownConversationCount ?? 0,
-        input.knownConversationCount,
-      ),
-      conversationPhase: input.conversationPhase,
-      historyComplete: input.historyComplete || input.conversationPhase === "complete" ? 1 : 0,
-      historyCursor: input.historyCursor,
-      threadRootCount: Math.max(existing?.threadRootCount ?? 0, input.threadRootCount),
-      completedThreadCount: Math.max(
-        existing?.completedThreadCount ?? 0,
-        input.completedThreadCount,
-      ),
-      pendingThreadCount: input.pendingThreadCount,
-      activeThreadTs: input.activeThreadTs,
-      repliesCursor: input.repliesCursor,
-      oldestMessageTs: minSlackTs(existing?.oldestMessageTs, input.oldestMessageTs),
-      newestMessageTs: maxSlackTs(existing?.newestMessageTs, input.newestMessageTs),
-      firstDiscoveredAt: existing?.firstDiscoveredAt ?? input.observedAt,
-      historyCompleteAt,
-      repliesCompleteAt,
-      lastObservedAt: input.observedAt,
-      updatedAt: timestamp,
-    };
+  upsertSyncProof(input: { platform: Platform; accountKey: string; proof: SyncProofInput }): void {
+    const timestamp = now();
+    const scopeId = buildSyncScopeId(
+      input.platform,
+      input.accountKey,
+      input.proof.scope.kind,
+      input.proof.scope.key,
+    );
+    const parentScopeId = input.proof.scope.parent
+      ? buildSyncScopeId(
+          input.platform,
+          input.accountKey,
+          input.proof.scope.parent.kind,
+          input.proof.scope.parent.key,
+        )
+      : null;
+    const existingScope = this.db
+      .select({
+        displayName: syncScopes.displayName,
+        metadataJson: syncScopes.metadataJson,
+        firstDiscoveredAt: syncScopes.firstDiscoveredAt,
+      })
+      .from(syncScopes)
+      .where(eq(syncScopes.id, scopeId))
+      .get();
+    const scopeDisplayName =
+      input.proof.scope.displayName === undefined
+        ? (existingScope?.displayName ?? null)
+        : input.proof.scope.displayName;
+    const scopeMetadataJson =
+      input.proof.scope.metadata === undefined
+        ? (existingScope?.metadataJson ?? null)
+        : safeStringifyJson(input.proof.scope.metadata);
+    const scopeFirstDiscoveredAt = existingScope?.firstDiscoveredAt ?? input.proof.observedAt;
+
+    if (input.proof.scope.parent) {
+      this.db
+        .insert(syncScopes)
+        .values({
+          id: parentScopeId!,
+          platform: input.platform,
+          accountKey: input.accountKey,
+          scopeKind: input.proof.scope.parent.kind,
+          scopeKey: input.proof.scope.parent.key,
+          parentScopeId: null,
+          displayName: null,
+          metadataJson: null,
+          firstDiscoveredAt: input.proof.observedAt,
+          lastObservedAt: input.proof.observedAt,
+          createdAt: timestamp,
+          updatedAt: timestamp,
+        })
+        .onConflictDoUpdate({
+          target: [
+            syncScopes.platform,
+            syncScopes.accountKey,
+            syncScopes.scopeKind,
+            syncScopes.scopeKey,
+          ],
+          set: {
+            lastObservedAt: input.proof.observedAt,
+            updatedAt: timestamp,
+          },
+        })
+        .run();
+    }
 
     this.db
-      .insert(slackBackfillProofs)
-      .values(values)
+      .insert(syncScopes)
+      .values({
+        id: scopeId,
+        platform: input.platform,
+        accountKey: input.accountKey,
+        scopeKind: input.proof.scope.kind,
+        scopeKey: input.proof.scope.key,
+        parentScopeId,
+        displayName: scopeDisplayName,
+        metadataJson: scopeMetadataJson,
+        firstDiscoveredAt: scopeFirstDiscoveredAt,
+        lastObservedAt: input.proof.observedAt,
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      })
       .onConflictDoUpdate({
-        target: [slackBackfillProofs.accountKey, slackBackfillProofs.conversationId],
+        target: [
+          syncScopes.platform,
+          syncScopes.accountKey,
+          syncScopes.scopeKind,
+          syncScopes.scopeKey,
+        ],
         set: {
-          teamId: values.teamId,
-          conversationName: values.conversationName,
-          conversationFamily: values.conversationFamily,
-          syncMode: values.syncMode,
-          scanStartedAt: values.scanStartedAt,
-          knownConversationCount: values.knownConversationCount,
-          conversationPhase: values.conversationPhase,
-          historyComplete: values.historyComplete,
-          historyCursor: values.historyCursor,
-          threadRootCount: values.threadRootCount,
-          completedThreadCount: values.completedThreadCount,
-          pendingThreadCount: values.pendingThreadCount,
-          activeThreadTs: values.activeThreadTs,
-          repliesCursor: values.repliesCursor,
-          oldestMessageTs: values.oldestMessageTs,
-          newestMessageTs: values.newestMessageTs,
-          firstDiscoveredAt: values.firstDiscoveredAt,
-          historyCompleteAt: values.historyCompleteAt,
-          repliesCompleteAt: values.repliesCompleteAt,
-          lastObservedAt: values.lastObservedAt,
-          updatedAt: values.updatedAt,
+          parentScopeId,
+          displayName: scopeDisplayName,
+          metadataJson: scopeMetadataJson,
+          firstDiscoveredAt: scopeFirstDiscoveredAt,
+          lastObservedAt: input.proof.observedAt,
+          updatedAt: timestamp,
+        },
+      })
+      .run();
+
+    const proofId = buildSyncProofId(
+      input.platform,
+      input.accountKey,
+      input.proof.scope.kind,
+      input.proof.scope.key,
+      input.proof.proofKind,
+    );
+    const existingProof = this.db
+      .select({
+        completedAt: syncProofs.completedAt,
+      })
+      .from(syncProofs)
+      .where(eq(syncProofs.id, proofId))
+      .get();
+    const completedAt =
+      input.proof.status === "complete"
+        ? (existingProof?.completedAt ?? input.proof.completedAt ?? input.proof.observedAt)
+        : (input.proof.completedAt ?? existingProof?.completedAt ?? null);
+    const proofSyncMode = input.proof.syncMode ?? null;
+    const proofRunStartedAt = input.proof.runStartedAt ?? null;
+    const proofFreshUntil = input.proof.freshUntil ?? null;
+    const resumeCursorJson = safeStringifyJson(input.proof.resumeCursor);
+    const coverageJson = safeStringifyJson(input.proof.coverage);
+    const statsJson = safeStringifyJson(input.proof.stats);
+    const errorJson = safeStringifyJson(input.proof.error);
+
+    this.db
+      .insert(syncProofs)
+      .values({
+        id: proofId,
+        platform: input.platform,
+        accountKey: input.accountKey,
+        scopeId,
+        proofKind: input.proof.proofKind,
+        status: input.proof.status,
+        syncMode: proofSyncMode,
+        runStartedAt: proofRunStartedAt,
+        lastObservedAt: input.proof.observedAt,
+        completedAt,
+        freshUntil: proofFreshUntil,
+        resumeCursorJson,
+        coverageJson,
+        statsJson,
+        errorJson,
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      })
+      .onConflictDoUpdate({
+        target: [
+          syncProofs.platform,
+          syncProofs.accountKey,
+          syncProofs.scopeId,
+          syncProofs.proofKind,
+        ],
+        set: {
+          status: input.proof.status,
+          syncMode: proofSyncMode,
+          runStartedAt: proofRunStartedAt,
+          lastObservedAt: input.proof.observedAt,
+          completedAt,
+          freshUntil: proofFreshUntil,
+          resumeCursorJson,
+          coverageJson,
+          statsJson,
+          errorJson,
+          updatedAt: timestamp,
         },
       })
       .run();
@@ -1168,6 +1283,10 @@ export class CuedDatabase {
     sourceAccounts: number;
     integrations: number;
     authSessions: number;
+    messageBreakdown: Array<{
+      platform: Platform;
+      messages: number;
+    }>;
   } {
     return {
       contacts: this.countRows(contacts),
@@ -1177,10 +1296,30 @@ export class CuedDatabase {
       sourceAccounts: this.countRows(sourceAccounts),
       integrations: this.countRows(integrationStates),
       authSessions: this.countRows(authSessions),
+      messageBreakdown: this.listMessageCountsByPlatform(),
     };
   }
 
-  getProjectionState(): ProjectionStateRow {
+  listMessageCountsByPlatform(): Array<{
+    platform: Platform;
+    messages: number;
+  }> {
+    return this.sqlite
+      .prepare(
+        `
+        SELECT platform, COUNT(*) AS messages
+        FROM messages
+        GROUP BY platform
+        ORDER BY messages DESC, platform ASC
+      `,
+      )
+      .all() as Array<{
+      platform: Platform;
+      messages: number;
+    }>;
+  }
+
+  getProjectionState(options: { initialize?: boolean } = {}): ProjectionStateRow {
     const row = this.db
       .select({
         singleton_key: projectionState.singletonKey,
@@ -1204,11 +1343,13 @@ export class CuedDatabase {
       last_rebuild_at: null,
       updated_at: now(),
     };
-    this.upsertProjectionState({
-      projectionWatermark: 0,
-      lastProjectedAt: null,
-      lastRebuildAt: null,
-    });
+    if (options.initialize !== false) {
+      this.upsertProjectionState({
+        projectionWatermark: 0,
+        lastProjectedAt: null,
+        lastRebuildAt: null,
+      });
+    }
     return fallback;
   }
 
@@ -1240,12 +1381,14 @@ export class CuedDatabase {
       .run();
   }
 
-  getProjectionBacklog(): {
+  getProjectionBacklog(options: { initializeProjectionState?: boolean } = {}): {
     projection_watermark: number;
     max_raw_event_rowid: number;
     pending_raw_events: number;
   } {
-    const state = this.getProjectionState();
+    const state = this.getProjectionState({
+      initialize: options.initializeProjectionState !== false,
+    });
     const row = this.sqlite
       .prepare(
         `
@@ -1267,8 +1410,64 @@ export class CuedDatabase {
     };
   }
 
+  getIntegrationProjectionStats(
+    platform: Platform,
+    accountKey: string,
+  ): {
+    rawEvents: number;
+    rawEventsBySchema: Record<string, number>;
+    projectedContacts: number;
+    projectedConversations: number;
+    projectedMessages: number;
+  } {
+    const rawEventRows = this.sqlite
+      .prepare(
+        `
+        SELECT
+          COALESCE(normalized_schema, entity_kind || '.' || event_kind) AS schema_key,
+          COUNT(*) AS count
+        FROM raw_events
+        WHERE platform = ? AND account_key = ?
+        GROUP BY schema_key
+        ORDER BY count DESC, schema_key ASC
+      `,
+      )
+      .all(platform, accountKey) as Array<{
+      schema_key: string | null;
+      count: number | null;
+    }>;
+    const projectedCounts = this.sqlite
+      .prepare(
+        `
+        SELECT
+          (SELECT COUNT(*) FROM contact_sources WHERE platform = ? AND account_key = ?) AS projected_contacts,
+          (SELECT COUNT(*) FROM conversations WHERE platform = ? AND account_key = ?) AS projected_conversations,
+          (SELECT COUNT(*) FROM messages WHERE platform = ? AND account_key = ?) AS projected_messages
+      `,
+      )
+      .get(platform, accountKey, platform, accountKey, platform, accountKey) as {
+      projected_contacts: number | null;
+      projected_conversations: number | null;
+      projected_messages: number | null;
+    };
+
+    const rawEventsBySchema = Object.fromEntries(
+      rawEventRows
+        .filter((row) => typeof row.schema_key === "string" && row.schema_key.length > 0)
+        .map((row) => [row.schema_key!, Number(row.count ?? 0)]),
+    );
+
+    return {
+      rawEvents: rawEventRows.reduce((total, row) => total + Number(row.count ?? 0), 0),
+      rawEventsBySchema,
+      projectedContacts: Number(projectedCounts.projected_contacts ?? 0),
+      projectedConversations: Number(projectedCounts.projected_conversations ?? 0),
+      projectedMessages: Number(projectedCounts.projected_messages ?? 0),
+    };
+  }
+
   listIntegrationStates(): IntegrationStateRow[] {
-    return this.db
+    const rows = this.db
       .select({
         id: integrationStates.id,
         platform: integrationStates.platform,
@@ -1289,7 +1488,8 @@ export class CuedDatabase {
       })
       .from(integrationStates)
       .orderBy(asc(integrationStates.platform), asc(integrationStates.accountKey))
-      .all() as IntegrationStateRow[];
+      .all() as Array<IntegrationStateRow & { platform: string }>;
+    return rows.filter(hasKnownPlatform);
   }
 
   listEnabledSyncPlatforms(): Platform[] {
@@ -1299,11 +1499,12 @@ export class CuedDatabase {
       .where(and(eq(integrationStates.enabled, 1), eq(integrationStates.syncCapable, 1)))
       .orderBy(asc(integrationStates.platform))
       .all()
-      .map((row) => row.platform as Platform);
+      .filter(hasKnownPlatform)
+      .map((row) => row.platform);
   }
 
   listEnabledSyncTargets(): Array<{ platform: Platform; account_key: string }> {
-    return this.db
+    const rows = this.db
       .select({
         platform: integrationStates.platform,
         account_key: integrationStates.accountKey,
@@ -1311,7 +1512,8 @@ export class CuedDatabase {
       .from(integrationStates)
       .where(and(eq(integrationStates.enabled, 1), eq(integrationStates.syncCapable, 1)))
       .orderBy(asc(integrationStates.platform), asc(integrationStates.accountKey))
-      .all() as Array<{ platform: Platform; account_key: string }>;
+      .all() as Array<{ platform: string; account_key: string }>;
+    return rows.filter(hasKnownPlatform);
   }
 
   getIntegrationState(platform: Platform, accountKey: string): IntegrationStateRow | null {
@@ -1601,6 +1803,56 @@ export class CuedDatabase {
         and(eq(integrationStates.platform, platform), eq(integrationStates.accountKey, accountKey)),
       )
       .run();
+  }
+
+  clearIntegrationRuntimeState(platform: Platform, accountKey: string): number {
+    return this.db.transaction((tx) => {
+      const removedSourceAccounts = tx
+        .delete(sourceAccounts)
+        .where(
+          and(eq(sourceAccounts.platform, platform), eq(sourceAccounts.accountKey, accountKey)),
+        )
+        .run().changes;
+      const removedCheckpoints = tx
+        .delete(syncCheckpoints)
+        .where(
+          and(eq(syncCheckpoints.platform, platform), eq(syncCheckpoints.accountKey, accountKey)),
+        )
+        .run().changes;
+      const removedSyncProofs = tx
+        .delete(syncProofs)
+        .where(and(eq(syncProofs.platform, platform), eq(syncProofs.accountKey, accountKey)))
+        .run().changes;
+      const removedSyncScopes = tx
+        .delete(syncScopes)
+        .where(and(eq(syncScopes.platform, platform), eq(syncScopes.accountKey, accountKey)))
+        .run().changes;
+      const removedRunErrors = tx
+        .delete(syncRunErrors)
+        .where(and(eq(syncRunErrors.platform, platform), eq(syncRunErrors.accountKey, accountKey)))
+        .run().changes;
+      const removedRuns = tx
+        .delete(syncRuns)
+        .where(and(eq(syncRuns.platform, platform), eq(syncRuns.accountKey, accountKey)))
+        .run().changes;
+      const removedSlackBackfillProofs =
+        platform === "slack"
+          ? tx
+              .delete(slackBackfillProofs)
+              .where(eq(slackBackfillProofs.accountKey, accountKey))
+              .run().changes
+          : 0;
+
+      return (
+        Number(removedSourceAccounts) +
+        Number(removedCheckpoints) +
+        Number(removedSyncProofs) +
+        Number(removedSyncScopes) +
+        Number(removedRunErrors) +
+        Number(removedRuns) +
+        Number(removedSlackBackfillProofs)
+      );
+    });
   }
 
   queueOutboundMessage(input: {
@@ -1979,6 +2231,57 @@ export class CuedDatabase {
     }
 
     return null;
+  }
+
+  resolveDiscordSendTarget(targetInput: string): DiscordSendResolution | null {
+    const trimmed = targetInput.trim();
+    if (trimmed.length === 0) {
+      return null;
+    }
+
+    const exact = this.sqlite
+      .prepare(
+        `
+        SELECT id, source_conversation_key, native_conversation_key, name
+        FROM conversations
+        WHERE platform = 'discord'
+          AND type IN ('dm', 'group')
+          AND (
+            source_conversation_key = ?
+            OR native_conversation_key = ?
+            OR lower(name) = lower(?)
+          )
+        ORDER BY updated_at DESC, id ASC
+        LIMIT 1
+      `,
+      )
+      .get(trimmed, trimmed, trimmed) as
+      | {
+          id: string;
+          source_conversation_key: string;
+          native_conversation_key: string | null;
+          name: string | null;
+        }
+      | undefined;
+
+    if (!exact) {
+      return null;
+    }
+
+    return {
+      target:
+        exact.native_conversation_key ??
+        exact.source_conversation_key.replace(/^discord:channel:/, ""),
+      threadId: exact.source_conversation_key,
+      resolution:
+        exact.source_conversation_key === trimmed
+          ? "source_conversation_key"
+          : exact.native_conversation_key === trimmed
+            ? "channel_id"
+            : "conversation_name",
+      matchedConversationId: exact.id,
+      matchedName: exact.name,
+    };
   }
 
   findMessageByPlatformKey(
@@ -2819,6 +3122,43 @@ export class CuedDatabase {
     this.db.update(syncRuns).set(values).where(eq(syncRuns.id, runId)).run();
   }
 
+  getLatestFinishedSyncRun(
+    platform: Platform,
+    accountKey: string,
+  ): {
+    status: "completed" | "failed";
+    finished_at: number;
+    details_json: string | null;
+  } | null {
+    return (
+      (this.db
+        .select({
+          status: syncRuns.status,
+          finished_at: syncRuns.finishedAt,
+          details_json: syncRuns.detailsJson,
+        })
+        .from(syncRuns)
+        .where(
+          and(
+            eq(syncRuns.platform, platform),
+            eq(syncRuns.accountKey, accountKey),
+            inArray(syncRuns.runType, ["sync", "sync_resume"]),
+            inArray(syncRuns.status, ["completed", "failed"]),
+            sql`${syncRuns.finishedAt} IS NOT NULL`,
+          ),
+        )
+        .orderBy(desc(syncRuns.finishedAt))
+        .limit(1)
+        .get() as
+        | {
+            status: "completed" | "failed";
+            finished_at: number;
+            details_json: string | null;
+          }
+        | undefined) ?? null
+    );
+  }
+
   failRun(runId: string, errorMessage: string, details?: unknown): void {
     this.db.transaction((tx) => {
       const run = tx
@@ -3501,6 +3841,18 @@ export function openCuedDatabase(dbPath?: string): CuedDatabase {
     releaseChannel: getCurrentReleaseChannel(),
   });
   return db;
+}
+
+export function openExistingCuedDatabase(
+  dbPath?: string,
+  options: { readonly?: boolean } = {},
+): CuedDatabase {
+  const resolvedPath = dbPath ?? CUED_DB_PATH;
+  if (!existsSync(resolvedPath)) {
+    throw new Error(`Cued database does not exist at ${resolvedPath}`);
+  }
+
+  return new CuedDatabase(resolvedPath, options);
 }
 
 export function openCuedDatabaseReadOnly(dbPath?: string): CuedDatabase {

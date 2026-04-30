@@ -14,7 +14,6 @@ import { dirname, join } from "node:path";
 import process from "node:process";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
-import Database from "better-sqlite3";
 import { sendDaemonRequest } from "../../client.js";
 import { getCurrentAppVersion, getCurrentReleaseChannel } from "../../core/app-metadata.js";
 import {
@@ -26,7 +25,12 @@ import {
   ensureCuedDirs,
 } from "../../core/config.js";
 import { createLogger } from "../../core/logging.js";
-import { type CuedDatabase, openCuedDatabase } from "../../db/database.js";
+import {
+  type CuedDatabase,
+  openCuedDatabase,
+  openExistingCuedDatabase,
+} from "../../db/database.js";
+import { openSqliteDatabase } from "../../db/sqlite.js";
 import { terminateCompetingDaemons } from "../../macos/competing-daemons.js";
 import {
   bootoutLaunchAgent,
@@ -466,7 +470,7 @@ async function requestShutdownForUpdate(db: CuedDatabase): Promise<void> {
 }
 
 function backupDatabaseSnapshot(sourceDbPath: string, destinationPath: string): void {
-  const backupDb = new Database(sourceDbPath);
+  const backupDb = openSqliteDatabase(sourceDbPath);
   try {
     rmSync(destinationPath, { force: true });
     backupDb.pragma("wal_checkpoint(FULL)");
@@ -485,6 +489,43 @@ function runPreflight(stagedAppPath: string, preflightDbPath: string): void {
     },
     stdio: "ignore",
   });
+}
+
+export function runUpdateHelperHealthCheck(dbPath: string, expectedVersion: string): boolean {
+  const db = openExistingCuedDatabase(dbPath, { readonly: true });
+  try {
+    const daemon = db.getDaemonState();
+    return daemon?.status === "running" && daemon.version === expectedVersion;
+  } finally {
+    db.close();
+  }
+}
+
+export function clearUpdateHelperPendingState(dbPath: string): void {
+  const db = openExistingCuedDatabase(dbPath);
+  try {
+    db.setUpdatePendingRollback(null);
+  } finally {
+    db.close();
+  }
+}
+
+export function setUpdateHelperLastError(dbPath: string, message: string | null): void {
+  const db = openExistingCuedDatabase(dbPath);
+  try {
+    db.setUpdateLastError(
+      message
+        ? {
+            at: now(),
+            stage: "install",
+            message,
+            targetVersion: null,
+          }
+        : null,
+    );
+  } finally {
+    db.close();
+  }
 }
 
 async function prepareReleaseInstall(db: CuedDatabase): Promise<DownloadedRelease> {
@@ -543,7 +584,7 @@ function shellEscape(value: string): string {
   return `'${value.replaceAll("'", `'\\''`)}'`;
 }
 
-function writeHelperScript(
+export function renderUpdateHelperScript(
   input: PendingRollbackState & {
     stagedAppPath: string;
     targetVersion: string;
@@ -552,14 +593,13 @@ function writeHelperScript(
     stagingRoot: string;
   },
 ): string {
-  const helperDir = mkdtempSync(join(tmpdir(), "cued-update-helper."));
-  const scriptPath = join(helperDir, "apply-update.sh");
-  const script = `#!/usr/bin/env bash
+  return `#!/usr/bin/env bash
 set -euo pipefail
 
 INSTALLED_APP_PATH=${shellEscape(input.installedAppPath)}
 INSTALLED_APP_EXEC=${shellEscape(getAppExecutablePath(input.installedAppPath))}
 STAGED_APP_PATH=${shellEscape(input.stagedAppPath)}
+HELPER_CLI_PATH=${shellEscape(join(input.stagedAppPath, "Contents", "Resources", "cued-cli"))}
 APP_BACKUP_PATH=${shellEscape(input.appBackupPath)}
 DB_PATH=${shellEscape(input.dbPath)}
 DB_BACKUP_PATH=${shellEscape(input.dbBackupPath)}
@@ -571,12 +611,16 @@ STAGING_ROOT=${shellEscape(input.stagingRoot)}
 WAIT_FOR_EXIT_MS=${UPDATE_HELPER_WAIT_FOR_EXIT_MS}
 HEALTH_TIMEOUT_MS=${UPDATE_HEALTH_TIMEOUT_MS}
 
-sqlite_exec() {
-  /usr/bin/sqlite3 "$DB_PATH" "$1" >/dev/null
+clear_pending() {
+  "$HELPER_CLI_PATH" update helper-clear-pending --db-path "$DB_PATH" >/dev/null 2>&1 || true
 }
 
-clear_pending() {
-  sqlite_exec "INSERT INTO app_settings (key, value, updated_at) VALUES ('update_pending_rollback_json', NULL, strftime('%s','now') * 1000) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at;"
+clear_last_error() {
+  "$HELPER_CLI_PATH" update helper-set-last-error --db-path "$DB_PATH" >/dev/null 2>&1 || true
+}
+
+set_last_error() {
+  "$HELPER_CLI_PATH" update helper-set-last-error --db-path "$DB_PATH" --message "$1" >/dev/null 2>&1 || true
 }
 
 cleanup_legacy_launch_agent() {
@@ -614,15 +658,8 @@ restore_previous() {
 wait_for_health() {
   local deadline=$(( $(date +%s) * 1000 + HEALTH_TIMEOUT_MS ))
   while (( $(date +%s) * 1000 < deadline )); do
-    if [[ -f "$DB_PATH" ]]; then
-      local row
-      row=$(/usr/bin/sqlite3 "$DB_PATH" "SELECT COALESCE(status,''), COALESCE(version,'') FROM daemon_state WHERE singleton_key = 'daemon' LIMIT 1;" 2>/dev/null || true)
-      if [[ "$row" == "running|$TARGET_VERSION" || "$row" == "running$TARGET_VERSION" ]]; then
-        return 0
-      fi
-      if [[ "$row" == "running|$TARGET_VERSION"* ]]; then
-        return 0
-      fi
+    if [[ -f "$DB_PATH" ]] && "$HELPER_CLI_PATH" update helper-health --db-path "$DB_PATH" --expected-version "$TARGET_VERSION" >/dev/null 2>&1; then
+      return 0
     fi
     sleep 2
   done
@@ -645,17 +682,31 @@ if wait_for_health; then
     cleanup_legacy_launch_agent
   fi
   clear_pending
-  sqlite_exec "INSERT INTO app_settings (key, value, updated_at) VALUES ('update_last_error_json', NULL, strftime('%s','now') * 1000) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at;"
+  clear_last_error
   rm -rf "$STAGING_ROOT"
   exit 0
 fi
 
 restore_previous
 clear_pending
-sqlite_exec "INSERT INTO app_settings (key, value, updated_at) VALUES ('update_last_error_json', 'Update health check failed; restored previous version.', strftime('%s','now') * 1000) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at;"
+set_last_error "Update health check failed; restored previous version."
 rm -rf "$STAGING_ROOT"
 exit 1
 `;
+}
+
+function writeHelperScript(
+  input: PendingRollbackState & {
+    stagedAppPath: string;
+    targetVersion: string;
+    dbPath: string;
+    migrateLegacyLaunchAgent: boolean;
+    stagingRoot: string;
+  },
+): string {
+  const helperDir = mkdtempSync(join(tmpdir(), "cued-update-helper."));
+  const scriptPath = join(helperDir, "apply-update.sh");
+  const script = renderUpdateHelperScript(input);
   writeFileSync(scriptPath, script, { mode: 0o700 });
   return scriptPath;
 }

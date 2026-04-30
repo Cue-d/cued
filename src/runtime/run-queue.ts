@@ -19,6 +19,30 @@ export class RunQueueService {
     private readonly schedulers: RunQueueSchedulers = {},
   ) {}
 
+  private listManualSyncTargets(source: AdapterPlatform): string[] {
+    const syncCapableTargets = this.db
+      .listEnabledSyncTargets()
+      .filter(
+        (target): target is { platform: AdapterPlatform; account_key: string } =>
+          isAdapterPlatform(target.platform) && target.platform === source,
+      )
+      .map((target) => `${target.platform}:${target.account_key}`);
+    if (syncCapableTargets.length > 0) {
+      return [...new Set(syncCapableTargets)];
+    }
+
+    const authenticatedTargets = this.db
+      .listIntegrationStates()
+      .filter(
+        (integration) =>
+          integration.platform === source &&
+          integration.enabled === 1 &&
+          (integration.auth_state === "authenticated" || integration.auth_state === "authorized"),
+      )
+      .map((integration) => `${integration.platform}:${integration.account_key}`);
+    return [...new Set(authenticatedTargets)];
+  }
+
   queueMessageSend(input: {
     platform: string;
     target: string;
@@ -28,7 +52,11 @@ export class RunQueueService {
     queued: true;
     messageId: string;
   } {
-    if (input.platform !== "signal" && input.platform !== "whatsapp") {
+    if (
+      input.platform !== "signal" &&
+      input.platform !== "whatsapp" &&
+      input.platform !== "discord"
+    ) {
       throw new Error(`Unsupported outbound platform: ${input.platform}`);
     }
     if (input.target.trim().length === 0 || input.text.trim().length === 0) {
@@ -38,7 +66,9 @@ export class RunQueueService {
     const resolved =
       input.platform === "signal"
         ? this.db.resolveSignalSendTarget(input.target.trim())
-        : this.db.resolveWhatsAppSendTarget(input.target.trim());
+        : input.platform === "whatsapp"
+          ? this.db.resolveWhatsAppSendTarget(input.target.trim())
+          : this.db.resolveDiscordSendTarget(input.target.trim());
     if (!resolved) {
       throw new Error(`Unable to resolve ${input.platform} target: ${input.target.trim()}`);
     }
@@ -54,7 +84,9 @@ export class RunQueueService {
         resolvedTarget: resolved.target,
         resolvedThreadId: resolved.threadId,
         resolution: resolved.resolution,
-        matchedContactIds: resolved.matchedContactIds,
+        matchedContactIds: "matchedContactIds" in resolved ? resolved.matchedContactIds : undefined,
+        matchedConversationId:
+          "matchedConversationId" in resolved ? resolved.matchedConversationId : undefined,
         matchedName: resolved.matchedName,
       },
     });
@@ -77,17 +109,7 @@ export class RunQueueService {
     }
 
     if (source && isAdapterPlatform(source)) {
-      const targets = [
-        ...new Set(
-          this.db
-            .listEnabledSyncTargets()
-            .filter(
-              (target): target is { platform: AdapterPlatform; account_key: string } =>
-                isAdapterPlatform(target.platform) && target.platform === source,
-            )
-            .map((target) => `${target.platform}:${target.account_key}`),
-        ),
-      ];
+      const targets = this.listManualSyncTargets(source);
 
       if (targets.length > 0) {
         const queuedTargets: string[] = [];
