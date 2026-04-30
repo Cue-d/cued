@@ -17,6 +17,7 @@
     "build:tarball:macos": "bash scripts/build-cued-tarball.sh",
     "check:app-quality": "pnpm check:biome && pnpm build && pnpm typecheck && pnpm test",
     "check:ci-local": "sh scripts/check-ci-local.sh",
+    "smoke:auth-lifecycle": "tsx scripts/smoke-auth-lifecycle.ts",
     "bootstrap:signal:macos": "bash scripts/fetch-signal-cli-macos.sh",
     "check:native:macos": "swift build --package-path native/macos/CuedNative -c release",
     "check:biome": "biome check .",
