@@ -21,6 +21,12 @@ const ADAPTER_DEFINITIONS: Record<AdapterPlatform, AdapterDefinition> = {
     autoSync: true,
     workerTimeoutMs: 120_000,
   },
+  discord: {
+    platform: "discord",
+    workerEntrypoint: join(import.meta.dirname, "../discord/sync/worker.js"),
+    autoSync: true,
+    workerTimeoutMs: 120_000,
+  },
   contacts: {
     platform: "contacts",
     workerEntrypoint: join(import.meta.dirname, "../contacts/worker.js"),

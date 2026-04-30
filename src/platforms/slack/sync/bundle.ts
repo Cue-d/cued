@@ -2,7 +2,7 @@ import type { SourceAccountInput } from "../../../core/types/provider.js";
 import { loadIntegrationSecret } from "../../core/secrets/keychain.js";
 import type { SyncBundle } from "../../core/sync.js";
 import { SlackHelperClient } from "../helper/client.js";
-import type { SlackTransport } from "../transport.js";
+import type { SlackMessagesResult, SlackTransport } from "../transport.js";
 import type { SlackConversation, SlackCredentials, SlackMessage, SlackUser } from "../types.js";
 import {
   buildSlackContactEvents,
@@ -14,6 +14,7 @@ import {
   buildSlackBackfillSyncProofs,
   type SlackBackfillConversationPhase,
   type SlackBackfillConversationProof,
+  type SlackBackfillProofError,
 } from "./proof.js";
 
 const INCREMENTAL_BUFFER_MS = 5 * 60 * 1000;
@@ -182,6 +183,34 @@ function sortSlackMessages(messages: SlackMessage[]): SlackMessage[] {
   });
 }
 
+function slackAccessProofError(error: unknown): SlackBackfillProofError | null {
+  const value = error as {
+    message?: unknown;
+    errorKind?: unknown;
+    retryable?: unknown;
+    slackCode?: unknown;
+  };
+  const code =
+    typeof value?.slackCode === "string"
+      ? value.slackCode
+      : error instanceof Error
+        ? error.message
+        : String(error);
+  const retryable = value?.retryable === true;
+  if (
+    retryable ||
+    !["missing_scope", "not_in_channel", "channel_not_found", "is_archived"].includes(code)
+  ) {
+    return null;
+  }
+  return {
+    code,
+    message: error instanceof Error ? error.message : String(error),
+    retryable: false,
+    kind: typeof value?.errorKind === "string" ? value.errorKind : "slack_api",
+  };
+}
+
 function loadSlackAuthFromKeychain(accountKey: string): SlackCredentials {
   const parsed = loadIntegrationSecret("slack", accountKey).secret;
   if (typeof parsed.token !== "string" || typeof parsed.cookie !== "string") {
@@ -308,23 +337,31 @@ async function listAllUsers(client: SlackTransport): Promise<SlackUser[]> {
 async function listConversationMembers(
   client: SlackTransport,
   conversation: SlackConversation,
-): Promise<string[]> {
+): Promise<{ memberIds: string[]; error: SlackBackfillProofError | null }> {
   if (conversation.is_im && conversation.user) {
-    return [conversation.user];
+    return { memberIds: [conversation.user], error: null };
   }
 
   if (!conversation.is_mpim) {
-    return [];
+    return { memberIds: [], error: null };
   }
 
   const members: string[] = [];
   let cursor: string | undefined;
-  do {
-    const result = await client.getConversationMembers(conversation.id, cursor);
-    members.push(...result.members);
-    cursor = result.nextCursor || undefined;
-  } while (cursor);
-  return [...new Set(members)];
+  try {
+    do {
+      const result = await client.getConversationMembers(conversation.id, cursor);
+      members.push(...result.members);
+      cursor = result.nextCursor || undefined;
+    } while (cursor);
+  } catch (error) {
+    const proofError = slackAccessProofError(error);
+    if (!proofError) {
+      throw error;
+    }
+    return { memberIds: [], error: proofError };
+  }
+  return { memberIds: [...new Set(members)], error: null };
 }
 
 async function listConversationMessages(
@@ -333,18 +370,37 @@ async function listConversationMessages(
   oldestMs: number,
   messagesPageLimit: number,
   repliesPageLimit: number,
-): Promise<SlackMessage[]> {
+): Promise<{
+  messages: SlackMessage[];
+  historyError: SlackBackfillProofError | null;
+  repliesError: SlackBackfillProofError | null;
+  threadRootCount: number;
+  completedThreadCount: number;
+}> {
   const messageByTs = new Map<string, SlackMessage>();
   const threadParents = new Set<string>();
   const oldest = formatOldestTs(oldestMs);
   let cursor: string | undefined;
+  let historyError: SlackBackfillProofError | null = null;
+  let repliesError: SlackBackfillProofError | null = null;
+  let completedThreadCount = 0;
 
   do {
-    const result = await client.getHistory(conversationId, {
-      cursor,
-      oldest,
-      limit: messagesPageLimit,
-    });
+    let result: SlackMessagesResult;
+    try {
+      result = await client.getHistory(conversationId, {
+        cursor,
+        oldest,
+        limit: messagesPageLimit,
+      });
+    } catch (error) {
+      const proofError = slackAccessProofError(error);
+      if (!proofError) {
+        throw error;
+      }
+      historyError = proofError;
+      break;
+    }
 
     for (const message of result.messages) {
       if (message.reply_count && message.reply_count > 0) {
@@ -362,11 +418,21 @@ async function listConversationMessages(
   for (const threadTs of threadParents) {
     let repliesCursor: string | undefined;
     do {
-      const result = await client.getReplies(conversationId, threadTs, {
-        cursor: repliesCursor,
-        oldest,
-        limit: repliesPageLimit,
-      });
+      let result: SlackMessagesResult;
+      try {
+        result = await client.getReplies(conversationId, threadTs, {
+          cursor: repliesCursor,
+          oldest,
+          limit: repliesPageLimit,
+        });
+      } catch (error) {
+        const proofError = slackAccessProofError(error);
+        if (!proofError) {
+          throw error;
+        }
+        repliesError = proofError;
+        break;
+      }
 
       for (const reply of result.messages) {
         if (reply.ts === threadTs || !shouldIncludeMessage(reply)) {
@@ -377,9 +443,19 @@ async function listConversationMessages(
 
       repliesCursor = result.nextCursor || undefined;
     } while (repliesCursor);
+    if (repliesError) {
+      break;
+    }
+    completedThreadCount += 1;
   }
 
-  return sortSlackMessages(Array.from(messageByTs.values()));
+  return {
+    messages: sortSlackMessages(Array.from(messageByTs.values())),
+    historyError,
+    repliesError,
+    threadRootCount: threadParents.size,
+    completedThreadCount,
+  };
 }
 
 interface SlackConversationResumeState {
@@ -397,6 +473,8 @@ interface SlackConversationBatchResult {
   messages: SlackMessage[];
   complete: boolean;
   resumeState: SlackConversationResumeState;
+  historyError: SlackBackfillProofError | null;
+  repliesError: SlackBackfillProofError | null;
 }
 
 async function listConversationMessagesBatch(
@@ -422,6 +500,8 @@ async function listConversationMessagesBatch(
   let activeThreadTs = resumeState?.activeThreadTs ?? null;
   let repliesCursor = resumeState?.repliesCursor ?? null;
   let apiPagesRemaining = apiPageBudget;
+  let historyError: SlackBackfillProofError | null = null;
+  let repliesError: SlackBackfillProofError | null = null;
 
   const addMessage = (message: SlackMessage) => {
     if (!shouldIncludeMessage(message) || seenMessageTs.has(message.ts)) {
@@ -433,11 +513,21 @@ async function listConversationMessagesBatch(
 
   while (apiPagesRemaining > 0) {
     if (!historyComplete) {
-      const result = await client.getHistory(conversationId, {
-        cursor: historyCursor ?? undefined,
-        oldest,
-        limit: messagesPageLimit,
-      });
+      let result: SlackMessagesResult;
+      try {
+        result = await client.getHistory(conversationId, {
+          cursor: historyCursor ?? undefined,
+          oldest,
+          limit: messagesPageLimit,
+        });
+      } catch (error) {
+        const proofError = slackAccessProofError(error);
+        if (!proofError) {
+          throw error;
+        }
+        historyError = proofError;
+        break;
+      }
       apiPagesRemaining -= 1;
       for (const message of result.messages) {
         if (message.reply_count && message.reply_count > 0) {
@@ -459,11 +549,21 @@ async function listConversationMessagesBatch(
     }
 
     if (activeThreadTs) {
-      const result = await client.getReplies(conversationId, activeThreadTs, {
-        cursor: repliesCursor ?? undefined,
-        oldest,
-        limit: repliesPageLimit,
-      });
+      let result: SlackMessagesResult;
+      try {
+        result = await client.getReplies(conversationId, activeThreadTs, {
+          cursor: repliesCursor ?? undefined,
+          oldest,
+          limit: repliesPageLimit,
+        });
+      } catch (error) {
+        const proofError = slackAccessProofError(error);
+        if (!proofError) {
+          throw error;
+        }
+        repliesError = proofError;
+        break;
+      }
       apiPagesRemaining -= 1;
       for (const reply of result.messages) {
         if (reply.ts === activeThreadTs) {
@@ -490,7 +590,9 @@ async function listConversationMessagesBatch(
 
   return {
     messages: sortSlackMessages(messages),
-    complete: historyComplete && !activeThreadTs && pendingThreadTs.length === 0,
+    complete:
+      Boolean(historyError || repliesError) ||
+      (historyComplete && !activeThreadTs && pendingThreadTs.length === 0),
     resumeState: {
       historyCursor,
       historyComplete,
@@ -501,6 +603,8 @@ async function listConversationMessagesBatch(
       activeThreadTs,
       repliesCursor: activeThreadTs ? repliesCursor : null,
     },
+    historyError,
+    repliesError,
   };
 }
 
@@ -551,6 +655,8 @@ function buildSlackBackfillConversationProof(input: {
     oldestMessageTs: range.oldest,
     newestMessageTs: range.newest,
     observedAt: input.observedAt,
+    historyError: input.messageBatch.historyError,
+    repliesError: input.messageBatch.repliesError,
   };
 }
 
@@ -564,11 +670,17 @@ function buildCompleteSlackBackfillConversationProof(input: {
   knownConversationCount: number;
   observedAt: number;
   messages: SlackMessage[];
+  historyError?: SlackBackfillProofError | null;
+  repliesError?: SlackBackfillProofError | null;
+  threadRootCount?: number;
+  completedThreadCount?: number;
+  membersError?: SlackBackfillProofError | null;
 }): SlackBackfillConversationProof {
   const range = summarizeMessageRange(input.messages);
-  const threadRootCount = input.messages.filter(
-    (message) => Number(message.reply_count ?? 0) > 0,
-  ).length;
+  const threadRootCount =
+    input.threadRootCount ??
+    input.messages.filter((message) => Number(message.reply_count ?? 0) > 0).length;
+  const completedThreadCount = input.completedThreadCount ?? threadRootCount;
   return {
     teamId: input.teamId,
     accountKey: input.accountKey,
@@ -582,13 +694,16 @@ function buildCompleteSlackBackfillConversationProof(input: {
     historyComplete: true,
     historyCursor: null,
     threadRootCount,
-    completedThreadCount: threadRootCount,
-    pendingThreadCount: 0,
+    completedThreadCount,
+    pendingThreadCount: Math.max(threadRootCount - completedThreadCount, 0),
     activeThreadTs: null,
     repliesCursor: null,
     oldestMessageTs: range.oldest,
     newestMessageTs: range.newest,
     observedAt: input.observedAt,
+    historyError: input.historyError ?? null,
+    repliesError: input.repliesError ?? null,
+    membersError: input.membersError ?? null,
   };
 }
 
@@ -649,7 +764,7 @@ export async function buildSlackSyncBundle(options?: {
     },
   ];
   const rawEvents: SyncBundle["rawEvents"] = [];
-  const slackBackfillDiagnostics: SlackBackfillConversationProof[] = [];
+  const slackConversationProofs: SlackBackfillConversationProof[] = [];
   const usersById = new Map<string, SlackUser>();
   const knownConversationIds = new Set(savedCursor?.knownConversationIds ?? []);
 
@@ -713,7 +828,10 @@ export async function buildSlackSyncBundle(options?: {
         conversation,
         observedBase,
       );
-      const memberIds = await listConversationMembers(client, conversation);
+      const { memberIds, error: membersError } = await listConversationMembers(
+        client,
+        conversation,
+      );
       const messageBatch = await listConversationMessagesBatch(
         client,
         conversation.id,
@@ -734,7 +852,7 @@ export async function buildSlackSyncBundle(options?: {
         apiPageBudget,
       );
       knownConversationIds.add(conversation.id);
-      slackBackfillDiagnostics.push(
+      slackConversationProofs.push(
         buildSlackBackfillConversationProof({
           teamId,
           accountKey,
@@ -746,6 +864,10 @@ export async function buildSlackSyncBundle(options?: {
           messageBatch,
         }),
       );
+      const proof = slackConversationProofs.at(-1);
+      if (proof) {
+        proof.membersError = membersError;
+      }
       rawEvents.push(
         buildSlackConversationEvent({
           teamId,
@@ -864,10 +986,7 @@ export async function buildSlackSyncBundle(options?: {
         sourceCursor,
         syncMode: scan.mode,
         hasMore,
-        proofs: slackBackfillDiagnostics.flatMap(buildSlackBackfillSyncProofs),
-        diagnostics: {
-          slackBackfillConversations: slackBackfillDiagnostics,
-        },
+        proofs: slackConversationProofs.flatMap(buildSlackBackfillSyncProofs),
       };
     }
 
@@ -888,8 +1007,11 @@ export async function buildSlackSyncBundle(options?: {
         conversation,
         observedBase,
       );
-      const memberIds = await listConversationMembers(client, conversation);
-      const messages = await listConversationMessages(
+      const { memberIds, error: membersError } = await listConversationMembers(
+        client,
+        conversation,
+      );
+      const messageBatch = await listConversationMessages(
         client,
         conversation.id,
         conversationOldestMs,
@@ -916,11 +1038,11 @@ export async function buildSlackSyncBundle(options?: {
           conversationId: conversation.id,
           selfUserId,
           observedAt: observedBase,
-          messages,
+          messages: messageBatch.messages,
         }),
       );
 
-      slackBackfillDiagnostics.push(
+      slackConversationProofs.push(
         buildCompleteSlackBackfillConversationProof({
           teamId,
           accountKey,
@@ -930,7 +1052,12 @@ export async function buildSlackSyncBundle(options?: {
           scanStartedAt: scan.startedAt,
           knownConversationCount: knownConversationIds.size,
           observedAt: observedBase,
-          messages,
+          messages: messageBatch.messages,
+          historyError: messageBatch.historyError,
+          repliesError: messageBatch.repliesError,
+          threadRootCount: messageBatch.threadRootCount,
+          completedThreadCount: messageBatch.completedThreadCount,
+          membersError,
         }),
       );
     }
@@ -985,10 +1112,6 @@ export async function buildSlackSyncBundle(options?: {
     sourceCursor,
     syncMode: scan.mode,
     hasMore,
-    proofs: slackBackfillDiagnostics.flatMap(buildSlackBackfillSyncProofs),
-    diagnostics:
-      slackBackfillDiagnostics.length > 0
-        ? { slackBackfillConversations: slackBackfillDiagnostics }
-        : undefined,
+    proofs: slackConversationProofs.flatMap(buildSlackBackfillSyncProofs),
   };
 }

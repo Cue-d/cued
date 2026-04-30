@@ -1,5 +1,6 @@
 import type { CuedDatabase } from "../db/database.js";
 import { buildIntegrationStatus } from "../platforms/core/state/status.js";
+import type { DiscordRealtimeSupervisor } from "../platforms/discord/realtime/session.js";
 import type { LinkedInRealtimeSupervisor } from "../platforms/linkedin/realtime/session.js";
 import type { SignalRealtimeSupervisor } from "../platforms/signal/realtime/session.js";
 import type { SlackRealtimeSupervisor } from "../platforms/slack/realtime/session.js";
@@ -19,6 +20,7 @@ export interface DaemonBootstrapSnapshot {
 export async function buildDoctorSnapshot(
   db: CuedDatabase,
   options: {
+    discordRealtime: DiscordRealtimeSupervisor;
     slackRealtime: SlackRealtimeSupervisor;
     linkedInRealtime: LinkedInRealtimeSupervisor;
     signalRealtime: SignalRealtimeSupervisor;
@@ -42,6 +44,7 @@ export async function buildDoctorSnapshot(
     bootstrap: options.bootstrap,
     ...(await buildDoctorReport(db, {
       slackRealtimeSessions: options.slackRealtime.getStatuses(),
+      discordRealtimeSessions: options.discordRealtime.getStatuses(),
       linkedinRealtimeSessions: options.linkedInRealtime.getStatuses(),
       signalRealtimeSessions: options.signalRealtime.getStatuses(),
       whatsappRealtimeSessions: options.whatsAppRealtime.getStatuses(),
@@ -65,6 +68,7 @@ export function buildDaemonStatusSnapshot(
   db: CuedDatabase,
   options: {
     app: unknown;
+    discordRealtime: DiscordRealtimeSupervisor;
     slackRealtime: SlackRealtimeSupervisor;
     linkedInRealtime: LinkedInRealtimeSupervisor;
     signalRealtime: SignalRealtimeSupervisor;
@@ -81,6 +85,7 @@ export function buildDaemonStatusSnapshot(
     projection: db.getProjectionBacklog(),
     checkpoints: db.listCheckpointSummary(),
     recentRuns: db.listRecentRuns(),
+    discordRealtimeSessions: options.discordRealtime.getStatuses(),
     slackRealtimeSessions: options.slackRealtime.getStatuses(),
     linkedinRealtimeSessions: options.linkedInRealtime.getStatuses(),
     signalRealtimeSessions: options.signalRealtime.getStatuses(),
