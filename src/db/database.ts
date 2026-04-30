@@ -21,6 +21,7 @@ import type {
 } from "../core/types/provider.js";
 import {
   normalizeRawEventProvenance,
+  parsePlatform,
   resolveRawEventNormalizedSchema,
 } from "../core/types/provider.js";
 import { normalizePhone, toE164 } from "../core/utils/phone.js";
@@ -226,6 +227,12 @@ export interface IntegrationStateRow {
   updated_at: number;
 }
 
+function hasKnownPlatform<T extends { platform: string | null }>(
+  row: T,
+): row is T & { platform: Platform } {
+  return typeof row.platform === "string" && parsePlatform(row.platform) !== null;
+}
+
 export interface AuthSessionRow {
   id: string;
   platform: Platform;
@@ -334,6 +341,14 @@ export interface WhatsAppSendResolution {
   threadId: string;
   resolution: "whatsapp_jid" | "phone" | "group" | "passthrough";
   matchedContactIds: string[];
+  matchedName: string | null;
+}
+
+export interface DiscordSendResolution {
+  target: string;
+  threadId: string | null;
+  resolution: "channel_id" | "source_conversation_key" | "conversation_name";
+  matchedConversationId: string | null;
   matchedName: string | null;
 }
 
@@ -1395,8 +1410,64 @@ export class CuedDatabase {
     };
   }
 
+  getIntegrationProjectionStats(
+    platform: Platform,
+    accountKey: string,
+  ): {
+    rawEvents: number;
+    rawEventsBySchema: Record<string, number>;
+    projectedContacts: number;
+    projectedConversations: number;
+    projectedMessages: number;
+  } {
+    const rawEventRows = this.sqlite
+      .prepare(
+        `
+        SELECT
+          COALESCE(normalized_schema, entity_kind || '.' || event_kind) AS schema_key,
+          COUNT(*) AS count
+        FROM raw_events
+        WHERE platform = ? AND account_key = ?
+        GROUP BY schema_key
+        ORDER BY count DESC, schema_key ASC
+      `,
+      )
+      .all(platform, accountKey) as Array<{
+      schema_key: string | null;
+      count: number | null;
+    }>;
+    const projectedCounts = this.sqlite
+      .prepare(
+        `
+        SELECT
+          (SELECT COUNT(*) FROM contact_sources WHERE platform = ? AND account_key = ?) AS projected_contacts,
+          (SELECT COUNT(*) FROM conversations WHERE platform = ? AND account_key = ?) AS projected_conversations,
+          (SELECT COUNT(*) FROM messages WHERE platform = ? AND account_key = ?) AS projected_messages
+      `,
+      )
+      .get(platform, accountKey, platform, accountKey, platform, accountKey) as {
+      projected_contacts: number | null;
+      projected_conversations: number | null;
+      projected_messages: number | null;
+    };
+
+    const rawEventsBySchema = Object.fromEntries(
+      rawEventRows
+        .filter((row) => typeof row.schema_key === "string" && row.schema_key.length > 0)
+        .map((row) => [row.schema_key!, Number(row.count ?? 0)]),
+    );
+
+    return {
+      rawEvents: rawEventRows.reduce((total, row) => total + Number(row.count ?? 0), 0),
+      rawEventsBySchema,
+      projectedContacts: Number(projectedCounts.projected_contacts ?? 0),
+      projectedConversations: Number(projectedCounts.projected_conversations ?? 0),
+      projectedMessages: Number(projectedCounts.projected_messages ?? 0),
+    };
+  }
+
   listIntegrationStates(): IntegrationStateRow[] {
-    return this.db
+    const rows = this.db
       .select({
         id: integrationStates.id,
         platform: integrationStates.platform,
@@ -1417,7 +1488,8 @@ export class CuedDatabase {
       })
       .from(integrationStates)
       .orderBy(asc(integrationStates.platform), asc(integrationStates.accountKey))
-      .all() as IntegrationStateRow[];
+      .all() as Array<IntegrationStateRow & { platform: string }>;
+    return rows.filter(hasKnownPlatform);
   }
 
   listEnabledSyncPlatforms(): Platform[] {
@@ -1427,11 +1499,12 @@ export class CuedDatabase {
       .where(and(eq(integrationStates.enabled, 1), eq(integrationStates.syncCapable, 1)))
       .orderBy(asc(integrationStates.platform))
       .all()
-      .map((row) => row.platform as Platform);
+      .filter(hasKnownPlatform)
+      .map((row) => row.platform);
   }
 
   listEnabledSyncTargets(): Array<{ platform: Platform; account_key: string }> {
-    return this.db
+    const rows = this.db
       .select({
         platform: integrationStates.platform,
         account_key: integrationStates.accountKey,
@@ -1439,7 +1512,8 @@ export class CuedDatabase {
       .from(integrationStates)
       .where(and(eq(integrationStates.enabled, 1), eq(integrationStates.syncCapable, 1)))
       .orderBy(asc(integrationStates.platform), asc(integrationStates.accountKey))
-      .all() as Array<{ platform: Platform; account_key: string }>;
+      .all() as Array<{ platform: string; account_key: string }>;
+    return rows.filter(hasKnownPlatform);
   }
 
   getIntegrationState(platform: Platform, accountKey: string): IntegrationStateRow | null {
@@ -2157,6 +2231,57 @@ export class CuedDatabase {
     }
 
     return null;
+  }
+
+  resolveDiscordSendTarget(targetInput: string): DiscordSendResolution | null {
+    const trimmed = targetInput.trim();
+    if (trimmed.length === 0) {
+      return null;
+    }
+
+    const exact = this.sqlite
+      .prepare(
+        `
+        SELECT id, source_conversation_key, native_conversation_key, name
+        FROM conversations
+        WHERE platform = 'discord'
+          AND type IN ('dm', 'group')
+          AND (
+            source_conversation_key = ?
+            OR native_conversation_key = ?
+            OR lower(name) = lower(?)
+          )
+        ORDER BY updated_at DESC, id ASC
+        LIMIT 1
+      `,
+      )
+      .get(trimmed, trimmed, trimmed) as
+      | {
+          id: string;
+          source_conversation_key: string;
+          native_conversation_key: string | null;
+          name: string | null;
+        }
+      | undefined;
+
+    if (!exact) {
+      return null;
+    }
+
+    return {
+      target:
+        exact.native_conversation_key ??
+        exact.source_conversation_key.replace(/^discord:channel:/, ""),
+      threadId: exact.source_conversation_key,
+      resolution:
+        exact.source_conversation_key === trimmed
+          ? "source_conversation_key"
+          : exact.native_conversation_key === trimmed
+            ? "channel_id"
+            : "conversation_name",
+      matchedConversationId: exact.id,
+      matchedName: exact.name,
+    };
   }
 
   findMessageByPlatformKey(
@@ -2995,6 +3120,43 @@ export class CuedDatabase {
           };
 
     this.db.update(syncRuns).set(values).where(eq(syncRuns.id, runId)).run();
+  }
+
+  getLatestFinishedSyncRun(
+    platform: Platform,
+    accountKey: string,
+  ): {
+    status: "completed" | "failed";
+    finished_at: number;
+    details_json: string | null;
+  } | null {
+    return (
+      (this.db
+        .select({
+          status: syncRuns.status,
+          finished_at: syncRuns.finishedAt,
+          details_json: syncRuns.detailsJson,
+        })
+        .from(syncRuns)
+        .where(
+          and(
+            eq(syncRuns.platform, platform),
+            eq(syncRuns.accountKey, accountKey),
+            inArray(syncRuns.runType, ["sync", "sync_resume"]),
+            inArray(syncRuns.status, ["completed", "failed"]),
+            sql`${syncRuns.finishedAt} IS NOT NULL`,
+          ),
+        )
+        .orderBy(desc(syncRuns.finishedAt))
+        .limit(1)
+        .get() as
+        | {
+            status: "completed" | "failed";
+            finished_at: number;
+            details_json: string | null;
+          }
+        | undefined) ?? null
+    );
   }
 
   failRun(runId: string, errorMessage: string, details?: unknown): void {
