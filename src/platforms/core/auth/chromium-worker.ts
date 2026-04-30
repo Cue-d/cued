@@ -6,7 +6,7 @@ declare const localStorage: {
   getItem(key: string): string | null;
 };
 
-type Platform = "slack" | "linkedin";
+type Platform = "slack" | "linkedin" | "discord";
 type AuthState = "authenticated" | "failed" | "cancelled";
 
 type WorkerArgs = {
@@ -55,7 +55,7 @@ function parseArgs(argv: string[]): WorkerArgs {
   }
 
   const platform = values.get("--platform");
-  if (platform !== "slack" && platform !== "linkedin") {
+  if (platform !== "slack" && platform !== "linkedin" && platform !== "discord") {
     throw new Error(`Unsupported chromium auth platform: ${platform ?? "missing"}`);
   }
 
@@ -112,6 +112,33 @@ function isLinkedInAuthPage(url: string): boolean {
 
 function isLinkedInMessagingUrl(url: string): boolean {
   return /linkedin\.com\/messaging/i.test(url);
+}
+
+function isDiscordAppUrl(url: string): boolean {
+  return /^https:\/\/(ptb\.|canary\.)?discord\.com\/(app|channels)\b/i.test(url);
+}
+
+async function fetchDiscordCurrentUser(token: string): Promise<{
+  id: string;
+  username: string;
+  global_name?: string | null;
+}> {
+  const response = await fetch("https://discord.com/api/v10/users/@me", {
+    headers: {
+      Authorization: token,
+      Accept: "application/json",
+      "User-Agent":
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Cued/1.0",
+    },
+  });
+  if (!response.ok) {
+    throw new Error(`Discord auth verification failed (${response.status})`);
+  }
+  return (await response.json()) as {
+    id: string;
+    username: string;
+    global_name?: string | null;
+  };
 }
 
 type LinkedInCapture = {
@@ -312,6 +339,53 @@ async function extractLinkedInAuth(
   };
 }
 
+async function extractDiscordAuth(
+  context: BrowserContext,
+  page: Page,
+  accountKey: string,
+): Promise<ExtractedAuth | null> {
+  if (!isDiscordAppUrl(page.url())) {
+    return null;
+  }
+
+  const storageState = await context.storageState();
+  const discordOrigin = storageState.origins.find((origin) =>
+    /^https:\/\/(ptb\.|canary\.)?discord\.com$/i.test(origin.origin),
+  );
+  const tokenRaw =
+    discordOrigin?.localStorage.find((entry) => entry.name === "token")?.value ?? null;
+  if (typeof tokenRaw !== "string" || tokenRaw.length === 0) {
+    throw new Error("Discord token missing from localStorage");
+  }
+
+  const token = tokenRaw.replace(/^"|"$/g, "").trim();
+  if (!token || token === "null") {
+    throw new Error("Discord token was empty after normalization");
+  }
+
+  const me = await fetchDiscordCurrentUser(token);
+
+  return {
+    keychainService: "dev.cued.auth.discord",
+    keychainAccount: accountKey,
+    secret: {
+      token,
+      userId: me.id,
+      username: me.username,
+      globalName: me.global_name ?? null,
+      savedAt: Date.now(),
+    },
+    resultSummary: {
+      provider: "discord",
+      userId: me.id,
+      username: me.username,
+      globalName: me.global_name ?? null,
+      displayName: me.global_name ?? me.username,
+      currentUrl: page.url(),
+    },
+  };
+}
+
 async function maybeExtractAuth(
   args: WorkerArgs,
   context: BrowserContext,
@@ -320,9 +394,15 @@ async function maybeExtractAuth(
   switch (args.platform) {
     case "slack":
       return extractSlackAuth(context, page, args.accountKey);
+    case "discord":
+      return extractDiscordAuth(context, page, args.accountKey);
     case "linkedin":
       return extractLinkedInAuth(context, page, args.accountKey);
   }
+}
+
+function listOpenPages(context: BrowserContext): Page[] {
+  return context.pages().filter((page) => !page.isClosed());
 }
 
 function getFakeResult(args: WorkerArgs): WorkerResult | null {
@@ -376,9 +456,13 @@ async function run(): Promise<void> {
     }
 
     const deadline = Date.now() + getTimeoutMs();
+    let lastObservedUrls: string[] = [];
+    let lastExtractionError: string | null = null;
     while (Date.now() < deadline) {
+      const openPages = listOpenPages(context);
       page = firstOpenPage(context) ?? page;
-      if (!page || page.isClosed()) {
+      lastObservedUrls = openPages.map((openPage) => openPage.url());
+      if (openPages.length === 0 || !page || page.isClosed()) {
         const cancelled: WorkerResult = {
           sessionId: args.sessionId,
           platform: args.platform,
@@ -393,25 +477,32 @@ async function run(): Promise<void> {
         return;
       }
 
-      const extracted = await maybeExtractAuth(args, context, page);
-      if (extracted) {
-        storeInKeychain(extracted.keychainService, extracted.keychainAccount, extracted.secret);
-        const result: WorkerResult = {
-          sessionId: args.sessionId,
-          platform: args.platform,
-          accountKey: extracted.keychainAccount,
-          state: "authenticated",
-          keychainService: extracted.keychainService,
-          keychainAccount: extracted.keychainAccount,
-          resultSummary: {
-            ...extracted.resultSummary,
-            profileDir: args.profileDir,
-          },
-          errorSummary: null,
-        };
-        await context.close();
-        process.stdout.write(JSON.stringify(result));
-        return;
+      for (const candidatePage of openPages) {
+        try {
+          const extracted = await maybeExtractAuth(args, context, candidatePage);
+          if (!extracted) {
+            continue;
+          }
+          storeInKeychain(extracted.keychainService, extracted.keychainAccount, extracted.secret);
+          const result: WorkerResult = {
+            sessionId: args.sessionId,
+            platform: args.platform,
+            accountKey: extracted.keychainAccount,
+            state: "authenticated",
+            keychainService: extracted.keychainService,
+            keychainAccount: extracted.keychainAccount,
+            resultSummary: {
+              ...extracted.resultSummary,
+              profileDir: args.profileDir,
+            },
+            errorSummary: null,
+          };
+          await context.close();
+          process.stdout.write(JSON.stringify(result));
+          return;
+        } catch (error) {
+          lastExtractionError = error instanceof Error ? error.message : String(error);
+        }
       }
 
       await page.waitForTimeout(1000);
@@ -427,8 +518,11 @@ async function run(): Promise<void> {
       resultSummary: {
         provider: args.platform,
         profileDir: args.profileDir,
+        pageUrls: lastObservedUrls,
       },
-      errorSummary: `Timed out waiting for ${args.platform} authentication`,
+      errorSummary:
+        `Timed out waiting for ${args.platform} authentication` +
+        (lastExtractionError ? ` (${lastExtractionError})` : ""),
     };
     process.stdout.write(JSON.stringify(failed));
   } finally {

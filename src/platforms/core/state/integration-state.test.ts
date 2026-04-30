@@ -4,6 +4,11 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { resolveHostOS } from "../../../core/platform-capabilities.js";
 import { CuedDatabase } from "../../../db/database.js";
+import { openSqliteDatabase } from "../../../db/sqlite.js";
+import {
+  buildDiscordContactEvent,
+  buildDiscordConversationEvent,
+} from "../../discord/sync/events.js";
 import { refreshLocalIntegrationStates } from "./local-refresh.js";
 import {
   completeAuthSession,
@@ -53,6 +58,17 @@ describe("integration state management", () => {
     const db = new CuedDatabase(join(dir, "local.db"));
     db.migrate();
     return db;
+  }
+
+  type RawSql = {
+    prepare(sql: string): {
+      run(...params: unknown[]): unknown;
+      get(...params: unknown[]): unknown;
+    };
+  };
+
+  function rawSql(db: CuedDatabase): RawSql {
+    return (db as unknown as { sqlite: RawSql }).sqlite;
   }
 
   function createPackagedSignalHelper(version = "0.12.9"): string {
@@ -203,17 +219,19 @@ process.exit(44);
 
     const disabled = setIntegrationEnabled(db, "slack", completed.integration!.accountKey, false);
     expect(disabled.enabled).toBe(false);
+    const requestedDiscord = requestIntegrationAccess(db, "discord");
+    expect(requestedDiscord.integration.platform).toBe("discord");
+    expect(requestedDiscord.integration.runtimeKind).toBe("chromium");
+    expect(requestedDiscord.integration.launchTarget).toBe("https://discord.com/login");
     expect(listRequestableIntegrationPlatforms()).toEqual([
       "slack",
+      "discord",
       "linkedin",
       "whatsapp",
       "signal",
     ]);
     expect(() => requestIntegrationAccess(db, "gmail")).toThrow(
       "Unsupported integration platform: gmail",
-    );
-    expect(() => requestIntegrationAccess(db, "discord")).toThrow(
-      "Unsupported integration platform: discord",
     );
     const expectedContactsAvailability = resolveHostOS() === "macos" ? "available" : "unsupported";
     expect(buildIntegrationStatus(db).setupIntegrations).toEqual(
@@ -240,7 +258,7 @@ process.exit(44);
     );
     expect(
       buildIntegrationStatus(db).setupIntegrations.map((integration) => integration.platform),
-    ).toEqual(["contacts", "imessage", "slack", "linkedin", "whatsapp", "signal"]);
+    ).toEqual(["contacts", "imessage", "slack", "discord", "linkedin", "whatsapp", "signal"]);
     db.close();
   });
 
@@ -251,7 +269,7 @@ process.exit(44);
 
     expect(
       buildIntegrationStatus(db).setupIntegrations.map((integration) => integration.platform),
-    ).toEqual(["contacts", "imessage", "slack", "linkedin", "whatsapp", "signal"]);
+    ).toEqual(["contacts", "imessage", "slack", "discord", "linkedin", "whatsapp", "signal"]);
 
     db.close();
   });
@@ -270,10 +288,218 @@ process.exit(44);
       { platform: "contacts", authState: "unknown" },
       { platform: "imessage", authState: "unknown" },
       { platform: "slack", authState: "missing" },
+      { platform: "discord", authState: "missing" },
       { platform: "linkedin", authState: "missing" },
       { platform: "whatsapp", authState: "missing" },
       { platform: "signal", authState: "missing" },
     ]);
+
+    db.close();
+  });
+
+  it("clears discord blocked metadata after successful reauthentication", () => {
+    const db = createDb();
+
+    const requested = requestIntegrationAccess(db, "discord");
+    db.upsertIntegrationState({
+      platform: "discord",
+      accountKey: requested.integration.accountKey,
+      displayName: requested.integration.displayName,
+      authState: "blocked",
+      enabled: true,
+      connectionKind: requested.integration.connectionKind,
+      syncCapable: false,
+      launchStrategy: requested.integration.launchStrategy,
+      launchTarget: requested.integration.launchTarget,
+      importedFrom: requested.integration.importedFrom,
+      artifactPaths: requested.integration.artifactPaths,
+      metadata: {
+        ...(requested.integration.metadata ?? {}),
+        blockedAt: 123,
+        blockedReason: "discord_auth_invalidated",
+        lastAuthError: "Discord API GET /users/@me failed (401)",
+      },
+    });
+
+    const completed = completeAuthSession(db, requested.authSession.id, {
+      state: "authenticated",
+      keychainService: "dev.cued.auth.discord",
+      keychainAccount: "default",
+      resultSummary: {
+        provider: "discord",
+        userId: "123",
+        username: "the0t",
+        displayName: "theo",
+      },
+    });
+
+    expect(completed.integration?.authState).toBe("authenticated");
+    expect(completed.integration?.metadata).toEqual(
+      expect.objectContaining({
+        blockedAt: null,
+        blockedReason: null,
+        lastAuthError: null,
+      }),
+    );
+
+    db.close();
+  });
+
+  it("includes projection stats in integration status", () => {
+    const db = createDb();
+    const requested = requestIntegrationAccess(db, "discord");
+    const currentUser = {
+      id: "u-self",
+      username: "theo",
+      global_name: "Theo",
+    };
+
+    db.insertRawEvents([
+      buildDiscordContactEvent({
+        accountKey: requested.integration.accountKey,
+        observedAt: 1_710_000_000_000,
+        user: {
+          id: "u-peer",
+          username: "ava",
+          global_name: "Ava",
+        },
+      }),
+      buildDiscordConversationEvent({
+        accountKey: requested.integration.accountKey,
+        observedAt: 1_710_000_000_000,
+        channel: {
+          id: "dm-1",
+          type: 1,
+          recipients: [
+            {
+              id: "u-peer",
+              username: "ava",
+              global_name: "Ava",
+            },
+          ],
+          last_message_id: "100",
+        },
+        currentUser,
+      }),
+    ]);
+
+    const integration = buildIntegrationStatus(db).integrations.find(
+      (entry) => entry.platform === "discord",
+    );
+
+    expect(integration?.projectionStats).toEqual({
+      rawEvents: 2,
+      rawEventsBySchema: {
+        "contact.observed@1": 1,
+        "conversation.observed@1": 1,
+      },
+      projectedContacts: 0,
+      projectedConversations: 0,
+      projectedMessages: 0,
+    });
+
+    db.close();
+  });
+
+  it("includes latest sync diagnostics in integration status", () => {
+    const db = createDb();
+    const requested = requestIntegrationAccess(db, "discord");
+
+    const runId = db.queueSyncRun({
+      platform: "discord",
+      accountKey: requested.integration.accountKey,
+      runType: "sync",
+      trigger: "test",
+    });
+    const claimed = db.claimNextQueuedRun(["sync"], "ingesting");
+    expect(claimed?.id).toBe(runId);
+    db.finishRun(runId, {
+      diagnostics: {
+        discordHydration: {
+          selectedChannelCount: 100,
+          attemptedChannelCount: 78,
+          completedChannelCount: 77,
+          messageLimitPerChannel: 50,
+          partial: true,
+          breakChannelId: "dm-break",
+          error: "Discord API rate limited",
+          rateLimited: true,
+        },
+      },
+    });
+
+    const integration = buildIntegrationStatus(db).integrations.find(
+      (entry) => entry.platform === "discord",
+    );
+
+    expect(integration?.latestSyncDiagnostics).toEqual({
+      status: "completed",
+      finishedAt: expect.any(Number),
+      diagnostics: {
+        discordHydration: {
+          selectedChannelCount: 100,
+          attemptedChannelCount: 78,
+          completedChannelCount: 77,
+          messageLimitPerChannel: 50,
+          partial: true,
+          breakChannelId: "dm-break",
+          error: "Discord API rate limited",
+          rateLimited: true,
+        },
+      },
+    });
+
+    db.close();
+  });
+
+  it("ignores legacy persisted integrations for unknown platforms", () => {
+    const db = createDb();
+    const sqlite = openSqliteDatabase(db.dbPath);
+    sqlite
+      .prepare(
+        `INSERT INTO integration_states (
+          id,
+          platform,
+          account_key,
+          display_name,
+          auth_state,
+          enabled,
+          connection_kind,
+          sync_capable,
+          launch_strategy,
+          launch_target,
+          imported_from,
+          artifact_paths_json,
+          metadata_json,
+          last_seen_at,
+          created_at,
+          updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        "legacy-telegram",
+        "telegram",
+        "default",
+        "Telegram",
+        "failed",
+        1,
+        "browser-session",
+        0,
+        "chromium-auth",
+        "https://web.telegram.org/",
+        "legacy",
+        null,
+        null,
+        1,
+        1,
+        1,
+      );
+    sqlite.close();
+
+    expect(() => buildIntegrationStatus(db)).not.toThrow();
+    expect(
+      listIntegrationStates(db).some((integration) => String(integration.platform) === "telegram"),
+    ).toBe(false);
 
     db.close();
   });
@@ -507,7 +733,13 @@ process.exit(44);
       accountKey: "T123",
       removed: true,
     });
-    expect(db.getIntegrationState("slack", "T123")).toBeNull();
+    expect(db.getIntegrationState("slack", "T123")).toMatchObject({
+      platform: "slack",
+      account_key: "T123",
+      auth_state: "cancelled",
+      enabled: 0,
+      sync_capable: 0,
+    });
     expect(listIntegrationStates(db)).not.toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -548,7 +780,237 @@ process.exit(44);
       removed: true,
     });
     expect(existsSync(configDir)).toBe(false);
-    expect(db.getIntegrationState("signal", "default")).toBeNull();
+    expect(db.getIntegrationState("signal", "default")).toMatchObject({
+      platform: "signal",
+      account_key: "default",
+      auth_state: "cancelled",
+      enabled: 0,
+      sync_capable: 0,
+    });
+    expect(listIntegrationStates(db)).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          platform: "signal",
+          accountKey: "default",
+        }),
+      ]),
+    );
+
+    db.close();
+  });
+
+  it("does not resurrect a removed signal integration during managed helper refresh", async () => {
+    installSecurityTool({});
+    process.env.CUED_APP_PATH = createPackagedSignalHelper("0.14.1");
+    process.env.CUED_WHATSAPP_HELPER_BINARY = join(
+      createTempDir("cued-missing-whatsapp-helper-"),
+      "cued-whatsapp-helper",
+    );
+    process.env.CUED_SLACK_APP_BINARY = join(createTempDir("cued-no-slack-app-"), "Slack");
+
+    const db = createDb();
+    const configDir = createTempDir("cued-signal-config-");
+    db.upsertIntegrationState({
+      platform: "signal",
+      accountKey: "default",
+      displayName: "Signal",
+      authState: "authenticated",
+      enabled: true,
+      connectionKind: "local-cli",
+      syncCapable: true,
+      launchStrategy: "qr-native",
+      launchTarget: null,
+      importedFrom: "local-cli",
+      metadata: { configDir },
+    });
+
+    removeIntegration(db, "signal", "default");
+    await refreshManagedIntegrationStates(db);
+
+    expect(db.getIntegrationState("signal", "default")).toMatchObject({
+      platform: "signal",
+      account_key: "default",
+      auth_state: "cancelled",
+      enabled: 0,
+      sync_capable: 0,
+    });
+    expect(listIntegrationStates(db)).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ platform: "signal" })]),
+    );
+
+    db.close();
+  });
+
+  it("does not resolve a removed integration when no account key is provided", () => {
+    const db = createDb();
+    db.upsertIntegrationState({
+      platform: "signal",
+      accountKey: "default",
+      displayName: "Signal",
+      authState: "authenticated",
+      enabled: true,
+      connectionKind: "local-cli",
+      syncCapable: true,
+      launchStrategy: "qr-native",
+      launchTarget: null,
+      importedFrom: "local-cli",
+      metadata: {},
+    });
+
+    removeIntegration(db, "signal", "default");
+
+    expect(() => setIntegrationEnabled(db, "signal", undefined, true)).toThrow(
+      "Integration not found: signal",
+    );
+
+    db.close();
+  });
+
+  it("clears account-scoped sync state when removing an integration", () => {
+    const db = createDb();
+    db.upsertIntegrationState({
+      platform: "signal",
+      accountKey: "default",
+      displayName: "Signal",
+      authState: "authenticated",
+      enabled: true,
+      connectionKind: "local-cli",
+      syncCapable: true,
+      launchStrategy: "qr-native",
+      launchTarget: null,
+      importedFrom: "local-cli",
+      metadata: {},
+    });
+    db.upsertSourceAccount({
+      platform: "signal",
+      accountKey: "default",
+      displayName: "Signal",
+    });
+    db.upsertCheckpoint({
+      platform: "signal",
+      accountKey: "default",
+      syncMode: "incremental",
+      sourceCursor: { cursor: "stale" },
+      lastSuccessAt: Date.now(),
+    });
+    db.upsertSyncProof({
+      platform: "signal",
+      accountKey: "default",
+      proof: {
+        scope: { kind: "account", key: "default" },
+        proofKind: "messages",
+        status: "complete",
+        syncMode: "incremental",
+        observedAt: Date.now(),
+      },
+    });
+    db.queueSyncRun({
+      platform: "signal",
+      accountKey: "default",
+      runType: "sync",
+      trigger: "test",
+    });
+
+    expect(db.getOverview().sourceAccounts).toBe(1);
+    expect(db.getCheckpoint("signal", "default")).not.toBeNull();
+    expect(db.listSyncProofs("signal", "default")).toHaveLength(1);
+    expect(db.hasQueuedOrRunningRun("signal", "default")).toBe(true);
+
+    removeIntegration(db, "signal", "default");
+
+    expect(db.getOverview().sourceAccounts).toBe(0);
+    expect(db.getCheckpoint("signal", "default")).toBeNull();
+    expect(db.listSyncProofs("signal", "default")).toHaveLength(0);
+    expect(db.hasQueuedOrRunningRun("signal", "default")).toBe(false);
+
+    db.close();
+  });
+
+  it("clears legacy Slack backfill proofs when removing a Slack integration", () => {
+    const db = createDb();
+    const timestamp = Date.now();
+    db.upsertIntegrationState({
+      platform: "slack",
+      accountKey: "T123",
+      displayName: "Acme",
+      authState: "authenticated",
+      enabled: true,
+      connectionKind: "browser-session",
+      syncCapable: true,
+      launchStrategy: "chromium-auth",
+      launchTarget: "https://slack.com/signin",
+      importedFrom: "local-cli",
+      metadata: {},
+    });
+    rawSql(db)
+      .prepare(
+        `INSERT INTO slack_backfill_proofs (
+          id,
+          account_key,
+          team_id,
+          conversation_id,
+          conversation_name,
+          conversation_family,
+          sync_mode,
+          scan_started_at,
+          known_conversation_count,
+          conversation_phase,
+          history_complete,
+          history_cursor,
+          thread_root_count,
+          completed_thread_count,
+          pending_thread_count,
+          active_thread_ts,
+          replies_cursor,
+          oldest_message_ts,
+          newest_message_ts,
+          first_discovered_at,
+          history_complete_at,
+          replies_complete_at,
+          last_observed_at,
+          updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        "proof-1",
+        "T123",
+        "T123",
+        "C123",
+        "general",
+        "channel",
+        "full",
+        timestamp,
+        1,
+        "complete",
+        1,
+        null,
+        0,
+        0,
+        0,
+        null,
+        null,
+        null,
+        null,
+        timestamp,
+        timestamp,
+        timestamp,
+        timestamp,
+        timestamp,
+      );
+
+    expect(
+      rawSql(db)
+        .prepare("SELECT COUNT(*) AS count FROM slack_backfill_proofs WHERE account_key = ?")
+        .get("T123"),
+    ).toEqual({ count: 1 });
+
+    removeIntegration(db, "slack", "T123");
+
+    expect(
+      rawSql(db)
+        .prepare("SELECT COUNT(*) AS count FROM slack_backfill_proofs WHERE account_key = ?")
+        .get("T123"),
+    ).toEqual({ count: 0 });
 
     db.close();
   });
@@ -584,6 +1046,7 @@ process.exit(44);
           platform: "slack",
           accountKey: "T123",
           authState: "authenticated",
+          enabled: true,
         }),
       ]),
     );
@@ -611,7 +1074,11 @@ process.exit(44);
     });
     expect(completed.integration).toBeNull();
     expect(completed.authSession).toBeNull();
-    expect(db.getIntegrationState("slack", requested.integration.accountKey)).toBeNull();
+    expect(db.getIntegrationState("slack", requested.integration.accountKey)).toMatchObject({
+      auth_state: "cancelled",
+      enabled: 0,
+      sync_capable: 0,
+    });
 
     db.close();
   });

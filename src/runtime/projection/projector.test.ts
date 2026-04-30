@@ -32,6 +32,46 @@ describe("projector", () => {
     return db;
   }
 
+  it("uses indexes for contact fanout refresh predicates", () => {
+    const db = createDb();
+
+    const messagePlan = db.orm().all<{ detail: string }>(sql`
+      EXPLAIN QUERY PLAN
+      UPDATE messages
+      SET sender_name = 'Ava'
+      WHERE sender_contact_id IN ('contact-a')
+    `);
+    const participantPlan = db.orm().all<{ detail: string }>(sql`
+      EXPLAIN QUERY PLAN
+      UPDATE conversation_participants
+      SET participant_name = 'Ava'
+      WHERE contact_id IN ('contact-a')
+    `);
+    const timelinePlan = db.orm().all<{ detail: string }>(sql`
+      EXPLAIN QUERY PLAN
+      UPDATE timeline_events
+      SET actor_name = 'Ava'
+      WHERE actor_contact_id IN ('contact-a')
+    `);
+    const reactionPlan = db.orm().all<{ detail: string }>(sql`
+      EXPLAIN QUERY PLAN
+      UPDATE message_reactions
+      SET reactor_name = 'Ava'
+      WHERE reactor_contact_id IN ('contact-a')
+    `);
+
+    expect(messagePlan.map((row) => row.detail).join("\n")).toContain("idx_messages_sender");
+    expect(participantPlan.map((row) => row.detail).join("\n")).toContain(
+      "idx_conversation_participants_contact",
+    );
+    expect(timelinePlan.map((row) => row.detail).join("\n")).toContain(
+      "idx_timeline_events_actor_contact",
+    );
+    expect(reactionPlan.map((row) => row.detail).join("\n")).toContain(
+      "idx_message_reactions_reactor_contact",
+    );
+  });
+
   it("fails with raw-event context for unsupported normalized schemas", () => {
     const db = createDb();
 

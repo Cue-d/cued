@@ -110,12 +110,13 @@ export const SYNC_PROOF_STATUS_VALUES = [
   "pending",
   "running",
   "complete",
+  "partial",
+  "blocked",
   "failed",
   "stale",
 ] as const;
 export type SyncProofStatus = (typeof SYNC_PROOF_STATUS_VALUES)[number];
 
-// Standard cross-platform kinds; adapters may use source-specific strings as needed.
 export const SYNC_SCOPE_KIND_VALUES = [
   "account",
   "folder",

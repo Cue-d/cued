@@ -1,4 +1,5 @@
 import { type ChildProcess, execFileSync, spawn } from "node:child_process";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 import type { AuthSessionState, Platform } from "../../../core/types/provider.js";
 import type { CuedDatabase } from "../../../db/database.js";
@@ -21,7 +22,17 @@ export interface ChromiumAuthHandle {
 }
 
 function resolveWorkerEntrypoint(): string {
-  return join(import.meta.dirname, "./chromium-worker.js");
+  const jsEntrypoint = join(import.meta.dirname, "./chromium-worker.js");
+  if (existsSync(jsEntrypoint)) {
+    return jsEntrypoint;
+  }
+
+  const tsEntrypoint = join(import.meta.dirname, "./chromium-worker.ts");
+  if (existsSync(tsEntrypoint)) {
+    return tsEntrypoint;
+  }
+
+  return jsEntrypoint;
 }
 
 function buildWorkerArgs(
@@ -39,6 +50,7 @@ function buildWorkerArgs(
   }
 
   return [
+    ...process.execArgv,
     resolveWorkerEntrypoint(),
     "--platform",
     session.platform,

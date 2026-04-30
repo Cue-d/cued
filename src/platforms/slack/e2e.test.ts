@@ -7,7 +7,6 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { CuedDatabase } from "../../db/database.js";
 import { projectPendingRawEvents } from "../../runtime/projection/projector.js";
 import { runAdapter } from "../core/runner.js";
-import { isSlackBackfillConversationProof } from "./sync/proof.js";
 
 type SlackPhase = "bootstrap" | "rerun" | "expand";
 
@@ -511,24 +510,28 @@ echo '{"token":"xoxc-test","cookie":"cookie-test","teamId":"T123","teamName":"Ac
         }),
       );
 
-      expect(db.listSlackBackfillProofs("workspace-a")).toEqual([
+      expect(db.listSyncProofs("slack", "workspace-a")).toEqual([
         expect.objectContaining({
-          conversation_id: "C_ENG",
-          conversation_phase: "complete",
-          history_complete: 1,
-          thread_root_count: 1,
-          completed_thread_count: 1,
-          pending_thread_count: 0,
-          history_complete_at: expect.any(Number),
-          replies_complete_at: expect.any(Number),
+          scope_key: "C_ENG",
+          proof_kind: "messages",
+          status: "complete",
+          stats_json: expect.stringContaining('"threadRootCount":1'),
         }),
         expect.objectContaining({
-          conversation_id: "D_BEN",
-          conversation_phase: "complete",
+          scope_key: "C_ENG",
+          proof_kind: "replies",
+          status: "complete",
+          stats_json: expect.stringContaining('"completedThreadCount":1'),
         }),
         expect.objectContaining({
-          conversation_id: "G_TEAM",
-          conversation_phase: "complete",
+          scope_key: "D_BEN",
+          proof_kind: "messages",
+          status: "complete",
+        }),
+        expect.objectContaining({
+          scope_key: "G_TEAM",
+          proof_kind: "messages",
+          status: "complete",
         }),
       ]);
 
@@ -603,19 +606,22 @@ echo '{"token":"xoxc-test","cookie":"cookie-test","teamId":"T123","teamName":"Ac
         }),
       );
 
-      expect(db.listSlackBackfillProofs("workspace-a")).toEqual(
+      expect(db.listSyncProofs("slack", "workspace-a")).toEqual(
         expect.arrayContaining([
           expect.objectContaining({
-            conversation_id: "C_NEW",
-            conversation_phase: "complete",
+            scope_key: "C_NEW",
+            proof_kind: "messages",
+            status: "complete",
           }),
           expect.objectContaining({
-            conversation_id: "D_DREW",
-            conversation_phase: "complete",
+            scope_key: "D_DREW",
+            proof_kind: "messages",
+            status: "complete",
           }),
           expect.objectContaining({
-            conversation_id: "G_NEW",
-            conversation_phase: "complete",
+            scope_key: "G_NEW",
+            proof_kind: "messages",
+            status: "complete",
           }),
         ]),
       );
@@ -662,13 +668,12 @@ async function runSlackCycle(
   const bundle = await runAdapter("slack", "workspace-a", envOverrides);
   const insertResult = db.insertRawEvents(bundle.rawEvents);
   db.upsertSourceAccounts(bundle.sourceAccounts ?? []);
-  const slackBackfillProofs = Array.isArray(bundle.diagnostics?.slackBackfillConversations)
-    ? bundle.diagnostics.slackBackfillConversations
-    : [];
-  for (const proof of slackBackfillProofs) {
-    if (isSlackBackfillConversationProof(proof)) {
-      db.upsertSlackBackfillProof(proof);
-    }
+  for (const proof of bundle.proofs ?? []) {
+    db.upsertSyncProof({
+      platform: "slack",
+      accountKey: "workspace-a",
+      proof,
+    });
   }
   const projection = projectPendingRawEvents(db);
   const resolvedSyncMode = resolveCheckpointSyncMode(

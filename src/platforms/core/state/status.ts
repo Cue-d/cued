@@ -40,6 +40,16 @@ export const REQUESTABLE_INTEGRATIONS: Record<string, RequestableIntegrationConf
       authCapture: "localStorage.localConfig_v2 + cookie:d",
     },
   },
+  discord: {
+    connectionKind: "browser-session",
+    runtimeKind: "chromium",
+    launchStrategy: "chromium-auth",
+    launchTarget: "https://discord.com/login",
+    displayName: "Discord",
+    metadata: {
+      authCapture: "localStorage.token",
+    },
+  },
   linkedin: {
     connectionKind: "browser-session",
     runtimeKind: "chromium",
@@ -142,7 +152,9 @@ export function resolveAccountKey(
   if (accountKey) {
     return accountKey;
   }
-  const matches = db.listIntegrationStates().filter((row) => row.platform === platform);
+  const matches = db
+    .listIntegrationStates()
+    .filter((row) => row.platform === platform && !isUserRemovedIntegrationRow(row));
   if (matches.length === 1) {
     return matches[0]!.account_key;
   }
@@ -255,6 +267,17 @@ export function getKeychainMetadata(metadata: Record<string, unknown> | null): {
   };
 }
 
+export function isUserRemovedIntegrationMetadata(
+  metadata: Record<string, unknown> | null | undefined,
+): boolean {
+  return metadata?.userRemoved === true;
+}
+
+export function isUserRemovedIntegrationRow(row: IntegrationStateRow): boolean {
+  const metadata = safeParseJsonRecord(row.metadata_json, "integration_states.metadata_json");
+  return isUserRemovedIntegrationMetadata(metadata);
+}
+
 export function deleteKeychainSecret(
   keychainService: string | null,
   keychainAccount: string | null,
@@ -325,6 +348,8 @@ export function summarizeIntegrationStates(
           "integration_states.artifact_paths_json",
         ),
         metadata,
+        projectionStats: db.getIntegrationProjectionStats(row.platform, row.account_key),
+        latestSyncDiagnostics: getLatestSyncDiagnostics(db, row.platform, row.account_key),
         lastSeenAt: row.last_seen_at,
         updatedAt: row.updated_at,
         latestAuthSessionId: db.getLatestAuthSession(row.platform, row.account_key)?.id ?? null,
@@ -357,6 +382,12 @@ export function summarizeManagedIntegrationState(
     importedFrom: integration.importedFrom,
     artifactPaths: integration.artifactPaths ?? [],
     metadata: integration.metadata ?? null,
+    projectionStats: db.getIntegrationProjectionStats(integration.platform, integration.accountKey),
+    latestSyncDiagnostics: getLatestSyncDiagnostics(
+      db,
+      integration.platform,
+      integration.accountKey,
+    ),
     lastSeenAt: now(),
     updatedAt: now(),
     latestAuthSessionId:
@@ -370,6 +401,29 @@ export function summarizeManagedIntegrationState(
       },
       hostOs,
     ),
+  };
+}
+
+function getLatestSyncDiagnostics(
+  db: CuedDatabase,
+  platform: Platform,
+  accountKey: string,
+): IntegrationStateSummary["latestSyncDiagnostics"] {
+  const run = db.getLatestFinishedSyncRun(platform, accountKey);
+  if (!run) {
+    return null;
+  }
+
+  const details = safeParseJsonRecord(run.details_json, "sync_runs.details_json");
+  const diagnostics =
+    details && typeof details.diagnostics === "object" && details.diagnostics !== null
+      ? (details.diagnostics as Record<string, unknown>)
+      : null;
+
+  return {
+    status: run.status,
+    finishedAt: run.finished_at,
+    diagnostics,
   };
 }
 
@@ -427,6 +481,7 @@ function buildSetupIntegrations(
     "contacts",
     "imessage",
     "slack",
+    "discord",
     "linkedin",
     "whatsapp",
     "signal",
@@ -492,7 +547,10 @@ function buildSetupIntegrations(
 }
 
 export function listIntegrationStates(db: CuedDatabase): IntegrationStateSummary[] {
-  return summarizeIntegrationStates(db, db.listIntegrationStates());
+  return summarizeIntegrationStates(
+    db,
+    db.listIntegrationStates().filter((row) => !isUserRemovedIntegrationRow(row)),
+  );
 }
 
 export function listAuthSessions(db: CuedDatabase, limit = 20): AuthSessionSummary[] {
