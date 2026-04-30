@@ -1,5 +1,7 @@
 import Foundation
 
+private let permissionRelaunchSetupIntentFilename = "permission-relaunch-setup.intent"
+
 func trimmedEnvironmentPath(_ environment: [String: String], name: String) -> String? {
   let value = environment[name]?.trimmingCharacters(in: .whitespacesAndNewlines)
   return value?.isEmpty == false ? value : nil
@@ -24,6 +26,37 @@ func configuredCuedDBPath(
 ) -> String {
   trimmedEnvironmentPath(environment, name: "CUED_DB_PATH")
     ?? "\(configuredCuedHomePath(environment: environment, homeDirectory: homeDirectory))/local.db"
+}
+
+func permissionRelaunchSetupIntentPath(
+  environment: [String: String] = ProcessInfo.processInfo.environment,
+  homeDirectory: String = NSHomeDirectory()
+) -> String {
+  "\(configuredCuedHomePath(environment: environment, homeDirectory: homeDirectory))/\(permissionRelaunchSetupIntentFilename)"
+}
+
+func markPermissionRelaunchSetupIntent() {
+  let path = permissionRelaunchSetupIntentPath()
+  let directoryURL = URL(fileURLWithPath: path).deletingLastPathComponent()
+  do {
+    try FileManager.default.createDirectory(
+      at: directoryURL,
+      withIntermediateDirectories: true,
+      attributes: [.posixPermissions: 0o700]
+    )
+    try "1\n".write(toFile: path, atomically: true, encoding: .utf8)
+  } catch {
+    // Best effort only. Losing this marker should not block the permission flow.
+  }
+}
+
+func consumePermissionRelaunchSetupIntent() -> Bool {
+  let path = permissionRelaunchSetupIntentPath()
+  guard FileManager.default.fileExists(atPath: path) else {
+    return false
+  }
+  try? FileManager.default.removeItem(atPath: path)
+  return true
 }
 
 func shellEscape(_ value: String) -> String {

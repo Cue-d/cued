@@ -1521,6 +1521,11 @@ final class MenuBarAppController: NSObject, NSApplicationDelegate {
     menuBarLease.release()
   }
 
+  func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+    onboardingWindowController.showAndRefresh()
+    return true
+  }
+
   @objc private func openSetup() {
     onboardingWindowController.showAndRefresh()
   }
@@ -1583,6 +1588,11 @@ final class MenuBarAppController: NSObject, NSApplicationDelegate {
   }
 
   private func openSetupIfNeeded() {
+    if consumePermissionRelaunchSetupIntent() {
+      onboardingWindowController.showAndRefresh()
+      return
+    }
+
     let snapshot = statusStore.readSnapshot()
     let currentVersion = (Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String)
       ?? snapshot.installedAppVersion
