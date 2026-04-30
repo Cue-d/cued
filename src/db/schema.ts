@@ -51,6 +51,41 @@ export const syncCheckpoints = sqliteTable("sync_checkpoints", {
   updatedAt: integer("updated_at").notNull(),
 });
 
+export const syncScopes = sqliteTable("sync_scopes", {
+  id: text("id").primaryKey(),
+  platform: textEnum("platform", PLATFORM_VALUES).notNull(),
+  accountKey: text("account_key").notNull(),
+  scopeKind: text("scope_kind").notNull(),
+  scopeKey: text("scope_key").notNull(),
+  parentScopeId: text("parent_scope_id"),
+  displayName: text("display_name"),
+  metadataJson: text("metadata_json"),
+  firstDiscoveredAt: integer("first_discovered_at").notNull(),
+  lastObservedAt: integer("last_observed_at").notNull(),
+  createdAt: integer("created_at").notNull(),
+  updatedAt: integer("updated_at").notNull(),
+});
+
+export const syncProofs = sqliteTable("sync_proofs", {
+  id: text("id").primaryKey(),
+  platform: textEnum("platform", PLATFORM_VALUES).notNull(),
+  accountKey: text("account_key").notNull(),
+  scopeId: text("scope_id").notNull(),
+  proofKind: text("proof_kind").notNull(),
+  status: text("status").notNull(),
+  syncMode: textEnum("sync_mode", SYNC_MODE_VALUES),
+  runStartedAt: integer("run_started_at"),
+  lastObservedAt: integer("last_observed_at").notNull(),
+  completedAt: integer("completed_at"),
+  freshUntil: integer("fresh_until"),
+  resumeCursorJson: text("resume_cursor_json"),
+  coverageJson: text("coverage_json"),
+  statsJson: text("stats_json"),
+  errorJson: text("error_json"),
+  createdAt: integer("created_at").notNull(),
+  updatedAt: integer("updated_at").notNull(),
+});
+
 export const syncRuns = sqliteTable("sync_runs", {
   id: text("id").primaryKey(),
   platform: textEnum("platform", PLATFORM_VALUES),

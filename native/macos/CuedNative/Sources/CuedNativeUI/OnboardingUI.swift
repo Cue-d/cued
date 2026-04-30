@@ -1397,6 +1397,7 @@ private let installerPlatformOrder = [
   "phone_calls",
   "imessage",
   "slack",
+  "discord",
   "linkedin",
   "whatsapp",
   "signal",
@@ -1444,7 +1445,7 @@ private func installerDefaultPermissionStatus(for key: String) -> InstallerPermi
 
 private func installerPlatformIconAssetName(for platform: String) -> String? {
   switch platform {
-  case "contacts", "phone_calls", "imessage":
+  case "contacts", "discord", "phone_calls", "imessage":
     return nil  // Use SF Symbol fallback icons
   case "slack":
     return "slack-logo"
@@ -1467,6 +1468,8 @@ private func installerPlatformAccentColor(for platform: String) -> Color {
     return Color(red: 0.13, green: 0.74, blue: 0.38)
   case "imessage":
     return Color(red: 0.24, green: 0.81, blue: 0.39)
+  case "discord":
+    return Color(red: 0.35, green: 0.40, blue: 0.95)
   case "slack":
     return Color(red: 0.36, green: 0.18, blue: 0.52)
   case "linkedin":
@@ -1613,6 +1616,8 @@ private func platformWalkthrough(for configuration: InstallerPlatformConfigurati
     return "Uses Full Disk Access for local Messages sync and Messages automation for AppleScript sending."
   case "slack":
     return "Authenticate each workspace in a browser sign-in flow. You can add more workspaces at any time."
+  case "discord":
+    return "Authenticate in a browser sign-in flow on this Mac. Discord v1 syncs newly observed messages after connection."
   case "linkedin":
     return "Authenticate in a browser window and Cued will save the session on this Mac."
   case "whatsapp":
@@ -1628,6 +1633,8 @@ private func authFlowDetail(for platform: String) -> String {
   switch platform {
   case "slack":
     return "Opens Slack sign-in in a browser tab for this workspace."
+  case "discord":
+    return "Opens Discord sign-in in a browser window."
   case "linkedin":
     return "Opens LinkedIn sign-in in a browser window."
   case "whatsapp":
@@ -1713,6 +1720,8 @@ private func installerPlatformTitle(_ platform: String, fallback: String?) -> St
     return "Signal"
   case "slack":
     return "Slack"
+  case "discord":
+    return "Discord"
   case "whatsapp":
     return "WhatsApp"
   default:
@@ -1789,7 +1798,7 @@ private func installerSupportsMultipleAccounts(_ platform: String) -> Bool {
 
 private func installerIsRequestablePlatform(_ platform: String) -> Bool {
   switch platform {
-  case "linkedin", "signal", "slack", "whatsapp":
+  case "discord", "linkedin", "signal", "slack", "whatsapp":
     return true
   default:
     return false

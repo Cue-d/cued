@@ -1,4 +1,4 @@
-import type Database from "better-sqlite3";
+import type Database from "better-sqlite3-multiple-ciphers";
 
 type MigrationDatabase = InstanceType<typeof Database>;
 
@@ -30,6 +30,217 @@ function addColumnIfMissing(db: MigrationDatabase, tableName: string, definition
     return;
   }
   db.exec(`ALTER TABLE ${tableName} ADD COLUMN ${definition}`);
+}
+
+function buildSyncScopeId(
+  platform: string,
+  accountKey: string,
+  scopeKind: string,
+  scopeKey: string,
+): string {
+  return `scope:${Buffer.from(JSON.stringify([platform, accountKey, scopeKind, scopeKey])).toString(
+    "base64url",
+  )}`;
+}
+
+function buildSyncProofId(
+  platform: string,
+  accountKey: string,
+  scopeKind: string,
+  scopeKey: string,
+  proofKind: string,
+): string {
+  return `proof:${Buffer.from(
+    JSON.stringify([platform, accountKey, scopeKind, scopeKey, proofKind]),
+  ).toString("base64url")}`;
+}
+
+function stringifyJson(value: unknown): string | null {
+  if (value === undefined) {
+    return null;
+  }
+  return JSON.stringify(value);
+}
+
+function migrateSlackBackfillProofsToGeneric(db: MigrationDatabase): void {
+  if (
+    !tableExists(db, "slack_backfill_proofs") ||
+    !tableExists(db, "sync_scopes") ||
+    !tableExists(db, "sync_proofs")
+  ) {
+    return;
+  }
+
+  const rows = db.prepare("SELECT * FROM slack_backfill_proofs").all() as Array<{
+    account_key: string;
+    team_id: string;
+    conversation_id: string;
+    conversation_name: string | null;
+    conversation_family: string;
+    sync_mode: string;
+    scan_started_at: number;
+    known_conversation_count: number;
+    conversation_phase: string;
+    history_complete: number;
+    history_cursor: string | null;
+    thread_root_count: number;
+    completed_thread_count: number;
+    pending_thread_count: number;
+    active_thread_ts: string | null;
+    replies_cursor: string | null;
+    oldest_message_ts: string | null;
+    newest_message_ts: string | null;
+    first_discovered_at: number;
+    history_complete_at: number | null;
+    replies_complete_at: number | null;
+    last_observed_at: number;
+    updated_at: number;
+  }>;
+  if (rows.length === 0) {
+    return;
+  }
+
+  const upsertScope = db.prepare(`
+    INSERT INTO sync_scopes (
+      id,
+      platform,
+      account_key,
+      scope_kind,
+      scope_key,
+      parent_scope_id,
+      display_name,
+      metadata_json,
+      first_discovered_at,
+      last_observed_at,
+      created_at,
+      updated_at
+    ) VALUES (?, 'slack', ?, 'conversation', ?, NULL, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(platform, account_key, scope_kind, scope_key) DO UPDATE SET
+      display_name = excluded.display_name,
+      metadata_json = excluded.metadata_json,
+      first_discovered_at = MIN(sync_scopes.first_discovered_at, excluded.first_discovered_at),
+      last_observed_at = MAX(sync_scopes.last_observed_at, excluded.last_observed_at),
+      updated_at = MAX(sync_scopes.updated_at, excluded.updated_at)
+  `);
+  const upsertProof = db.prepare(`
+    INSERT INTO sync_proofs (
+      id,
+      platform,
+      account_key,
+      scope_id,
+      proof_kind,
+      status,
+      sync_mode,
+      run_started_at,
+      last_observed_at,
+      completed_at,
+      fresh_until,
+      resume_cursor_json,
+      coverage_json,
+      stats_json,
+      error_json,
+      created_at,
+      updated_at
+    ) VALUES (?, 'slack', ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, NULL, ?, ?)
+    ON CONFLICT(platform, account_key, scope_id, proof_kind) DO UPDATE SET
+      status = excluded.status,
+      sync_mode = excluded.sync_mode,
+      run_started_at = excluded.run_started_at,
+      last_observed_at = MAX(sync_proofs.last_observed_at, excluded.last_observed_at),
+      completed_at = COALESCE(sync_proofs.completed_at, excluded.completed_at),
+      resume_cursor_json = excluded.resume_cursor_json,
+      coverage_json = excluded.coverage_json,
+      stats_json = excluded.stats_json,
+      updated_at = MAX(sync_proofs.updated_at, excluded.updated_at)
+  `);
+
+  for (const row of rows) {
+    const scopeId = buildSyncScopeId("slack", row.account_key, "conversation", row.conversation_id);
+    const firstDiscoveredAt = row.first_discovered_at ?? row.last_observed_at;
+    const updatedAt = row.updated_at ?? row.last_observed_at;
+    upsertScope.run(
+      scopeId,
+      row.account_key,
+      row.conversation_id,
+      row.conversation_name,
+      stringifyJson({
+        teamId: row.team_id,
+        conversationFamily: row.conversation_family,
+      }),
+      firstDiscoveredAt,
+      row.last_observed_at,
+      firstDiscoveredAt,
+      updatedAt,
+    );
+
+    const messagesComplete = row.history_complete === 1 || row.conversation_phase !== "history";
+    upsertProof.run(
+      buildSyncProofId("slack", row.account_key, "conversation", row.conversation_id, "messages"),
+      row.account_key,
+      scopeId,
+      "messages",
+      messagesComplete ? "complete" : "running",
+      row.sync_mode,
+      row.scan_started_at,
+      row.last_observed_at,
+      messagesComplete ? (row.history_complete_at ?? row.last_observed_at) : null,
+      messagesComplete
+        ? null
+        : stringifyJson({
+            historyCursor: row.history_cursor,
+            conversationPhase: row.conversation_phase,
+          }),
+      stringifyJson({
+        oldestMessageTs: row.oldest_message_ts,
+        newestMessageTs: row.newest_message_ts,
+      }),
+      stringifyJson({
+        knownConversationCount: row.known_conversation_count,
+        threadRootCount: row.thread_root_count,
+      }),
+      firstDiscoveredAt,
+      updatedAt,
+    );
+
+    if (
+      row.thread_root_count > 0 ||
+      row.conversation_phase === "threads" ||
+      row.conversation_phase === "complete"
+    ) {
+      const repliesComplete = row.conversation_phase === "complete";
+      upsertProof.run(
+        buildSyncProofId("slack", row.account_key, "conversation", row.conversation_id, "replies"),
+        row.account_key,
+        scopeId,
+        "replies",
+        repliesComplete ? "complete" : "running",
+        row.sync_mode,
+        row.scan_started_at,
+        row.last_observed_at,
+        repliesComplete ? (row.replies_complete_at ?? row.last_observed_at) : null,
+        repliesComplete
+          ? null
+          : stringifyJson({
+              activeThreadTs: row.active_thread_ts,
+              repliesCursor: row.replies_cursor,
+              conversationPhase: row.conversation_phase,
+            }),
+        stringifyJson({
+          oldestMessageTs: row.oldest_message_ts,
+          newestMessageTs: row.newest_message_ts,
+          completedThreadCount: row.completed_thread_count,
+          pendingThreadCount: row.pending_thread_count,
+        }),
+        stringifyJson({
+          threadRootCount: row.thread_root_count,
+          completedThreadCount: row.completed_thread_count,
+          pendingThreadCount: row.pending_thread_count,
+        }),
+        firstDiscoveredAt,
+        updatedAt,
+      );
+    }
+  }
 }
 
 function repairLegacySyncRunsIfNeeded(db: MigrationDatabase): void {
@@ -655,6 +866,43 @@ export const MIGRATIONS: Migration[] = [
         UNIQUE(platform, account_key)
       );
 
+      CREATE TABLE IF NOT EXISTS sync_scopes (
+        id TEXT PRIMARY KEY,
+        platform TEXT NOT NULL,
+        account_key TEXT NOT NULL,
+        scope_kind TEXT NOT NULL,
+        scope_key TEXT NOT NULL,
+        parent_scope_id TEXT REFERENCES sync_scopes(id) ON DELETE CASCADE,
+        display_name TEXT,
+        metadata_json TEXT,
+        first_discovered_at INTEGER NOT NULL,
+        last_observed_at INTEGER NOT NULL,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        UNIQUE(platform, account_key, scope_kind, scope_key)
+      );
+
+      CREATE TABLE IF NOT EXISTS sync_proofs (
+        id TEXT PRIMARY KEY,
+        platform TEXT NOT NULL,
+        account_key TEXT NOT NULL,
+        scope_id TEXT NOT NULL REFERENCES sync_scopes(id) ON DELETE CASCADE,
+        proof_kind TEXT NOT NULL,
+        status TEXT NOT NULL,
+        sync_mode TEXT,
+        run_started_at INTEGER,
+        last_observed_at INTEGER NOT NULL,
+        completed_at INTEGER,
+        fresh_until INTEGER,
+        resume_cursor_json TEXT,
+        coverage_json TEXT,
+        stats_json TEXT,
+        error_json TEXT,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        UNIQUE(platform, account_key, scope_id, proof_kind)
+      );
+
       CREATE TABLE IF NOT EXISTS sync_runs (
         id TEXT PRIMARY KEY,
         platform TEXT,
@@ -1036,6 +1284,18 @@ export const MIGRATIONS: Migration[] = [
       CREATE INDEX IF NOT EXISTS idx_sync_checkpoints_lookup
       ON sync_checkpoints(platform, account_key);
 
+      CREATE INDEX IF NOT EXISTS idx_sync_scopes_lookup
+      ON sync_scopes(platform, account_key, scope_kind, scope_key);
+
+      CREATE INDEX IF NOT EXISTS idx_sync_scopes_parent
+      ON sync_scopes(parent_scope_id, updated_at);
+
+      CREATE INDEX IF NOT EXISTS idx_sync_proofs_lookup
+      ON sync_proofs(platform, account_key, scope_id, proof_kind);
+
+      CREATE INDEX IF NOT EXISTS idx_sync_proofs_status
+      ON sync_proofs(platform, account_key, status, updated_at);
+
       CREATE INDEX IF NOT EXISTS idx_sync_runs_status_type_queue
       ON sync_runs(status, run_type, queued_at);
 
@@ -1053,6 +1313,15 @@ export const MIGRATIONS: Migration[] = [
 
       CREATE INDEX IF NOT EXISTS idx_contact_sources_contact
       ON contact_sources(contact_id, platform, account_key);
+
+      CREATE INDEX IF NOT EXISTS idx_conversation_participants_contact
+      ON conversation_participants(contact_id);
+
+      CREATE INDEX IF NOT EXISTS idx_timeline_events_actor_contact
+      ON timeline_events(actor_contact_id);
+
+      CREATE INDEX IF NOT EXISTS idx_message_reactions_reactor_contact
+      ON message_reactions(reactor_contact_id);
 
       CREATE INDEX IF NOT EXISTS idx_conversations_lookup
       ON conversations(platform, account_key, source_conversation_key);
@@ -1500,7 +1769,92 @@ export const MIGRATIONS: Migration[] = [
     },
   },
   {
-    id: "0007_add_timeline_call_fields",
+    id: "0007_add_generic_sync_proof_tables",
+    apply: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS sync_scopes (
+          id TEXT PRIMARY KEY,
+          platform TEXT NOT NULL,
+          account_key TEXT NOT NULL,
+          scope_kind TEXT NOT NULL,
+          scope_key TEXT NOT NULL,
+          parent_scope_id TEXT REFERENCES sync_scopes(id) ON DELETE CASCADE,
+          display_name TEXT,
+          metadata_json TEXT,
+          first_discovered_at INTEGER NOT NULL,
+          last_observed_at INTEGER NOT NULL,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          UNIQUE(platform, account_key, scope_kind, scope_key)
+        );
+
+        CREATE TABLE IF NOT EXISTS sync_proofs (
+          id TEXT PRIMARY KEY,
+          platform TEXT NOT NULL,
+          account_key TEXT NOT NULL,
+          scope_id TEXT NOT NULL REFERENCES sync_scopes(id) ON DELETE CASCADE,
+          proof_kind TEXT NOT NULL,
+          status TEXT NOT NULL,
+          sync_mode TEXT,
+          run_started_at INTEGER,
+          last_observed_at INTEGER NOT NULL,
+          completed_at INTEGER,
+          fresh_until INTEGER,
+          resume_cursor_json TEXT,
+          coverage_json TEXT,
+          stats_json TEXT,
+          error_json TEXT,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          UNIQUE(platform, account_key, scope_id, proof_kind)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_sync_scopes_lookup
+        ON sync_scopes(platform, account_key, scope_kind, scope_key);
+
+        CREATE INDEX IF NOT EXISTS idx_sync_scopes_parent
+        ON sync_scopes(parent_scope_id, updated_at);
+
+        CREATE INDEX IF NOT EXISTS idx_sync_proofs_lookup
+        ON sync_proofs(platform, account_key, scope_id, proof_kind);
+
+        CREATE INDEX IF NOT EXISTS idx_sync_proofs_status
+        ON sync_proofs(platform, account_key, status, updated_at);
+      `);
+    },
+  },
+  {
+    id: "0008_migrate_slack_backfill_proofs_to_generic",
+    apply: (db) => {
+      migrateSlackBackfillProofsToGeneric(db);
+    },
+  },
+  {
+    id: "0009_add_contact_fanout_projection_indexes",
+    legacyIds: ["0008_add_contact_fanout_projection_indexes"],
+    apply: (db) => {
+      if (tableExists(db, "conversation_participants")) {
+        db.exec(`
+          CREATE INDEX IF NOT EXISTS idx_conversation_participants_contact
+          ON conversation_participants(contact_id);
+        `);
+      }
+      if (tableExists(db, "timeline_events")) {
+        db.exec(`
+          CREATE INDEX IF NOT EXISTS idx_timeline_events_actor_contact
+          ON timeline_events(actor_contact_id);
+        `);
+      }
+      if (tableExists(db, "message_reactions")) {
+        db.exec(`
+          CREATE INDEX IF NOT EXISTS idx_message_reactions_reactor_contact
+          ON message_reactions(reactor_contact_id);
+        `);
+      }
+    },
+  },
+  {
+    id: "0010_add_timeline_call_fields",
     apply: (db) => {
       if (!tableExists(db, "timeline_events")) {
         return;
