@@ -12,6 +12,10 @@ interface SlackHelperCommandEnvelope<TResult = unknown> {
   ok: boolean;
   protocolVersion: number;
   error?: string;
+  errorKind?: string;
+  retryAfterMs?: number;
+  retryable?: boolean;
+  slackCode?: string;
   result?: TResult;
 }
 
@@ -19,6 +23,30 @@ type SpawnImpl = typeof spawn;
 
 const DEFAULT_RETRY_ATTEMPTS = 4;
 const DEFAULT_RETRY_BASE_MS = 500;
+
+export class SlackHelperError extends Error {
+  readonly errorKind?: string;
+  readonly retryAfterMs?: number;
+  readonly retryable?: boolean;
+  readonly slackCode?: string;
+
+  constructor(
+    message: string,
+    input: {
+      errorKind?: string;
+      retryAfterMs?: number;
+      retryable?: boolean;
+      slackCode?: string;
+    } = {},
+  ) {
+    super(message);
+    this.name = "SlackHelperError";
+    this.errorKind = input.errorKind;
+    this.retryAfterMs = input.retryAfterMs;
+    this.retryable = input.retryable;
+    this.slackCode = input.slackCode;
+  }
+}
 
 export class SlackHelperClient implements SlackTransport {
   private readonly helperPath: string;
@@ -140,7 +168,11 @@ export class SlackHelperClient implements SlackTransport {
         if (attempt >= this.retryAttempts || !isRetryableSlackHelperError(error)) {
           break;
         }
-        await delay(this.retryBaseMs * 2 ** (attempt - 1));
+        const retryAfterMs =
+          error instanceof SlackHelperError && Number.isFinite(error.retryAfterMs)
+            ? Math.max(0, error.retryAfterMs ?? 0)
+            : null;
+        await delay(retryAfterMs ?? this.retryBaseMs * 2 ** (attempt - 1));
       }
     }
 
@@ -179,7 +211,7 @@ export class SlackHelperClient implements SlackTransport {
         const stderr = Buffer.concat(stderrChunks).toString("utf8").trim();
         const parsed = stdout ? tryParseHelperEnvelope<TResult>(stdout) : null;
         if (parsed?.error) {
-          reject(new Error(parsed.error));
+          reject(buildSlackHelperError(parsed));
           return;
         }
         reject(
@@ -209,7 +241,7 @@ export class SlackHelperClient implements SlackTransport {
           return;
         }
         if (!parsed.ok) {
-          reject(new Error(parsed.error ?? `Slack helper command failed: ${command}`));
+          reject(buildSlackHelperError(parsed, `Slack helper command failed: ${command}`));
           return;
         }
         resolve(parsed.result as TResult);
@@ -218,6 +250,21 @@ export class SlackHelperClient implements SlackTransport {
       child.stdin?.end(input);
     });
   }
+}
+
+function buildSlackHelperError(
+  envelope: Pick<
+    SlackHelperCommandEnvelope,
+    "error" | "errorKind" | "retryAfterMs" | "retryable" | "slackCode"
+  >,
+  fallback = "Slack helper command failed",
+): SlackHelperError {
+  return new SlackHelperError(envelope.error ?? fallback, {
+    errorKind: envelope.errorKind,
+    retryAfterMs: envelope.retryAfterMs,
+    retryable: envelope.retryable,
+    slackCode: envelope.slackCode,
+  });
 }
 
 function tryParseHelperEnvelope<TResult>(raw: string): SlackHelperCommandEnvelope<TResult> | null {
@@ -229,6 +276,12 @@ function tryParseHelperEnvelope<TResult>(raw: string): SlackHelperCommandEnvelop
 }
 
 function isRetryableSlackHelperError(error: unknown): boolean {
+  if (error instanceof SlackHelperError && error.retryable === false) {
+    return false;
+  }
+  if (error instanceof SlackHelperError && error.retryable === true) {
+    return true;
+  }
   const message =
     error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
   return (

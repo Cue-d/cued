@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { CUED_BROWSER_DIR } from "../../../core/config.js";
 import type { CuedDatabase } from "../../../db/database.js";
 import { completeAuthSession } from "../../core/state/mutations.js";
+import { isUserRemovedIntegrationMetadata } from "../../core/state/status.js";
 
 const SLACK_KEYCHAIN_SERVICE = "dev.cued.auth.slack";
 
@@ -61,6 +62,14 @@ export function storeSlackSession(
   const existingMetadata = existing?.metadata_json
     ? (JSON.parse(existing.metadata_json) as Record<string, unknown>)
     : {};
+  if (isUserRemovedIntegrationMetadata(existingMetadata)) {
+    return {
+      platform: "slack",
+      accountKey,
+      sourcePath: payload.sourcePath,
+      imported: false,
+    };
+  }
 
   const importedSavedAt =
     typeof existingMetadata.importedSavedAt === "number" ? existingMetadata.importedSavedAt : null;
