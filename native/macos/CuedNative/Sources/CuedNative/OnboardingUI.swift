@@ -92,14 +92,14 @@ final class OnboardingWindowController: NSWindowController {
     fatalError("init(coder:) has not been implemented")
   }
 
-  func showAndRefresh() {
+  func showAndRefresh(forceActivePermissionRefresh: Bool = false) {
     showWindow(nil)
     window?.makeKeyAndOrderFront(nil)
     NSApp.activate(ignoringOtherApps: true)
-    refresh()
+    refresh(forceActivePermissionRefresh: forceActivePermissionRefresh)
   }
 
-  func refresh(forceLivePermissions: Bool = false) {
+  func refresh(forceActivePermissionRefresh: Bool = false) {
     guard !isRefreshing else {
       return
     }
@@ -108,7 +108,7 @@ final class OnboardingWindowController: NSWindowController {
 
     let daemonSupervisor = self.daemonSupervisor
     let shouldEnsurePrerequisites = consumePrerequisiteSetupFlag()
-    let shouldRefreshPermissions = forceLivePermissions || consumeLivePermissionRefreshFlag()
+    let shouldRefreshPermissions = forceActivePermissionRefresh || shouldRefreshPermissionsActively()
 
     Task.detached(priority: .userInitiated) { [daemonSupervisor] in
       if shouldEnsurePrerequisites {
@@ -144,6 +144,7 @@ final class OnboardingWindowController: NSWindowController {
           allIntegrations: self.cachedAllIntegrations,
           integrations: self.cachedSetupIntegrations
         )
+        self.schedulePermissionRefreshRetry()
         self.schedulePendingStatusRefreshIfNeeded()
       }
     }
@@ -214,16 +215,22 @@ final class OnboardingWindowController: NSWindowController {
   }
 
   private func requestPermission(flags: [String]) {
+    if onboardingPermissionKeys(for: flags).contains("full_disk_access") {
+      markPermissionRelaunchSetupIntent()
+    }
     markPendingLivePermissions(flags: flags)
     runActions(
       argumentsList: [["permissions", "request"] + flags],
-      refreshPermissionsAfter: onboardingShouldRefreshPermissionsLive(for: flags)
+      forceActivePermissionRefreshAfter: onboardingShouldRefreshPermissionsActively(for: flags)
     )
   }
 
   private func guidePermission(key: String) {
     guard let panel = onboardingGuidePanel(for: key) else {
       return
+    }
+    if key == "full_disk_access" {
+      markPermissionRelaunchSetupIntent()
     }
     PermissionGuideAssistant.shared.present(panel: panel)
   }
@@ -370,7 +377,7 @@ final class OnboardingWindowController: NSWindowController {
 
   private func runActions(
     argumentsList: [[String]],
-    refreshPermissionsAfter: Bool
+    forceActivePermissionRefreshAfter: Bool
   ) {
     viewModel.beginRefresh()
     let daemonSupervisor = self.daemonSupervisor
@@ -380,15 +387,12 @@ final class OnboardingWindowController: NSWindowController {
       }
       await MainActor.run {
         self.onRefresh()
-        self.refresh(forceLivePermissions: refreshPermissionsAfter)
-        if refreshPermissionsAfter {
-          self.schedulePermissionRefreshRetry()
-        }
+        self.refresh(forceActivePermissionRefresh: forceActivePermissionRefreshAfter)
       }
     }
   }
 
-  private func consumeLivePermissionRefreshFlag() -> Bool {
+  private func shouldRefreshPermissionsActively() -> Bool {
     guard !pendingLivePermissionKeys.isEmpty else {
       pendingLivePermissionDeadline = nil
       return false
@@ -401,11 +405,13 @@ final class OnboardingWindowController: NSWindowController {
       pendingLivePermissionDeadline = nil
       return false
     }
-    return true
+    return pendingLivePermissionKeys.contains("messages_automation")
   }
 
   private func markPendingLivePermissions(flags: [String]) {
-    pendingLivePermissionKeys.formUnion(onboardingPermissionKeys(for: flags))
+    pendingLivePermissionKeys.formUnion(
+      onboardingPermissionKeys(for: flags).filter(isRetryablePermissionKey)
+    )
     if !pendingLivePermissionKeys.isEmpty {
       pendingLivePermissionDeadline = Date().addingTimeInterval(30)
     }
@@ -469,6 +475,14 @@ func onboardingPermissionKeys(for flags: [String]) -> Set<String> {
   return keys
 }
 
-func onboardingShouldRefreshPermissionsLive(for flags: [String]) -> Bool {
+func onboardingShouldRetryPermissionRefresh(for flags: [String]) -> Bool {
+  onboardingPermissionKeys(for: flags).contains(where: isRetryablePermissionKey)
+}
+
+func onboardingShouldRefreshPermissionsActively(for flags: [String]) -> Bool {
   onboardingPermissionKeys(for: flags).contains("messages_automation")
+}
+
+func isRetryablePermissionKey(_ key: String) -> Bool {
+  key == "messages_automation" || key == "full_disk_access"
 }

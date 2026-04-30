@@ -13,11 +13,18 @@ final class OnboardingUITests: XCTestCase {
     )
   }
 
-  func testLivePermissionRefreshIsOnlyForcedForMessagesRequests() {
-    XCTAssertFalse(onboardingShouldRefreshPermissionsLive(for: ["--contacts"]))
-    XCTAssertFalse(onboardingShouldRefreshPermissionsLive(for: ["--full-disk-access"]))
-    XCTAssertTrue(onboardingShouldRefreshPermissionsLive(for: ["--messages"]))
-    XCTAssertTrue(onboardingShouldRefreshPermissionsLive(for: ["--all"]))
+  func testPermissionRefreshRetryIsScheduledForLiveVerifiableRequests() {
+    XCTAssertFalse(onboardingShouldRetryPermissionRefresh(for: ["--contacts"]))
+    XCTAssertTrue(onboardingShouldRetryPermissionRefresh(for: ["--full-disk-access"]))
+    XCTAssertTrue(onboardingShouldRetryPermissionRefresh(for: ["--messages"]))
+    XCTAssertTrue(onboardingShouldRetryPermissionRefresh(for: ["--all"]))
+  }
+
+  func testActivePermissionRefreshIsOnlyForcedForMessagesRequests() {
+    XCTAssertFalse(onboardingShouldRefreshPermissionsActively(for: ["--contacts"]))
+    XCTAssertFalse(onboardingShouldRefreshPermissionsActively(for: ["--full-disk-access"]))
+    XCTAssertTrue(onboardingShouldRefreshPermissionsActively(for: ["--messages"]))
+    XCTAssertTrue(onboardingShouldRefreshPermissionsActively(for: ["--all"]))
   }
 
   func testPermissionGuideURLsMatchExpectedSystemSettingsPanes() {

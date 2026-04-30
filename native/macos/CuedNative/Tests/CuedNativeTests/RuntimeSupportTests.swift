@@ -29,6 +29,24 @@ final class RuntimeSupportTests: XCTestCase {
     )
   }
 
+  func testPermissionRelaunchSetupIntentPathUsesConfiguredCuedHome() {
+    XCTAssertEqual(
+      permissionRelaunchSetupIntentPath(
+        environment: ["CUED_HOME": " /tmp/cued-home "],
+        homeDirectory: "/Users/test"
+      ),
+      "/tmp/cued-home/permission-relaunch-setup.intent"
+    )
+
+    XCTAssertEqual(
+      permissionRelaunchSetupIntentPath(
+        environment: ["CUED_DB_PATH": " /tmp/cued/local.db "],
+        homeDirectory: "/Users/test"
+      ),
+      "/tmp/cued/permission-relaunch-setup.intent"
+    )
+  }
+
   func testBuildShellCommandEscapesValuesAndSortsExports() {
     let command = buildShellCommand(
       "cued setup",
