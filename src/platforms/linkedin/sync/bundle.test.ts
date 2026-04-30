@@ -906,4 +906,178 @@ describe("buildLinkedInSyncBundle", () => {
       ),
     ).toBe(false);
   });
+
+  it("stores linkedin message proof cursors and resumes full backfill from source cursor", async () => {
+    const conversation = {
+      title: "Long Thread",
+      entityURN: "urn:li:fsd_conversation:CONV_LONG",
+      lastActivityAt: 1_700_000_000_000,
+      lastReadAt: 1_700_000_000_000,
+      groupChat: false,
+      read: true,
+      categories: ["PRIMARY_INBOX"],
+      unreadCount: 0,
+      conversationParticipants: [
+        {
+          entityURN: "urn:li:fsd_profile:SELF123",
+          participantType: {
+            member: { firstName: "Theo", lastName: "Tarr", profileUrl: "" },
+          },
+        },
+        {
+          entityURN: "urn:li:fsd_profile:OTHER456",
+          participantType: {
+            member: { firstName: "Ava", lastName: "Chen", profileUrl: "" },
+          },
+        },
+      ],
+    };
+    const message = (index: number) => ({
+      entityURN: `urn:li:fsd_message:MSG_${index}`,
+      body: { text: `Message ${index}` },
+      deliveredAt: 1_700_000_000_000 - index,
+      sender: {
+        entityURN: "urn:li:fsd_profile:OTHER456",
+        participantType: {},
+      },
+      messageBodyRenderFormat: "DEFAULT" as const,
+      renderContent: [],
+      reactionSummaries: [],
+      conversationURN: conversation.entityURN,
+    });
+
+    let page = 0;
+    const first = await buildLinkedInSyncBundle({
+      accountKey: "default",
+      loadProjectedReactions: () => new Map(),
+      client: {
+        async fetchSelf() {
+          return "urn:li:fsd_profile:SELF123";
+        },
+        async getConnections() {
+          return { connections: [] };
+        },
+        async getConversations() {
+          return {
+            conversations: [conversation],
+            syncToken: "sync-token-long",
+          };
+        },
+        async getConversationsBefore() {
+          return { conversations: [] };
+        },
+        async getConversationsWithCursor() {
+          return { conversations: [], nextCursor: null };
+        },
+        async getMessages() {
+          page += 1;
+          return { messages: [message(page)], prevCursor: `cursor-${page}` };
+        },
+        async getMessagesWithPrevCursor() {
+          page += 1;
+          return { messages: [message(page)], prevCursor: `cursor-${page}` };
+        },
+        async getMessagesBefore() {
+          page += 1;
+          return { messages: [message(page)], prevCursor: `cursor-${page}` };
+        },
+        async getReactors() {
+          return [];
+        },
+      },
+    });
+
+    expect(first.hasMore).toBe(true);
+    expect(first.sourceCursor).toEqual(
+      expect.objectContaining({
+        scan: expect.objectContaining({
+          activeConversation: expect.objectContaining({
+            entityURN: conversation.entityURN,
+          }),
+          activeMessageCursor: expect.objectContaining({
+            prevCursor: "cursor-10",
+          }),
+        }),
+      }),
+    );
+    expect(first.proofs).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          proofKind: "messages",
+          status: "running",
+          resumeCursor: expect.objectContaining({
+            prevCursor: "cursor-10",
+          }),
+        }),
+      ]),
+    );
+
+    const getConversations = vi.fn(async () => {
+      throw new Error("resume should use source cursor active conversation");
+    });
+    const getMessages = vi.fn(async () => {
+      throw new Error("resume should not refetch latest page");
+    });
+    const resumed = await buildLinkedInSyncBundle({
+      accountKey: "default",
+      sourceCursor: first.sourceCursor,
+      loadProjectedReactions: () => new Map(),
+      client: {
+        async fetchSelf() {
+          return "urn:li:fsd_profile:SELF123";
+        },
+        async getConnections() {
+          return { connections: [] };
+        },
+        getConversations,
+        async getConversationsBefore() {
+          return { conversations: [] };
+        },
+        async getConversationsWithCursor() {
+          return { conversations: [], nextCursor: null };
+        },
+        getMessages,
+        async getMessagesWithPrevCursor(_conversationId: string, prevCursor: string) {
+          expect(prevCursor).toBe("cursor-10");
+          return { messages: [], prevCursor: null };
+        },
+        async getMessagesBefore() {
+          return { messages: [], prevCursor: null };
+        },
+        async getReactors() {
+          return [];
+        },
+      },
+    });
+
+    expect(getConversations).not.toHaveBeenCalled();
+    expect(getMessages).not.toHaveBeenCalled();
+    expect(resumed.hasMore).toBe(false);
+    expect(resumed.sourceCursor).toEqual(
+      expect.objectContaining({
+        syncToken: "sync-token-long",
+      }),
+    );
+    expect(resumed.sourceCursor).toEqual(
+      expect.not.objectContaining({
+        scan: expect.anything(),
+      }),
+    );
+    expect(resumed.proofs).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          proofKind: "messages",
+          status: "complete",
+          resumeCursor: null,
+          coverage: {
+            oldestMessageAt: 1_699_999_999_990,
+            newestMessageAt: 1_699_999_999_999,
+          },
+          stats: {
+            messageCount: 10,
+          },
+        }),
+      ]),
+    );
+  });
 });

@@ -3034,6 +3034,9 @@ export async function runDaemon(): Promise<void> {
         }
       }
       if (platform === "linkedin") {
+        if (checkpoint?.source_cursor_json) {
+          envOverrides.CUED_LINKEDIN_SOURCE_CURSOR = checkpoint.source_cursor_json;
+        }
         if (typeof sourceCursor?.lastSyncAt === "number") {
           envOverrides.CUED_LINKEDIN_LAST_SYNC_AT = String(sourceCursor.lastSyncAt);
         }
