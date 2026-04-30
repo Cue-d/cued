@@ -14,7 +14,7 @@ vi.mock("node:child_process", async (importOriginal) => {
   };
 });
 
-import { SlackHelperClient } from "./client.js";
+import { SlackHelperClient, type SlackHelperError } from "./client.js";
 
 class MockChild extends EventEmitter {
   readonly stdout = new PassThrough();
@@ -90,6 +90,37 @@ describe("slack helper client", () => {
     child.emit("close", 1);
 
     await expect(promise).rejects.toThrow("bad auth");
+  });
+
+  it("surfaces structured helper envelope errors", async () => {
+    const child = new MockChild();
+    spawnMock.mockReturnValue(child);
+
+    const client = new SlackHelperClient(
+      { token: "xoxc-test", cookie: "cookie-test" },
+      { helperPath: "/tmp/cued-slack-helper" },
+    );
+
+    const promise = client.getHistory("C123");
+    child.stdout.write(
+      `${JSON.stringify({
+        ok: false,
+        protocolVersion: 1,
+        error: "not_in_channel",
+        errorKind: "slack_api",
+        retryable: false,
+        slackCode: "not_in_channel",
+      })}\n`,
+    );
+    child.emit("close", 1);
+
+    await expect(promise).rejects.toMatchObject({
+      name: "SlackHelperError",
+      message: "not_in_channel",
+      errorKind: "slack_api",
+      retryable: false,
+      slackCode: "not_in_channel",
+    } satisfies Partial<SlackHelperError>);
   });
 
   it("retries transient helper errors and returns the later success", async () => {

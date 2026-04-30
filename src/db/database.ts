@@ -21,6 +21,7 @@ import type {
 } from "../core/types/provider.js";
 import {
   normalizeRawEventProvenance,
+  parsePlatform,
   resolveRawEventNormalizedSchema,
 } from "../core/types/provider.js";
 import { normalizePhone, toE164 } from "../core/utils/phone.js";
@@ -131,33 +132,6 @@ export interface MessagesAutomationVerificationState {
   summary: string | null;
 }
 
-export interface SlackBackfillProofRow {
-  id: string;
-  account_key: string;
-  team_id: string;
-  conversation_id: string;
-  conversation_name: string | null;
-  conversation_family: string;
-  sync_mode: string;
-  scan_started_at: number;
-  known_conversation_count: number;
-  conversation_phase: string;
-  history_complete: number;
-  history_cursor: string | null;
-  thread_root_count: number;
-  completed_thread_count: number;
-  pending_thread_count: number;
-  active_thread_ts: string | null;
-  replies_cursor: string | null;
-  oldest_message_ts: string | null;
-  newest_message_ts: string | null;
-  first_discovered_at: number;
-  history_complete_at: number | null;
-  replies_complete_at: number | null;
-  last_observed_at: number;
-  updated_at: number;
-}
-
 export interface SyncScopeRow {
   id: string;
   platform: Platform;
@@ -209,50 +183,6 @@ export interface ContactMergeDecisionRow {
   created_at: number;
 }
 
-function compareSlackTs(left: string | null | undefined, right: string | null | undefined): number {
-  if (!left && !right) {
-    return 0;
-  }
-  if (!left) {
-    return -1;
-  }
-  if (!right) {
-    return 1;
-  }
-  const leftNumeric = Number(left);
-  const rightNumeric = Number(right);
-  if (Number.isFinite(leftNumeric) && Number.isFinite(rightNumeric)) {
-    return leftNumeric === rightNumeric ? 0 : leftNumeric < rightNumeric ? -1 : 1;
-  }
-  return left.localeCompare(right);
-}
-
-function minSlackTs(
-  left: string | null | undefined,
-  right: string | null | undefined,
-): string | null {
-  if (!left) {
-    return right ?? null;
-  }
-  if (!right) {
-    return left;
-  }
-  return compareSlackTs(left, right) <= 0 ? left : right;
-}
-
-function maxSlackTs(
-  left: string | null | undefined,
-  right: string | null | undefined,
-): string | null {
-  if (!left) {
-    return right ?? null;
-  }
-  if (!right) {
-    return left;
-  }
-  return compareSlackTs(left, right) >= 0 ? left : right;
-}
-
 function buildSyncScopeId(
   platform: Platform,
   accountKey: string,
@@ -295,6 +225,12 @@ export interface IntegrationStateRow {
   last_seen_at: number;
   created_at: number;
   updated_at: number;
+}
+
+function hasKnownPlatform<T extends { platform: string | null }>(
+  row: T,
+): row is T & { platform: Platform } {
+  return typeof row.platform === "string" && parsePlatform(row.platform) !== null;
 }
 
 export interface AuthSessionRow {
@@ -405,6 +341,14 @@ export interface WhatsAppSendResolution {
   threadId: string;
   resolution: "whatsapp_jid" | "phone" | "group" | "passthrough";
   matchedContactIds: string[];
+  matchedName: string | null;
+}
+
+export interface DiscordSendResolution {
+  target: string;
+  threadId: string | null;
+  resolution: "channel_id" | "source_conversation_key" | "conversation_name";
+  matchedConversationId: string | null;
   matchedName: string | null;
 }
 
@@ -1331,151 +1275,6 @@ export class CuedDatabase {
       .run();
   }
 
-  listSlackBackfillProofs(accountKey: string): SlackBackfillProofRow[] {
-    return this.db
-      .select({
-        id: slackBackfillProofs.id,
-        account_key: slackBackfillProofs.accountKey,
-        team_id: slackBackfillProofs.teamId,
-        conversation_id: slackBackfillProofs.conversationId,
-        conversation_name: slackBackfillProofs.conversationName,
-        conversation_family: slackBackfillProofs.conversationFamily,
-        sync_mode: slackBackfillProofs.syncMode,
-        scan_started_at: slackBackfillProofs.scanStartedAt,
-        known_conversation_count: slackBackfillProofs.knownConversationCount,
-        conversation_phase: slackBackfillProofs.conversationPhase,
-        history_complete: slackBackfillProofs.historyComplete,
-        history_cursor: slackBackfillProofs.historyCursor,
-        thread_root_count: slackBackfillProofs.threadRootCount,
-        completed_thread_count: slackBackfillProofs.completedThreadCount,
-        pending_thread_count: slackBackfillProofs.pendingThreadCount,
-        active_thread_ts: slackBackfillProofs.activeThreadTs,
-        replies_cursor: slackBackfillProofs.repliesCursor,
-        oldest_message_ts: slackBackfillProofs.oldestMessageTs,
-        newest_message_ts: slackBackfillProofs.newestMessageTs,
-        first_discovered_at: slackBackfillProofs.firstDiscoveredAt,
-        history_complete_at: slackBackfillProofs.historyCompleteAt,
-        replies_complete_at: slackBackfillProofs.repliesCompleteAt,
-        last_observed_at: slackBackfillProofs.lastObservedAt,
-        updated_at: slackBackfillProofs.updatedAt,
-      })
-      .from(slackBackfillProofs)
-      .where(eq(slackBackfillProofs.accountKey, accountKey))
-      .orderBy(asc(slackBackfillProofs.conversationId))
-      .all() as SlackBackfillProofRow[];
-  }
-
-  upsertSlackBackfillProof(input: {
-    accountKey: string;
-    teamId: string;
-    conversationId: string;
-    conversationName?: string | null;
-    conversationFamily: string;
-    syncMode: string;
-    scanStartedAt: number;
-    knownConversationCount: number;
-    conversationPhase: string;
-    historyComplete: boolean;
-    historyCursor: string | null;
-    threadRootCount: number;
-    completedThreadCount: number;
-    pendingThreadCount: number;
-    activeThreadTs: string | null;
-    repliesCursor: string | null;
-    oldestMessageTs: string | null;
-    newestMessageTs: string | null;
-    observedAt: number;
-  }): void {
-    const id = `${input.accountKey}:${input.conversationId}`;
-    const existing = this.db
-      .select({
-        firstDiscoveredAt: slackBackfillProofs.firstDiscoveredAt,
-        historyCompleteAt: slackBackfillProofs.historyCompleteAt,
-        repliesCompleteAt: slackBackfillProofs.repliesCompleteAt,
-        oldestMessageTs: slackBackfillProofs.oldestMessageTs,
-        newestMessageTs: slackBackfillProofs.newestMessageTs,
-        knownConversationCount: slackBackfillProofs.knownConversationCount,
-        threadRootCount: slackBackfillProofs.threadRootCount,
-        completedThreadCount: slackBackfillProofs.completedThreadCount,
-      })
-      .from(slackBackfillProofs)
-      .where(eq(slackBackfillProofs.id, id))
-      .get();
-    const timestamp = now();
-    const historyCompleteAt =
-      input.historyComplete || input.conversationPhase === "complete"
-        ? (existing?.historyCompleteAt ?? input.observedAt)
-        : (existing?.historyCompleteAt ?? null);
-    const repliesCompleteAt =
-      input.conversationPhase === "complete"
-        ? (existing?.repliesCompleteAt ?? input.observedAt)
-        : (existing?.repliesCompleteAt ?? null);
-
-    const values = {
-      id,
-      accountKey: input.accountKey,
-      teamId: input.teamId,
-      conversationId: input.conversationId,
-      conversationName: input.conversationName ?? null,
-      conversationFamily: input.conversationFamily,
-      syncMode: input.syncMode,
-      scanStartedAt: input.scanStartedAt,
-      knownConversationCount: Math.max(
-        existing?.knownConversationCount ?? 0,
-        input.knownConversationCount,
-      ),
-      conversationPhase: input.conversationPhase,
-      historyComplete: input.historyComplete || input.conversationPhase === "complete" ? 1 : 0,
-      historyCursor: input.historyCursor,
-      threadRootCount: Math.max(existing?.threadRootCount ?? 0, input.threadRootCount),
-      completedThreadCount: Math.max(
-        existing?.completedThreadCount ?? 0,
-        input.completedThreadCount,
-      ),
-      pendingThreadCount: input.pendingThreadCount,
-      activeThreadTs: input.activeThreadTs,
-      repliesCursor: input.repliesCursor,
-      oldestMessageTs: minSlackTs(existing?.oldestMessageTs, input.oldestMessageTs),
-      newestMessageTs: maxSlackTs(existing?.newestMessageTs, input.newestMessageTs),
-      firstDiscoveredAt: existing?.firstDiscoveredAt ?? input.observedAt,
-      historyCompleteAt,
-      repliesCompleteAt,
-      lastObservedAt: input.observedAt,
-      updatedAt: timestamp,
-    };
-
-    this.db
-      .insert(slackBackfillProofs)
-      .values(values)
-      .onConflictDoUpdate({
-        target: [slackBackfillProofs.accountKey, slackBackfillProofs.conversationId],
-        set: {
-          teamId: values.teamId,
-          conversationName: values.conversationName,
-          conversationFamily: values.conversationFamily,
-          syncMode: values.syncMode,
-          scanStartedAt: values.scanStartedAt,
-          knownConversationCount: values.knownConversationCount,
-          conversationPhase: values.conversationPhase,
-          historyComplete: values.historyComplete,
-          historyCursor: values.historyCursor,
-          threadRootCount: values.threadRootCount,
-          completedThreadCount: values.completedThreadCount,
-          pendingThreadCount: values.pendingThreadCount,
-          activeThreadTs: values.activeThreadTs,
-          repliesCursor: values.repliesCursor,
-          oldestMessageTs: values.oldestMessageTs,
-          newestMessageTs: values.newestMessageTs,
-          firstDiscoveredAt: values.firstDiscoveredAt,
-          historyCompleteAt: values.historyCompleteAt,
-          repliesCompleteAt: values.repliesCompleteAt,
-          lastObservedAt: values.lastObservedAt,
-          updatedAt: values.updatedAt,
-        },
-      })
-      .run();
-  }
-
   getOverview(): {
     contacts: number;
     conversations: number;
@@ -1611,8 +1410,64 @@ export class CuedDatabase {
     };
   }
 
+  getIntegrationProjectionStats(
+    platform: Platform,
+    accountKey: string,
+  ): {
+    rawEvents: number;
+    rawEventsBySchema: Record<string, number>;
+    projectedContacts: number;
+    projectedConversations: number;
+    projectedMessages: number;
+  } {
+    const rawEventRows = this.sqlite
+      .prepare(
+        `
+        SELECT
+          COALESCE(normalized_schema, entity_kind || '.' || event_kind) AS schema_key,
+          COUNT(*) AS count
+        FROM raw_events
+        WHERE platform = ? AND account_key = ?
+        GROUP BY schema_key
+        ORDER BY count DESC, schema_key ASC
+      `,
+      )
+      .all(platform, accountKey) as Array<{
+      schema_key: string | null;
+      count: number | null;
+    }>;
+    const projectedCounts = this.sqlite
+      .prepare(
+        `
+        SELECT
+          (SELECT COUNT(*) FROM contact_sources WHERE platform = ? AND account_key = ?) AS projected_contacts,
+          (SELECT COUNT(*) FROM conversations WHERE platform = ? AND account_key = ?) AS projected_conversations,
+          (SELECT COUNT(*) FROM messages WHERE platform = ? AND account_key = ?) AS projected_messages
+      `,
+      )
+      .get(platform, accountKey, platform, accountKey, platform, accountKey) as {
+      projected_contacts: number | null;
+      projected_conversations: number | null;
+      projected_messages: number | null;
+    };
+
+    const rawEventsBySchema = Object.fromEntries(
+      rawEventRows
+        .filter((row) => typeof row.schema_key === "string" && row.schema_key.length > 0)
+        .map((row) => [row.schema_key!, Number(row.count ?? 0)]),
+    );
+
+    return {
+      rawEvents: rawEventRows.reduce((total, row) => total + Number(row.count ?? 0), 0),
+      rawEventsBySchema,
+      projectedContacts: Number(projectedCounts.projected_contacts ?? 0),
+      projectedConversations: Number(projectedCounts.projected_conversations ?? 0),
+      projectedMessages: Number(projectedCounts.projected_messages ?? 0),
+    };
+  }
+
   listIntegrationStates(): IntegrationStateRow[] {
-    return this.db
+    const rows = this.db
       .select({
         id: integrationStates.id,
         platform: integrationStates.platform,
@@ -1633,7 +1488,8 @@ export class CuedDatabase {
       })
       .from(integrationStates)
       .orderBy(asc(integrationStates.platform), asc(integrationStates.accountKey))
-      .all() as IntegrationStateRow[];
+      .all() as Array<IntegrationStateRow & { platform: string }>;
+    return rows.filter(hasKnownPlatform);
   }
 
   listEnabledSyncPlatforms(): Platform[] {
@@ -1643,11 +1499,12 @@ export class CuedDatabase {
       .where(and(eq(integrationStates.enabled, 1), eq(integrationStates.syncCapable, 1)))
       .orderBy(asc(integrationStates.platform))
       .all()
-      .map((row) => row.platform as Platform);
+      .filter(hasKnownPlatform)
+      .map((row) => row.platform);
   }
 
   listEnabledSyncTargets(): Array<{ platform: Platform; account_key: string }> {
-    return this.db
+    const rows = this.db
       .select({
         platform: integrationStates.platform,
         account_key: integrationStates.accountKey,
@@ -1655,7 +1512,8 @@ export class CuedDatabase {
       .from(integrationStates)
       .where(and(eq(integrationStates.enabled, 1), eq(integrationStates.syncCapable, 1)))
       .orderBy(asc(integrationStates.platform), asc(integrationStates.accountKey))
-      .all() as Array<{ platform: Platform; account_key: string }>;
+      .all() as Array<{ platform: string; account_key: string }>;
+    return rows.filter(hasKnownPlatform);
   }
 
   getIntegrationState(platform: Platform, accountKey: string): IntegrationStateRow | null {
@@ -1945,6 +1803,56 @@ export class CuedDatabase {
         and(eq(integrationStates.platform, platform), eq(integrationStates.accountKey, accountKey)),
       )
       .run();
+  }
+
+  clearIntegrationRuntimeState(platform: Platform, accountKey: string): number {
+    return this.db.transaction((tx) => {
+      const removedSourceAccounts = tx
+        .delete(sourceAccounts)
+        .where(
+          and(eq(sourceAccounts.platform, platform), eq(sourceAccounts.accountKey, accountKey)),
+        )
+        .run().changes;
+      const removedCheckpoints = tx
+        .delete(syncCheckpoints)
+        .where(
+          and(eq(syncCheckpoints.platform, platform), eq(syncCheckpoints.accountKey, accountKey)),
+        )
+        .run().changes;
+      const removedSyncProofs = tx
+        .delete(syncProofs)
+        .where(and(eq(syncProofs.platform, platform), eq(syncProofs.accountKey, accountKey)))
+        .run().changes;
+      const removedSyncScopes = tx
+        .delete(syncScopes)
+        .where(and(eq(syncScopes.platform, platform), eq(syncScopes.accountKey, accountKey)))
+        .run().changes;
+      const removedRunErrors = tx
+        .delete(syncRunErrors)
+        .where(and(eq(syncRunErrors.platform, platform), eq(syncRunErrors.accountKey, accountKey)))
+        .run().changes;
+      const removedRuns = tx
+        .delete(syncRuns)
+        .where(and(eq(syncRuns.platform, platform), eq(syncRuns.accountKey, accountKey)))
+        .run().changes;
+      const removedSlackBackfillProofs =
+        platform === "slack"
+          ? tx
+              .delete(slackBackfillProofs)
+              .where(eq(slackBackfillProofs.accountKey, accountKey))
+              .run().changes
+          : 0;
+
+      return (
+        Number(removedSourceAccounts) +
+        Number(removedCheckpoints) +
+        Number(removedSyncProofs) +
+        Number(removedSyncScopes) +
+        Number(removedRunErrors) +
+        Number(removedRuns) +
+        Number(removedSlackBackfillProofs)
+      );
+    });
   }
 
   queueOutboundMessage(input: {
@@ -2323,6 +2231,57 @@ export class CuedDatabase {
     }
 
     return null;
+  }
+
+  resolveDiscordSendTarget(targetInput: string): DiscordSendResolution | null {
+    const trimmed = targetInput.trim();
+    if (trimmed.length === 0) {
+      return null;
+    }
+
+    const exact = this.sqlite
+      .prepare(
+        `
+        SELECT id, source_conversation_key, native_conversation_key, name
+        FROM conversations
+        WHERE platform = 'discord'
+          AND type IN ('dm', 'group')
+          AND (
+            source_conversation_key = ?
+            OR native_conversation_key = ?
+            OR lower(name) = lower(?)
+          )
+        ORDER BY updated_at DESC, id ASC
+        LIMIT 1
+      `,
+      )
+      .get(trimmed, trimmed, trimmed) as
+      | {
+          id: string;
+          source_conversation_key: string;
+          native_conversation_key: string | null;
+          name: string | null;
+        }
+      | undefined;
+
+    if (!exact) {
+      return null;
+    }
+
+    return {
+      target:
+        exact.native_conversation_key ??
+        exact.source_conversation_key.replace(/^discord:channel:/, ""),
+      threadId: exact.source_conversation_key,
+      resolution:
+        exact.source_conversation_key === trimmed
+          ? "source_conversation_key"
+          : exact.native_conversation_key === trimmed
+            ? "channel_id"
+            : "conversation_name",
+      matchedConversationId: exact.id,
+      matchedName: exact.name,
+    };
   }
 
   findMessageByPlatformKey(
@@ -3161,6 +3120,43 @@ export class CuedDatabase {
           };
 
     this.db.update(syncRuns).set(values).where(eq(syncRuns.id, runId)).run();
+  }
+
+  getLatestFinishedSyncRun(
+    platform: Platform,
+    accountKey: string,
+  ): {
+    status: "completed" | "failed";
+    finished_at: number;
+    details_json: string | null;
+  } | null {
+    return (
+      (this.db
+        .select({
+          status: syncRuns.status,
+          finished_at: syncRuns.finishedAt,
+          details_json: syncRuns.detailsJson,
+        })
+        .from(syncRuns)
+        .where(
+          and(
+            eq(syncRuns.platform, platform),
+            eq(syncRuns.accountKey, accountKey),
+            inArray(syncRuns.runType, ["sync", "sync_resume"]),
+            inArray(syncRuns.status, ["completed", "failed"]),
+            sql`${syncRuns.finishedAt} IS NOT NULL`,
+          ),
+        )
+        .orderBy(desc(syncRuns.finishedAt))
+        .limit(1)
+        .get() as
+        | {
+            status: "completed" | "failed";
+            finished_at: number;
+            details_json: string | null;
+          }
+        | undefined) ?? null
+    );
   }
 
   failRun(runId: string, errorMessage: string, details?: unknown): void {
