@@ -83,6 +83,43 @@ describe("RunQueueService", () => {
     db.close();
   });
 
+  it("queues authenticated accounts even when helper-dependent sync capability is stale", () => {
+    const db = createDb();
+    db.upsertIntegrationState({
+      platform: "linkedin",
+      accountKey: "default",
+      displayName: "LinkedIn",
+      authState: "authenticated",
+      enabled: true,
+      connectionKind: "browser-session",
+      syncCapable: false,
+      launchStrategy: "chromium-auth",
+      launchTarget: "https://www.linkedin.com/login",
+    });
+
+    const queue = new RunQueueService(db);
+    const result = queue.queueSyncRun("linkedin");
+
+    expect(result).toEqual({
+      queued: true,
+      runId: result.runIds[0] ?? null,
+      runIds: expect.any(Array),
+      targets: ["linkedin:default"],
+    });
+    expect(result.runIds).toHaveLength(1);
+
+    const [run] = db.listRecentRuns(1);
+    expect(run).toMatchObject({
+      platform: "linkedin",
+      account_key: "default",
+      trigger: "cli",
+      run_type: "sync",
+      status: "queued",
+    });
+
+    db.close();
+  });
+
   it("preserves the legacy platform-only queue when no explicit sync targets exist", () => {
     const db = createDb();
     const queue = new RunQueueService(db);
