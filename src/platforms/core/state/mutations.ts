@@ -335,6 +335,8 @@ export function completeAuthSession(
       authenticatedAt: input.state === "authenticated" ? now() : null,
       authResult: input.resultSummary ?? null,
       lastAuthError: input.errorSummary ?? null,
+      blockedAt: input.state === "authenticated" ? null : (metadata.blockedAt ?? null),
+      blockedReason: input.state === "authenticated" ? null : (metadata.blockedReason ?? null),
     },
   });
 

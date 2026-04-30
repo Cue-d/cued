@@ -40,6 +40,16 @@ export const REQUESTABLE_INTEGRATIONS: Record<string, RequestableIntegrationConf
       authCapture: "localStorage.localConfig_v2 + cookie:d",
     },
   },
+  discord: {
+    connectionKind: "browser-session",
+    runtimeKind: "chromium",
+    launchStrategy: "chromium-auth",
+    launchTarget: "https://discord.com/login",
+    displayName: "Discord",
+    metadata: {
+      authCapture: "localStorage.token",
+    },
+  },
   linkedin: {
     connectionKind: "browser-session",
     runtimeKind: "chromium",
@@ -338,6 +348,8 @@ export function summarizeIntegrationStates(
           "integration_states.artifact_paths_json",
         ),
         metadata,
+        projectionStats: db.getIntegrationProjectionStats(row.platform, row.account_key),
+        latestSyncDiagnostics: getLatestSyncDiagnostics(db, row.platform, row.account_key),
         lastSeenAt: row.last_seen_at,
         updatedAt: row.updated_at,
         latestAuthSessionId: db.getLatestAuthSession(row.platform, row.account_key)?.id ?? null,
@@ -370,6 +382,12 @@ export function summarizeManagedIntegrationState(
     importedFrom: integration.importedFrom,
     artifactPaths: integration.artifactPaths ?? [],
     metadata: integration.metadata ?? null,
+    projectionStats: db.getIntegrationProjectionStats(integration.platform, integration.accountKey),
+    latestSyncDiagnostics: getLatestSyncDiagnostics(
+      db,
+      integration.platform,
+      integration.accountKey,
+    ),
     lastSeenAt: now(),
     updatedAt: now(),
     latestAuthSessionId:
@@ -383,6 +401,29 @@ export function summarizeManagedIntegrationState(
       },
       hostOs,
     ),
+  };
+}
+
+function getLatestSyncDiagnostics(
+  db: CuedDatabase,
+  platform: Platform,
+  accountKey: string,
+): IntegrationStateSummary["latestSyncDiagnostics"] {
+  const run = db.getLatestFinishedSyncRun(platform, accountKey);
+  if (!run) {
+    return null;
+  }
+
+  const details = safeParseJsonRecord(run.details_json, "sync_runs.details_json");
+  const diagnostics =
+    details && typeof details.diagnostics === "object" && details.diagnostics !== null
+      ? (details.diagnostics as Record<string, unknown>)
+      : null;
+
+  return {
+    status: run.status,
+    finishedAt: run.finished_at,
+    diagnostics,
   };
 }
 
@@ -440,6 +481,7 @@ function buildSetupIntegrations(
     "contacts",
     "imessage",
     "slack",
+    "discord",
     "linkedin",
     "whatsapp",
     "signal",

@@ -660,6 +660,95 @@ describe("CuedDatabase", () => {
     db.close();
   });
 
+  it("resolves Discord send targets only for DMs and group DMs", () => {
+    const db = createDb();
+    const sql = sqlite(db);
+    const timestamp = Date.now();
+
+    sql
+      .prepare(
+        `
+      INSERT INTO conversations (
+          id, platform, account_key, source_conversation_key, native_conversation_key, type, is_active,
+          removal_reason, name, topic, participant_names, last_message_id, last_message_at,
+          last_message_preview, unread_count, created_at, updated_at
+        ) VALUES (?, 'discord', 'default', ?, ?, ?, 1, NULL, ?, NULL, '[]', NULL, NULL, NULL, 0, ?, ?)
+      `,
+      )
+      .run("discord-dm", "discord:channel:dm-1", "dm-1", "dm", "Jarvis", timestamp, timestamp);
+    sql
+      .prepare(
+        `
+      INSERT INTO conversations (
+          id, platform, account_key, source_conversation_key, native_conversation_key, type, is_active,
+          removal_reason, name, topic, participant_names, last_message_id, last_message_at,
+          last_message_preview, unread_count, created_at, updated_at
+        ) VALUES (?, 'discord', 'default', ?, ?, ?, 1, NULL, ?, NULL, '[]', NULL, NULL, NULL, 0, ?, ?)
+      `,
+      )
+      .run(
+        "discord-group-dm",
+        "discord:channel:group-dm-1",
+        "group-dm-1",
+        "group",
+        "Jarvis, Ava",
+        timestamp,
+        timestamp,
+      );
+    sql
+      .prepare(
+        `
+      INSERT INTO conversations (
+          id, platform, account_key, source_conversation_key, native_conversation_key, type, is_active,
+          removal_reason, name, topic, participant_names, last_message_id, last_message_at,
+          last_message_preview, unread_count, created_at, updated_at
+        ) VALUES (?, 'discord', 'default', ?, ?, ?, 1, NULL, ?, NULL, '[]', NULL, NULL, NULL, 0, ?, ?)
+      `,
+      )
+      .run(
+        "discord-channel",
+        "discord:channel:guild-1",
+        "guild-1",
+        "channel",
+        "general",
+        timestamp,
+        timestamp,
+      );
+
+    expect(db.resolveDiscordSendTarget("Jarvis")).toEqual({
+      target: "dm-1",
+      threadId: "discord:channel:dm-1",
+      resolution: "conversation_name",
+      matchedConversationId: "discord-dm",
+      matchedName: "Jarvis",
+    });
+    expect(db.resolveDiscordSendTarget("Jarvis, Ava")).toEqual({
+      target: "group-dm-1",
+      threadId: "discord:channel:group-dm-1",
+      resolution: "conversation_name",
+      matchedConversationId: "discord-group-dm",
+      matchedName: "Jarvis, Ava",
+    });
+    expect(db.resolveDiscordSendTarget("dm-1")).toEqual({
+      target: "dm-1",
+      threadId: "discord:channel:dm-1",
+      resolution: "channel_id",
+      matchedConversationId: "discord-dm",
+      matchedName: "Jarvis",
+    });
+    expect(db.resolveDiscordSendTarget("discord:channel:dm-1")).toEqual({
+      target: "dm-1",
+      threadId: "discord:channel:dm-1",
+      resolution: "source_conversation_key",
+      matchedConversationId: "discord-dm",
+      matchedName: "Jarvis",
+    });
+    expect(db.resolveDiscordSendTarget("general")).toBeNull();
+    expect(db.resolveDiscordSendTarget("guild-1")).toBeNull();
+
+    db.close();
+  });
+
   it("records manual merge decisions and resolves canonical contact chains", () => {
     const db = createDb();
 
@@ -1199,6 +1288,23 @@ describe("CuedDatabase", () => {
         .prepare("SELECT 1 FROM schema_migrations WHERE id = ?")
         .get("0008_migrate_slack_backfill_proofs_to_generic"),
     ).toBeTruthy();
+    expect(
+      sql
+        .prepare("SELECT 1 FROM schema_migrations WHERE id = ?")
+        .get("0009_add_contact_fanout_projection_indexes"),
+    ).toBeTruthy();
+    const indexNames = (
+      sql.prepare("SELECT name FROM sqlite_master WHERE type = 'index'").all() as Array<{
+        name: string;
+      }>
+    ).map((row) => row.name);
+    expect(indexNames).toEqual(
+      expect.arrayContaining([
+        "idx_conversation_participants_contact",
+        "idx_timeline_events_actor_contact",
+        "idx_message_reactions_reactor_contact",
+      ]),
+    );
     expect(syncRunColumns).toContain("queued_at");
     expect(
       sql.prepare("SELECT queued_at, started_at FROM sync_runs WHERE id = ?").get("legacy-run"),
@@ -1224,6 +1330,38 @@ describe("CuedDatabase", () => {
       ]),
     );
     expect(triggerSql?.sql).toContain("rowid = NEW.rowid");
+
+    db.close();
+  });
+
+  it("honors the pre-renumbered Discord fanout index migration id", () => {
+    const dir = mkdtempSync(join(tmpdir(), "cued-discord-fanout-legacy-id-"));
+    tempDirs.push(dir);
+    const db = new CuedDatabase(join(dir, "local.db"));
+    const sql = sqlite(db);
+
+    sql.exec(`
+      CREATE TABLE schema_migrations (
+        id TEXT PRIMARY KEY,
+        applied_at INTEGER NOT NULL
+      )
+    `);
+    sql
+      .prepare("INSERT INTO schema_migrations (id, applied_at) VALUES (?, ?)")
+      .run("0008_add_contact_fanout_projection_indexes", 1);
+
+    db.migrate();
+
+    expect(
+      sql
+        .prepare("SELECT 1 FROM schema_migrations WHERE id = ?")
+        .get("0008_add_contact_fanout_projection_indexes"),
+    ).toBeTruthy();
+    expect(
+      sql
+        .prepare("SELECT 1 FROM schema_migrations WHERE id = ?")
+        .get("0009_add_contact_fanout_projection_indexes"),
+    ).toBeUndefined();
 
     db.close();
   });

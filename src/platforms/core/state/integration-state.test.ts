@@ -4,6 +4,11 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { resolveHostOS } from "../../../core/platform-capabilities.js";
 import { CuedDatabase } from "../../../db/database.js";
+import { openSqliteDatabase } from "../../../db/sqlite.js";
+import {
+  buildDiscordContactEvent,
+  buildDiscordConversationEvent,
+} from "../../discord/sync/events.js";
 import { refreshLocalIntegrationStates } from "./local-refresh.js";
 import {
   completeAuthSession,
@@ -214,17 +219,19 @@ process.exit(44);
 
     const disabled = setIntegrationEnabled(db, "slack", completed.integration!.accountKey, false);
     expect(disabled.enabled).toBe(false);
+    const requestedDiscord = requestIntegrationAccess(db, "discord");
+    expect(requestedDiscord.integration.platform).toBe("discord");
+    expect(requestedDiscord.integration.runtimeKind).toBe("chromium");
+    expect(requestedDiscord.integration.launchTarget).toBe("https://discord.com/login");
     expect(listRequestableIntegrationPlatforms()).toEqual([
       "slack",
+      "discord",
       "linkedin",
       "whatsapp",
       "signal",
     ]);
     expect(() => requestIntegrationAccess(db, "gmail")).toThrow(
       "Unsupported integration platform: gmail",
-    );
-    expect(() => requestIntegrationAccess(db, "discord")).toThrow(
-      "Unsupported integration platform: discord",
     );
     const expectedContactsAvailability = resolveHostOS() === "macos" ? "available" : "unsupported";
     expect(buildIntegrationStatus(db).setupIntegrations).toEqual(
@@ -251,7 +258,7 @@ process.exit(44);
     );
     expect(
       buildIntegrationStatus(db).setupIntegrations.map((integration) => integration.platform),
-    ).toEqual(["contacts", "imessage", "slack", "linkedin", "whatsapp", "signal"]);
+    ).toEqual(["contacts", "imessage", "slack", "discord", "linkedin", "whatsapp", "signal"]);
     db.close();
   });
 
@@ -262,7 +269,7 @@ process.exit(44);
 
     expect(
       buildIntegrationStatus(db).setupIntegrations.map((integration) => integration.platform),
-    ).toEqual(["contacts", "imessage", "slack", "linkedin", "whatsapp", "signal"]);
+    ).toEqual(["contacts", "imessage", "slack", "discord", "linkedin", "whatsapp", "signal"]);
 
     db.close();
   });
@@ -281,10 +288,218 @@ process.exit(44);
       { platform: "contacts", authState: "unknown" },
       { platform: "imessage", authState: "unknown" },
       { platform: "slack", authState: "missing" },
+      { platform: "discord", authState: "missing" },
       { platform: "linkedin", authState: "missing" },
       { platform: "whatsapp", authState: "missing" },
       { platform: "signal", authState: "missing" },
     ]);
+
+    db.close();
+  });
+
+  it("clears discord blocked metadata after successful reauthentication", () => {
+    const db = createDb();
+
+    const requested = requestIntegrationAccess(db, "discord");
+    db.upsertIntegrationState({
+      platform: "discord",
+      accountKey: requested.integration.accountKey,
+      displayName: requested.integration.displayName,
+      authState: "blocked",
+      enabled: true,
+      connectionKind: requested.integration.connectionKind,
+      syncCapable: false,
+      launchStrategy: requested.integration.launchStrategy,
+      launchTarget: requested.integration.launchTarget,
+      importedFrom: requested.integration.importedFrom,
+      artifactPaths: requested.integration.artifactPaths,
+      metadata: {
+        ...(requested.integration.metadata ?? {}),
+        blockedAt: 123,
+        blockedReason: "discord_auth_invalidated",
+        lastAuthError: "Discord API GET /users/@me failed (401)",
+      },
+    });
+
+    const completed = completeAuthSession(db, requested.authSession.id, {
+      state: "authenticated",
+      keychainService: "dev.cued.auth.discord",
+      keychainAccount: "default",
+      resultSummary: {
+        provider: "discord",
+        userId: "123",
+        username: "the0t",
+        displayName: "theo",
+      },
+    });
+
+    expect(completed.integration?.authState).toBe("authenticated");
+    expect(completed.integration?.metadata).toEqual(
+      expect.objectContaining({
+        blockedAt: null,
+        blockedReason: null,
+        lastAuthError: null,
+      }),
+    );
+
+    db.close();
+  });
+
+  it("includes projection stats in integration status", () => {
+    const db = createDb();
+    const requested = requestIntegrationAccess(db, "discord");
+    const currentUser = {
+      id: "u-self",
+      username: "theo",
+      global_name: "Theo",
+    };
+
+    db.insertRawEvents([
+      buildDiscordContactEvent({
+        accountKey: requested.integration.accountKey,
+        observedAt: 1_710_000_000_000,
+        user: {
+          id: "u-peer",
+          username: "ava",
+          global_name: "Ava",
+        },
+      }),
+      buildDiscordConversationEvent({
+        accountKey: requested.integration.accountKey,
+        observedAt: 1_710_000_000_000,
+        channel: {
+          id: "dm-1",
+          type: 1,
+          recipients: [
+            {
+              id: "u-peer",
+              username: "ava",
+              global_name: "Ava",
+            },
+          ],
+          last_message_id: "100",
+        },
+        currentUser,
+      }),
+    ]);
+
+    const integration = buildIntegrationStatus(db).integrations.find(
+      (entry) => entry.platform === "discord",
+    );
+
+    expect(integration?.projectionStats).toEqual({
+      rawEvents: 2,
+      rawEventsBySchema: {
+        "contact.observed@1": 1,
+        "conversation.observed@1": 1,
+      },
+      projectedContacts: 0,
+      projectedConversations: 0,
+      projectedMessages: 0,
+    });
+
+    db.close();
+  });
+
+  it("includes latest sync diagnostics in integration status", () => {
+    const db = createDb();
+    const requested = requestIntegrationAccess(db, "discord");
+
+    const runId = db.queueSyncRun({
+      platform: "discord",
+      accountKey: requested.integration.accountKey,
+      runType: "sync",
+      trigger: "test",
+    });
+    const claimed = db.claimNextQueuedRun(["sync"], "ingesting");
+    expect(claimed?.id).toBe(runId);
+    db.finishRun(runId, {
+      diagnostics: {
+        discordHydration: {
+          selectedChannelCount: 100,
+          attemptedChannelCount: 78,
+          completedChannelCount: 77,
+          messageLimitPerChannel: 50,
+          partial: true,
+          breakChannelId: "dm-break",
+          error: "Discord API rate limited",
+          rateLimited: true,
+        },
+      },
+    });
+
+    const integration = buildIntegrationStatus(db).integrations.find(
+      (entry) => entry.platform === "discord",
+    );
+
+    expect(integration?.latestSyncDiagnostics).toEqual({
+      status: "completed",
+      finishedAt: expect.any(Number),
+      diagnostics: {
+        discordHydration: {
+          selectedChannelCount: 100,
+          attemptedChannelCount: 78,
+          completedChannelCount: 77,
+          messageLimitPerChannel: 50,
+          partial: true,
+          breakChannelId: "dm-break",
+          error: "Discord API rate limited",
+          rateLimited: true,
+        },
+      },
+    });
+
+    db.close();
+  });
+
+  it("ignores legacy persisted integrations for unknown platforms", () => {
+    const db = createDb();
+    const sqlite = openSqliteDatabase(db.dbPath);
+    sqlite
+      .prepare(
+        `INSERT INTO integration_states (
+          id,
+          platform,
+          account_key,
+          display_name,
+          auth_state,
+          enabled,
+          connection_kind,
+          sync_capable,
+          launch_strategy,
+          launch_target,
+          imported_from,
+          artifact_paths_json,
+          metadata_json,
+          last_seen_at,
+          created_at,
+          updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        "legacy-telegram",
+        "telegram",
+        "default",
+        "Telegram",
+        "failed",
+        1,
+        "browser-session",
+        0,
+        "chromium-auth",
+        "https://web.telegram.org/",
+        "legacy",
+        null,
+        null,
+        1,
+        1,
+        1,
+      );
+    sqlite.close();
+
+    expect(() => buildIntegrationStatus(db)).not.toThrow();
+    expect(
+      listIntegrationStates(db).some((integration) => String(integration.platform) === "telegram"),
+    ).toBe(false);
 
     db.close();
   });
