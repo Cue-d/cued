@@ -11,6 +11,9 @@ nonisolated(unsafe) private let sqliteTransient = unsafeBitCast(-1, to: sqlite3_
 private let defaultMessagesDBPath =
   FileManager.default.homeDirectoryForCurrentUser
   .appendingPathComponent("Library/Messages/chat.db").path
+private let defaultCallHistoryDBPath =
+  FileManager.default.homeDirectoryForCurrentUser
+  .appendingPathComponent("Library/Application Support/CallHistoryDB/CallHistory.storedata").path
 
 struct ContactRecord: Encodable {
   let sourceId: String
@@ -90,6 +93,17 @@ struct IMessageWatchOptions {
   var dbPath: String = defaultMessagesDBPath
 }
 
+struct CallHistoryDumpOptions {
+  var dbPath: String = defaultCallHistoryDBPath
+  var chatDBPath: String = defaultMessagesDBPath
+  var afterPK = 0
+  var limit = 500
+}
+
+struct CallHistoryWatchOptions {
+  var dbPath: String = defaultCallHistoryDBPath
+}
+
 struct AuthOpenOptions {
   var platform = ""
   var accountKey = ""
@@ -106,6 +120,45 @@ struct AuthQROptions {
 struct WatchEvent: Encodable {
   let event: String
   let timestamp: Int
+}
+
+struct CallHistoryRecord: Codable {
+  let pk: Int
+  let sourceCallKey: String
+  let sourceConversationKey: String
+  let remoteSourceKey: String?
+  let remoteAddress: String?
+  let remoteDisplayName: String?
+  let provider: String
+  let providerCallType: String?
+  let direction: String
+  let medium: String
+  let status: String
+  let startedAt: Int
+  let endedAt: Int?
+  let durationSeconds: Int?
+  let disconnectedCause: String?
+  let syntheticConversation: Bool
+}
+
+struct CallHistorySyncBatch: Codable {
+  let cursor: Int
+  let fetchedCount: Int
+  let calls: [CallHistoryRecord]
+}
+
+private struct CallHistoryRow {
+  let pk: Int
+  let uniqueID: String?
+  let dateValue: Double?
+  let durationSeconds: Double?
+  let address: String?
+  let name: String?
+  let serviceProvider: String?
+  let callType: Int?
+  let originated: Int?
+  let answered: Int?
+  let disconnectedCause: Int?
 }
 
 private struct MessageRow {
@@ -159,11 +212,12 @@ enum CLIError: Error, LocalizedError {
   case browser(String)
   case auth(String)
   case imessageWatch(String)
+  case callHistory(String)
 
   var errorDescription: String? {
     switch self {
     case .invalidCommand:
-      return "usage: CuedNative contacts dump|status|watch | CuedNative imessage dump [--db-path PATH] [--after-rowid N] [--limit N] | CuedNative imessage watch [--db-path PATH] | CuedNative browser open --url URL | CuedNative browser close --url-prefix PREFIX | CuedNative auth open --platform PLATFORM --account-key KEY --session-id ID --db-path PATH | CuedNative auth qr --title TITLE --subtitle TEXT --uri URI | CuedNative login-item status|enable|disable | CuedNative --menu-bar"
+      return "usage: CuedNative contacts dump|status|watch | CuedNative imessage dump [--db-path PATH] [--after-rowid N] [--limit N] | CuedNative imessage watch [--db-path PATH] | CuedNative callhistory dump [--db-path PATH] [--chat-db-path PATH] [--after-pk N] [--limit N] | CuedNative callhistory watch [--db-path PATH] | CuedNative browser open --url URL | CuedNative browser close --url-prefix PREFIX | CuedNative auth open --platform PLATFORM --account-key KEY --session-id ID --db-path PATH | CuedNative auth qr --title TITLE --subtitle TEXT --uri URI | CuedNative login-item status|enable|disable | CuedNative --menu-bar"
     case .invalidOption(let message):
       return message
     case .contactsAccessDenied:
@@ -175,6 +229,8 @@ enum CLIError: Error, LocalizedError {
     case .auth(let message):
       return message
     case .imessageWatch(let message):
+      return message
+    case .callHistory(let message):
       return message
     }
   }
@@ -298,6 +354,12 @@ struct CuedNativeCLI {
     case ("imessage", "watch"):
       let options = try parseIMessageWatchOptions(Array(arguments.dropFirst(2)))
       try streamIMessageChanges(options: options)
+    case ("callhistory", "dump"):
+      let options = try parseCallHistoryOptions(Array(arguments.dropFirst(2)))
+      try writeJSON(dumpCallHistory(options: options))
+    case ("callhistory", "watch"):
+      let options = try parseCallHistoryWatchOptions(Array(arguments.dropFirst(2)))
+      try streamCallHistoryChanges(options: options)
     case ("auth", "open"):
       let options = try parseAuthOpenOptions(Array(arguments.dropFirst(2)))
       try writeJSON(runManagedAuth(options: options))
@@ -367,6 +429,66 @@ struct CuedNativeCLI {
 
   private static func parseIMessageWatchOptions(_ arguments: [String]) throws -> IMessageWatchOptions {
     var options = IMessageWatchOptions()
+    var index = 0
+
+    while index < arguments.count {
+      switch arguments[index] {
+      case "--db-path":
+        index += 1
+        guard index < arguments.count else {
+          throw CLIError.invalidOption("--db-path requires a value")
+        }
+        options.dbPath = arguments[index]
+      default:
+        throw CLIError.invalidOption("unknown option: \(arguments[index])")
+      }
+      index += 1
+    }
+
+    return options
+  }
+
+  private static func parseCallHistoryOptions(_ arguments: [String]) throws -> CallHistoryDumpOptions {
+    var options = CallHistoryDumpOptions()
+    var index = 0
+
+    while index < arguments.count {
+      switch arguments[index] {
+      case "--db-path":
+        index += 1
+        guard index < arguments.count else {
+          throw CLIError.invalidOption("--db-path requires a value")
+        }
+        options.dbPath = arguments[index]
+      case "--chat-db-path":
+        index += 1
+        guard index < arguments.count else {
+          throw CLIError.invalidOption("--chat-db-path requires a value")
+        }
+        options.chatDBPath = arguments[index]
+      case "--after-pk":
+        index += 1
+        guard index < arguments.count, let value = Int(arguments[index]) else {
+          throw CLIError.invalidOption("--after-pk requires an integer")
+        }
+        options.afterPK = value
+      case "--limit":
+        index += 1
+        guard index < arguments.count, let value = Int(arguments[index]) else {
+          throw CLIError.invalidOption("--limit requires an integer")
+        }
+        options.limit = value
+      default:
+        throw CLIError.invalidOption("unknown option: \(arguments[index])")
+      }
+      index += 1
+    }
+
+    return options
+  }
+
+  private static func parseCallHistoryWatchOptions(_ arguments: [String]) throws -> CallHistoryWatchOptions {
+    var options = CallHistoryWatchOptions()
     var index = 0
 
     while index < arguments.count {
@@ -798,6 +920,172 @@ struct CuedNativeCLI {
       do {
         try writeJSONLine(WatchEvent(
           event: "messages_changed",
+          timestamp: Int(Date().timeIntervalSince1970 * 1000)
+        ))
+      } catch {
+        fputs("\(error.localizedDescription)\n", stderr)
+      }
+    }
+    source.setCancelHandler {
+      close(fileDescriptor)
+    }
+    source.resume()
+
+    RunLoop.main.run()
+  }
+
+  private static func dumpCallHistory(options: CallHistoryDumpOptions) throws -> CallHistorySyncBatch {
+    guard FileManager.default.fileExists(atPath: options.dbPath) else {
+      return CallHistorySyncBatch(cursor: options.afterPK, fetchedCount: 0, calls: [])
+    }
+
+    let connection = try SQLiteConnection(path: options.dbPath)
+    let chatConnection =
+      FileManager.default.fileExists(atPath: options.chatDBPath)
+      ? try? SQLiteConnection(path: options.chatDBPath)
+      : nil
+
+    let rows = try connection.query(
+      sql: """
+        SELECT
+          Z_PK,
+          ZUNIQUE_ID,
+          ZDATE,
+          ZDURATION,
+          ZADDRESS,
+          ZNAME,
+          ZSERVICE_PROVIDER,
+          ZCALLTYPE,
+          ZORIGINATED,
+          ZANSWERED,
+          ZDISCONNECTED_CAUSE
+        FROM ZCALLRECORD
+        WHERE Z_PK > ?
+        ORDER BY Z_PK
+        LIMIT ?
+      """,
+      bind: { statement in
+        sqlite3_bind_int64(statement, 1, sqlite3_int64(options.afterPK))
+        sqlite3_bind_int64(statement, 2, sqlite3_int64(options.limit))
+      },
+      mapRow: { statement in
+        CallHistoryRow(
+          pk: intColumn(statement, 0) ?? 0,
+          uniqueID: stringColumn(statement, 1),
+          dateValue: doubleColumn(statement, 2),
+          durationSeconds: doubleColumn(statement, 3),
+          address: stringColumn(statement, 4),
+          name: stringColumn(statement, 5),
+          serviceProvider: stringColumn(statement, 6),
+          callType: intColumn(statement, 7),
+          originated: intColumn(statement, 8),
+          answered: intColumn(statement, 9),
+          disconnectedCause: intColumn(statement, 10)
+        )
+      }
+    )
+
+    guard !rows.isEmpty else {
+      return CallHistorySyncBatch(cursor: options.afterPK, fetchedCount: 0, calls: [])
+    }
+
+    let calls = try rows.map { row in
+      let remoteAddress = nilIfEmpty(row.address)
+      let remoteSourceKey = buildRemoteSourceKey(from: remoteAddress)
+      let chatID: Int? =
+        if let chatConnection, let remoteAddress {
+          try findDirectChatID(connection: chatConnection, candidates: handleCandidates(for: remoteAddress))
+        } else {
+          nil
+        }
+      let sourceConversationKey =
+        if let chatID {
+          String(chatID)
+        } else if let remoteSourceKey {
+          "call:\(remoteSourceKey)"
+        } else {
+          "call:\(row.uniqueID ?? String(row.pk))"
+        }
+      let provider = normalizeCallProvider(row.serviceProvider)
+      let direction = normalizeCallDirection(row.originated)
+      let durationSeconds: Int? =
+        if let duration = row.durationSeconds, duration.isFinite {
+          max(0, Int(duration.rounded()))
+        } else {
+          nil
+        }
+      let startedAt =
+        if let dateValue = row.dateValue, dateValue.isFinite {
+          Int(((dateValue + Double(appleEpochOffset)) * 1000.0).rounded())
+        } else {
+          0
+        }
+      let endedAt: Int? =
+        if let durationSeconds {
+          startedAt + durationSeconds * 1000
+        } else {
+          nil
+        }
+
+      return CallHistoryRecord(
+        pk: row.pk,
+        sourceCallKey: nilIfEmpty(row.uniqueID) ?? "callhistory:\(row.pk)",
+        sourceConversationKey: sourceConversationKey,
+        remoteSourceKey: remoteSourceKey,
+        remoteAddress: remoteAddress,
+        remoteDisplayName: nilIfEmpty(row.name),
+        provider: provider,
+        providerCallType: row.callType.map(String.init),
+        direction: direction,
+        medium: normalizeCallMedium(provider: provider, callType: row.callType),
+        status: normalizeCallStatus(
+          direction: direction,
+          disconnectedCause: row.disconnectedCause,
+          answered: row.answered,
+          durationSeconds: durationSeconds
+        ),
+        startedAt: startedAt,
+        endedAt: endedAt,
+        durationSeconds: durationSeconds,
+        disconnectedCause: row.disconnectedCause.map(String.init),
+        syntheticConversation: chatID == nil
+      )
+    }
+
+    return CallHistorySyncBatch(
+      cursor: rows.last?.pk ?? options.afterPK,
+      fetchedCount: rows.count,
+      calls: calls
+    )
+  }
+
+  @MainActor
+  private static func streamCallHistoryChanges(options: CallHistoryWatchOptions) throws {
+    let url = URL(fileURLWithPath: options.dbPath)
+    let directoryURL = url.deletingLastPathComponent()
+    guard FileManager.default.fileExists(atPath: directoryURL.path) else {
+      throw CLIError.callHistory("call history directory does not exist: \(directoryURL.path)")
+    }
+
+    let fileDescriptor = open(directoryURL.path, O_EVTONLY)
+    guard fileDescriptor >= 0 else {
+      throw CLIError.callHistory("unable to watch call history directory: \(directoryURL.path)")
+    }
+
+    try writeJSONLine(WatchEvent(
+      event: "ready",
+      timestamp: Int(Date().timeIntervalSince1970 * 1000)
+    ))
+
+    let source = DispatchSource.makeFileSystemObjectSource(
+      fileDescriptor: fileDescriptor,
+      eventMask: [.write, .extend, .rename, .delete, .attrib],
+      queue: DispatchQueue.main
+    )
+    source.setEventHandler {
+      do {
+        try writeJSONLine(WatchEvent(
+          event: "callhistory_changed",
           timestamp: Int(Date().timeIntervalSince1970 * 1000)
         ))
       } catch {
@@ -1271,6 +1559,206 @@ struct CuedNativeCLI {
     )
   }
 
+  private static func normalizePhone(_ value: String) -> String {
+    let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty else {
+      return ""
+    }
+
+    let digits = trimmed.filter(\.isNumber)
+    guard !digits.isEmpty else {
+      return ""
+    }
+
+    if digits.count == 11, digits.hasPrefix("1") {
+      return String(digits.dropFirst())
+    }
+
+    return trimmed.hasPrefix("+") ? "+\(digits)" : String(digits)
+  }
+
+  private static func toE164(_ value: String) -> String? {
+    let normalized = normalizePhone(value)
+    guard !normalized.isEmpty else {
+      return nil
+    }
+
+    if normalized.hasPrefix("+") {
+      return normalized
+    }
+
+    if normalized.count == 10 {
+      return "+1\(normalized)"
+    }
+
+    if normalized.allSatisfy(\.isNumber) {
+      return "+\(normalized)"
+    }
+
+    return nil
+  }
+
+  private static func handleCandidates(for value: String) -> [String] {
+    let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty else {
+      return []
+    }
+    if trimmed.contains("@") {
+      return [trimmed.lowercased()]
+    }
+
+    var candidates = Set<String>()
+    let normalized = normalizePhone(trimmed)
+    let e164 = toE164(trimmed)
+    candidates.insert(trimmed)
+    if !normalized.isEmpty {
+      candidates.insert(normalized)
+      if !normalized.hasPrefix("+") {
+        candidates.insert("+\(normalized)")
+      }
+      if normalized.count == 10 {
+        candidates.insert("+1\(normalized)")
+      }
+    }
+    if let e164 {
+      candidates.insert(e164)
+    }
+    return candidates.filter { !$0.isEmpty }
+  }
+
+  private static func buildRemoteSourceKey(from address: String?) -> String? {
+    guard let address = nilIfEmpty(address) else {
+      return nil
+    }
+    if address.contains("@") {
+      return "imessage:\(address.lowercased())"
+    }
+    let normalized = toE164(address) ?? normalizePhone(address)
+    return normalized.isEmpty ? "imessage:\(address)" : "imessage:\(normalized)"
+  }
+
+  private static func normalizeCallProvider(_ serviceProvider: String?) -> String {
+    let normalized = serviceProvider?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
+    if normalized.contains("facetime") {
+      return "facetime"
+    }
+    if normalized.contains("telephony") {
+      return "telephony"
+    }
+    return "unknown"
+  }
+
+  private static func normalizeCallMedium(provider: String, callType: Int?) -> String {
+    if callType == 8 {
+      return "video"
+    }
+    if callType == 16 {
+      return "audio"
+    }
+    if provider == "telephony" {
+      return "audio"
+    }
+    return "unknown"
+  }
+
+  private static func normalizeCallDirection(_ originated: Int?) -> String {
+    if originated == 1 {
+      return "outgoing"
+    }
+    if originated == 0 {
+      return "incoming"
+    }
+    return "unknown"
+  }
+
+  private static func isLikelyCompletedCall(answered: Int?, durationSeconds: Int?) -> Bool {
+    if answered == 1 {
+      return true
+    }
+    if let durationSeconds {
+      return durationSeconds >= 20
+    }
+    return false
+  }
+
+  private static func normalizeCallStatus(
+    direction: String,
+    disconnectedCause: Int?,
+    answered: Int?,
+    durationSeconds: Int?
+  ) -> String {
+    if isLikelyCompletedCall(answered: answered, durationSeconds: durationSeconds) {
+      return "completed"
+    }
+    if disconnectedCause == 41 {
+      return "failed"
+    }
+    if direction == "incoming", disconnectedCause == 21 {
+      return "declined"
+    }
+    if direction == "outgoing", disconnectedCause == 12 {
+      return "blocked"
+    }
+    if direction == "outgoing" {
+      return "canceled"
+    }
+    if direction == "incoming" {
+      return "missed"
+    }
+    return "unknown"
+  }
+
+  private static func findDirectChatID(connection: SQLiteConnection, candidates: [String]) throws -> Int? {
+    guard !candidates.isEmpty else {
+      return nil
+    }
+
+    let placeholders = Array(repeating: "?", count: candidates.count).joined(separator: ", ")
+    let sql = """
+      WITH candidate_chats AS (
+        SELECT
+          c.ROWID AS chat_id,
+          MAX(m.date) AS last_message_date,
+          MAX(m.ROWID) AS last_message_rowid
+        FROM chat c
+        JOIN chat_handle_join chj ON chj.chat_id = c.ROWID
+        JOIN handle h ON h.ROWID = chj.handle_id
+        LEFT JOIN chat_message_join cmj ON cmj.chat_id = c.ROWID
+        LEFT JOIN message m ON m.ROWID = cmj.message_id
+        WHERE LOWER(h.id) IN (\(placeholders))
+          AND NOT EXISTS (
+            SELECT 1
+            FROM chat_handle_join other
+            WHERE other.chat_id = c.ROWID
+              AND other.handle_id <> h.ROWID
+          )
+        GROUP BY c.ROWID
+      )
+      SELECT chat_id
+      FROM candidate_chats
+      ORDER BY
+        COALESCE(last_message_date, 0) DESC,
+        COALESCE(last_message_rowid, 0) DESC,
+        chat_id DESC
+      LIMIT 1
+    """
+
+    let rows = try connection.query(
+      sql: sql,
+      bind: { statement in
+        for (index, candidate) in candidates.enumerated() {
+          let value = candidate.lowercased()
+          sqlite3_bind_text(statement, Int32(index + 1), value, -1, sqliteTransient)
+        }
+      },
+      mapRow: { statement in
+        intColumn(statement, 0)
+      }
+    )
+
+    return rows.first ?? nil
+  }
+
   private static func decodeTypedstreamLength(_ data: [UInt8], offset: Int) -> (bytesConsumed: Int, length: Int)? {
     guard offset < data.count else {
       return nil
@@ -1386,6 +1874,14 @@ struct CuedNativeCLI {
     }
 
     return Int(sqlite3_column_int64(statement, index))
+  }
+
+  private static func doubleColumn(_ statement: OpaquePointer?, _ index: Int32) -> Double? {
+    guard sqlite3_column_type(statement, index) != SQLITE_NULL else {
+      return nil
+    }
+
+    return sqlite3_column_double(statement, index)
   }
 
   private static func boolColumn(_ statement: OpaquePointer?, _ index: Int32) -> Bool {

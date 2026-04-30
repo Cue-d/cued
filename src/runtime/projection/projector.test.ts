@@ -557,6 +557,208 @@ describe("projector", () => {
     db.close();
   });
 
+  it("projects call raw events into typed timeline rows and conversation summaries", () => {
+    const db = createDb();
+    const observedAt = 1_710_060_000_000;
+
+    db.insertRawEvents([
+      {
+        id: "imessage-contact-call",
+        platform: "imessage",
+        accountKey: "local",
+        entityKind: "contact",
+        eventKind: "observed",
+        observedAt,
+        dedupeKey: "imessage:contact:+14155550123",
+        payload: {
+          sourceEntityKey: "imessage:+14155550123",
+          fields: { display_name: "Ava Chen" },
+          handles: [{ type: "phone", value: "+14155550123", deterministic: true }],
+        },
+        sourceVersion: "imessage-v1",
+      },
+      {
+        id: "imessage-conversation-call",
+        platform: "imessage",
+        accountKey: "local",
+        entityKind: "conversation",
+        eventKind: "observed",
+        observedAt: observedAt + 1,
+        dedupeKey: "imessage:conversation:1",
+        payload: {
+          sourceConversationKey: "1",
+          conversationType: "dm",
+          displayName: "Ava Chen",
+          participants: [{ sourceEntityKey: "imessage:+14155550123" }],
+        },
+        sourceVersion: "imessage-v1",
+      },
+      {
+        id: "imessage-call",
+        platform: "imessage",
+        accountKey: "local",
+        entityKind: "call",
+        eventKind: "observed",
+        observedAt: observedAt + 2,
+        dedupeKey: "imessage:call:call-1",
+        payload: {
+          sourceCallKey: "call-1",
+          sourceConversationKey: "1",
+          provider: "facetime",
+          providerCallType: "8",
+          direction: "incoming",
+          medium: "video",
+          status: "declined",
+          startedAt: observedAt + 10,
+          endedAt: observedAt + 10,
+          durationSeconds: 0,
+          initiatorSourceKey: "imessage:+14155550123",
+          primaryRemoteSourceKey: "imessage:+14155550123",
+          remoteAddress: "+14155550123",
+          remoteDisplayName: "Ava Chen",
+          disconnectedCause: "21",
+        },
+        sourceVersion: "imessage-v1",
+      },
+    ]);
+
+    projectPendingRawEvents(db);
+
+    const timelineRow = db.orm().get<{
+      system_kind: string | null;
+      call_provider: string | null;
+      call_direction: string | null;
+      call_status: string | null;
+      call_medium: string | null;
+      call_started_at: number | null;
+      call_ended_at: number | null;
+      call_duration_seconds: number | null;
+      call_disconnected_cause: string | null;
+      subject_source_key: string | null;
+      text: string | null;
+    }>(sql`
+      SELECT
+        system_kind,
+        call_provider,
+        call_direction,
+        call_status,
+        call_medium,
+        call_started_at,
+        call_ended_at,
+        call_duration_seconds,
+        call_disconnected_cause,
+        subject_source_key,
+        text
+      FROM timeline_events
+      WHERE source_event_key = 'call-1'
+    `);
+    expect(timelineRow).toEqual({
+      system_kind: "call",
+      call_provider: "facetime",
+      call_direction: "incoming",
+      call_status: "declined",
+      call_medium: "video",
+      call_started_at: observedAt + 10,
+      call_ended_at: observedAt + 10,
+      call_duration_seconds: 0,
+      call_disconnected_cause: "21",
+      subject_source_key: "imessage:+14155550123",
+      text: "Declined FaceTime video call",
+    });
+
+    const conversationRow = db.orm().get<{
+      last_message_preview: string | null;
+      last_message_at: number | null;
+    }>(sql`
+      SELECT last_message_preview, last_message_at
+      FROM conversations
+      WHERE source_conversation_key = '1'
+    `);
+    expect(conversationRow).toEqual({
+      last_message_preview: "Declined FaceTime video call",
+      last_message_at: observedAt + 10,
+    });
+
+    db.close();
+  });
+
+  it("renders unknown call providers without duplicating 'Call call'", () => {
+    const db = createDb();
+    const observedAt = 1_710_070_000_000;
+
+    db.insertRawEvents([
+      {
+        id: "imessage-contact-call-unknown",
+        platform: "imessage",
+        accountKey: "local",
+        entityKind: "contact",
+        eventKind: "observed",
+        observedAt,
+        dedupeKey: "imessage:contact:+14155550124",
+        payload: {
+          sourceEntityKey: "imessage:+14155550124",
+          fields: { display_name: "Ava Chen" },
+          handles: [{ type: "phone", value: "+14155550124", deterministic: true }],
+        },
+        sourceVersion: "imessage-v1",
+      },
+      {
+        id: "imessage-conversation-call-unknown",
+        platform: "imessage",
+        accountKey: "local",
+        entityKind: "conversation",
+        eventKind: "observed",
+        observedAt: observedAt + 1,
+        dedupeKey: "imessage:conversation:unknown-provider",
+        payload: {
+          sourceConversationKey: "unknown-provider",
+          conversationType: "dm",
+          displayName: "Ava Chen",
+          participants: [{ sourceEntityKey: "imessage:+14155550124" }],
+        },
+        sourceVersion: "imessage-v1",
+      },
+      {
+        id: "imessage-call-unknown-provider",
+        platform: "imessage",
+        accountKey: "local",
+        entityKind: "call",
+        eventKind: "observed",
+        observedAt: observedAt + 2,
+        dedupeKey: "imessage:call:unknown-provider",
+        payload: {
+          sourceCallKey: "unknown-provider",
+          sourceConversationKey: "unknown-provider",
+          provider: "unknown",
+          direction: "incoming",
+          medium: "audio",
+          status: "missed",
+          startedAt: observedAt + 10,
+          endedAt: observedAt + 10,
+          durationSeconds: 0,
+          initiatorSourceKey: "imessage:+14155550124",
+          primaryRemoteSourceKey: "imessage:+14155550124",
+          remoteAddress: "+14155550124",
+          remoteDisplayName: "Ava Chen",
+        },
+        sourceVersion: "imessage-v1",
+      },
+    ]);
+
+    projectPendingRawEvents(db);
+
+    const timelineRow = db.orm().get<{ text: string | null }>(sql`
+      SELECT text
+      FROM timeline_events
+      WHERE source_event_key = 'unknown-provider'
+    `);
+    expect(timelineRow).toEqual({
+      text: "Missed Call",
+    });
+
+    db.close();
+  });
+
   it("keeps FTS rowids aligned when reprojecting an existing message", () => {
     const db = createDb();
     const observedAt = 1_710_200_000_000;
