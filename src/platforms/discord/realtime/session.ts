@@ -216,7 +216,7 @@ export class DiscordRealtimeSession implements DiscordRealtimeSessionLike {
           user: currentUser,
         },
       });
-      await this.refreshDmChannels();
+      await this.loadDmChannels();
       this.hasEverConnected = true;
       this.setStatus({
         state: "connected",
@@ -252,6 +252,14 @@ export class DiscordRealtimeSession implements DiscordRealtimeSessionLike {
   }
 
   private async refreshDmChannels(): Promise<void> {
+    try {
+      await this.loadDmChannels();
+    } catch (error) {
+      this.handlePollFailure(error);
+    }
+  }
+
+  private async loadDmChannels(): Promise<void> {
     if (!this.currentUser || this.pollingDm) {
       return;
     }
@@ -259,8 +267,6 @@ export class DiscordRealtimeSession implements DiscordRealtimeSessionLike {
     try {
       const channels = (await this.client.listPrivateChannels()).filter(isDiscordDmChannel);
       await this.refreshChannels(channels);
-    } catch (error) {
-      this.handlePollFailure(error);
     } finally {
       this.pollingDm = false;
     }

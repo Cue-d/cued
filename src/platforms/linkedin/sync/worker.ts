@@ -5,10 +5,14 @@ async function main(): Promise<void> {
     const lastSyncAt = process.env.CUED_LINKEDIN_LAST_SYNC_AT
       ? Number(process.env.CUED_LINKEDIN_LAST_SYNC_AT)
       : undefined;
+    const sourceCursor = process.env.CUED_LINKEDIN_SOURCE_CURSOR
+      ? JSON.parse(process.env.CUED_LINKEDIN_SOURCE_CURSOR)
+      : undefined;
     const bundle = await buildLinkedInSyncBundle({
       accountKey: process.env.CUED_ACCOUNT_KEY,
       lastSyncAt: Number.isFinite(lastSyncAt) ? lastSyncAt : undefined,
       syncToken: process.env.CUED_LINKEDIN_SYNC_TOKEN ?? null,
+      sourceCursor,
     });
     process.stdout.write(JSON.stringify({ ok: true, bundle }));
   } catch (error) {
