@@ -186,6 +186,29 @@ cued integrations status
 cued sync run discord
 ```
 
+### Gmail OAuth credentials
+
+Official Cued builds include the Cued Desktop Google OAuth client, so normal users can connect Gmail without creating Google Cloud credentials. Source builds keep credentials external: put a Google OAuth desktop client JSON at `~/.cued/google-oauth-client.json`, or set `CUED_GOOGLE_OAUTH_CLIENT_FILE` / `GOOGLE_OAUTH_CLIENT_FILE` before running the Gmail connect flow. Explicit env vars override the bundled client for local development.
+
+Cued requests only `https://www.googleapis.com/auth/gmail.readonly`. It stores per-account access and refresh tokens in Keychain and stores synced Gmail message content locally in `~/.cued/local.db`.
+
+Release packaging can inject the official client without committing it:
+
+```bash
+CUED_BUNDLED_GOOGLE_OAUTH_CLIENT_FILE=/private/path/google-oauth-client.json pnpm build:app:macos
+```
+
+### Idle performance controls
+
+The daemon defaults to a low-idle scheduler tick and platform-specific sync intervals. Tune these only when debugging or benchmarking:
+
+```bash
+CUED_AUTOSYNC_SCHEDULER_TICK_MS=15000
+CUED_AUTOSYNC_INTERVAL_MS=60000
+CUED_AUTOSYNC_INTERVAL_SIGNAL_MS=300000
+CUED_AUTOSYNC_INTERVAL_WHATSAPP_MS=300000
+```
+
 ### Contributor workflow
 
 1. Run `pnpm install`.

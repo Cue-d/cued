@@ -72,6 +72,9 @@ The setup TUI summarizes install state, daemon state, permissions, and next acti
 - `cued integrations connect slack default`
 - `cued integrations connect discord default`
 - `cued integrations connect linkedin default`
+- `cued integrations connect gmail`
+
+Official Cued builds include the Cued Desktop Google OAuth client, so Gmail does not require user-provided client credentials. Source builds can provide a Google OAuth desktop client JSON at `~/.cued/google-oauth-client.json`, or through `CUED_GOOGLE_OAUTH_CLIENT_FILE` / `GOOGLE_OAUTH_CLIENT_FILE`. Cued stores account tokens in Keychain and keeps synced Gmail message content local in `~/.cued/local.db`.
 
 ## Verify
 

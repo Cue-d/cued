@@ -321,6 +321,46 @@ describe("CuedDatabase", () => {
     db.close();
   });
 
+  it("clears completed_at when a generic sync proof returns to running", () => {
+    const db = createDb();
+
+    db.upsertSyncProof({
+      platform: "slack",
+      accountKey: "workspace-a",
+      proof: {
+        scope: {
+          kind: "conversation",
+          key: "C123",
+        },
+        proofKind: "messages",
+        status: "complete",
+        observedAt: 100,
+      },
+    });
+    db.upsertSyncProof({
+      platform: "slack",
+      accountKey: "workspace-a",
+      proof: {
+        scope: {
+          kind: "conversation",
+          key: "C123",
+        },
+        proofKind: "messages",
+        status: "running",
+        observedAt: 200,
+      },
+    });
+
+    expect(db.listSyncProofs("slack", "workspace-a")).toEqual([
+      expect.objectContaining({
+        status: "running",
+        completed_at: null,
+      }),
+    ]);
+
+    db.close();
+  });
+
   it("persists app settings and install metadata", () => {
     const db = createDb();
 

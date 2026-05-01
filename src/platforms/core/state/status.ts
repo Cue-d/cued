@@ -50,6 +50,17 @@ export const REQUESTABLE_INTEGRATIONS: Record<string, RequestableIntegrationConf
       authCapture: "localStorage.token",
     },
   },
+  gmail: {
+    connectionKind: "local-cli",
+    runtimeKind: "oauth",
+    launchStrategy: "native-auth",
+    launchTarget: null,
+    displayName: "Gmail",
+    metadata: {
+      authCapture: "google_oauth_loopback_pkce",
+      scopes: ["https://www.googleapis.com/auth/gmail.readonly"],
+    },
+  },
   linkedin: {
     connectionKind: "browser-session",
     runtimeKind: "chromium",
@@ -495,6 +506,7 @@ function buildSetupIntegrations(
     "imessage",
     "slack",
     "discord",
+    "gmail",
     "linkedin",
     "whatsapp",
     "signal",
@@ -629,6 +641,7 @@ export function resolveCompletedDisplayName(
       typeof resultSummary?.pushName === "string" ? resultSummary.pushName : null,
       typeof resultSummary?.linkedAccount === "string" ? resultSummary.linkedAccount : null,
       typeof resultSummary?.accountJid === "string" ? resultSummary.accountJid : null,
+      typeof resultSummary?.emailAddress === "string" ? resultSummary.emailAddress : null,
       typeof resultSummary?.profileName === "string" ? resultSummary.profileName : null,
       typeof resultSummary?.displayName === "string" ? resultSummary.displayName : null,
     ) ?? currentDisplayName
@@ -676,7 +689,9 @@ export function getPlatformRuntimeDefaults(platform: Platform): {
       ? "native"
       : platform === "signal" || platform === "whatsapp"
         ? "qr_native"
-        : "chromium";
+        : platform === "gmail"
+          ? "oauth"
+          : "chromium";
   return {
     runtimeKind,
     accountKey: getDefaultAccountKeyForPlatform(platform),

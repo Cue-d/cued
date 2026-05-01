@@ -86,7 +86,9 @@ function ensureRequestableIntegrationState(
           ? "signal-helper-runtime"
           : requested.runtimeKind === "chromium"
             ? "chromium-runtime"
-            : "native-qr-runtime",
+            : requested.runtimeKind === "oauth"
+              ? "oauth-loopback-runtime"
+              : "native-qr-runtime",
       requestedAt: normalizedExistingMetadata.requestedAt ?? now(),
       runtimeKind: requested.runtimeKind,
       browserProfileDir,
@@ -210,6 +212,15 @@ function resolveCompletedAccountKey(
   session: AuthSessionRow,
   input: CompletedAuthSessionInput,
 ): string {
+  if (session.platform === "gmail" && input.state === "authenticated") {
+    const emailAddress =
+      typeof input.resultSummary?.emailAddress === "string"
+        ? input.resultSummary.emailAddress.trim()
+        : "";
+    const keychainAccount =
+      typeof input.keychainAccount === "string" ? input.keychainAccount.trim() : "";
+    return emailAddress || keychainAccount || session.account_key;
+  }
   if (session.platform !== "slack" || input.state !== "authenticated") {
     return session.account_key;
   }

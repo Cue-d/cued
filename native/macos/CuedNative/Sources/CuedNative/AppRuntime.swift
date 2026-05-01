@@ -33,6 +33,10 @@ private func configuredMenuBarLockPath() -> String {
   "\(configuredCuedHomePath())/menu-bar.lock"
 }
 
+private func configuredMenuBarStatusPath() -> String {
+  "\(configuredCuedHomePath())/menu-bar-status.json"
+}
+
 private func bundledNativeHelperPath() -> String? {
   guard let resourcePath = Bundle.main.resourcePath?.trimmingCharacters(in: .whitespacesAndNewlines),
         !resourcePath.isEmpty else {
@@ -485,6 +489,10 @@ final class AppStatusStore: @unchecked Sendable {
         updateSummary: nil
       )
     }
+    if let snapshot = readSnapshotFromCache(daemonLockState: daemonLockState) {
+      return snapshot
+    }
+
     var db: OpaquePointer?
     guard sqlite3_open_v2(dbPath, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK, let db else {
       if let db {
@@ -542,41 +550,24 @@ final class AppStatusStore: @unchecked Sendable {
     )
   }
 
-  private func readSnapshotViaCLI(
+  private func readSnapshotFromCache(
     daemonLockState: (running: Bool, pid: Int?, updatedAt: Int?)
   ) -> AppStatusSnapshot? {
-    let daemonLaunchPath = Bundle.main.path(forResource: "cued-cli", ofType: nil)
-    guard let daemonLaunchPath else {
+    guard let data = FileManager.default.contents(atPath: configuredMenuBarStatusPath()) else {
       return nil
     }
-
-    let process = Process()
-    process.executableURL = URL(fileURLWithPath: daemonLaunchPath)
-    process.arguments = ["status", "--read-only", "--menu-bar"]
-    process.environment = ProcessInfo.processInfo.environment
-
-    let stdoutPipe = Pipe()
-    process.standardOutput = stdoutPipe
-    process.standardError = FileHandle.nullDevice
-
-    do {
-      try process.run()
-    } catch {
-      return nil
-    }
-    let data = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
-    process.waitUntilExit()
-
-    guard process.terminationStatus == 0 else {
-      return nil
-    }
-
     guard
       let payload = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
     else {
       return nil
     }
+    return parseStatusPayload(payload, daemonLockState: daemonLockState)
+  }
 
+  private func parseStatusPayload(
+    _ payload: [String: Any],
+    daemonLockState: (running: Bool, pid: Int?, updatedAt: Int?)
+  ) -> AppStatusSnapshot {
     let overview = payload["overview"] as? [String: Any] ?? [:]
     let integrations = parseIntegrations(payload["integrations"])
     let app = payload["app"] as? [String: Any] ?? [:]
@@ -599,8 +590,8 @@ final class AppStatusStore: @unchecked Sendable {
 
     return AppStatusSnapshot(
       daemonRunning: daemonRunning,
-      daemonPID: daemonPID,
-      daemonUpdatedAt: daemonUpdatedAt,
+      daemonPID: daemonLockState.running ? daemonLockState.pid : daemonPID,
+      daemonUpdatedAt: daemonLockState.running ? daemonLockState.updatedAt : daemonUpdatedAt,
       contacts: intValue(overview["contacts"]) ?? 0,
       conversations: intValue(overview["conversations"]) ?? 0,
       messages: intValue(overview["messages"]) ?? 0,
@@ -696,6 +687,15 @@ final class AppStatusStore: @unchecked Sendable {
     }
   }
 
+  private func metadataMarksUserRemoved(_ metadataJSON: String?) -> Bool {
+    guard let metadataJSON,
+          let data = metadataJSON.data(using: .utf8),
+          let metadata = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+      return false
+    }
+    return boolValue(metadata["userRemoved"]) == true
+  }
+
   private func queryDaemonRow(db: OpaquePointer) -> (running: Bool, pid: Int?, updatedAt: Int?) {
     let sql = """
       SELECT pid, updated_at
@@ -763,7 +763,7 @@ final class AppStatusStore: @unchecked Sendable {
   private func queryIntegrations(db: OpaquePointer) -> [AppIntegrationStatus] {
     let sql = """
       SELECT platform, account_key, auth_state, enabled
-      , display_name
+      , display_name, metadata_json
       FROM integration_states
       ORDER BY platform, account_key
     """
@@ -776,6 +776,12 @@ final class AppStatusStore: @unchecked Sendable {
 
     var results: [AppIntegrationStatus] = []
     while sqlite3_step(statement) == SQLITE_ROW {
+      let metadataJSON = sqlite3_column_type(statement, 5) == SQLITE_NULL
+        ? nil
+        : String(cString: sqlite3_column_text(statement, 5))
+      if metadataMarksUserRemoved(metadataJSON) {
+        continue
+      }
       results.append(
         AppIntegrationStatus(
           platform: String(cString: sqlite3_column_text(statement, 0)),
@@ -1538,7 +1544,7 @@ final class MenuBarAppController: NSObject, NSApplicationDelegate {
   }
 
   func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
-    onboardingWindowController.showAndRefresh()
+    onboardingWindowController.showAndRefresh(forceActivePermissionRefresh: true)
     return true
   }
 
@@ -1605,7 +1611,7 @@ final class MenuBarAppController: NSObject, NSApplicationDelegate {
 
   private func openSetupIfNeeded() {
     if consumePermissionRelaunchSetupIntent() {
-      onboardingWindowController.showAndRefresh()
+      onboardingWindowController.showAndRefresh(forceActivePermissionRefresh: true)
       return
     }
 

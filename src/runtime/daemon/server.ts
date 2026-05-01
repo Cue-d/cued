@@ -143,7 +143,7 @@ const DEFAULT_PROJECTION_BATCH_SIZE = 1_000;
 const DEFAULT_REALTIME_PROJECTION_ENABLED = true;
 const DEFAULT_DEFERRED_PROJECTION_COALESCE_MS = 250;
 const NATIVE_WATCH_DEBOUNCE_MS = 1_500;
-const AUTOSYNC_SCHEDULER_TICK_MS = 1_000;
+const DEFAULT_AUTOSYNC_SCHEDULER_TICK_MS = 15_000;
 const UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
 const UPDATE_SHUTDOWN_GRACE_MS = 30_000;
 const SIGNAL_SEND_SESSION_WAIT_MS = 3_000;
@@ -354,6 +354,13 @@ export function shouldProjectIngestRunInline(input: {
     input.firstInsertedRowId != null &&
     input.lastInsertedRowId != null
   );
+}
+
+function getAutoSyncSchedulerTickMs(): number {
+  const configured = Number(process.env.CUED_AUTOSYNC_SCHEDULER_TICK_MS);
+  return Number.isFinite(configured) && configured > 0
+    ? Math.trunc(configured)
+    : DEFAULT_AUTOSYNC_SCHEDULER_TICK_MS;
 }
 
 function isSqliteBusyError(error: unknown): boolean {
@@ -2767,14 +2774,14 @@ export async function runDaemon(): Promise<void> {
       return;
     }
     try {
+      if (trigger === "scheduler" && bootstrap.state !== "ready") {
+        return;
+      }
       const autoSyncTargets = getAutoSyncTargets(db);
       let queuedAny = false;
       const queuedAt = now();
       for (const target of autoSyncTargets) {
         if (trigger === "scheduler") {
-          if (bootstrap.state !== "ready") {
-            continue;
-          }
           const targetKey = `${target.platform}:${target.accountKey}`;
           const lastQueuedAt = lastAutoSyncQueuedAt.get(targetKey) ?? startedAt;
           if (queuedAt - lastQueuedAt < getAutoSyncIntervalMs(target.platform)) {
@@ -3043,6 +3050,9 @@ export async function runDaemon(): Promise<void> {
         if (typeof sourceCursor?.syncToken === "string" && sourceCursor.syncToken.length > 0) {
           envOverrides.CUED_LINKEDIN_SYNC_TOKEN = sourceCursor.syncToken;
         }
+      }
+      if (platform === "gmail" && checkpoint?.source_cursor_json) {
+        envOverrides.CUED_GMAIL_SOURCE_CURSOR = checkpoint.source_cursor_json;
       }
       if (platform === "signal" && typeof sourceCursor?.lastSyncAt === "number") {
         envOverrides.CUED_SIGNAL_LAST_SYNC_AT = String(sourceCursor.lastSyncAt);
@@ -3551,7 +3561,7 @@ export async function runDaemon(): Promise<void> {
 
   const schedulerLoop = setInterval(() => {
     queueAutoSyncRuns("scheduler");
-  }, AUTOSYNC_SCHEDULER_TICK_MS);
+  }, getAutoSyncSchedulerTickMs());
 
   const updateLoop = setInterval(() => {
     scheduleUpdateCheck(false);

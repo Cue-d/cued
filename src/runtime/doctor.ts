@@ -3,7 +3,8 @@ import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { CuedDatabase } from "../db/database.js";
 import { listAdapterPlatforms } from "../platforms/core/registry.js";
-import { listIntegrationStates } from "../platforms/core/state/status.js";
+import { buildIntegrationStatus, listIntegrationStates } from "../platforms/core/state/status.js";
+import { resolveGoogleOAuthClientFile } from "../platforms/gmail/oauth/client.js";
 import { DEFAULT_CHAT_DB_PATH, IMessageReader } from "../platforms/imessage/reader.js";
 import {
   getSignalConfigDir,
@@ -33,6 +34,25 @@ export interface DoctorRuntimeStatus {
   linkedinRealtimeSessions?: unknown;
   signalRealtimeSessions?: unknown;
   whatsappRealtimeSessions?: unknown;
+}
+
+export interface AuthDiagnostic {
+  platform: string;
+  accountKey: string;
+  displayName: string | null;
+  authState: string;
+  enabled: boolean;
+  runtimeKind: string;
+  launchStrategy: string | null;
+  authCapture: string | null;
+  credentialSource: string;
+  keychain: {
+    service: string | null;
+    account: string | null;
+    status: "present" | "missing" | "not_configured" | "error" | "not_checked";
+  };
+  checks: string[];
+  remediation?: string;
 }
 
 export type PermissionStatusKey = "contacts" | "full_disk_access" | "messages_automation";
@@ -563,6 +583,154 @@ async function getWhatsAppLinkCheck(): Promise<DoctorCheck> {
   }
 }
 
+function getKeychainItemStatus(
+  service: string | null,
+  account: string | null,
+): AuthDiagnostic["keychain"]["status"] {
+  if (!service || !account) {
+    return "not_configured";
+  }
+
+  try {
+    execFileSync("security", ["find-generic-password", "-s", service, "-a", account], {
+      stdio: ["ignore", "ignore", "ignore"],
+    });
+    return "present";
+  } catch (error) {
+    const status =
+      typeof (error as { status?: unknown }).status === "number"
+        ? (error as { status: number }).status
+        : null;
+    return status === 44 ? "missing" : "error";
+  }
+}
+
+function inferCredentialSource(input: {
+  platform: string;
+  importedFrom: string | null;
+  authCapture: string | null;
+  runtimeKind: string;
+  importMethod: string | null;
+}): string {
+  if (input.platform === "contacts" || input.platform === "imessage") {
+    return "macos_permission";
+  }
+  if (input.platform === "gmail") {
+    return "google_oauth_loopback_pkce";
+  }
+  if (input.platform === "whatsapp") {
+    return "whatsapp_linked_device_store";
+  }
+  if (input.platform === "signal") {
+    return "signal_cli_linked_device_config";
+  }
+  if (input.importMethod) {
+    return input.importMethod;
+  }
+  if (input.importedFrom) {
+    return input.importedFrom;
+  }
+  return input.authCapture ?? input.runtimeKind;
+}
+
+function getAuthDiagnosticRemediation(checks: string[]): string | undefined {
+  if (checks.includes("missing_google_oauth_client")) {
+    return "Install an official Cued build with bundled Gmail OAuth credentials, add a Google OAuth client JSON at ~/.cued/google-oauth-client.json, or set CUED_GOOGLE_OAUTH_CLIENT_FILE.";
+  }
+  if (checks.includes("keychain_item_missing")) {
+    return "Reconnect this integration so Cued can store fresh credentials for the recorded account.";
+  }
+  if (checks.includes("linked_device_missing")) {
+    return "Reconnect this integration from onboarding or `cued integrations connect <platform>`.";
+  }
+  if (checks.includes("managed_browser_fallback_used")) {
+    return "Prefer existing Keychain or installed-app import before opening a managed browser.";
+  }
+  return undefined;
+}
+
+export function buildAuthDiagnostics(db: CuedDatabase): AuthDiagnostic[] {
+  const status = buildIntegrationStatus(db, { includeLiveLocalIntegrations: false });
+  const byIdentity = new Map<string, (typeof status.integrations)[number]>();
+  for (const integration of [...status.integrations, ...status.setupIntegrations]) {
+    byIdentity.set(`${integration.platform}:${integration.accountKey}`, integration);
+  }
+
+  const googleOAuthClientFile = resolveGoogleOAuthClientFile();
+  const googleOAuthClientExists = existsSync(googleOAuthClientFile);
+
+  return [...byIdentity.values()].map((integration) => {
+    const metadata = integration.metadata ?? {};
+    const keychainService =
+      typeof metadata.keychainService === "string" ? metadata.keychainService : null;
+    const keychainAccount =
+      typeof metadata.keychainAccount === "string" ? metadata.keychainAccount : null;
+    const authCapture = typeof metadata.authCapture === "string" ? metadata.authCapture : null;
+    const importMethod = typeof metadata.importMethod === "string" ? metadata.importMethod : null;
+    const runtimeKind =
+      typeof metadata.runtimeKind === "string" ? metadata.runtimeKind : integration.runtimeKind;
+    const keychainStatus = getKeychainItemStatus(keychainService, keychainAccount);
+    const checks: string[] = [];
+
+    if (integration.authState !== "authenticated" && integration.authState !== "authorized") {
+      checks.push(`auth_state_${integration.authState}`);
+    }
+    if (keychainService && keychainAccount && keychainStatus === "missing") {
+      checks.push("keychain_item_missing");
+    } else if (keychainService && keychainAccount && keychainStatus === "error") {
+      checks.push("keychain_check_error");
+    }
+    if (integration.platform === "gmail" && !googleOAuthClientExists) {
+      checks.push("missing_google_oauth_client");
+    }
+    if (
+      integration.platform === "linkedin" &&
+      integration.authState === "authenticated" &&
+      (metadata.authResult as { realtimeReady?: unknown } | undefined)?.realtimeReady !== true
+    ) {
+      checks.push("linkedin_realtime_headers_missing");
+    }
+    if (
+      integration.platform === "slack" &&
+      integration.authState === "authenticated" &&
+      integration.importedFrom !== "slack-desktop-cdp"
+    ) {
+      checks.push("managed_browser_fallback_used");
+    }
+    if (
+      (integration.platform === "whatsapp" || integration.platform === "signal") &&
+      integration.authState !== "authenticated"
+    ) {
+      checks.push("linked_device_missing");
+    }
+
+    return {
+      platform: integration.platform,
+      accountKey: integration.accountKey,
+      displayName: integration.displayName,
+      authState: integration.authState,
+      enabled: integration.enabled,
+      runtimeKind,
+      launchStrategy: integration.launchStrategy,
+      authCapture,
+      credentialSource: inferCredentialSource({
+        platform: integration.platform,
+        importedFrom: integration.importedFrom,
+        authCapture,
+        runtimeKind,
+        importMethod,
+      }),
+      keychain: {
+        service: keychainService,
+        account: keychainAccount,
+        status: keychainStatus,
+      },
+      checks,
+      remediation: getAuthDiagnosticRemediation(checks),
+    };
+  });
+}
+
 export async function buildDoctorReport(
   db: CuedDatabase,
   runtime: DoctorRuntimeStatus = {},
@@ -598,6 +766,7 @@ export async function buildDoctorReport(
     ),
     registeredAdapters: listAdapterPlatforms(),
     integrations: listIntegrationStates(db),
+    auth: buildAuthDiagnostics(db),
     checks,
   };
 }

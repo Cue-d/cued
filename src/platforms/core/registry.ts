@@ -1,4 +1,5 @@
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   ADAPTER_PLATFORM_VALUES,
   type AdapterPlatform,
@@ -14,46 +15,54 @@ export interface AdapterDefinition {
   workerTimeoutMs: number;
 }
 
+const MODULE_DIRNAME = dirname(fileURLToPath(import.meta.url));
+
 const ADAPTER_DEFINITIONS: Record<AdapterPlatform, AdapterDefinition> = {
   imessage: {
     platform: "imessage",
-    workerEntrypoint: join(import.meta.dirname, "../imessage/worker.js"),
+    workerEntrypoint: join(MODULE_DIRNAME, "../imessage/worker.js"),
     autoSync: true,
     workerTimeoutMs: 120_000,
   },
   discord: {
     platform: "discord",
-    workerEntrypoint: join(import.meta.dirname, "../discord/sync/worker.js"),
+    workerEntrypoint: join(MODULE_DIRNAME, "../discord/sync/worker.js"),
     autoSync: true,
     workerTimeoutMs: 120_000,
   },
   contacts: {
     platform: "contacts",
-    workerEntrypoint: join(import.meta.dirname, "../contacts/worker.js"),
+    workerEntrypoint: join(MODULE_DIRNAME, "../contacts/worker.js"),
     autoSync: true,
     workerTimeoutMs: 30_000,
   },
+  gmail: {
+    platform: "gmail",
+    workerEntrypoint: join(MODULE_DIRNAME, "../gmail/sync/worker.js"),
+    autoSync: true,
+    workerTimeoutMs: 600_000,
+  },
   linkedin: {
     platform: "linkedin",
-    workerEntrypoint: join(import.meta.dirname, "../linkedin/sync/worker.js"),
+    workerEntrypoint: join(MODULE_DIRNAME, "../linkedin/sync/worker.js"),
     autoSync: true,
     workerTimeoutMs: 120_000,
   },
   slack: {
     platform: "slack",
-    workerEntrypoint: join(import.meta.dirname, "../slack/sync/worker.js"),
+    workerEntrypoint: join(MODULE_DIRNAME, "../slack/sync/worker.js"),
     autoSync: true,
     workerTimeoutMs: 600_000,
   },
   signal: {
     platform: "signal",
-    workerEntrypoint: join(import.meta.dirname, "../signal/sync/worker.js"),
+    workerEntrypoint: join(MODULE_DIRNAME, "../signal/sync/worker.js"),
     autoSync: true,
     workerTimeoutMs: 60_000,
   },
   whatsapp: {
     platform: "whatsapp",
-    workerEntrypoint: join(import.meta.dirname, "../whatsapp/sync/worker.js"),
+    workerEntrypoint: join(MODULE_DIRNAME, "../whatsapp/sync/worker.js"),
     autoSync: true,
     workerTimeoutMs: 60_000,
   },
