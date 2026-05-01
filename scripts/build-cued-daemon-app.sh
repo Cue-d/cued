@@ -35,6 +35,7 @@ TRAY_ICON_SOURCE="$ROOT_DIR/native/macos/CuedNative/Resources/trayIconTemplate.p
 CUED_MARK_SOURCE="$ROOT_DIR/native/macos/CuedNative/Resources/cued-mark.png"
 NODE_PATH="${CUED_NODE_PATH:-$(command -v node)}"
 RUNTIME_SYMLINK_PRUNER="$ROOT_DIR/dist/macos/runtime-symlinks.js"
+GOOGLE_OAUTH_CLIENT_SOURCE="${CUED_BUNDLED_GOOGLE_OAUTH_CLIENT_FILE:-}"
 APP_VERSION="$("$NODE_PATH" -p "require(process.argv[1]).version" "$ROOT_DIR/package.json")"
 NODE_VERSION="$("$NODE_PATH" -p 'process.versions.node')"
 NODE_ARCH="$("$NODE_PATH" -p 'process.arch === "arm64" ? "arm64" : "x64"')"
@@ -283,6 +284,15 @@ rm -rf "$RUNTIME_DIR/native"
 mkdir -p "$RESOURCES_DIR/scripts"
 cp "$PERMISSIONS_SCRIPT_SOURCE" "$RESOURCES_DIR/scripts/request-macos-access.sh"
 chmod +x "$RESOURCES_DIR/scripts/request-macos-access.sh"
+if [[ -n "$GOOGLE_OAUTH_CLIENT_SOURCE" ]]; then
+  if [[ ! -f "$GOOGLE_OAUTH_CLIENT_SOURCE" ]]; then
+    echo "CUED_BUNDLED_GOOGLE_OAUTH_CLIENT_FILE does not exist: $GOOGLE_OAUTH_CLIENT_SOURCE" >&2
+    exit 1
+  fi
+  mkdir -p "$RESOURCES_DIR/oauth"
+  cp "$GOOGLE_OAUTH_CLIENT_SOURCE" "$RESOURCES_DIR/oauth/google-oauth-client.json"
+  chmod 600 "$RESOURCES_DIR/oauth/google-oauth-client.json"
+fi
 mkdir -p "$RESOURCES_DIR/skills"
 cp -R "$ROOT_DIR/skills/cued" "$RESOURCES_DIR/skills/cued"
 rm -rf "$RESOURCES_DIR/skills/cued/cued-workspace" "$RESOURCES_DIR/skills/cued/evals/runs"
@@ -341,7 +351,13 @@ EOF
 cat > "$RESOURCES_DIR/cued-cli" <<EOF
 #!/usr/bin/env bash
 set -euo pipefail
-SCRIPT_DIR="\$(cd "\$(dirname "\${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_SOURCE="\${BASH_SOURCE[0]}"
+while [[ -L "\$SCRIPT_SOURCE" ]]; do
+  SCRIPT_DIR="\$(cd "\$(dirname "\$SCRIPT_SOURCE")" && pwd)"
+  SCRIPT_SOURCE="\$(readlink "\$SCRIPT_SOURCE")"
+  [[ "\$SCRIPT_SOURCE" != /* ]] && SCRIPT_SOURCE="\$SCRIPT_DIR/\$SCRIPT_SOURCE"
+done
+SCRIPT_DIR="\$(cd "\$(dirname "\$SCRIPT_SOURCE")" && pwd)"
 APP_EXEC="\$SCRIPT_DIR/../MacOS/$APP_EXECUTABLE_NAME"
 APP_BUNDLE_PATH="\$(cd "\$SCRIPT_DIR/../.." && pwd)"
 RUNTIME_ROOT="\$SCRIPT_DIR/cued-runtime"
@@ -357,6 +373,9 @@ export CUED_IMESSAGE_NATIVE_BINARY="\${CUED_IMESSAGE_NATIVE_BINARY:-\$NATIVE_HEL
 export CUED_CONTACTS_NATIVE_BINARY="\${CUED_CONTACTS_NATIVE_BINARY:-\$NATIVE_HELPER}"
 export CUED_AUTH_NATIVE_BINARY="\${CUED_AUTH_NATIVE_BINARY:-\$APP_EXEC}"
 export CUED_CHROMIUM_EXECUTABLE_PATH="\${CUED_CHROMIUM_EXECUTABLE_PATH:-\$SCRIPT_DIR/runtime/chromium/chrome/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing}"
+if [[ -f "\$SCRIPT_DIR/oauth/google-oauth-client.json" ]]; then
+  export CUED_BUNDLED_GOOGLE_OAUTH_CLIENT_FILE="\${CUED_BUNDLED_GOOGLE_OAUTH_CLIENT_FILE:-\$SCRIPT_DIR/oauth/google-oauth-client.json}"
+fi
 export CUED_SLACK_HELPER_BINARY="\${CUED_SLACK_HELPER_BINARY:-\$SCRIPT_DIR/helpers/cued-slack-helper}"
 export CUED_WHATSAPP_HELPER_BINARY="\${CUED_WHATSAPP_HELPER_BINARY:-\$SCRIPT_DIR/helpers/cued-whatsapp-helper}"
 export CUED_APP_VERSION="\${CUED_APP_VERSION:-$APP_VERSION}"

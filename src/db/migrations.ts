@@ -1875,4 +1875,23 @@ export const MIGRATIONS: Migration[] = [
       `);
     },
   },
+  {
+    id: "0011_remove_telegram_runtime_state",
+    apply: (db) => {
+      for (const tableName of [
+        "integration_states",
+        "auth_sessions",
+        "sync_checkpoints",
+        "source_accounts",
+        "sync_proofs",
+        "sync_scopes",
+        "sync_runs",
+        "sync_run_errors",
+      ]) {
+        if (tableExists(db, tableName) && columnExists(db, tableName, "platform")) {
+          db.prepare(`DELETE FROM ${tableName} WHERE platform = 'telegram'`).run();
+        }
+      }
+    },
+  },
 ];

@@ -33,6 +33,8 @@ tmp/
 temp/
 .cache/
 **/cache/
+**/google-oauth-client.json
+**/oauth_client.json
 
 # macOS
 .DS_Store

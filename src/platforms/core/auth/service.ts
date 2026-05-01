@@ -1,6 +1,8 @@
 import type { ChildProcess } from "node:child_process";
 import process from "node:process";
 import type { CuedDatabase } from "../../../db/database.js";
+import { importLinkedInStoredAuth } from "../../linkedin/auth/keychain-import.js";
+import { importSlackDesktopAuth } from "../../slack/auth/desktop-import.js";
 import {
   completeAuthSession,
   connectIntegration,
@@ -16,7 +18,7 @@ import {
   getIntegrationSummary,
   listRequestableIntegrationPlatforms,
 } from "../state/status.js";
-import type { Platform } from "../types.js";
+import { type Platform, parsePlatform } from "../types.js";
 import { runAuthSessionSync, startAuthSession } from "./runtime.js";
 
 export type { AuthSessionSummary, IntegrationStateSummary } from "../state/types.js";
@@ -31,6 +33,8 @@ type ConnectLifecycle = {
   wakeIngest?: () => void;
   onRuntimeStateChanged?: () => void;
 };
+
+const SLACK_PENDING_ACCOUNT_KEY_PREFIX = "pending-slack-";
 
 export class IntegrationAuthService {
   constructor(private readonly db: CuedDatabase) {}
@@ -75,6 +79,11 @@ export class IntegrationAuthService {
     integration: ReturnType<typeof getIntegrationSummary> | null;
     authSession: ReturnType<typeof getAuthSessionSummary>;
   }> {
+    const reusable = await this.connectReusableAuth(platform, accountKey, lifecycle);
+    if (reusable) {
+      return reusable;
+    }
+
     const requested = connectIntegration(this.db, platform, accountKey);
     const running = markAuthSessionInProgress(this.db, requested.authSession.id, process.pid);
 
@@ -117,6 +126,14 @@ export class IntegrationAuthService {
     integration: ReturnType<typeof getIntegrationSummary>;
     authSession: ReturnType<typeof getAuthSessionSummary>;
   }> {
+    const reusable = await this.connectReusableAuth(platform, accountKey, lifecycle);
+    if (reusable?.integration) {
+      return {
+        integration: reusable.integration,
+        authSession: reusable.authSession,
+      };
+    }
+
     const requested = connectIntegration(this.db, platform, accountKey);
     const integration = getIntegrationSummary(
       this.db,
@@ -218,5 +235,116 @@ export class IntegrationAuthService {
       integration: completed.integration,
       authSession: completed.authSession,
     };
+  }
+
+  private async connectReusableAuth(
+    platform: string,
+    accountKey: string | undefined,
+    lifecycle: ConnectLifecycle,
+  ): Promise<{
+    integration: ReturnType<typeof getIntegrationSummary> | null;
+    authSession: ReturnType<typeof getAuthSessionSummary>;
+  } | null> {
+    const normalized = parsePlatform(platform.trim().toLowerCase());
+    if (normalized !== "slack" && normalized !== "linkedin") {
+      return null;
+    }
+
+    const slackPendingDiscoveryRequest =
+      normalized === "slack" && accountKey?.startsWith(SLACK_PENDING_ACCOUNT_KEY_PREFIX) === true;
+    const previouslyAuthenticatedSlackAccounts = slackPendingDiscoveryRequest
+      ? new Set(
+          this.db
+            .listIntegrationStates()
+            .filter((row) => row.platform === "slack" && row.auth_state === "authenticated")
+            .map((row) => row.account_key),
+        )
+      : new Set<string>();
+
+    if (normalized === "slack") {
+      await importSlackDesktopAuth(this.db, {
+        skipWhenAnyAuthenticated: false,
+        reviveUserRemoved: true,
+      }).catch(() => []);
+    } else {
+      importLinkedInStoredAuth(this.db, { reviveUserRemoved: true });
+    }
+
+    const reusableAccountKey = slackPendingDiscoveryRequest ? undefined : accountKey;
+    const reusable = this.findReusableAuthenticatedIntegration(
+      normalized,
+      reusableAccountKey,
+      slackPendingDiscoveryRequest ? previouslyAuthenticatedSlackAccounts : undefined,
+    );
+    if (!reusable) {
+      return null;
+    }
+
+    const metadata = reusable.metadata ?? {};
+    const keychainService =
+      typeof metadata.keychainService === "string" ? metadata.keychainService : null;
+    const keychainAccount =
+      typeof metadata.keychainAccount === "string" ? metadata.keychainAccount : null;
+    if (!keychainService || !keychainAccount) {
+      return null;
+    }
+    const previousAuthResult =
+      typeof metadata.authResult === "object" && metadata.authResult
+        ? (metadata.authResult as Record<string, unknown>)
+        : {};
+    const resultSummary = {
+      ...previousAuthResult,
+      provider: reusable.platform,
+      source: "reused_existing_auth",
+      importedFrom: reusable.importedFrom,
+      displayName: reusable.displayName,
+    };
+
+    const sessionId = this.db.createAuthSession({
+      platform: reusable.platform,
+      accountKey: reusable.accountKey,
+      integrationStateId: `${reusable.platform}:${reusable.accountKey}`,
+      state: "requested",
+      resultSummary,
+    });
+    markAuthSessionInProgress(this.db, sessionId, process.pid);
+
+    return this.completeAndSchedule(
+      sessionId,
+      {
+        state: "authenticated",
+        keychainService,
+        keychainAccount,
+        resultSummary,
+      },
+      lifecycle,
+    );
+  }
+
+  private findReusableAuthenticatedIntegration(
+    platform: Extract<Platform, "slack" | "linkedin">,
+    accountKey?: string,
+    excludeAccountKeys: ReadonlySet<string> = new Set(),
+  ): ReturnType<typeof getIntegrationSummary> | null {
+    const rows = this.db
+      .listIntegrationStates()
+      .filter(
+        (row) =>
+          row.platform === platform &&
+          row.auth_state === "authenticated" &&
+          !excludeAccountKeys.has(row.account_key) &&
+          (accountKey ? row.account_key === accountKey : true),
+      )
+      .sort((left, right) => {
+        const leftImported = left.imported_from === "slack-desktop-cdp";
+        const rightImported = right.imported_from === "slack-desktop-cdp";
+        if (leftImported !== rightImported) {
+          return leftImported ? -1 : 1;
+        }
+        return right.updated_at - left.updated_at;
+      });
+
+    const first = rows[0];
+    return first ? getIntegrationSummary(this.db, first.platform, first.account_key) : null;
   }
 }

@@ -77,6 +77,20 @@ function getExecutablePath(): string | undefined {
   return process.env.CUED_CHROMIUM_EXECUTABLE_PATH || undefined;
 }
 
+function bringAuthBrowserToFront(): void {
+  try {
+    execFileSync(
+      "osascript",
+      ["-e", 'tell application id "com.google.chrome.for.testing" to activate'],
+      {
+        stdio: ["ignore", "ignore", "ignore"],
+      },
+    );
+  } catch {
+    // Best-effort only: auth can still proceed if macOS refuses activation.
+  }
+}
+
 function storeInKeychain(service: string, account: string, secret: Record<string, unknown>): void {
   execFileSync(
     "security",
@@ -454,6 +468,8 @@ async function run(): Promise<void> {
     if (!page.url() || page.url() === "about:blank") {
       await page.goto(args.launchTarget, { waitUntil: "domcontentloaded" });
     }
+    await page.bringToFront().catch(() => {});
+    bringAuthBrowserToFront();
 
     const deadline = Date.now() + getTimeoutMs();
     let lastObservedUrls: string[] = [];

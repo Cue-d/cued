@@ -9,6 +9,8 @@ import {
   buildDiscordContactEvent,
   buildDiscordConversationEvent,
 } from "../../discord/sync/events.js";
+import { importLinkedInStoredAuth } from "../../linkedin/auth/keychain-import.js";
+import { storeSlackSession } from "../../slack/auth/session-store.js";
 import { refreshLocalIntegrationStates } from "./local-refresh.js";
 import {
   completeAuthSession,
@@ -125,6 +127,12 @@ if (args[0] === "find-generic-password" && args[1] === "-s" && args[3] === "-a" 
   process.stdout.write(JSON.stringify(entry));
   process.exit(0);
 }
+if (args[0] === "add-generic-password") {
+  process.exit(0);
+}
+if (args[0] === "delete-generic-password") {
+  process.exit(0);
+}
 process.exit(44);
 `,
     );
@@ -225,13 +233,20 @@ process.exit(44);
     expect(requestedDiscord.integration.launchTarget).toBe("https://discord.com/login");
     expect(listRequestableIntegrationPlatforms()).toEqual([
       "slack",
+      "gmail",
       "discord",
       "linkedin",
       "whatsapp",
       "signal",
     ]);
-    expect(() => requestIntegrationAccess(db, "gmail")).toThrow(
-      "Unsupported integration platform: gmail",
+    const gmailRequested = requestIntegrationAccess(db, "gmail");
+    expect(gmailRequested.integration.platform).toBe("gmail");
+    expect(gmailRequested.integration.accountKey).toBe("default");
+    expect(gmailRequested.integration.runtimeKind).toBe("oauth");
+    expect(gmailRequested.integration.metadata).toEqual(
+      expect.objectContaining({
+        authManagedBy: "oauth-loopback-runtime",
+      }),
     );
     const expectedContactsAvailability = resolveHostOS() === "macos" ? "available" : "unsupported";
     expect(buildIntegrationStatus(db).setupIntegrations).toEqual(
@@ -258,7 +273,16 @@ process.exit(44);
     );
     expect(
       buildIntegrationStatus(db).setupIntegrations.map((integration) => integration.platform),
-    ).toEqual(["contacts", "imessage", "slack", "discord", "linkedin", "whatsapp", "signal"]);
+    ).toEqual([
+      "contacts",
+      "imessage",
+      "slack",
+      "discord",
+      "gmail",
+      "linkedin",
+      "whatsapp",
+      "signal",
+    ]);
     db.close();
   });
 
@@ -269,7 +293,16 @@ process.exit(44);
 
     expect(
       buildIntegrationStatus(db).setupIntegrations.map((integration) => integration.platform),
-    ).toEqual(["contacts", "imessage", "slack", "discord", "linkedin", "whatsapp", "signal"]);
+    ).toEqual([
+      "contacts",
+      "imessage",
+      "slack",
+      "discord",
+      "gmail",
+      "linkedin",
+      "whatsapp",
+      "signal",
+    ]);
 
     db.close();
   });
@@ -289,6 +322,7 @@ process.exit(44);
       { platform: "imessage", authState: "unknown" },
       { platform: "slack", authState: "missing" },
       { platform: "discord", authState: "missing" },
+      { platform: "gmail", authState: "missing" },
       { platform: "linkedin", authState: "missing" },
       { platform: "whatsapp", authState: "missing" },
       { platform: "signal", authState: "missing" },
@@ -626,6 +660,132 @@ process.exit(44);
     db.close();
   });
 
+  it("revives user-removed LinkedIn auth only during explicit connect import", () => {
+    installSecurityTool({
+      "dev.cued.auth.linkedin:default": {
+        cookies: [
+          { name: "li_at", value: "li_at-token" },
+          { name: "JSESSIONID", value: '"ajax:123"' },
+        ],
+        savedAt: 1234,
+      },
+    });
+
+    const db = createDb();
+    db.upsertIntegrationState({
+      platform: "linkedin",
+      accountKey: "default",
+      displayName: "LinkedIn",
+      authState: "authenticated",
+      enabled: true,
+      connectionKind: "browser-session",
+      syncCapable: true,
+      launchStrategy: "chromium-auth",
+      launchTarget: "https://www.linkedin.com/login",
+      importedFrom: "local-cli",
+      metadata: {
+        keychainService: "dev.cued.auth.linkedin",
+        keychainAccount: "default",
+      },
+    });
+
+    removeIntegration(db, "linkedin", "default");
+    expect(importLinkedInStoredAuth(db)).toEqual([]);
+    expect(db.getIntegrationState("linkedin", "default")).toMatchObject({
+      auth_state: "cancelled",
+    });
+
+    expect(importLinkedInStoredAuth(db, { reviveUserRemoved: true })).toEqual([
+      { platform: "linkedin", accountKey: "default", imported: true },
+    ]);
+    expect(db.getIntegrationState("linkedin", "default")).toMatchObject({
+      auth_state: "authenticated",
+      enabled: 1,
+    });
+    expect(listIntegrationStates(db)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          platform: "linkedin",
+          accountKey: "default",
+          metadata: expect.objectContaining({
+            keychainService: "dev.cued.auth.linkedin",
+            keychainAccount: "default",
+            userRemoved: false,
+            removedAt: null,
+          }),
+        }),
+      ]),
+    );
+
+    db.close();
+  });
+
+  it("revives user-removed Slack desktop credentials only when explicitly requested", () => {
+    installSecurityTool({});
+
+    const db = createDb();
+    db.upsertIntegrationState({
+      platform: "slack",
+      accountKey: "T123",
+      displayName: "Acme",
+      authState: "cancelled",
+      enabled: false,
+      connectionKind: "browser-session",
+      syncCapable: false,
+      launchStrategy: "chromium-auth",
+      launchTarget: "https://slack.com/signin",
+      importedFrom: "slack-desktop-cdp",
+      metadata: {
+        userRemoved: true,
+        removedAt: 1000,
+      },
+    });
+
+    const payload = {
+      accountKey: "T123",
+      teamId: "T123",
+      teamName: "Acme",
+      userId: "U123",
+      token: "xoxc-token",
+      cookie: "d-cookie",
+      savedAt: 2000,
+      sourcePath: "/Users/test/Library/Application Support/Slack",
+      importMethod: "slack-desktop-cdp",
+    };
+
+    expect(storeSlackSession(db, payload)).toMatchObject({
+      imported: false,
+    });
+    expect(db.getIntegrationState("slack", "T123")).toMatchObject({
+      auth_state: "cancelled",
+      enabled: 0,
+    });
+
+    expect(storeSlackSession(db, payload, { reviveUserRemoved: true })).toMatchObject({
+      imported: true,
+    });
+    expect(db.getIntegrationState("slack", "T123")).toMatchObject({
+      auth_state: "authenticated",
+      enabled: 1,
+    });
+    expect(listIntegrationStates(db)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          platform: "slack",
+          accountKey: "T123",
+          metadata: expect.objectContaining({
+            keychainService: "dev.cued.auth.slack",
+            keychainAccount: "T123",
+            userRemoved: false,
+            removedAt: null,
+          }),
+        }),
+      ]),
+    );
+
+    db.close();
+  });
+
   it("repairs stale slack sync capability only when the helper is available", async () => {
     installSecurityTool({});
     process.env.CUED_SLACK_HELPER_BINARY = createSlackHelper();
@@ -695,6 +855,36 @@ process.exit(44);
 
     expect(completed.integration?.platform).toBe("whatsapp");
     expect(completed.integration?.displayName).toBe("Theo");
+    db.close();
+  });
+
+  it("uses the signed-in Gmail address as the account key after auth", () => {
+    const db = createDb();
+    const requested = requestIntegrationAccess(db, "gmail");
+
+    const completed = completeAuthSession(db, requested.authSession.id, {
+      state: "authenticated",
+      keychainService: "dev.cued.auth.gmail",
+      keychainAccount: "theo@cued.so",
+      resultSummary: {
+        emailAddress: "theo@cued.so",
+        messagesTotal: 61,
+        threadsTotal: 60,
+      },
+    });
+
+    expect(completed.integration?.platform).toBe("gmail");
+    expect(completed.integration?.accountKey).toBe("theo@cued.so");
+    expect(completed.integration?.displayName).toBe("theo@cued.so");
+    expect(completed.integration?.syncCapable).toBe(true);
+    expect(completed.integration?.metadata).toEqual(
+      expect.objectContaining({
+        keychainService: "dev.cued.auth.gmail",
+        keychainAccount: "theo@cued.so",
+      }),
+    );
+    expect(db.getIntegrationState("gmail", "default")).toBeNull();
+    expect(requestIntegrationAccess(db, "gmail").integration.accountKey).toBe("default");
     db.close();
   });
 

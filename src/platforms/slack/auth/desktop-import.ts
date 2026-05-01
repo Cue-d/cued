@@ -86,7 +86,10 @@ function parseLocalConfig(raw: string): SlackDesktopLocalConfig {
   return JSON.parse(raw) as SlackDesktopLocalConfig;
 }
 
-export async function importSlackDesktopAuth(db: CuedDatabase): Promise<
+export async function importSlackDesktopAuth(
+  db: CuedDatabase,
+  options: { skipWhenAnyAuthenticated?: boolean; reviveUserRemoved?: boolean } = {},
+): Promise<
   Array<{
     platform: "slack";
     accountKey: string;
@@ -94,7 +97,8 @@ export async function importSlackDesktopAuth(db: CuedDatabase): Promise<
     imported: boolean;
   }>
 > {
-  if (!isSlackInstalled() || hasAuthenticatedSlackIntegration(db)) {
+  const skipWhenAnyAuthenticated = options.skipWhenAnyAuthenticated ?? true;
+  if (!isSlackInstalled() || (skipWhenAnyAuthenticated && hasAuthenticatedSlackIntegration(db))) {
     return [];
   }
 
@@ -144,17 +148,23 @@ export async function importSlackDesktopAuth(db: CuedDatabase): Promise<
 
       const sourcePath = getSlackUserDataDir();
       return teams.map((team) =>
-        storeSlackSession(db, {
-          accountKey: team.id,
-          teamId: team.id,
-          teamName: team.name,
-          userId: team.user_id,
-          token: team.token,
-          cookie: dCookie.value,
-          savedAt: Date.now(),
-          sourcePath,
-          importMethod: "slack-desktop-cdp",
-        }),
+        storeSlackSession(
+          db,
+          {
+            accountKey: team.id,
+            teamId: team.id,
+            teamName: team.name,
+            userId: team.user_id,
+            token: team.token,
+            cookie: dCookie.value,
+            savedAt: Date.now(),
+            sourcePath,
+            importMethod: "slack-desktop-cdp",
+          },
+          {
+            reviveUserRemoved: options.reviveUserRemoved,
+          },
+        ),
       );
     } finally {
       await browser.close();

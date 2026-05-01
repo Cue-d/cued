@@ -406,6 +406,7 @@ final class OnboardingWindowController: NSWindowController {
       return false
     }
     return pendingLivePermissionKeys.contains("messages_automation")
+      || pendingLivePermissionKeys.contains("full_disk_access")
   }
 
   private func markPendingLivePermissions(flags: [String]) {
@@ -480,7 +481,8 @@ func onboardingShouldRetryPermissionRefresh(for flags: [String]) -> Bool {
 }
 
 func onboardingShouldRefreshPermissionsActively(for flags: [String]) -> Bool {
-  onboardingPermissionKeys(for: flags).contains("messages_automation")
+  let keys = onboardingPermissionKeys(for: flags)
+  return keys.contains("messages_automation") || keys.contains("full_disk_access")
 }
 
 func isRetryablePermissionKey(_ key: String) -> Bool {

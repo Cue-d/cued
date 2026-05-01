@@ -1,5 +1,13 @@
-import { describe, expect, it } from "vitest";
-import { type PermissionCheckSummaryInput, summarizePermissionStatuses } from "./doctor.js";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, describe, expect, it } from "vitest";
+import { CuedDatabase } from "../db/database.js";
+import {
+  buildAuthDiagnostics,
+  type PermissionCheckSummaryInput,
+  summarizePermissionStatuses,
+} from "./doctor.js";
 
 function makeInput(
   overrides: Partial<PermissionCheckSummaryInput> = {},
@@ -30,6 +38,31 @@ function makeInput(
 }
 
 describe("permission status summaries", () => {
+  const tempDirs: string[] = [];
+  const originalGoogleClientFile = process.env.CUED_GOOGLE_OAUTH_CLIENT_FILE;
+
+  afterEach(() => {
+    if (originalGoogleClientFile === undefined) {
+      delete process.env.CUED_GOOGLE_OAUTH_CLIENT_FILE;
+    } else {
+      process.env.CUED_GOOGLE_OAUTH_CLIENT_FILE = originalGoogleClientFile;
+    }
+    while (tempDirs.length > 0) {
+      const dir = tempDirs.pop();
+      if (dir) {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    }
+  });
+
+  function createDb(): CuedDatabase {
+    const dir = mkdtempSync(join(tmpdir(), "cued-auth-doctor-"));
+    tempDirs.push(dir);
+    const db = new CuedDatabase(join(dir, "local.db"));
+    db.migrate();
+    return db;
+  }
+
   it("maps successful checks to granted permissions", () => {
     expect(summarizePermissionStatuses(makeInput())).toEqual([
       expect.objectContaining({
@@ -117,5 +150,34 @@ describe("permission status summaries", () => {
         status: "needs_action",
       }),
     );
+  });
+
+  it("reports auth diagnostics for every setup platform without requiring broad keychain access", () => {
+    const dir = mkdtempSync(join(tmpdir(), "cued-missing-google-client-"));
+    tempDirs.push(dir);
+    process.env.CUED_GOOGLE_OAUTH_CLIENT_FILE = join(dir, "missing-client.json");
+    const db = createDb();
+
+    const diagnostics = buildAuthDiagnostics(db);
+
+    expect(diagnostics.map((item) => item.platform)).toEqual(
+      expect.arrayContaining([
+        "contacts",
+        "gmail",
+        "imessage",
+        "linkedin",
+        "signal",
+        "slack",
+        "whatsapp",
+      ]),
+    );
+    expect(diagnostics.find((item) => item.platform === "gmail")).toEqual(
+      expect.objectContaining({
+        credentialSource: "google_oauth_loopback_pkce",
+        checks: expect.arrayContaining(["missing_google_oauth_client"]),
+      }),
+    );
+
+    db.close();
   });
 });

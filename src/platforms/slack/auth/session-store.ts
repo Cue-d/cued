@@ -26,6 +26,10 @@ export interface StoredSlackSessionResult {
   imported: boolean;
 }
 
+export interface StoreSlackSessionOptions {
+  reviveUserRemoved?: boolean;
+}
+
 function getChromiumProfileDir(accountKey: string): string {
   return join(CUED_BROWSER_DIR, "slack", accountKey);
 }
@@ -56,13 +60,15 @@ function keychainSecretExists(service: string, account: string): boolean {
 export function storeSlackSession(
   db: CuedDatabase,
   payload: StoredSlackSessionPayload,
+  options: StoreSlackSessionOptions = {},
 ): StoredSlackSessionResult {
   const accountKey = payload.accountKey;
   const existing = db.getIntegrationState("slack", accountKey);
   const existingMetadata = existing?.metadata_json
     ? (JSON.parse(existing.metadata_json) as Record<string, unknown>)
     : {};
-  if (isUserRemovedIntegrationMetadata(existingMetadata)) {
+  const userRemoved = isUserRemovedIntegrationMetadata(existingMetadata);
+  if (userRemoved && !options.reviveUserRemoved) {
     return {
       platform: "slack",
       accountKey,
@@ -101,7 +107,7 @@ export function storeSlackSession(
     accountKey,
     displayName: payload.teamName,
     authState: existing?.auth_state ?? "requested",
-    enabled: existing ? existing.enabled === 1 : true,
+    enabled: userRemoved ? true : existing ? existing.enabled === 1 : true,
     connectionKind: "browser-session",
     syncCapable: existing ? existing.sync_capable === 1 : false,
     launchStrategy: "chromium-auth",
@@ -125,6 +131,9 @@ export function storeSlackSession(
       importedSavedAt: payload.savedAt,
       importSourcePath: payload.sourcePath,
       importMethod: payload.importMethod,
+      userRemoved: false,
+      removedAt: null,
+      disconnectedAt: null,
     },
   });
 

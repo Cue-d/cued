@@ -45,7 +45,10 @@ function hasRequiredCookies(cookieNames: readonly string[]): boolean {
   return cookieNamesSet.has("li_at") && cookieNamesSet.has("JSESSIONID");
 }
 
-export function importLinkedInStoredAuth(db: CuedDatabase): ImportedLinkedInSessionResult[] {
+export function importLinkedInStoredAuth(
+  db: CuedDatabase,
+  options: { reviveUserRemoved?: boolean } = {},
+): ImportedLinkedInSessionResult[] {
   const accountKey = LINKEDIN_DEFAULT_ACCOUNT_KEY;
   const secret = readLinkedInKeychainSecret(accountKey);
   if (!secret) {
@@ -61,7 +64,8 @@ export function importLinkedInStoredAuth(db: CuedDatabase): ImportedLinkedInSess
   const existingMetadata = existing?.metadata_json
     ? (safeParseJsonRecord(existing.metadata_json, "integration_states.metadata_json") ?? {})
     : {};
-  if (isUserRemovedIntegrationMetadata(existingMetadata)) {
+  const userRemoved = isUserRemovedIntegrationMetadata(existingMetadata);
+  if (userRemoved && !options.reviveUserRemoved) {
     return [];
   }
   const alreadyImported =
@@ -79,7 +83,7 @@ export function importLinkedInStoredAuth(db: CuedDatabase): ImportedLinkedInSess
     accountKey,
     displayName: existing?.display_name ?? "LinkedIn",
     authState: existing?.auth_state ?? "requested",
-    enabled: existing ? existing.enabled === 1 : true,
+    enabled: userRemoved ? true : existing ? existing.enabled === 1 : true,
     connectionKind: "browser-session",
     syncCapable: existing ? existing.sync_capable === 1 : true,
     launchStrategy: "chromium-auth",
@@ -100,6 +104,9 @@ export function importLinkedInStoredAuth(db: CuedDatabase): ImportedLinkedInSess
       keychainAccount: accountKey,
       importedSavedAt: parsed.savedAt,
       importedFromKeychain: true,
+      userRemoved: false,
+      removedAt: null,
+      disconnectedAt: null,
     },
   });
 

@@ -4,6 +4,7 @@ import type { CuedDatabase } from "../../../db/database.js";
 import type { AuthSessionSummary, IntegrationStateSummary } from "../state/types.js";
 import { runChromiumAuthSessionSync, startChromiumAuthSession } from "./chromium.js";
 import { runNativeAuthSessionSync, startNativeAuthSession } from "./native.js";
+import { runOAuthAuthSessionSync, startOAuthAuthSession } from "./oauth.js";
 import { runQrNativeAuthSessionSync, startQrNativeAuthSession } from "./qr-native.js";
 
 export interface AuthRuntimeResult {
@@ -34,6 +35,8 @@ export function startAuthSession(
       return startQrNativeAuthSession(db, session, integration);
     case "native":
       return startNativeAuthSession(db, session);
+    case "oauth":
+      return startOAuthAuthSession(db, session, integration);
     default:
       throw new Error(`Unsupported auth runtime: ${integration.runtimeKind}`);
   }
@@ -51,6 +54,8 @@ export async function runAuthSessionSync(
       return runQrNativeAuthSessionSync(db, session, integration);
     case "native":
       return runNativeAuthSessionSync(db, session);
+    case "oauth":
+      return runOAuthAuthSessionSync(db, session, integration);
     default:
       throw new Error(`Unsupported auth runtime: ${integration.runtimeKind}`);
   }

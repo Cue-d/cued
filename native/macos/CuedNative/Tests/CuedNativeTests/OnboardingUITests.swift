@@ -20,9 +20,9 @@ final class OnboardingUITests: XCTestCase {
     XCTAssertTrue(onboardingShouldRetryPermissionRefresh(for: ["--all"]))
   }
 
-  func testActivePermissionRefreshIsOnlyForcedForMessagesRequests() {
+  func testActivePermissionRefreshIsForcedForLiveVerifiableRequests() {
     XCTAssertFalse(onboardingShouldRefreshPermissionsActively(for: ["--contacts"]))
-    XCTAssertFalse(onboardingShouldRefreshPermissionsActively(for: ["--full-disk-access"]))
+    XCTAssertTrue(onboardingShouldRefreshPermissionsActively(for: ["--full-disk-access"]))
     XCTAssertTrue(onboardingShouldRefreshPermissionsActively(for: ["--messages"]))
     XCTAssertTrue(onboardingShouldRefreshPermissionsActively(for: ["--all"]))
   }

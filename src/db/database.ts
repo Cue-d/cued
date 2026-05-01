@@ -1221,7 +1221,7 @@ export class CuedDatabase {
     const completedAt =
       input.proof.status === "complete"
         ? (existingProof?.completedAt ?? input.proof.completedAt ?? input.proof.observedAt)
-        : (input.proof.completedAt ?? existingProof?.completedAt ?? null);
+        : (input.proof.completedAt ?? null);
     const proofSyncMode = input.proof.syncMode ?? null;
     const proofRunStartedAt = input.proof.runStartedAt ?? null;
     const proofFreshUntil = input.proof.freshUntil ?? null;
