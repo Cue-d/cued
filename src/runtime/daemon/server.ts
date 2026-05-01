@@ -4100,6 +4100,15 @@ async function dispatchRequest(
             reason: request.reason,
           }),
         };
+      case "contacts-merge-batch":
+        return {
+          id: request.id,
+          ok: true,
+          result: runQueueService.mergeContactsBatch({
+            merges: request.merges,
+            apply: request.apply,
+          }),
+        };
       case "rebuild":
         return {
           id: request.id,

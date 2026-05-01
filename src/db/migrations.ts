@@ -1040,6 +1040,21 @@ export const MIGRATIONS: Migration[] = [
         UNIQUE(platform, account_key, source_entity_key)
       );
 
+      CREATE TABLE IF NOT EXISTS contact_memories (
+        id TEXT PRIMARY KEY,
+        contact_id TEXT NOT NULL,
+        body TEXT NOT NULL,
+        source_kind TEXT NOT NULL,
+        evidence_json TEXT,
+        confidence INTEGER,
+        supersedes_memory_id TEXT REFERENCES contact_memories(id) ON DELETE SET NULL,
+        stale_at INTEGER,
+        created_by TEXT,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        CHECK (confidence IS NULL OR (confidence >= 0 AND confidence <= 100))
+      );
+
       CREATE TABLE IF NOT EXISTS conversations (
         id TEXT PRIMARY KEY,
         platform TEXT NOT NULL,
@@ -1313,6 +1328,12 @@ export const MIGRATIONS: Migration[] = [
 
       CREATE INDEX IF NOT EXISTS idx_contact_sources_contact
       ON contact_sources(contact_id, platform, account_key);
+
+      CREATE INDEX IF NOT EXISTS idx_contact_memories_contact_current
+      ON contact_memories(contact_id, stale_at, created_at DESC);
+
+      CREATE INDEX IF NOT EXISTS idx_contact_memories_created
+      ON contact_memories(created_at DESC);
 
       CREATE INDEX IF NOT EXISTS idx_conversation_participants_contact
       ON conversation_participants(contact_id);
@@ -1892,6 +1913,33 @@ export const MIGRATIONS: Migration[] = [
           db.prepare(`DELETE FROM ${tableName} WHERE platform = 'telegram'`).run();
         }
       }
+    },
+  },
+  {
+    id: "0012_contact_memories",
+    apply: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS contact_memories (
+          id TEXT PRIMARY KEY,
+          contact_id TEXT NOT NULL,
+          body TEXT NOT NULL,
+          source_kind TEXT NOT NULL,
+          evidence_json TEXT,
+          confidence INTEGER,
+          supersedes_memory_id TEXT REFERENCES contact_memories(id) ON DELETE SET NULL,
+          stale_at INTEGER,
+          created_by TEXT,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          CHECK (confidence IS NULL OR (confidence >= 0 AND confidence <= 100))
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_contact_memories_contact_current
+        ON contact_memories(contact_id, stale_at, created_at DESC);
+
+        CREATE INDEX IF NOT EXISTS idx_contact_memories_created
+        ON contact_memories(created_at DESC);
+      `);
     },
   },
 ];

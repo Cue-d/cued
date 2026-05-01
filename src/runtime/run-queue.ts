@@ -4,7 +4,7 @@ import {
   isAdapterPlatform,
   isPlatform,
 } from "../core/types/provider.js";
-import type { CuedDatabase } from "../db/database.js";
+import type { ContactMergeBatchInput, CuedDatabase } from "../db/database.js";
 import { rebuildProjectedState } from "./projection/projector.js";
 
 type RunQueueSchedulers = {
@@ -268,6 +268,31 @@ export class RunQueueService {
       primaryContactId: decision.primaryContactId,
       secondaryContactId: decision.secondaryContactId,
       canonicalContactId: decision.canonicalContactId,
+      projection,
+    };
+  }
+
+  mergeContactsBatch(input: { merges: ContactMergeBatchInput[]; apply: boolean }): {
+    applied: boolean;
+    mergeCount: number;
+    decisions: ReturnType<CuedDatabase["planContactMergeDecisions"]>;
+    projection?: ReturnType<typeof rebuildProjectedState>;
+  } {
+    if (!input.apply) {
+      const decisions = this.db.planContactMergeDecisions(input.merges);
+      return {
+        applied: false,
+        mergeCount: decisions.length,
+        decisions,
+      };
+    }
+
+    const decisions = this.db.recordContactMergeDecisionsBatch(input.merges, { createdBy: "cli" });
+    const projection = rebuildProjectedState(this.db);
+    return {
+      applied: true,
+      mergeCount: decisions.length,
+      decisions,
       projection,
     };
   }

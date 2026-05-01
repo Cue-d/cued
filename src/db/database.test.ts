@@ -164,6 +164,128 @@ describe("CuedDatabase", () => {
     db.close();
   });
 
+  it("stores current contact memories and marks superseded memories stale", () => {
+    const db = createDb();
+    insertContact(db, { id: "contact-1", name: "Ava Chen" });
+
+    const original = db.addContactMemory({
+      contactId: "contact-1",
+      body: "Works on applied AI and prefers concise follow-ups.",
+      sourceKind: "local_messages",
+      evidence: { messageIds: ["message-1"] },
+      confidence: 83,
+      createdBy: "test",
+    });
+
+    expect(original).toMatchObject({
+      contact_id: "contact-1",
+      contact_name: "Ava Chen",
+      body: "Works on applied AI and prefers concise follow-ups.",
+      source_kind: "local_messages",
+      evidence_json: JSON.stringify({ messageIds: ["message-1"] }),
+      confidence: 83,
+      stale_at: null,
+      created_by: "test",
+    });
+
+    const replacement = db.addContactMemory({
+      contactId: "contact-1",
+      body: "Works on applied AI and prefers direct, concise messages.",
+      sourceKind: "local_messages",
+      evidence: { messageIds: ["message-2"], supersedesReason: "more recent evidence" },
+      confidence: 91,
+      supersedesMemoryId: original.id,
+      createdBy: "test",
+    });
+
+    expect(replacement.supersedes_memory_id).toBe(original.id);
+    expect(db.getContactMemory(original.id)?.stale_at).toEqual(expect.any(Number));
+    expect(db.listContactMemories({ contactId: "contact-1" }).map((row) => row.id)).toEqual([
+      replacement.id,
+    ]);
+    expect(
+      db.listContactMemories({ contactId: "contact-1", includeStale: true }).map((row) => row.id),
+    ).toEqual([replacement.id, original.id]);
+
+    db.close();
+  });
+
+  it("rejects superseding a memory from a different contact", () => {
+    const db = createDb();
+    insertContact(db, { id: "contact-1", name: "Ava Chen" });
+    insertContact(db, { id: "contact-2", name: "Ben Lee" });
+    const otherMemory = db.addContactMemory({
+      contactId: "contact-2",
+      body: "Works on robotics.",
+      sourceKind: "local_messages",
+    });
+
+    expect(() =>
+      db.addContactMemory({
+        contactId: "contact-1",
+        body: "Works on applied AI.",
+        sourceKind: "local_messages",
+        supersedesMemoryId: otherMemory.id,
+      }),
+    ).toThrow("Cannot supersede a contact memory from a different contact.");
+
+    db.close();
+  });
+
+  it("preserves contact memories across projected state rebuilds", () => {
+    const db = createDb();
+    insertContact(db, { id: "contact-1", name: "Ava Chen", updatedAt: 1 });
+    const memory = db.addContactMemory({
+      contactId: "contact-1",
+      body: "Works on applied AI and prefers concise follow-ups.",
+      sourceKind: "local_messages",
+      createdBy: "test",
+    });
+
+    db.clearProjectedState();
+    insertContact(db, { id: "contact-1", name: "Ava Chen", updatedAt: 2 });
+
+    expect(db.getContactMemory(memory.id)).toMatchObject({
+      id: memory.id,
+      contact_id: "contact-1",
+      contact_name: "Ava Chen",
+      body: "Works on applied AI and prefers concise follow-ups.",
+    });
+
+    db.close();
+  });
+
+  it("can read and stale preserved contact memories when the projected contact is absent", () => {
+    const db = createDb();
+    insertContact(db, { id: "contact-1", name: "Ava Chen", updatedAt: 1 });
+    const memory = db.addContactMemory({
+      contactId: "contact-1",
+      body: "Works on applied AI and prefers concise follow-ups.",
+      sourceKind: "local_messages",
+      createdBy: "test",
+    });
+
+    db.clearProjectedState();
+
+    expect(db.getContactMemory(memory.id)).toMatchObject({
+      id: memory.id,
+      contact_id: "contact-1",
+      contact_name: null,
+      body: "Works on applied AI and prefers concise follow-ups.",
+      stale_at: null,
+    });
+    expect(db.listContactMemories({ contactId: "contact-1" }).map((row) => row.id)).toEqual([
+      memory.id,
+    ]);
+    expect(db.markContactMemoryStale(memory.id)).toMatchObject({
+      id: memory.id,
+      contact_name: null,
+      stale_at: expect.any(Number),
+    });
+
+    db.close();
+  });
+
   it("persists generic sync scopes and proofs", () => {
     const db = createDb();
 
@@ -830,6 +952,31 @@ describe("CuedDatabase", () => {
     db.close();
   });
 
+  it("moves secondary contact memories to the canonical contact on merge", () => {
+    const db = createDb();
+    insertContact(db, { id: "contact-a", name: "Ava Prime" });
+    insertContact(db, { id: "contact-b", name: "Ava Duplicate" });
+    const memory = db.addContactMemory({
+      contactId: "contact-b",
+      body: "Prefers short follow-ups.",
+      sourceKind: "local_messages",
+      createdBy: "test",
+    });
+
+    db.recordContactMergeDecision({
+      primaryContactId: "contact-a",
+      secondaryContactId: "contact-b",
+      reason: "same email",
+    });
+
+    expect(db.listContactMemories({ contactId: "contact-a" }).map((row) => row.id)).toEqual([
+      memory.id,
+    ]);
+    expect(db.listContactMemories({ contactId: "contact-b" })).toEqual([]);
+
+    db.close();
+  });
+
   it("queues, claims, and finishes sync runs", () => {
     const db = createDb();
 
@@ -1416,6 +1563,77 @@ describe("CuedDatabase", () => {
         .prepare("SELECT 1 FROM schema_migrations WHERE id = ?")
         .get("0009_add_contact_fanout_projection_indexes"),
     ).toBeUndefined();
+
+    db.close();
+  });
+
+  it("adds contact memories to existing migrated databases", () => {
+    const dir = mkdtempSync(join(tmpdir(), "cued-contact-memories-migration-"));
+    tempDirs.push(dir);
+    const db = new CuedDatabase(join(dir, "local.db"));
+    const sql = sqlite(db);
+
+    sql.exec(`
+      CREATE TABLE schema_migrations (
+        id TEXT PRIMARY KEY,
+        applied_at INTEGER NOT NULL
+      )
+    `);
+    sql.exec(`
+      INSERT INTO schema_migrations (id, applied_at)
+      VALUES
+        ('0001_bootstrap_current_schema', 1),
+        ('0002_upgrade_existing_schema_columns', 2),
+        ('0003_repair_conversation_removal_reason', 3),
+        ('0004_repair_partial_legacy_bootstrap', 4),
+        ('0005_add_contact_merge_decisions', 5),
+        ('0006_rename_contact_merge_columns', 6),
+        ('0007_add_generic_sync_proof_tables', 7),
+        ('0008_migrate_slack_backfill_proofs_to_generic', 8),
+        ('0009_add_contact_fanout_projection_indexes', 9),
+        ('0010_add_timeline_call_fields', 10),
+        ('0011_remove_telegram_runtime_state', 11)
+    `);
+    sql.exec(`
+      CREATE TABLE contacts (
+        id TEXT PRIMARY KEY,
+        kind TEXT NOT NULL DEFAULT 'person',
+        name TEXT,
+        photo_url TEXT,
+        company TEXT,
+        archived INTEGER NOT NULL DEFAULT 0,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      )
+    `);
+
+    db.migrate();
+
+    const memoryColumns = (
+      sql.prepare("PRAGMA table_info(contact_memories)").all() as Array<{
+        name: string;
+      }>
+    ).map((column) => column.name);
+
+    expect(memoryColumns).toEqual(
+      expect.arrayContaining([
+        "contact_id",
+        "body",
+        "source_kind",
+        "evidence_json",
+        "confidence",
+        "supersedes_memory_id",
+        "stale_at",
+        "created_at",
+      ]),
+    );
+    expect(
+      sql.prepare("SELECT 1 FROM schema_migrations WHERE id = ?").get("0012_contact_memories"),
+    ).toBeTruthy();
+    const contactForeignKeys = (
+      sql.prepare("PRAGMA foreign_key_list(contact_memories)").all() as Array<{ table: string }>
+    ).filter((foreignKey) => foreignKey.table === "contacts");
+    expect(contactForeignKeys).toEqual([]);
 
     db.close();
   });
