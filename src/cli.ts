@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { execFileSync } from "node:child_process";
-import { existsSync, realpathSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
@@ -145,6 +145,10 @@ Usage:
   cued integrations enable <platform> [account]
   cued integrations disable <platform> [account]
   cued contacts merge <primary-contact-id> <secondary-contact-id> [--reason TEXT]
+  cued contacts merge-batch <merges.json> [--apply]
+  cued contacts memory add <contact-id> <memory> [--source SOURCE] [--confidence 0-100] [--evidence JSON] [--supersedes MEMORY_ID]
+  cued contacts memory list <contact-id> [--limit N] [--include-stale]
+  cued contacts memory stale <memory-id>
   cued attachments list [--message ID] [--conversation ID] [--platform PLATFORM] [--account ACCOUNT] [--limit N]
   cued attachments fetch <attachment-id> [--variant original] [--max-bytes N] [--allow-large] [--no-extract]
   cued attachments search <query> [--conversation ID] [--platform PLATFORM] [--account ACCOUNT] [--limit N]
@@ -170,6 +174,72 @@ function printJson(value: unknown): void {
 function parseFlagValue(args: string[], flag: string): string | undefined {
   const index = args.findIndex((value) => value === flag);
   return index >= 0 ? args[index + 1] : undefined;
+}
+
+function parseIntegerFlag(args: string[], flag: string): number | undefined {
+  const raw = parseFlagValue(args, flag);
+  if (raw === undefined) {
+    return undefined;
+  }
+  if (!/^-?\d+$/.test(raw)) {
+    throw new Error(`${flag} must be an integer.`);
+  }
+  return Number(raw);
+}
+
+function parseJsonFlag(args: string[], flag: string): unknown {
+  const raw = parseFlagValue(args, flag);
+  if (raw === undefined) {
+    return undefined;
+  }
+  try {
+    return JSON.parse(raw) as unknown;
+  } catch (error) {
+    throw new Error(
+      `${flag} must be valid JSON: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+}
+
+function parseFreeTextArgument(args: string[], startIndex: number): string | undefined {
+  const bodyTokens = args.slice(startIndex).filter((value, index, values) => {
+    if (value.startsWith("--")) {
+      return false;
+    }
+    const previous = index > 0 ? values[index - 1] : undefined;
+    return previous === undefined || !previous.startsWith("--");
+  });
+  return bodyTokens.length > 0 ? bodyTokens.join(" ") : undefined;
+}
+
+function parseContactMergeBatchFile(path: string): Array<{
+  primaryContactId: string;
+  secondaryContactId: string;
+  reason?: string | null;
+}> {
+  const parsed = JSON.parse(readFileSync(path, "utf8")) as unknown;
+  if (!Array.isArray(parsed)) {
+    throw new Error("Merge batch file must contain a JSON array.");
+  }
+  return parsed.map((value, index) => {
+    if (!value || typeof value !== "object") {
+      throw new Error(`Merge batch item ${index} must be an object.`);
+    }
+    const item = value as Record<string, unknown>;
+    if (typeof item.primaryContactId !== "string" || typeof item.secondaryContactId !== "string") {
+      throw new Error(
+        `Merge batch item ${index} must include primaryContactId and secondaryContactId strings.`,
+      );
+    }
+    if (item.reason !== undefined && item.reason !== null && typeof item.reason !== "string") {
+      throw new Error(`Merge batch item ${index} reason must be a string when provided.`);
+    }
+    return {
+      primaryContactId: item.primaryContactId,
+      secondaryContactId: item.secondaryContactId,
+      reason: item.reason ?? null,
+    };
+  });
 }
 
 function getAppStatusMetadata(db: ReturnType<typeof openCuedDatabase>) {
@@ -812,9 +882,97 @@ async function main(): Promise<void> {
       });
       break;
     case "contacts":
+      if (subcommand === "memory" || subcommand === "memories") {
+        const memoryCommand = rest[0];
+        const args = rest.slice(1);
+        const db = openCuedDatabase();
+        try {
+          switch (memoryCommand) {
+            case "add": {
+              const contactId = args[0];
+              const body = parseFlagValue(args, "--body") ?? parseFreeTextArgument(args, 1);
+              if (!contactId || !body) {
+                throw new Error(
+                  "Usage: cued contacts memory add <contact-id> <memory> [--source SOURCE] [--confidence 0-100] [--evidence JSON] [--supersedes MEMORY_ID]",
+                );
+              }
+              printJson(
+                db.addContactMemory({
+                  contactId,
+                  body,
+                  sourceKind: parseFlagValue(args, "--source") ?? "agent",
+                  evidence: parseJsonFlag(args, "--evidence"),
+                  confidence: parseIntegerFlag(args, "--confidence") ?? null,
+                  supersedesMemoryId: parseFlagValue(args, "--supersedes") ?? null,
+                  createdBy: parseFlagValue(args, "--created-by") ?? "cued-cli",
+                }),
+              );
+              return;
+            }
+            case "list": {
+              const contactId = args[0];
+              if (!contactId) {
+                throw new Error(
+                  "Usage: cued contacts memory list <contact-id> [--limit N] [--include-stale]",
+                );
+              }
+              printJson(
+                db.listContactMemories({
+                  contactId,
+                  limit: parseIntegerFlag(args, "--limit"),
+                  includeStale: args.includes("--include-stale"),
+                }),
+              );
+              return;
+            }
+            case "stale": {
+              const memoryId = args[0];
+              if (!memoryId) {
+                throw new Error("Usage: cued contacts memory stale <memory-id>");
+              }
+              printJson(db.markContactMemoryStale(memoryId));
+              return;
+            }
+            default:
+              throw new Error(
+                "Usage: cued contacts memory add <contact-id> <memory> [--source SOURCE] [--confidence 0-100] [--evidence JSON] [--supersedes MEMORY_ID] | cued contacts memory list <contact-id> [--limit N] [--include-stale] | cued contacts memory stale <memory-id>",
+              );
+          }
+        } finally {
+          db.close();
+        }
+      }
+      if (subcommand === "merge-batch") {
+        const batchPath = rest[0];
+        if (!batchPath) {
+          throw new Error("Usage: cued contacts merge-batch <merges.json> [--apply]");
+        }
+        const merges = parseContactMergeBatchFile(batchPath);
+        const apply = rest.includes("--apply");
+        if (!apply) {
+          const db = openCuedDatabaseReadOnly();
+          try {
+            const decisions = db.planContactMergeDecisions(merges);
+            printJson({
+              applied: false,
+              mergeCount: decisions.length,
+              decisions,
+            });
+          } finally {
+            db.close();
+          }
+          return;
+        }
+        response = await sendDaemonRequest({
+          command: "contacts-merge-batch",
+          merges,
+          apply: true,
+        });
+        break;
+      }
       if (subcommand !== "merge" || !rest[0] || !rest[1]) {
         throw new Error(
-          "Usage: cued contacts merge <primary-contact-id> <secondary-contact-id> [--reason TEXT]",
+          "Usage: cued contacts merge <primary-contact-id> <secondary-contact-id> [--reason TEXT] | cued contacts merge-batch <merges.json> [--apply] | cued contacts memory add|list|stale ...",
         );
       }
       response = await sendDaemonRequest({

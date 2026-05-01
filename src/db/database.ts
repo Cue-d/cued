@@ -44,6 +44,7 @@ const {
   authSessions,
   contactMergeDecisions,
   contactHandles,
+  contactMemories,
   contactSources,
   contacts,
   conversationParticipants,
@@ -98,6 +99,35 @@ export interface QueuedSyncRun {
   queued_at: number;
   started_at: number | null;
   details_json: string | null;
+}
+
+export interface ContactMemoryRow {
+  id: string;
+  contact_id: string;
+  contact_name: string | null;
+  body: string;
+  source_kind: string;
+  evidence_json: string | null;
+  confidence: number | null;
+  supersedes_memory_id: string | null;
+  stale_at: number | null;
+  created_by: string | null;
+  created_at: number;
+  updated_at: number;
+}
+
+export interface ContactMergeBatchInput {
+  primaryContactId: string;
+  secondaryContactId: string;
+  reason?: string | null;
+}
+
+export interface PlannedContactMergeDecision {
+  decisionId: string;
+  primaryContactId: string;
+  secondaryContactId: string;
+  canonicalContactId: string;
+  reason: string | null;
 }
 
 export interface ProjectionStateRow {
@@ -442,6 +472,23 @@ function now(): number {
   return Date.now();
 }
 
+function resolveCanonicalContactIdFromAliases(
+  contactId: string,
+  aliasMap: Map<string, string>,
+): string {
+  const seen = new Set<string>();
+  let current = contactId;
+  while (!seen.has(current)) {
+    seen.add(current);
+    const next = aliasMap.get(current);
+    if (!next || next === current) {
+      return current;
+    }
+    current = next;
+  }
+  throw new Error(`Contact merge alias cycle detected at ${current}`);
+}
+
 function chunkArray<T>(items: readonly T[], size: number): T[][] {
   const chunks: T[][] = [];
   for (let index = 0; index < items.length; index += size) {
@@ -592,17 +639,50 @@ export class CuedDatabase {
     const aliasMap = new Map(
       this.listContactMergeAliases().map((row) => [row.contact_id, row.canonical_contact_id]),
     );
-    const seen = new Set<string>();
-    let current = contactId;
-    while (!seen.has(current)) {
-      seen.add(current);
-      const next = aliasMap.get(current);
-      if (!next || next === current) {
-        return current;
-      }
-      current = next;
+    return resolveCanonicalContactIdFromAliases(contactId, aliasMap);
+  }
+
+  planContactMergeDecisions(input: ContactMergeBatchInput[]): PlannedContactMergeDecision[] {
+    if (input.length === 0) {
+      throw new Error("At least one contact merge is required.");
     }
-    throw new Error(`Contact merge alias cycle detected at ${current}`);
+
+    const aliasMap = new Map(
+      this.listContactMergeAliases().map((row) => [row.contact_id, row.canonical_contact_id]),
+    );
+    const planned: PlannedContactMergeDecision[] = [];
+    for (const merge of input) {
+      const primaryContactId = merge.primaryContactId.trim();
+      const secondaryContactId = merge.secondaryContactId.trim();
+      if (!primaryContactId || !secondaryContactId) {
+        throw new Error("Primary and secondary contact ids are required.");
+      }
+      if (primaryContactId === secondaryContactId) {
+        throw new Error("Cannot merge a contact into itself");
+      }
+
+      this.assertContactExists(primaryContactId, "Primary");
+      this.assertContactExists(secondaryContactId, "Secondary");
+
+      const canonicalPrimary = resolveCanonicalContactIdFromAliases(primaryContactId, aliasMap);
+      const canonicalSecondary = resolveCanonicalContactIdFromAliases(secondaryContactId, aliasMap);
+      if (canonicalPrimary === canonicalSecondary) {
+        throw new Error(
+          `Contacts already resolve to the same canonical contact: ${canonicalPrimary}`,
+        );
+      }
+
+      aliasMap.set(canonicalSecondary, canonicalPrimary);
+      resolveCanonicalContactIdFromAliases(canonicalSecondary, aliasMap);
+      planned.push({
+        decisionId: randomUUID(),
+        primaryContactId: canonicalPrimary,
+        secondaryContactId: canonicalSecondary,
+        canonicalContactId: canonicalPrimary,
+        reason: merge.reason ?? null,
+      });
+    }
+    return planned;
   }
 
   recordContactMergeDecision(input: {
@@ -616,72 +696,69 @@ export class CuedDatabase {
     secondaryContactId: string;
     canonicalContactId: string;
   } {
-    if (input.primaryContactId === input.secondaryContactId) {
-      throw new Error("Cannot merge a contact into itself");
-    }
-
-    const primary = this.sqlite
-      .prepare(
-        `
-        SELECT id
-        FROM contacts
-        WHERE id = ?
-        LIMIT 1
-      `,
-      )
-      .get(input.primaryContactId) as { id: string } | undefined;
-    if (!primary) {
-      throw new Error(`Primary contact not found: ${input.primaryContactId}`);
-    }
-
-    const secondary = this.sqlite
-      .prepare(
-        `
-        SELECT id
-        FROM contacts
-        WHERE id = ?
-        LIMIT 1
-      `,
-      )
-      .get(input.secondaryContactId) as { id: string } | undefined;
-    if (!secondary) {
-      throw new Error(`Secondary contact not found: ${input.secondaryContactId}`);
-    }
-
-    const canonicalPrimary = this.resolveCanonicalContactId(input.primaryContactId);
-    const canonicalSecondary = this.resolveCanonicalContactId(input.secondaryContactId);
-    if (canonicalPrimary === canonicalSecondary) {
-      throw new Error(
-        `Contacts already resolve to the same canonical contact: ${canonicalPrimary}`,
-      );
-    }
-
-    const decisionId = randomUUID();
-    return this.sqlite.transaction(() => {
-      this.db
-        .insert(contactMergeDecisions)
-        .values({
-          id: decisionId,
-          decisionType: "merge",
-          primaryContactId: canonicalPrimary,
-          secondaryContactId: canonicalSecondary,
-          canonicalContactId: canonicalPrimary,
+    const [decision] = this.recordContactMergeDecisionsBatch(
+      [
+        {
+          primaryContactId: input.primaryContactId,
+          secondaryContactId: input.secondaryContactId,
           reason: input.reason ?? null,
-          createdBy: input.createdBy ?? "cli",
-          createdAt: now(),
-        })
-        .run();
+        },
+      ],
+      { createdBy: input.createdBy },
+    );
+    return {
+      decisionId: decision!.decisionId,
+      primaryContactId: decision!.primaryContactId,
+      secondaryContactId: decision!.secondaryContactId,
+      canonicalContactId: decision!.canonicalContactId,
+    };
+  }
 
-      // Validate that the new alias graph remains acyclic before committing.
-      this.resolveCanonicalContactId(canonicalSecondary);
-
-      return {
-        decisionId,
-        primaryContactId: canonicalPrimary,
-        secondaryContactId: canonicalSecondary,
-        canonicalContactId: canonicalPrimary,
-      };
+  recordContactMergeDecisionsBatch(
+    input: ContactMergeBatchInput[],
+    options: { createdBy?: string | null } = {},
+  ): PlannedContactMergeDecision[] {
+    const planned = this.planContactMergeDecisions(input);
+    const timestamp = now();
+    return this.sqlite.transaction(() => {
+      for (const decision of planned) {
+        this.db
+          .insert(contactMergeDecisions)
+          .values({
+            id: decision.decisionId,
+            decisionType: "merge",
+            primaryContactId: decision.primaryContactId,
+            secondaryContactId: decision.secondaryContactId,
+            canonicalContactId: decision.canonicalContactId,
+            reason: decision.reason,
+            createdBy: options.createdBy ?? "cli",
+            createdAt: timestamp,
+          })
+          .run();
+        this.db
+          .update(contactMemories)
+          .set({ contactId: decision.canonicalContactId, updatedAt: timestamp })
+          .where(eq(contactMemories.contactId, decision.secondaryContactId))
+          .run();
+      }
+      return planned;
     })();
+  }
+
+  private assertContactExists(contactId: string, label: "Primary" | "Secondary"): void {
+    const contact = this.sqlite
+      .prepare(
+        `
+        SELECT id
+        FROM contacts
+        WHERE id = ?
+        LIMIT 1
+      `,
+      )
+      .get(contactId) as { id: string } | undefined;
+    if (!contact) {
+      throw new Error(`${label} contact not found: ${contactId}`);
+    }
   }
 
   listAppSettings(): AppSettingRow[] {
@@ -1912,6 +1989,166 @@ export class CuedDatabase {
       })
       .run();
     return id;
+  }
+
+  addContactMemory(input: {
+    contactId: string;
+    body: string;
+    sourceKind?: string;
+    evidence?: unknown;
+    confidence?: number | null;
+    supersedesMemoryId?: string | null;
+    createdBy?: string | null;
+  }): ContactMemoryRow {
+    const contactId = input.contactId.trim();
+    const body = input.body.trim();
+    const sourceKind = (input.sourceKind ?? "agent").trim() || "agent";
+    const timestamp = now();
+    const confidence =
+      typeof input.confidence === "number" && Number.isFinite(input.confidence)
+        ? Math.trunc(input.confidence)
+        : null;
+
+    if (!contactId) {
+      throw new Error("Contact id is required.");
+    }
+    if (!body) {
+      throw new Error("Contact memory body is required.");
+    }
+    if (confidence !== null && (confidence < 0 || confidence > 100)) {
+      throw new Error("Contact memory confidence must be between 0 and 100.");
+    }
+
+    const contact = this.sqlite
+      .prepare("SELECT id FROM contacts WHERE id = ? LIMIT 1")
+      .get(contactId) as { id: string } | undefined;
+    if (!contact) {
+      throw new Error(`Contact not found: ${contactId}`);
+    }
+
+    const id = randomUUID();
+    this.db.transaction((tx) => {
+      if (input.supersedesMemoryId) {
+        const superseded = this.sqlite
+          .prepare("SELECT contact_id FROM contact_memories WHERE id = ? LIMIT 1")
+          .get(input.supersedesMemoryId) as { contact_id: string } | undefined;
+        if (!superseded) {
+          throw new Error(`Contact memory not found: ${input.supersedesMemoryId}`);
+        }
+        if (superseded.contact_id !== contactId) {
+          throw new Error("Cannot supersede a contact memory from a different contact.");
+        }
+        tx.update(contactMemories)
+          .set({ staleAt: timestamp, updatedAt: timestamp })
+          .where(eq(contactMemories.id, input.supersedesMemoryId))
+          .run();
+      }
+      tx.insert(contactMemories)
+        .values({
+          id,
+          contactId,
+          body,
+          sourceKind,
+          evidenceJson: safeStringifyJson(input.evidence),
+          confidence,
+          supersedesMemoryId: input.supersedesMemoryId ?? null,
+          staleAt: null,
+          createdBy: input.createdBy ?? null,
+          createdAt: timestamp,
+          updatedAt: timestamp,
+        })
+        .run();
+    });
+
+    return this.getContactMemory(id)!;
+  }
+
+  getContactMemory(id: string): ContactMemoryRow | null {
+    return (
+      (this.sqlite
+        .prepare(
+          `
+          SELECT
+            cn.id,
+            cn.contact_id,
+            c.name AS contact_name,
+            cn.body,
+            cn.source_kind,
+            cn.evidence_json,
+            cn.confidence,
+            cn.supersedes_memory_id,
+            cn.stale_at,
+            cn.created_by,
+            cn.created_at,
+            cn.updated_at
+          FROM contact_memories cn
+          LEFT JOIN contacts c ON c.id = cn.contact_id
+          WHERE cn.id = ?
+          LIMIT 1
+        `,
+        )
+        .get(id) as ContactMemoryRow | undefined) ?? null
+    );
+  }
+
+  listContactMemories(input: {
+    contactId: string;
+    includeStale?: boolean;
+    limit?: number;
+  }): ContactMemoryRow[] {
+    const contactId = input.contactId.trim();
+    if (!contactId) {
+      throw new Error("Contact id is required.");
+    }
+    const limit =
+      typeof input.limit === "number" && Number.isFinite(input.limit)
+        ? Math.max(1, Math.min(500, Math.trunc(input.limit)))
+        : 50;
+    const filters = ["cn.contact_id = ?"];
+    const params: unknown[] = [contactId];
+    if (!input.includeStale) {
+      filters.push("cn.stale_at IS NULL");
+    }
+    params.push(limit);
+
+    return this.sqlite
+      .prepare(
+        `
+        SELECT
+          cn.id,
+          cn.contact_id,
+          c.name AS contact_name,
+          cn.body,
+          cn.source_kind,
+          cn.evidence_json,
+          cn.confidence,
+          cn.supersedes_memory_id,
+          cn.stale_at,
+          cn.created_by,
+          cn.created_at,
+          cn.updated_at
+        FROM contact_memories cn
+        LEFT JOIN contacts c ON c.id = cn.contact_id
+        WHERE ${filters.join(" AND ")}
+        ORDER BY cn.created_at DESC
+        LIMIT ?
+      `,
+      )
+      .all(...params) as ContactMemoryRow[];
+  }
+
+  markContactMemoryStale(id: string, staleAt: number | null = null): ContactMemoryRow | null {
+    const timestamp = staleAt ?? now();
+    this.db
+      .update(contactMemories)
+      .set({ staleAt: timestamp, updatedAt: timestamp })
+      .where(eq(contactMemories.id, id))
+      .run();
+    const memory = this.getContactMemory(id);
+    if (!memory) {
+      throw new Error(`Contact memory not found: ${id}`);
+    }
+    return memory;
   }
 
   resolveSignalSendTarget(targetInput: string): SignalSendResolution | null {

@@ -243,6 +243,20 @@ export const contactMergeDecisions = sqliteTable("contact_merge_decisions", {
   createdAt: integer("created_at").notNull(),
 });
 
+export const contactMemories = sqliteTable("contact_memories", {
+  id: text("id").primaryKey(),
+  contactId: text("contact_id").notNull(),
+  body: text("body").notNull(),
+  sourceKind: text("source_kind").notNull(),
+  evidenceJson: text("evidence_json"),
+  confidence: integer("confidence"),
+  supersedesMemoryId: text("supersedes_memory_id"),
+  staleAt: integer("stale_at"),
+  createdBy: text("created_by"),
+  createdAt: integer("created_at").notNull(),
+  updatedAt: integer("updated_at").notNull(),
+});
+
 export const conversations = sqliteTable("conversations", {
   id: text("id").primaryKey(),
   platform: textEnum("platform", PLATFORM_VALUES).notNull(),

@@ -242,4 +242,100 @@ describe("RunQueueService", () => {
 
     db.close();
   });
+
+  it("validates batch contact merges before recording and rebuilds once on apply", () => {
+    const db = createDb();
+    for (const [id, platform, handle] of [
+      ["contact-a", "contacts", "+1 (555) 123-4567"],
+      ["contact-b", "linkedin", "urn:li:person:ava-chen"],
+      ["contact-c", "slack", "ava@example.com"],
+    ] as const) {
+      db.insertRawEvent({
+        id,
+        platform,
+        accountKey: "default",
+        entityKind: "contact",
+        eventKind: "observed",
+        observedAt: 1,
+        dedupeKey: `${platform}:${id}`,
+        payload: {
+          sourceEntityKey: `${platform}:${id}`,
+          fields: { display_name: "Ava Chen" },
+          handles: [
+            {
+              type: platform === "contacts" ? "phone" : platform,
+              value: handle,
+              deterministic: true,
+            },
+          ],
+        },
+        sourceVersion: `${platform}-v1`,
+      });
+    }
+
+    rebuildProjectedState(db);
+    const contacts = db.orm().all<{ id: string }>(sql`
+      SELECT id
+      FROM contacts
+      ORDER BY created_at ASC, id ASC
+    `);
+    expect(contacts).toHaveLength(3);
+
+    const queue = new RunQueueService(db);
+    const dryRun = queue.mergeContactsBatch({
+      apply: false,
+      merges: [
+        {
+          primaryContactId: contacts[0]!.id,
+          secondaryContactId: contacts[1]!.id,
+          reason: "batch dry-run one",
+        },
+        {
+          primaryContactId: contacts[0]!.id,
+          secondaryContactId: contacts[2]!.id,
+          reason: "batch dry-run two",
+        },
+      ],
+    });
+
+    expect(dryRun).toMatchObject({
+      applied: false,
+      mergeCount: 2,
+      decisions: [
+        expect.objectContaining({ canonicalContactId: contacts[0]!.id }),
+        expect.objectContaining({ canonicalContactId: contacts[0]!.id }),
+      ],
+    });
+    expect(db.listContactMergeDecisions()).toEqual([]);
+    expect(db.getOverview().contacts).toBe(3);
+
+    const applied = queue.mergeContactsBatch({
+      apply: true,
+      merges: [
+        {
+          primaryContactId: contacts[0]!.id,
+          secondaryContactId: contacts[1]!.id,
+          reason: "batch apply one",
+        },
+        {
+          primaryContactId: contacts[0]!.id,
+          secondaryContactId: contacts[2]!.id,
+          reason: "batch apply two",
+        },
+      ],
+    });
+
+    expect(applied).toMatchObject({
+      applied: true,
+      mergeCount: 2,
+      projection: expect.objectContaining({
+        contacts: 1,
+        projectionWatermark: 3,
+      }),
+    });
+    expect(db.listContactMergeDecisions()).toHaveLength(2);
+    expect(db.getOverview().contacts).toBe(1);
+
+    db.close();
+  });
 });

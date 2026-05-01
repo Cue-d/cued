@@ -55,6 +55,16 @@ export type DaemonRequest =
       secondaryContactId: string;
       reason?: string;
     }
+  | {
+      id: string;
+      command: "contacts-merge-batch";
+      merges: Array<{
+        primaryContactId: string;
+        secondaryContactId: string;
+        reason?: string | null;
+      }>;
+      apply: boolean;
+    }
   | { id: string; command: "rebuild" }
   | { id: string; command: "reset"; source: string };
 

@@ -57,6 +57,22 @@ first_seen_at INTEGER
 last_seen_at INTEGER
 ```
 
+### contact_memories
+Successful useful agent memories for a contact. These are durable agent context, not projected source data. Only current memories have `stale_at IS NULL`.
+```
+id TEXT PRIMARY KEY
+contact_id TEXT
+body TEXT
+source_kind TEXT      -- local_messages, web_search, linkedin, manual, agent, etc.
+evidence_json TEXT    -- message ids, URLs, handles, profile ids, query evidence
+confidence INTEGER    -- optional 0-100
+supersedes_memory_id TEXT
+stale_at INTEGER
+created_by TEXT
+created_at INTEGER
+updated_at INTEGER
+```
+
 ### conversations
 Canonical threads across all platforms.
 ```
@@ -155,5 +171,68 @@ Platform connection status. Key columns: `platform`, `account_key`, `auth_state`
 - **Find a person**: Search `contacts` by name (`LIKE '%name%' COLLATE NOCASE`), then check `contact_handles` for email/phone/handle matches.
 - **Cross-platform view**: Join `conversation_participants` → `conversations` for a contact to see all their threads across platforms.
 - **Duplicate detection**: Match `contact_handles.normalized_value` across different `contact_id`s, or match `contacts.name` case-insensitively. Many contacts have phone numbers as names (e.g. `+1347...`) because they were discovered via iMessage before being linked.
-- **Merge duplicates**: `cued contacts merge <primary-id> <secondary-id> [--reason TEXT]` (merges secondary into primary and rebuilds projected state).
+- **Merge duplicates**: `cued contacts merge <primary-id> <secondary-id> [--reason TEXT]` for one merge, or `cued contacts merge-batch merges.json --apply` for many exact-evidence merges with one rebuild. `merge-batch` dry-runs by default when `--apply` is omitted.
 - **Merge audit trail**: Manual merges are recorded in `contact_merge_decisions`, so they survive rebuilds and replay.
+- **Contact memories**: Use `contact_memories` for compact, evidence-backed agent memory. Write via `cued contacts memory ...`, not arbitrary SQL.
+
+## Contact Memories
+
+Use memories for facts that should improve future search, enrichment, or follow-up. Do not write memories for failed, ambiguous, or skipped enrichment attempts.
+
+Add a memory:
+```bash
+cued contacts memory add contact-id-here "Works on applied AI; likely useful for Cued enrichment feedback." --source local_messages --confidence 90 --evidence '{"message_ids":["message-id-here"]}'
+```
+
+List current memories:
+```bash
+cued contacts memory list contact-id-here --limit 20
+```
+
+Replace stale or incorrect information:
+```bash
+cued contacts memory add contact-id-here "Now works at ExampleCo, based on LinkedIn profile and recent messages." --source linkedin --confidence 95 --evidence '{"urls":["https://www.linkedin.com/in/example"],"message_ids":["message-id-here"]}' --supersedes memory-id-here
+```
+
+Mark a memory stale without replacement:
+```bash
+cued contacts memory stale memory-id-here
+```
+
+Before writing a memory, verify at least one of:
+- deterministic handle evidence: LinkedIn profile URL/id, email, phone, or platform id;
+- strong DM history with the contact;
+- local message evidence that directly supports the memory.
+
+Do not write a memory from name-only web search. Skip memory writes for weak contacts, bots, OTP/verification senders, one-off spam, placeholders, LinkedIn-only imports with no local interaction, or duplicate-name clusters without exact normalized-handle overlap.
+
+## Contact Enrichment
+
+Enrichment is a local-first identity task, not a web search task. Prioritize contacts that are likely to matter and only write successful, identity-linked memories.
+
+Queue candidates in this order:
+- high-recency or high-volume human DMs with missing company/profile context;
+- contacts with deterministic handles or profile URLs already in `contact_handles` / `contact_sources`;
+- duplicate clusters where exact handles can enrich the canonical record;
+- high-value contacts from recent meetings, calls, or messages that still lack public profile context.
+
+Deprioritize or skip service senders, newsletters, stores, bots, OTP/verification senders, one-off contacts, family/private contacts unless explicitly requested, and contacts with only a name and no local relationship evidence.
+
+Use this source order:
+1. Local identity evidence: exact email, phone, LinkedIn URL/id, platform user id, profile URL, message history.
+2. Existing public profile URL from `contact_sources.profile_url` or `contact_handles`.
+3. Web search for the exact profile handle or exact full name plus known affiliation.
+4. Cross-profile links from a verified source, such as a personal site linking GitHub/X/LinkedIn.
+
+Identity proof tiers:
+- **Write**: an exact local profile URL/handle matches the public page, or a verified public page links to another profile with the same handle/name/affiliation.
+- **Review**: name and affiliation mostly match, but there are multiple plausible people or one key detail conflicts.
+- **No write**: name-only search, weak affiliation match, conflicting profiles, private/unverifiable account, or no useful long-term fact.
+
+Good enrichment memories are compact and claim-specific:
+- public profile graph: personal site, LinkedIn, GitHub, X, portfolio;
+- current company/role only when supported by a current profile or recent local message;
+- durable interests or work areas only when supported by local messages or a profile bio;
+- useful follow-up context, such as likely founder/investor/recruiting relevance.
+
+Do not update canonical contact fields from web search unless identity is deterministic and the field is directly supported. Prefer `cued contacts memory add ... --source web --evidence ...` for researched context. If two verified sources disagree, either supersede a stale memory with evidence or write nothing and report the conflict.
