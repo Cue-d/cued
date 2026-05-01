@@ -3,13 +3,13 @@ import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync 
 import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { CUED_APP_BUNDLE_IDENTIFIER, CUED_LEGACY_LAUNCH_AGENT_LABELS } from "../core/identity.js";
 import { resolveMacOSNativeBinary } from "../runtime/native-binary.js";
 import { terminateCompetingDaemons } from "./competing-daemons.js";
 
 const APP_NAME = "Cued.app";
 const APP_EXECUTABLE_NAME = "CuedDaemon";
-const LAUNCH_AGENT_LABEL = "dev.cued.daemon";
-const APP_BUNDLE_IDENTIFIER = "dev.cued.app";
+const LEGACY_LAUNCH_AGENT_LABEL = CUED_LEGACY_LAUNCH_AGENT_LABELS[0];
 
 type NativeLoginItemStatus = {
   enabled: boolean;
@@ -87,7 +87,7 @@ export function isValidCuedAppBundle(appPath: string): boolean {
   try {
     const info = readFileSync(infoPath, "utf8");
     return (
-      readInfoPlistValue(info, "CFBundleIdentifier") === APP_BUNDLE_IDENTIFIER &&
+      readInfoPlistValue(info, "CFBundleIdentifier") === CUED_APP_BUNDLE_IDENTIFIER &&
       readInfoPlistValue(info, "CFBundleExecutable") === APP_EXECUTABLE_NAME &&
       readInfoPlistValue(info, "CFBundleName") === "Cued"
     );
@@ -226,7 +226,7 @@ export function installMacOSAppFromSource(
 }
 
 function launchAgentPath(): string {
-  return join(homedir(), "Library", "LaunchAgents", `${LAUNCH_AGENT_LABEL}.plist`);
+  return join(homedir(), "Library", "LaunchAgents", `${LEGACY_LAUNCH_AGENT_LABEL}.plist`);
 }
 
 export function getLaunchAgentPlistPath(): string {
@@ -234,7 +234,7 @@ export function getLaunchAgentPlistPath(): string {
 }
 
 function legacyLaunchAgentServiceTarget(): string {
-  return `gui/${currentUid()}/${LAUNCH_AGENT_LABEL}`;
+  return `gui/${currentUid()}/${LEGACY_LAUNCH_AGENT_LABEL}`;
 }
 
 function parseLaunchAgentPath(details: string): string | null {
@@ -314,7 +314,7 @@ export function getLegacyLaunchAgentStatus(): LegacyLaunchAgentStatus {
     });
     const plistPath = parseLaunchAgentPath(details) ?? fallbackPath;
     return {
-      label: LAUNCH_AGENT_LABEL,
+      label: LEGACY_LAUNCH_AGENT_LABEL,
       plistPath,
       installed: existsSync(plistPath),
       loaded: true,
@@ -322,7 +322,7 @@ export function getLegacyLaunchAgentStatus(): LegacyLaunchAgentStatus {
     };
   } catch (error) {
     return {
-      label: LAUNCH_AGENT_LABEL,
+      label: LEGACY_LAUNCH_AGENT_LABEL,
       plistPath: fallbackPath,
       installed: existsSync(fallbackPath),
       loaded: false,
@@ -415,7 +415,7 @@ export function getAppBundleInfo(appPath?: string): Record<string, unknown> {
     executablePath: appExecutablePath(resolvedAppPath),
     infoPath,
     version: getAppBundleVersion(resolvedAppPath),
-    bundleIdentifier: isValidCuedAppBundle(resolvedAppPath) ? APP_BUNDLE_IDENTIFIER : null,
+    bundleIdentifier: isValidCuedAppBundle(resolvedAppPath) ? CUED_APP_BUNDLE_IDENTIFIER : null,
     infoPlistPreview: existsSync(infoPath) ? readFileSync(infoPath, "utf8").slice(0, 800) : null,
   };
 }

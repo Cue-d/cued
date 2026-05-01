@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { cuedAuthKeychainService, legacyCuedAuthKeychainService } from "../../../core/identity.js";
 import type { Platform } from "../../../core/types/provider.js";
 import { openCuedDatabaseReadOnly } from "../../../db/database.js";
 
@@ -7,6 +8,42 @@ export interface IntegrationSecretPayload {
   keychainAccount: string;
   metadata: Record<string, unknown>;
   secret: Record<string, unknown>;
+}
+
+export function authKeychainService(platform: Platform): string {
+  return cuedAuthKeychainService(platform);
+}
+
+export function legacyAuthKeychainService(platform: Platform): string {
+  return legacyCuedAuthKeychainService(platform);
+}
+
+export function loadKeychainSecret(
+  service: string,
+  account: string,
+): Record<string, unknown> | null {
+  try {
+    const stdout = execFileSync(
+      "security",
+      ["find-generic-password", "-s", service, "-a", account, "-w"],
+      { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
+    );
+    return JSON.parse(stdout) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
+
+export function storeKeychainSecret(
+  service: string,
+  account: string,
+  secret: Record<string, unknown>,
+): void {
+  execFileSync(
+    "security",
+    ["add-generic-password", "-U", "-s", service, "-a", account, "-w", JSON.stringify(secret)],
+    { stdio: ["ignore", "ignore", "pipe"] },
+  );
 }
 
 export function loadIntegrationSecret(
@@ -34,17 +71,18 @@ export function loadIntegrationSecret(
       );
     }
 
-    const stdout = execFileSync(
-      "security",
-      ["find-generic-password", "-s", keychainService, "-a", keychainAccount, "-w"],
-      { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
-    );
+    const secret = loadKeychainSecret(keychainService, keychainAccount);
+    if (!secret) {
+      throw new Error(
+        `${platform} integration '${accountKey}' is missing stored Keychain credentials`,
+      );
+    }
 
     return {
       keychainService,
       keychainAccount,
       metadata,
-      secret: JSON.parse(stdout) as Record<string, unknown>,
+      secret,
     };
   } finally {
     db.close();

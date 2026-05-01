@@ -318,7 +318,7 @@ cat > "$CONTENTS_DIR/Info.plist" <<EOF
   <key>CFBundleExecutable</key>
   <string>$APP_EXECUTABLE_NAME</string>
   <key>CFBundleIdentifier</key>
-  <string>dev.cued.app</string>
+  <string>so.cued.desktop</string>
   <key>CFBundleInfoDictionaryVersion</key>
   <string>6.0</string>
   <key>CFBundleName</key>

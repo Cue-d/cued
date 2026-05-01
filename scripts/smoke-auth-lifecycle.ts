@@ -26,7 +26,7 @@ type IntegrationRow = {
 const runId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 const cuedHome =
   process.env.CUED_AUTH_SMOKE_HOME || mkdtempSync(join(tmpdir(), "cued-auth-smoke-"));
-const shadowKeychainService = `dev.cued.smoke.auth.${runId}`;
+const shadowKeychainService = `so.cued.desktop.smoke.auth.${runId}`;
 const cleanup = process.env.CUED_AUTH_SMOKE_KEEP_HOME !== "1";
 
 const cases: PlatformCase[] = [

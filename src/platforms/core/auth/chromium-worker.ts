@@ -1,6 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { mkdirSync } from "node:fs";
 import { type BrowserContext, type Cookie, chromium, type Page, type Request } from "playwright";
+import { cuedAuthKeychainService } from "../../../core/identity.js";
 
 declare const localStorage: {
   getItem(key: string): string | null;
@@ -268,7 +269,7 @@ async function extractSlackAuth(
   const teamName = typeof team.name === "string" ? team.name : teamId;
   const userId = typeof team.user_id === "string" ? team.user_id : "";
   return {
-    keychainService: "dev.cued.auth.slack",
+    keychainService: cuedAuthKeychainService("slack"),
     keychainAccount: teamId,
     secret: {
       token: team.token,
@@ -317,7 +318,7 @@ async function extractLinkedInAuth(
   );
 
   return {
-    keychainService: "dev.cued.auth.linkedin",
+    keychainService: cuedAuthKeychainService("linkedin"),
     keychainAccount: accountKey,
     secret: {
       cookies: cookies
@@ -380,7 +381,7 @@ async function extractDiscordAuth(
   const me = await fetchDiscordCurrentUser(token);
 
   return {
-    keychainService: "dev.cued.auth.discord",
+    keychainService: cuedAuthKeychainService("discord"),
     keychainAccount: accountKey,
     secret: {
       token,

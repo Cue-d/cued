@@ -212,7 +212,7 @@ process.exit(44);
 
     const completed = completeAuthSession(db, requested.authSession.id, {
       state: "authenticated",
-      keychainService: "dev.cued.auth.slack",
+      keychainService: "so.cued.desktop.auth.slack",
       keychainAccount: "T123",
       resultSummary: { teamId: "T123", teamName: "Acme" },
     });
@@ -221,7 +221,7 @@ process.exit(44);
     expect(completed.integration?.authState).toBe("authenticated");
     expect(completed.integration?.accountKey).toBe("T123");
     expect(completed.integration?.displayName).toBe("Acme");
-    expect(completed.authSession?.keychainService).toBe("dev.cued.auth.slack");
+    expect(completed.authSession?.keychainService).toBe("so.cued.desktop.auth.slack");
     expect(completed.authSession?.accountKey).toBe("T123");
     expect(db.getIntegrationState("slack", requested.integration.accountKey)).toBeNull();
 
@@ -357,7 +357,7 @@ process.exit(44);
 
     const completed = completeAuthSession(db, requested.authSession.id, {
       state: "authenticated",
-      keychainService: "dev.cued.auth.discord",
+      keychainService: "so.cued.desktop.auth.discord",
       keychainAccount: "default",
       resultSummary: {
         provider: "discord",
@@ -623,7 +623,7 @@ process.exit(44);
 
   it("imports stored LinkedIn auth into a fresh database on refresh", async () => {
     installSecurityTool({
-      "dev.cued.auth.linkedin:default": {
+      "so.cued.desktop.auth.linkedin:default": {
         cookies: [
           { name: "li_at", value: "li_at-token" },
           { name: "JSESSIONID", value: '"ajax:123"' },
@@ -644,7 +644,7 @@ process.exit(44);
           authState: "authenticated",
           syncCapable: true,
           metadata: expect.objectContaining({
-            keychainService: "dev.cued.auth.linkedin",
+            keychainService: "so.cued.desktop.auth.linkedin",
             keychainAccount: "default",
             importedSavedAt: 1234,
           }),
@@ -653,7 +653,7 @@ process.exit(44);
     );
     expect(db.getLatestAuthSession("linkedin", "default")).toMatchObject({
       state: "authenticated",
-      keychain_service: "dev.cued.auth.linkedin",
+      keychain_service: "so.cued.desktop.auth.linkedin",
       keychain_account: "default",
     });
 
@@ -662,7 +662,7 @@ process.exit(44);
 
   it("revives user-removed LinkedIn auth only during explicit connect import", () => {
     installSecurityTool({
-      "dev.cued.auth.linkedin:default": {
+      "so.cued.desktop.auth.linkedin:default": {
         cookies: [
           { name: "li_at", value: "li_at-token" },
           { name: "JSESSIONID", value: '"ajax:123"' },
@@ -684,7 +684,7 @@ process.exit(44);
       launchTarget: "https://www.linkedin.com/login",
       importedFrom: "local-cli",
       metadata: {
-        keychainService: "dev.cued.auth.linkedin",
+        keychainService: "so.cued.desktop.auth.linkedin",
         keychainAccount: "default",
       },
     });
@@ -708,7 +708,7 @@ process.exit(44);
           platform: "linkedin",
           accountKey: "default",
           metadata: expect.objectContaining({
-            keychainService: "dev.cued.auth.linkedin",
+            keychainService: "so.cued.desktop.auth.linkedin",
             keychainAccount: "default",
             userRemoved: false,
             removedAt: null,
@@ -774,7 +774,7 @@ process.exit(44);
           platform: "slack",
           accountKey: "T123",
           metadata: expect.objectContaining({
-            keychainService: "dev.cued.auth.slack",
+            keychainService: "so.cued.desktop.auth.slack",
             keychainAccount: "T123",
             userRemoved: false,
             removedAt: null,
@@ -864,7 +864,7 @@ process.exit(44);
 
     const completed = completeAuthSession(db, requested.authSession.id, {
       state: "authenticated",
-      keychainService: "dev.cued.auth.gmail",
+      keychainService: "so.cued.desktop.auth.gmail",
       keychainAccount: "theo@cued.so",
       resultSummary: {
         emailAddress: "theo@cued.so",
@@ -879,7 +879,7 @@ process.exit(44);
     expect(completed.integration?.syncCapable).toBe(true);
     expect(completed.integration?.metadata).toEqual(
       expect.objectContaining({
-        keychainService: "dev.cued.auth.gmail",
+        keychainService: "so.cued.desktop.auth.gmail",
         keychainAccount: "theo@cued.so",
       }),
     );
@@ -1211,7 +1211,7 @@ process.exit(44);
     const firstRequest = requestIntegrationAccess(db, "slack");
     const firstCompleted = completeAuthSession(db, firstRequest.authSession.id, {
       state: "authenticated",
-      keychainService: "dev.cued.auth.slack",
+      keychainService: "so.cued.desktop.auth.slack",
       keychainAccount: "T123",
       resultSummary: { teamId: "T123", teamName: "Acme" },
     });
@@ -1225,7 +1225,7 @@ process.exit(44);
 
     const secondCompleted = completeAuthSession(db, secondRequest.authSession.id, {
       state: "authenticated",
-      keychainService: "dev.cued.auth.slack",
+      keychainService: "so.cued.desktop.auth.slack",
       keychainAccount: "T123",
       resultSummary: { teamId: "T123", teamName: "Acme" },
     });
@@ -1258,7 +1258,7 @@ process.exit(44);
 
     const completed = completeAuthSession(db, requested.authSession.id, {
       state: "authenticated",
-      keychainService: "dev.cued.auth.slack",
+      keychainService: "so.cued.desktop.auth.slack",
       keychainAccount: "T123",
       resultSummary: { teamId: "T123", teamName: "Acme" },
     });

@@ -3,8 +3,8 @@ import { randomBytes } from "node:crypto";
 import { chmodSync, existsSync } from "node:fs";
 import Database from "better-sqlite3-multiple-ciphers";
 import { ensureCuedDirs } from "../core/config.js";
+import { CUED_DB_KEYCHAIN_SERVICE, CUED_LEGACY_DB_KEYCHAIN_SERVICES } from "../core/identity.js";
 
-const DB_KEYCHAIN_SERVICE = "dev.cued.db";
 const DB_KEYCHAIN_ACCOUNT = "local-db-key";
 
 type SQLiteOpenOptions = {
@@ -49,6 +49,9 @@ function hardenDbPaths(dbPath: string): void {
 export function loadOrCreateDatabaseKey(): string {
   const existingKey = loadExistingDatabaseKey();
   if (existingKey) {
+    if (shouldUseKeychainBackedDatabaseKey()) {
+      migrateDatabaseKeyToCurrentService();
+    }
     return existingKey;
   }
 
@@ -65,38 +68,49 @@ export function loadExistingDatabaseKey(): string | null {
     return `vitest-worker-${vitestWorkerKey}`;
   }
 
-  try {
-    const key = execFileSync(
-      "security",
-      ["find-generic-password", "-s", DB_KEYCHAIN_SERVICE, "-a", DB_KEYCHAIN_ACCOUNT, "-w"],
-      { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
-    ).trim();
-    if (key.length > 0) {
-      return key;
+  const services = [CUED_DB_KEYCHAIN_SERVICE, ...CUED_LEGACY_DB_KEYCHAIN_SERVICES];
+  for (const service of services) {
+    try {
+      const key = execFileSync(
+        "security",
+        ["find-generic-password", "-s", service, "-a", DB_KEYCHAIN_ACCOUNT, "-w"],
+        { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
+      ).trim();
+      if (key.length > 0) {
+        return key;
+      }
+    } catch {
+      // Try the next known service name.
     }
-  } catch {
-    return null;
   }
   return null;
+}
+
+function shouldUseKeychainBackedDatabaseKey(): boolean {
+  return !process.env.CUED_DB_KEY?.trim() && !process.env.VITEST_WORKER_ID?.trim();
+}
+
+function storeDatabaseKey(key: string): void {
+  execFileSync(
+    "security",
+    [
+      "add-generic-password",
+      "-U",
+      "-s",
+      CUED_DB_KEYCHAIN_SERVICE,
+      "-a",
+      DB_KEYCHAIN_ACCOUNT,
+      "-w",
+      key,
+    ],
+    { stdio: ["ignore", "ignore", "pipe"] },
+  );
 }
 
 function createAndStoreDatabaseKey(): string {
   const key = randomBytes(32).toString("hex");
   try {
-    execFileSync(
-      "security",
-      [
-        "add-generic-password",
-        "-U",
-        "-s",
-        DB_KEYCHAIN_SERVICE,
-        "-a",
-        DB_KEYCHAIN_ACCOUNT,
-        "-w",
-        key,
-      ],
-      { stdio: ["ignore", "ignore", "pipe"] },
-    );
+    storeDatabaseKey(key);
   } catch {
     const existingKey = loadExistingDatabaseKey();
     if (existingKey && existingKey.length > 0) {
@@ -105,6 +119,27 @@ function createAndStoreDatabaseKey(): string {
     throw new Error("Failed to create or load the Cued database encryption key");
   }
   return key;
+}
+
+export function migrateDatabaseKeyToCurrentService(): boolean {
+  const key = loadExistingDatabaseKey();
+  if (!key) {
+    return false;
+  }
+  try {
+    const key = execFileSync(
+      "security",
+      ["find-generic-password", "-s", CUED_DB_KEYCHAIN_SERVICE, "-a", DB_KEYCHAIN_ACCOUNT, "-w"],
+      { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
+    ).trim();
+    if (key.length > 0) {
+      return false;
+    }
+  } catch {
+    storeDatabaseKey(key);
+    return true;
+  }
+  return false;
 }
 
 export function openSqliteDatabase(
@@ -148,6 +183,9 @@ export function openSqliteDatabase(
   const key = loadExistingDatabaseKey();
   if (!key) {
     throw new Error("Failed to load the Cued database encryption key for an existing encrypted DB");
+  }
+  if (!options.readonly && shouldUseKeychainBackedDatabaseKey()) {
+    migrateDatabaseKeyToCurrentService();
   }
   sqlite = new Database(dbPath, openOptions);
   applyKey(sqlite, key);

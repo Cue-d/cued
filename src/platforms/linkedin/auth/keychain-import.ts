@@ -1,13 +1,19 @@
-import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 import { CUED_BROWSER_DIR } from "../../../core/config.js";
 import { safeParseJsonRecord, safeParseJsonStringArray } from "../../../db/codecs.js";
 import type { CuedDatabase } from "../../../db/database.js";
+import {
+  authKeychainService,
+  legacyAuthKeychainService,
+  loadKeychainSecret,
+  storeKeychainSecret,
+} from "../../core/secrets/keychain.js";
 import { completeAuthSession } from "../../core/state/mutations.js";
 import { isUserRemovedIntegrationMetadata } from "../../core/state/status.js";
 import { type LinkedInSessionSecret, parseLinkedInSessionSecret } from "./session-store.js";
 
-const LINKEDIN_KEYCHAIN_SERVICE = "dev.cued.auth.linkedin";
+const LINKEDIN_KEYCHAIN_SERVICE = authKeychainService("linkedin");
+const LEGACY_LINKEDIN_KEYCHAIN_SERVICE = legacyAuthKeychainService("linkedin");
 const LINKEDIN_DEFAULT_ACCOUNT_KEY = "default";
 
 export interface ImportedLinkedInSessionResult {
@@ -21,16 +27,15 @@ function getChromiumProfileDir(accountKey: string): string {
 }
 
 function readLinkedInKeychainSecret(accountKey: string): Record<string, unknown> | null {
-  try {
-    const stdout = execFileSync(
-      "security",
-      ["find-generic-password", "-s", LINKEDIN_KEYCHAIN_SERVICE, "-a", accountKey, "-w"],
-      { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
-    );
-    return JSON.parse(stdout) as Record<string, unknown>;
-  } catch {
-    return null;
+  const current = loadKeychainSecret(LINKEDIN_KEYCHAIN_SERVICE, accountKey);
+  if (current) {
+    return current;
   }
+  const legacy = loadKeychainSecret(LEGACY_LINKEDIN_KEYCHAIN_SERVICE, accountKey);
+  if (legacy) {
+    storeKeychainSecret(LINKEDIN_KEYCHAIN_SERVICE, accountKey, legacy);
+  }
+  return legacy;
 }
 
 function getCookieNames(session: LinkedInSessionSecret): string[] {

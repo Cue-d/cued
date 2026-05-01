@@ -8,7 +8,7 @@ private let appDaemonHeartbeatGraceMs = 120_000
 private let appSingletonLockStaleMs = 15_000
 private let singletonLockSlotBytes = 1_024
 private let singletonLockSlotCount = 2
-private let menuBarReopenNotificationName = Notification.Name("dev.cued.menuBar.reopen")
+private let menuBarReopenNotificationName = Notification.Name("so.cued.desktop.menuBar.reopen")
 private let appMessagesDBPath =
   FileManager.default.homeDirectoryForCurrentUser
   .appendingPathComponent("Library/Messages/chat.db").path
@@ -952,7 +952,7 @@ final class AppStatusStore: @unchecked Sendable {
 
 private final class DatabaseActivityMonitor: @unchecked Sendable {
   private let dbPath: String
-  private let queue = DispatchQueue(label: "dev.cued.status-watch")
+  private let queue = DispatchQueue(label: "so.cued.desktop.status-watch")
   private let onChange: @MainActor () -> Void
   private var directorySource: DispatchSourceFileSystemObject?
   private var dbSource: DispatchSourceFileSystemObject?

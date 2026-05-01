@@ -13,5 +13,6 @@ cask "cued" do
   zap trash: [
     "~/.cued",
     "~/Library/LaunchAgents/dev.cued.daemon.plist",
+    "~/Library/LaunchAgents/so.cued.desktop.daemon.plist",
   ]
 end

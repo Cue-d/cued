@@ -61,7 +61,7 @@ describe("IntegrationAuthService", () => {
       launchTarget: "https://slack.com/signin",
       importedFrom: "slack-desktop-cdp",
       metadata: {
-        keychainService: "dev.cued.auth.slack",
+        keychainService: "so.cued.desktop.auth.slack",
         keychainAccount: accountKey,
         authResult: { teamId: accountKey, teamName: displayName },
         browserProfileDir: `/tmp/cued/slack/${accountKey}`,

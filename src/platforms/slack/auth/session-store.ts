@@ -1,11 +1,15 @@
-import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 import { CUED_BROWSER_DIR } from "../../../core/config.js";
 import type { CuedDatabase } from "../../../db/database.js";
+import {
+  authKeychainService,
+  loadKeychainSecret,
+  storeKeychainSecret,
+} from "../../core/secrets/keychain.js";
 import { completeAuthSession } from "../../core/state/mutations.js";
 import { isUserRemovedIntegrationMetadata } from "../../core/state/status.js";
 
-const SLACK_KEYCHAIN_SERVICE = "dev.cued.auth.slack";
+const SLACK_KEYCHAIN_SERVICE = authKeychainService("slack");
 
 export interface StoredSlackSessionPayload {
   accountKey: string;
@@ -39,22 +43,11 @@ function storeSecretInKeychain(
   account: string,
   secret: Record<string, unknown>,
 ): void {
-  execFileSync(
-    "security",
-    ["add-generic-password", "-U", "-s", service, "-a", account, "-w", JSON.stringify(secret)],
-    { stdio: ["ignore", "ignore", "pipe"] },
-  );
+  storeKeychainSecret(service, account, secret);
 }
 
 function keychainSecretExists(service: string, account: string): boolean {
-  try {
-    execFileSync("security", ["find-generic-password", "-s", service, "-a", account, "-w"], {
-      stdio: ["ignore", "ignore", "pipe"],
-    });
-    return true;
-  } catch {
-    return false;
-  }
+  return loadKeychainSecret(service, account) !== null;
 }
 
 export function storeSlackSession(

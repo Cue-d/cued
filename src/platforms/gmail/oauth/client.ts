@@ -2,8 +2,9 @@ import { createHash, randomBytes } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { cuedAuthKeychainService } from "../../../core/identity.js";
 
-export const GMAIL_KEYCHAIN_SERVICE = "dev.cued.auth.gmail";
+export const GMAIL_KEYCHAIN_SERVICE = cuedAuthKeychainService("gmail");
 export const GMAIL_READONLY_SCOPE = "https://www.googleapis.com/auth/gmail.readonly";
 export const GOOGLE_OAUTH_CLIENT_RESOURCE_PATH =
   "Contents/Resources/oauth/google-oauth-client.json";

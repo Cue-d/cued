@@ -82,7 +82,7 @@ cued sync run contacts
 
 Discord currently uses a Chromium auth capture flow plus local polling for new messages.
 
-- Auth is stored in the Keychain under `dev.cued.auth.discord`.
+- Auth is stored in the Keychain under `so.cued.desktop.auth.discord`.
 - The sync worker is DM-only and does not enumerate guild or server channels.
 - Outbound Discord sends are DM-only.
 - The sync worker hydrates up to 50 messages in the 5 most recent unproven DMs during sync.
