@@ -17,6 +17,7 @@ import {
   getAuthSessionSummary,
   getIntegrationSummary,
   listRequestableIntegrationPlatforms,
+  refreshPersistedRequestableIntegrationStates,
 } from "../state/status.js";
 import { type Platform, parsePlatform } from "../types.js";
 import { runAuthSessionSync, startAuthSession } from "./runtime.js";
@@ -205,34 +206,35 @@ export class IntegrationAuthService {
     authSession: ReturnType<typeof getAuthSessionSummary>;
   }> {
     const completed = completeAuthSession(this.db, sessionId, input);
-    if (completed.integration?.authState === "authenticated") {
-      if (
-        !this.db.hasQueuedOrRunningRun(
-          completed.integration.platform,
-          completed.integration.accountKey,
-        )
-      ) {
+    let integration = completed.integration;
+    if (integration?.authState === "authenticated") {
+      refreshPersistedRequestableIntegrationStates(this.db);
+      integration = getIntegrationSummary(this.db, integration.platform, integration.accountKey);
+    }
+
+    if (integration?.authState === "authenticated" && integration.syncCapable) {
+      if (!this.db.hasQueuedOrRunningRun(integration.platform, integration.accountKey)) {
         this.db.queueSyncRun({
-          platform: completed.integration.platform,
-          accountKey: completed.integration.accountKey,
+          platform: integration.platform,
+          accountKey: integration.accountKey,
           runType: "sync",
           trigger: "integration_authenticated",
           details: {
-            source: completed.integration.platform,
-            accountKey: completed.integration.accountKey,
+            source: integration.platform,
+            accountKey: integration.accountKey,
             trigger: "integration_authenticated",
           },
         });
         lifecycle.wakeIngest?.();
       }
-      await lifecycle.emitAuthenticatedHook?.(
-        completed.integration.platform,
-        completed.integration.accountKey,
-      );
+    }
+
+    if (integration?.authState === "authenticated") {
+      await lifecycle.emitAuthenticatedHook?.(integration.platform, integration.accountKey);
     }
 
     return {
-      integration: completed.integration,
+      integration,
       authSession: completed.authSession,
     };
   }

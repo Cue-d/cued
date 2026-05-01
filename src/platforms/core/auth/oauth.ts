@@ -34,6 +34,30 @@ export interface OAuthAuthHandle {
   completion: Promise<OAuthAuthResult>;
 }
 
+export function parseOAuthAuthHelperResult(input: {
+  code: number | null;
+  stdout: string;
+  stderr: string;
+}): OAuthAuthResult {
+  const stdout = input.stdout.trim();
+  const stderr = input.stderr.trim();
+  if (input.code === 0 && stdout) {
+    try {
+      return JSON.parse(stdout) as OAuthAuthResult;
+    } catch (error) {
+      throw new Error(
+        `OAuth auth helper returned invalid JSON: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
+  }
+
+  throw new Error(
+    stderr || stdout || `OAuth auth helper exited with code ${input.code ?? "unknown"}`,
+  );
+}
+
 function openUrl(url: string): void {
   const opener =
     process.platform === "darwin" ? "open" : process.platform === "win32" ? "cmd" : "xdg-open";
@@ -163,13 +187,11 @@ export function startOAuthAuthSession(
     child.once("close", (code) => {
       const stdout = Buffer.concat(stdoutChunks).toString("utf8").trim();
       const stderr = Buffer.concat(stderrChunks).toString("utf8").trim();
-      if (code === 0 && stdout) {
-        resolve(JSON.parse(stdout) as OAuthAuthResult);
-        return;
+      try {
+        resolve(parseOAuthAuthHelperResult({ code, stdout, stderr }));
+      } catch (error) {
+        reject(error);
       }
-      reject(
-        new Error(stderr || stdout || `OAuth auth helper exited with code ${code ?? "unknown"}`),
-      );
     });
   });
   return { child, completion };

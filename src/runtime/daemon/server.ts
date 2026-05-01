@@ -272,7 +272,7 @@ type PendingSignalEcho = {
 };
 
 function getAutoSyncTargets(
-  db: ReturnType<typeof openCuedDatabase>,
+  db: Pick<ReturnType<typeof openCuedDatabase>, "listEnabledSyncTargets">,
 ): Array<{ platform: AdapterPlatform; accountKey: string }> {
   const configured = process.env.CUED_AUTOSYNC_PLATFORMS?.split(",")
     .map((value) => value.trim())
@@ -302,6 +302,20 @@ function getAutoSyncTargets(
     platform,
     accountKey: getDefaultAccountKeyForPlatform(platform),
   }));
+}
+
+export function buildSyncResumeTargets(
+  db: Pick<ReturnType<typeof openCuedDatabase>, "listEnabledSyncTargets" | "listCheckpointTargets">,
+): Array<{ platform: AdapterPlatform; accountKey: string }> {
+  return [
+    ...getAutoSyncTargets(db),
+    ...db
+      .listCheckpointTargets()
+      .filter((target): target is { platform: AdapterPlatform; account_key: string } =>
+        isAdapterPlatform(target.platform),
+      )
+      .map((target) => ({ platform: target.platform, accountKey: target.account_key })),
+  ];
 }
 
 function getAutoSyncIntervalMs(platform?: AdapterPlatform): number {
@@ -4088,24 +4102,10 @@ async function dispatchRequest(
           result: runQueueService.queueSyncRun(request.source),
         };
       case "sync-resume": {
-        const targets = [
-          ...getAutoSyncTargets(db).map((target) => `${target.platform}:${target.accountKey}`),
-          ...db
-            .listCheckpointTargets()
-            .filter((target) => isAdapterPlatform(target.platform))
-            .map((target) => `${target.platform}:${target.account_key}`),
-        ];
         return {
           id: request.id,
           ok: true,
-          result: runQueueService.queueSyncResume(
-            targets.flatMap((targetKey) => {
-              const [platform, accountKey] = targetKey.split(":");
-              return platform && accountKey && isAdapterPlatform(platform)
-                ? [{ platform, accountKey }]
-                : [];
-            }),
-          ),
+          result: runQueueService.queueSyncResume(buildSyncResumeTargets(db)),
         };
       }
       case "shutdown-for-update":

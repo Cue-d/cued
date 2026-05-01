@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildSyncResumeTargets,
   isDisconnectedSocketError,
   shouldProjectIngestRunInline,
   shouldSkipConnectedDiscordSchedulerSync,
@@ -88,5 +89,35 @@ describe("daemon socket errors", () => {
     error.code = "EACCES";
     expect(isDisconnectedSocketError(error)).toBe(false);
     expect(isDisconnectedSocketError("EPIPE")).toBe(false);
+  });
+});
+
+describe("sync resume targets", () => {
+  it("preserves account keys that contain colons", () => {
+    expect(
+      buildSyncResumeTargets({
+        listEnabledSyncTargets: () => [
+          {
+            platform: "slack",
+            account_key: "workspace:team",
+          },
+        ],
+        listCheckpointTargets: () => [
+          {
+            platform: "gmail",
+            account_key: "theo@example.com",
+          },
+        ],
+      }),
+    ).toEqual([
+      {
+        platform: "slack",
+        accountKey: "workspace:team",
+      },
+      {
+        platform: "gmail",
+        accountKey: "theo@example.com",
+      },
+    ]);
   });
 });
