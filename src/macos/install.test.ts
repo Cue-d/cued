@@ -79,13 +79,13 @@ describe("macOS app bundle resolution", () => {
   }
 
   it("accepts the canonical cued app bundle", () => {
-    const appPath = createAppBundle(createTempDir("cued-valid-app-"), "dev.cued.app");
+    const appPath = createAppBundle(createTempDir("cued-valid-app-"), "so.cued.desktop");
     expect(isValidCuedAppBundle(appPath)).toBe(true);
   });
 
   it("ignores legacy app bundles and falls back to the valid candidate", () => {
-    const legacy = createAppBundle(createTempDir("cued-legacy-app-"), "so.cued.desktop");
-    const valid = createAppBundle(createTempDir("cued-valid-app-"), "dev.cued.app");
+    const legacy = createAppBundle(createTempDir("cued-legacy-app-"), "legacy.invalid.app");
+    const valid = createAppBundle(createTempDir("cued-valid-app-"), "so.cued.desktop");
 
     expect(resolveInstalledAppPathFromCandidates([legacy, valid])).toBe(valid);
   });
@@ -96,7 +96,7 @@ describe("macOS app bundle resolution", () => {
 
   it("reports login item status alongside legacy launch agent state", () => {
     const homeDir = setTempHome();
-    const appPath = createAppBundle(createTempDir("cued-valid-app-"), "dev.cued.app");
+    const appPath = createAppBundle(createTempDir("cued-valid-app-"), "so.cued.desktop");
     process.env.CUED_APP_PATH = appPath;
 
     const plistPath = join(homeDir, "Library", "LaunchAgents", "dev.cued.daemon.plist");
@@ -129,7 +129,7 @@ describe("macOS app bundle resolution", () => {
 
   it("uses the launchctl-reported plist path when the shell HOME differs", () => {
     setTempHome();
-    const appPath = createAppBundle(createTempDir("cued-valid-app-"), "dev.cued.app");
+    const appPath = createAppBundle(createTempDir("cued-valid-app-"), "so.cued.desktop");
     process.env.CUED_APP_PATH = appPath;
 
     const actualHome = createTempDir("cued-actual-home-");
@@ -158,7 +158,7 @@ describe("macOS app bundle resolution", () => {
 
   it("migrates an existing legacy launch agent when enabling the login item", () => {
     const homeDir = setTempHome();
-    const appPath = createAppBundle(createTempDir("cued-valid-app-"), "dev.cued.app");
+    const appPath = createAppBundle(createTempDir("cued-valid-app-"), "so.cued.desktop");
     process.env.CUED_APP_PATH = appPath;
 
     const plistPath = join(homeDir, "Library", "LaunchAgents", "dev.cued.daemon.plist");
@@ -202,7 +202,7 @@ describe("macOS app bundle resolution", () => {
 
   it("disables the native login item and removes any legacy plist", () => {
     const homeDir = setTempHome();
-    const appPath = createAppBundle(createTempDir("cued-valid-app-"), "dev.cued.app");
+    const appPath = createAppBundle(createTempDir("cued-valid-app-"), "so.cued.desktop");
     process.env.CUED_APP_PATH = appPath;
 
     const plistPath = join(homeDir, "Library", "LaunchAgents", "dev.cued.daemon.plist");

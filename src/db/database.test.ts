@@ -636,7 +636,7 @@ describe("CuedDatabase", () => {
       nativePid: null,
       startedAt: 10,
       finishedAt: 20,
-      keychainService: "dev.cued.auth.slack",
+      keychainService: "so.cued.desktop.auth.slack",
       keychainAccount: "workspace-a",
       resultSummary: { teamId: "T123" },
     });
@@ -646,7 +646,7 @@ describe("CuedDatabase", () => {
       expect.objectContaining({
         id: sessionId,
         state: "authenticated",
-        keychain_service: "dev.cued.auth.slack",
+        keychain_service: "so.cued.desktop.auth.slack",
         keychain_account: "workspace-a",
         result_summary_json: JSON.stringify({ teamId: "T123" }),
       }),

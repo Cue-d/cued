@@ -1912,7 +1912,7 @@ private enum ManagedAuthPlatform: String {
   }
 
   var keychainService: String {
-    "dev.cued.auth.\(rawValue)"
+    "so.cued.desktop.auth.\(rawValue)"
   }
 
   var desktopUserAgent: String {

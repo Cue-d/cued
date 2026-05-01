@@ -75,7 +75,7 @@ describe("cued skill installer", () => {
 <plist version="1.0">
 <dict>
   <key>CFBundleIdentifier</key>
-  <string>dev.cued.app</string>
+  <string>so.cued.desktop</string>
   <key>CFBundleExecutable</key>
   <string>CuedDaemon</string>
   <key>CFBundleName</key>

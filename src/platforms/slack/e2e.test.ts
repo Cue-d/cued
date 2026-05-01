@@ -163,7 +163,7 @@ echo '{"token":"xoxc-test","cookie":"cookie-test","teamId":"T123","teamName":"Ac
       launchTarget: "https://slack.com/signin",
       importedFrom: "slack-desktop-cdp",
       metadata: {
-        keychainService: "dev.cued.auth.slack",
+        keychainService: "so.cued.desktop.auth.slack",
         keychainAccount: "workspace-a",
         authManagedBy: "chromium-runtime",
       },
