@@ -4,9 +4,18 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CuedDatabase } from "../../../db/database.js";
+import type { SlackHelperInspection } from "../../slack/helper/binary.js";
 import { IntegrationAuthService } from "./service.js";
 
 const importSlackDesktopAuthMock = vi.hoisted(() => vi.fn());
+const inspectSlackHelperMock = vi.hoisted(() =>
+  vi.fn<() => SlackHelperInspection>(() => ({
+    helperPath: "/tmp/cued-slack-helper",
+    version: "0.1.0",
+    protocolVersion: 1,
+    versionSupported: true,
+  })),
+);
 const startAuthSessionMock = vi.hoisted(() =>
   vi.fn(() => ({
     child: { pid: 12345 } as ChildProcess,
@@ -16,6 +25,10 @@ const startAuthSessionMock = vi.hoisted(() =>
 
 vi.mock("../../slack/auth/desktop-import.js", () => ({
   importSlackDesktopAuth: importSlackDesktopAuthMock,
+}));
+
+vi.mock("../../slack/helper/binary.js", () => ({
+  inspectSlackHelper: inspectSlackHelperMock,
 }));
 
 vi.mock("../../linkedin/auth/keychain-import.js", () => ({
@@ -124,6 +137,32 @@ describe("IntegrationAuthService", () => {
     expect(result.authSession?.accountKey).toBe("T_NEW");
     expect(activeAuthSessions.size).toBe(0);
     expect(startAuthSessionMock).not.toHaveBeenCalled();
+
+    db.close();
+  });
+
+  it("does not queue a Slack sync when reusable auth is not helper-ready", async () => {
+    const db = createDb();
+    upsertAuthenticatedSlack(db, "T_EXISTING", "Existing");
+    importSlackDesktopAuthMock.mockResolvedValue([]);
+    inspectSlackHelperMock.mockReturnValue({
+      helperPath: null,
+      version: null,
+      protocolVersion: null,
+      versionSupported: false,
+    });
+    const wakeIngest = vi.fn();
+
+    const service = new IntegrationAuthService(db);
+    const result = await service.connectManaged("slack", "T_EXISTING", new Map(), {
+      wakeIngest,
+    });
+
+    expect(result.integration.accountKey).toBe("T_EXISTING");
+    expect(result.integration.authState).toBe("authenticated");
+    expect(result.integration.syncCapable).toBe(false);
+    expect(db.listRecentRuns(1)).toEqual([]);
+    expect(wakeIngest).not.toHaveBeenCalled();
 
     db.close();
   });
