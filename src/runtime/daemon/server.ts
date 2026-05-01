@@ -3745,8 +3745,30 @@ async function probeExistingSocket(): Promise<"active" | "stale"> {
   });
 }
 
+export function isDisconnectedSocketError(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+  const code = (error as NodeJS.ErrnoException).code;
+  return code === "EPIPE" || code === "ECONNRESET" || code === "ERR_STREAM_DESTROYED";
+}
+
+function handleSocketError(error: unknown): void {
+  if (isDisconnectedSocketError(error)) {
+    return;
+  }
+  daemonLogger.warn("daemon socket error", error);
+}
+
 function writeResponse(socket: Socket, response: DaemonResponse): void {
-  socket.write(`${JSON.stringify(response)}\n`);
+  if (socket.destroyed || !socket.writable) {
+    return;
+  }
+  socket.write(`${JSON.stringify(response)}\n`, (error) => {
+    if (error) {
+      handleSocketError(error);
+    }
+  });
 }
 
 function handleSocket(
@@ -3765,6 +3787,8 @@ function handleSocket(
   requestUpdateShutdown: () => { shuttingDown: boolean; requestedAt: number | null },
 ): void {
   let buffer = "";
+
+  socket.on("error", handleSocketError);
 
   socket.on("data", (chunk) => {
     buffer += chunk.toString("utf8");
