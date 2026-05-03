@@ -1266,7 +1266,9 @@ public struct InstallerPlatformIcon: View {
     switch platform {
     case "slack":
       9
-    case "discord", "linkedin", "signal", "whatsapp":
+    case "linkedin":
+      5
+    case "discord", "signal", "whatsapp":
       7
     default:
       7
