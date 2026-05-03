@@ -113,3 +113,17 @@ These are not part of the normal inner loop, but they matter when validating pac
 - `pnpm sign:notarize:macos`
 
 See [../scripts/README.md](../scripts/README.md) for the script-level details.
+
+## Open Source Maintenance
+
+Community-facing project files live at the repository root:
+
+- `LICENSE`
+- `CONTRIBUTING.md`
+- `SECURITY.md`
+- `PRIVACY.md`
+- `CODE_OF_CONDUCT.md`
+- `ROADMAP.md`
+- `docs/integration-policy.md`
+
+Keep these files current when changing install paths, supported integrations, credential handling, or release behavior.

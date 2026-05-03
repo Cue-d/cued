@@ -1,0 +1,57 @@
+name: Bug Report
+description: Report a reproducible Cued bug
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not attach real `~/.cued/local.db` files, message exports, Keychain payloads, tokens, cookies, OAuth secrets, or private logs. For security issues, email theo@cued.so instead of opening a public issue.
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What happened?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps To Reproduce
+      placeholder: |
+        1. Run ...
+        2. Connect ...
+        3. See ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected Behavior
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Cued Version
+      placeholder: "0.1.x or commit SHA"
+  - type: dropdown
+    id: install_path
+    attributes:
+      label: Install Path
+      options:
+        - GitHub Release DMG
+        - GitHub Release terminal installer
+        - Source build
+        - Other
+  - type: input
+    id: macos
+    attributes:
+      label: macOS Version
+      placeholder: "macOS 15.4"
+  - type: textarea
+    id: logs
+    attributes:
+      label: Redacted Logs
+      description: Paste only redacted logs. Remove names, message text, tokens, cookies, emails, local paths, and account IDs where possible.
+      render: shell
