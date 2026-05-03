@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { buildAdapterInvocationEnv, readAdapterInvocationEnv } from "./invocation.js";
+import {
+  buildAdapterInvocationEnv,
+  readAdapterInvocationEnv,
+  selectAdapterInvocationProofs,
+} from "./invocation.js";
 
 describe("adapter invocation env", () => {
   it("preserves legacy cursor env vars while adding generic cursor env", () => {
@@ -69,4 +73,61 @@ describe("adapter invocation env", () => {
       syncProofs: [{ scopeKey: "C1", proofKind: "messages" }],
     });
   });
+
+  it("bounds Slack invocation proofs to the active conversation", () => {
+    const proofs = [
+      proofRow("conversation", "C1", "messages", "complete"),
+      proofRow("conversation", "C1", "replies", "running"),
+      proofRow("conversation", "C2", "messages", "running"),
+      proofRow("account", "workspace", "messages", "running"),
+    ];
+
+    expect(
+      selectAdapterInvocationProofs({
+        platform: "slack",
+        proofs,
+        sourceCursor: {
+          scan: {
+            activeConversationId: "C1",
+          },
+        },
+      }),
+    ).toEqual([proofs[0], proofs[1]]);
+  });
+
+  it("bounds LinkedIn invocation proofs to active account and message resume state", () => {
+    const proofs = [
+      proofRow("account", "default", "discovery", "running"),
+      proofRow("conversation", "urn:li:fs_conversation:CONV_LONG", "messages", "running"),
+      proofRow("conversation", "urn:li:fs_conversation:OTHER", "messages", "running"),
+      proofRow("conversation", "urn:li:fs_conversation:CONV_LONG", "discovery", "complete"),
+    ];
+
+    expect(
+      selectAdapterInvocationProofs({
+        platform: "linkedin",
+        proofs,
+        sourceCursor: {
+          scan: {
+            activeConversation: {
+              entityURN: "urn:li:fsd_conversation:CONV_LONG",
+            },
+          },
+        },
+      }),
+    ).toEqual([proofs[0], proofs[1]]);
+  });
 });
+
+function proofRow(scopeKind: string, scopeKey: string, proofKind: string, status: string) {
+  return {
+    scope_kind: scopeKind,
+    scope_key: scopeKey,
+    proof_kind: proofKind,
+    status,
+    resume_cursor_json: null,
+    coverage_json: null,
+    stats_json: null,
+    last_observed_at: 1,
+  };
+}
