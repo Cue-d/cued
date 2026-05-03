@@ -989,23 +989,27 @@ describe("buildLinkedInSyncBundle", () => {
 
     expect(first.hasMore).toBe(true);
     expect(first.sourceCursor).toEqual(
-      expect.not.objectContaining({
-        scan: expect.anything(),
+      expect.objectContaining({
+        scan: expect.objectContaining({
+          activeConversation: expect.objectContaining({
+            entityURN: conversation.entityURN,
+          }),
+        }),
+      }),
+    );
+    expect(first.sourceCursor).toEqual(
+      expect.objectContaining({
+        scan: expect.not.objectContaining({
+          activeMessageCursor: expect.anything(),
+        }),
       }),
     );
     expect(first.proofs).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           proofKind: "discovery",
-          status: "running",
-          resumeCursor: expect.objectContaining({
-            activeConversation: expect.objectContaining({
-              entityURN: conversation.entityURN,
-            }),
-            activeMessageCursor: expect.objectContaining({
-              prevCursor: "cursor-10",
-            }),
-          }),
+          status: "complete",
+          resumeCursor: null,
         }),
         expect.objectContaining({
           proofKind: "messages",

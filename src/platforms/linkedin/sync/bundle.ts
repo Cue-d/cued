@@ -960,7 +960,6 @@ export async function buildLinkedInSyncBundle(options?: {
 
     const proofs: SyncProofInput[] = [];
     let stoppedAtConversationIndex: number | null = null;
-    let stoppedMessageCursor: LinkedInMessageResumeCursor | null = null;
 
     const ingestConversation = async (
       conversation: Conversation,
@@ -1068,7 +1067,6 @@ export async function buildLinkedInSyncBundle(options?: {
         await ingestConversation(conversation, result.messages, result);
         if (!result.complete && !result.error) {
           stoppedAtConversationIndex = index;
-          stoppedMessageCursor = result.resumeCursor;
           break;
         }
       }
@@ -1095,11 +1093,10 @@ export async function buildLinkedInSyncBundle(options?: {
             conversationCursor: conversationResult.resumeScan?.conversationCursor ?? null,
             oldestLastActivity: conversationResult.resumeScan?.oldestLastActivity ?? null,
             activeConversation: stoppedConversation,
-            activeMessageCursor: stoppedMessageCursor,
             pendingConversations,
           }
         : undefined;
-    const discoveryComplete = !hasMore;
+    const discoveryComplete = !hasMoreConversationPages;
     proofs.unshift(
       buildLinkedInDiscoveryProof({
         accountKey,
@@ -1108,7 +1105,7 @@ export async function buildLinkedInSyncBundle(options?: {
         runStartedAt: scan?.startedAt ?? observedBase,
         syncMode,
         complete: discoveryComplete,
-        resumeScan: discoveryComplete ? null : (nextScan ?? null),
+        resumeScan: discoveryComplete ? null : (conversationResult.resumeScan ?? null),
         conversationCount: conversationResult.conversations.length,
         syncToken: conversationResult.syncToken ?? savedSyncToken,
       }),
@@ -1121,6 +1118,7 @@ export async function buildLinkedInSyncBundle(options?: {
         lastSyncAt: hasMore ? previousLastSyncAt : observedBase,
         syncToken: conversationResult.syncToken ?? savedSyncToken,
         userEntityUrn,
+        scan: nextScan,
       },
       syncMode,
       hasMore,
