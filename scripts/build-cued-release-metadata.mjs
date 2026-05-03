@@ -13,7 +13,7 @@ const version =
   JSON.parse(readFileSync(join(rootDir, "package.json"), "utf8")).version;
 const tag = process.env.CUED_RELEASE_TAG ?? `v${version}`;
 const repo = process.env.CUED_RELEASE_REPO ?? "Cue-d/cued";
-const channel = process.env.CUED_RELEASE_CHANNEL ?? "internal";
+const channel = process.env.CUED_RELEASE_CHANNEL ?? "stable";
 const publishedAt = process.env.CUED_RELEASE_PUBLISHED_AT ?? new Date().toISOString();
 
 const artifactNames = {

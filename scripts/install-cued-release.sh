@@ -8,7 +8,7 @@ if [[ "$(uname -s)" != "Darwin" ]]; then
 fi
 
 REPO="${CUED_RELEASE_REPO:-Cue-d/cued}"
-CHANNEL="${CUED_RELEASE_CHANNEL:-internal}"
+CHANNEL="${CUED_RELEASE_CHANNEL:-stable}"
 API_BASE="${CUED_RELEASE_API_BASE:-https://api.github.com}"
 APP_NAME="Cued.app"
 TARBALL_NAME="cued-macos-arm64.tar.gz"
