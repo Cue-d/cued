@@ -96,6 +96,37 @@ describe("Gmail sync bundle", () => {
     );
   });
 
+  it("marks unfinished historical pages with account pagination continuation", async () => {
+    gmailClientMock.listMessages.mockResolvedValue({
+      messages: [{ id: "m-1", threadId: "t-1" }],
+      nextPageToken: "next-page",
+    });
+    gmailClientMock.getMessage.mockResolvedValue(
+      gmailMessage({
+        id: "m-1",
+        threadId: "t-1",
+        from: "Friend <friend@example.com>",
+      }),
+    );
+
+    const bundle = await buildGmailSyncBundle({
+      accountKey: "me@example.com",
+      pageBudget: 1,
+    });
+
+    expect(bundle.hasMore).toBe(true);
+    expect(bundle.continuation).toEqual({
+      reason: "account_pagination",
+      detail: "Gmail historical message page token remains",
+    });
+    expect(bundle.proofs?.[0]).toEqual(
+      expect.objectContaining({
+        proofKind: "messages",
+        status: "running",
+      }),
+    );
+  });
+
   it("merges participants across messages in the same Gmail thread", () => {
     const rawEvents = buildGmailRawEvents({
       accountKey: "me@example.com",

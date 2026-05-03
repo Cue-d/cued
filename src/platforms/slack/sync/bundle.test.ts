@@ -799,21 +799,26 @@ describe("slack worker lib", () => {
         conversationCursor: null,
         conversationIndex: 0,
         activeConversationId: "C123",
-        historyCursor: "history-2",
-        historyComplete: false,
-        conversationPhase: "history",
-        threadRootCount: 0,
-        completedThreadCount: 0,
-        pendingThreadTs: [],
-        activeThreadTs: null,
-        repliesCursor: null,
       },
     });
+    expect(first.proofs).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          proofKind: "messages",
+          status: "running",
+          resumeCursor: expect.objectContaining({
+            historyCursor: "history-2",
+            conversationPhase: "history",
+          }),
+        }),
+      ]),
+    );
 
     const second = await buildSlackSyncBundle({
       accountKey: "default",
       apiPageBudget: 1,
       sourceCursor: first.sourceCursor,
+      syncProofs: first.proofs,
       client: {
         async testAuth() {
           return { ok: true, team_id: "T123", user_id: "U_SELF", team: "Acme", user: "Ava" };
@@ -950,21 +955,33 @@ describe("slack worker lib", () => {
         conversationCursor: null,
         conversationIndex: 0,
         activeConversationId: "C123",
-        historyCursor: null,
-        historyComplete: true,
-        conversationPhase: "threads",
-        threadRootCount: 1,
-        completedThreadCount: 0,
-        pendingThreadTs: [],
-        activeThreadTs: "1710000000.000100",
-        repliesCursor: "reply-2",
       },
     });
+    expect(first.proofs).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          proofKind: "messages",
+          status: "complete",
+          resumeCursor: null,
+        }),
+        expect.objectContaining({
+          proofKind: "replies",
+          status: "running",
+          resumeCursor: expect.objectContaining({
+            activeThreadTs: "1710000000.000100",
+            repliesCursor: "reply-2",
+            pendingThreadTs: [],
+            conversationPhase: "threads",
+          }),
+        }),
+      ]),
+    );
 
     const second = await buildSlackSyncBundle({
       accountKey: "default",
       apiPageBudget: 2,
       sourceCursor: first.sourceCursor,
+      syncProofs: first.proofs,
       client: {
         async testAuth() {
           return { ok: true, team_id: "T123", user_id: "U_SELF", team: "Acme", user: "Ava" };
@@ -1115,12 +1132,30 @@ describe("slack worker lib", () => {
     expect(first.sourceCursor).toEqual(
       expect.objectContaining({
         scan: expect.objectContaining({
-          conversationPhase: "history",
-          historyCursor: "history-2",
-          pendingThreadTs: ["1710000000.000100"],
-          activeThreadTs: null,
+          activeConversationId: "C123",
         }),
       }),
+    );
+    expect(first.proofs).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          proofKind: "messages",
+          status: "running",
+          resumeCursor: expect.objectContaining({
+            historyCursor: "history-2",
+            conversationPhase: "history",
+          }),
+        }),
+        expect.objectContaining({
+          proofKind: "replies",
+          status: "running",
+          resumeCursor: expect.objectContaining({
+            pendingThreadTs: ["1710000000.000100"],
+            activeThreadTs: null,
+            conversationPhase: "history",
+          }),
+        }),
+      ]),
     );
   });
 

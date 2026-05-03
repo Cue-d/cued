@@ -36,12 +36,14 @@ import {
 } from "../../core/types/provider.js";
 import { safeParseJsonRecord, safeParseJsonStringArray } from "../../db/codecs.js";
 import { type CuedDatabase, type OutboundMessageRow, openCuedDatabase } from "../../db/database.js";
+import { buildAdapterInvocationEnv } from "../../platforms/core/invocation.js";
 import { isAdapterPlatform, listAutoSyncPlatforms } from "../../platforms/core/registry.js";
 import { runAdapter } from "../../platforms/core/runner.js";
 import { loadIntegrationSecret } from "../../platforms/core/secrets/keychain.js";
 import { refreshLocalIntegrationStates } from "../../platforms/core/state/local-refresh.js";
 import { refreshManagedIntegrationStates } from "../../platforms/core/state/refresh.js";
 import { getIntegrationSummary } from "../../platforms/core/state/status.js";
+import type { SyncContinuation } from "../../platforms/core/sync.js";
 import {
   DiscordApiClient,
   isDiscordAuthInvalidationError,
@@ -686,22 +688,6 @@ function resolveCheckpointSyncMode(
   }
 
   return bundleSyncMode === "incremental" ? "incremental" : "full";
-}
-
-function buildDiscordSyncProofEnv(db: CuedDatabase, accountKey: string): string | null {
-  const proofs = db
-    .listSyncProofs("discord", accountKey)
-    .filter((proof) => proof.proof_kind === "latest_messages" || proof.proof_kind === "messages")
-    .map((proof) => ({
-      scopeKey: proof.scope_key,
-      proofKind: proof.proof_kind,
-      status: proof.status,
-      resumeCursor: safeParseJsonRecord(proof.resume_cursor_json, "sync_proofs.resume_cursor_json"),
-      coverage: safeParseJsonRecord(proof.coverage_json, "sync_proofs.coverage_json"),
-      lastObservedAt: proof.last_observed_at,
-    }));
-
-  return proofs.length > 0 ? JSON.stringify(proofs) : null;
 }
 
 function withRawEventAcquisitionMode(
@@ -3417,45 +3403,11 @@ export async function runDaemon(): Promise<void> {
         checkpoint?.source_cursor_json ?? null,
         "sync_checkpoints.source_cursor_json",
       );
-      const envOverrides: Record<string, string> = {};
-      if (platform === "imessage" && typeof sourceCursor?.rowId === "number") {
-        envOverrides.CUED_IMESSAGE_LAST_ROWID = String(sourceCursor.rowId);
-      }
-      if (platform === "imessage" && checkpoint?.source_cursor_json) {
-        envOverrides.CUED_IMESSAGE_SOURCE_CURSOR = checkpoint.source_cursor_json;
-      }
-      if (platform === "slack" && typeof sourceCursor?.lastSyncAt === "number") {
-        envOverrides.CUED_SLACK_LAST_SYNC_AT = String(sourceCursor.lastSyncAt);
-      }
-      if (platform === "slack" && checkpoint?.source_cursor_json) {
-        envOverrides.CUED_SLACK_SOURCE_CURSOR = checkpoint.source_cursor_json;
-      }
-      if (platform === "discord" && checkpoint?.source_cursor_json) {
-        envOverrides.CUED_DISCORD_SOURCE_CURSOR = checkpoint.source_cursor_json;
-      }
-      if (platform === "discord") {
-        const syncProofs = buildDiscordSyncProofEnv(db, accountKey);
-        if (syncProofs) {
-          envOverrides.CUED_DISCORD_SYNC_PROOFS = syncProofs;
-        }
-      }
-      if (platform === "linkedin") {
-        if (checkpoint?.source_cursor_json) {
-          envOverrides.CUED_LINKEDIN_SOURCE_CURSOR = checkpoint.source_cursor_json;
-        }
-        if (typeof sourceCursor?.lastSyncAt === "number") {
-          envOverrides.CUED_LINKEDIN_LAST_SYNC_AT = String(sourceCursor.lastSyncAt);
-        }
-        if (typeof sourceCursor?.syncToken === "string" && sourceCursor.syncToken.length > 0) {
-          envOverrides.CUED_LINKEDIN_SYNC_TOKEN = sourceCursor.syncToken;
-        }
-      }
-      if (platform === "gmail" && checkpoint?.source_cursor_json) {
-        envOverrides.CUED_GMAIL_SOURCE_CURSOR = checkpoint.source_cursor_json;
-      }
-      if (platform === "signal" && typeof sourceCursor?.lastSyncAt === "number") {
-        envOverrides.CUED_SIGNAL_LAST_SYNC_AT = String(sourceCursor.lastSyncAt);
-      }
+      const envOverrides = buildAdapterInvocationEnv({
+        platform,
+        checkpointSourceCursorJson: checkpoint?.source_cursor_json ?? null,
+        proofs: db.listSyncProofs(platform, accountKey),
+      });
 
       const adapterStartedAt = now();
       let adapterFetchMs = 0;
@@ -3466,6 +3418,7 @@ export async function runDaemon(): Promise<void> {
         ? "incremental"
         : "full";
       let bundleSourceCursor: Record<string, unknown> | null = null;
+      let bundleContinuation: SyncContinuation | null = null;
       let runDiagnostics: Record<string, unknown> | null = null;
       let checkpointLastSuccessAt = now();
       let sourceAccounts: Array<{
@@ -3575,6 +3528,17 @@ export async function runDaemon(): Promise<void> {
         } while (hasMore && pageCount < pageBudget);
 
         bundleHasMore = hasMore;
+        bundleContinuation = hasMore
+          ? {
+              reason: "account_pagination",
+              detail: "WhatsApp helper resync page remains",
+              scope: {
+                kind: "account",
+                key: "messages",
+                proofKind: "messages",
+              },
+            }
+          : null;
         bundleSourceCursor = {
           lastSyncAt: hasMore
             ? (whatsappCursor.lastSyncAt ?? checkpoint?.last_success_at)
@@ -3623,6 +3587,7 @@ export async function runDaemon(): Promise<void> {
           (bundle.sourceCursor as Record<string, unknown> | undefined | null) ?? null;
         bundleSyncMode = bundle.syncMode ?? bundleSyncMode;
         bundleHasMore = bundle.hasMore ?? false;
+        bundleContinuation = bundle.continuation ?? null;
         const bundleDiagnostics =
           bundle.diagnostics && Object.keys(bundle.diagnostics).length > 0
             ? bundle.diagnostics
@@ -3787,6 +3752,7 @@ export async function runDaemon(): Promise<void> {
         hasMore: bundleHasMore,
         syncMode: checkpointSyncMode,
         timings,
+        ...(bundleContinuation ? { continuation: bundleContinuation } : {}),
         ...(runDiagnostics ? { diagnostics: runDiagnostics } : {}),
       });
       if (platform === "signal") {
@@ -3803,6 +3769,7 @@ export async function runDaemon(): Promise<void> {
             source: currentRun.platform,
             accountKey,
             trigger: "ingest_continue",
+            ...(bundleContinuation ? { continuation: bundleContinuation } : {}),
           },
         });
         schedulers.wakeIngest(syncContinueDelayMs);

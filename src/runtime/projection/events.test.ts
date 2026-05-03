@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   assertCanonicalNormalizedSchemaForWrite,
+  assertCanonicalRawEventPayloadForWrite,
   normalizeStoredRawEventForProjection,
 } from "./events.js";
 
@@ -128,6 +129,20 @@ describe("normalized raw event registry", () => {
       assertCanonicalNormalizedSchemaForWrite("timeline_event.linkedin_system_message@1"),
     ).toThrowError(
       "New raw events must use canonical normalized schemas. Received 'timeline_event.linkedin_system_message@1'.",
+    );
+  });
+
+  it("rejects malformed canonical payloads for new writes", () => {
+    expect(() =>
+      assertCanonicalRawEventPayloadForWrite({
+        entityKind: "message",
+        eventKind: "created",
+        payload: {
+          sourceConversationKey: "conversation-1",
+        },
+      }),
+    ).toThrow(
+      "Raw event payload for 'message.created@1' must include string field 'sourceMessageKey'.",
     );
   });
 

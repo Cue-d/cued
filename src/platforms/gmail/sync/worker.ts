@@ -1,10 +1,9 @@
+import { readAdapterInvocationEnv } from "../../core/invocation.js";
 import { buildGmailSyncBundle } from "./bundle.js";
 
 async function main(): Promise<void> {
   try {
-    const sourceCursor = process.env.CUED_GMAIL_SOURCE_CURSOR
-      ? JSON.parse(process.env.CUED_GMAIL_SOURCE_CURSOR)
-      : undefined;
+    const invocation = readAdapterInvocationEnv("gmail");
     const pageBudget = process.env.CUED_GMAIL_PAGE_BUDGET
       ? Number(process.env.CUED_GMAIL_PAGE_BUDGET)
       : undefined;
@@ -16,7 +15,7 @@ async function main(): Promise<void> {
       : undefined;
     const bundle = await buildGmailSyncBundle({
       accountKey: process.env.CUED_ACCOUNT_KEY,
-      sourceCursor,
+      sourceCursor: invocation.sourceCursor,
       pageBudget: Number.isFinite(pageBudget) ? pageBudget : undefined,
       pageSize: Number.isFinite(pageSize) ? pageSize : undefined,
       fetchConcurrency: Number.isFinite(fetchConcurrency) ? fetchConcurrency : undefined,
