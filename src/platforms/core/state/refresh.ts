@@ -42,7 +42,7 @@ async function buildSignalManagedState(
   } else if (existing?.auth_state === "cancelled") {
     authState = "cancelled";
   } else {
-    authState = "blocked";
+    authState = "needs_auth";
   }
 
   return {
@@ -106,7 +106,7 @@ async function buildWhatsAppManagedState(
       } else if (existing?.auth_state === "cancelled") {
         authState = "cancelled";
       } else {
-        authState = "blocked";
+        authState = "needs_auth";
       }
     } catch {
       authState = existing?.auth_state === "cancelled" ? "cancelled" : "blocked";

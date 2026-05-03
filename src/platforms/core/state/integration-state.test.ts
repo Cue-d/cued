@@ -109,6 +109,27 @@ exit 1
     return helperPath;
   }
 
+  function createWhatsAppHelper(input: { authenticated?: boolean } = {}): string {
+    const helperPath = join(createTempDir("cued-whatsapp-helper-bin-"), "cued-whatsapp-helper");
+    const authenticated = input.authenticated === true;
+    writeFileSync(
+      helperPath,
+      `#!/bin/sh
+if [ "$1" = "version" ]; then
+  echo '{"version":"0.1.0"}'
+  exit 0
+fi
+if [ "$1" = "status" ]; then
+  echo '{"authenticated":${authenticated ? "true" : "false"},"accountJid":${authenticated ? '"15551234567@s.whatsapp.net"' : "null"},"pushName":${authenticated ? '"Theo"' : "null"},"helperVersion":"0.1.0"}'
+  exit 0
+fi
+exit 1
+`,
+    );
+    chmodSync(helperPath, 0o755);
+    return helperPath;
+  }
+
   function createSecurityTool(
     secretByServiceAndAccount: Record<string, Record<string, unknown>>,
   ): string {
@@ -853,6 +874,40 @@ process.exit(44);
             syncTransport: "slack-helper",
             slackHelperVersion: "0.1.0",
             slackHelperVersionSupported: true,
+          }),
+        }),
+      ]),
+    );
+    db.close();
+  });
+
+  it("marks bundled QR helpers without linked devices as needing auth", async () => {
+    installSecurityTool({});
+    process.env.CUED_APP_PATH = createPackagedSignalHelper("0.14.1");
+    process.env.CUED_WHATSAPP_HELPER_BINARY = createWhatsAppHelper({ authenticated: false });
+    process.env.CUED_SLACK_APP_BINARY = join(createTempDir("cued-no-slack-app-"), "Slack");
+
+    const db = createDb();
+    await refreshManagedIntegrationStates(db);
+
+    expect(listIntegrationStates(db)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          platform: "signal",
+          accountKey: "default",
+          authState: "needs_auth",
+          syncCapable: false,
+          capability: expect.objectContaining({
+            availability: "available",
+          }),
+        }),
+        expect.objectContaining({
+          platform: "whatsapp",
+          accountKey: "default",
+          authState: "needs_auth",
+          syncCapable: false,
+          capability: expect.objectContaining({
+            availability: "available",
           }),
         }),
       ]),
