@@ -59,6 +59,7 @@ export function assertCanonicalRawEventPayloadForWrite(
       return;
     case "call.observed@1":
       assertStringField(normalizedSchema, event.payload, "sourceCallKey");
+      assertStringField(normalizedSchema, event.payload, "sourceConversationKey");
       assertNumberField(normalizedSchema, event.payload, "startedAt");
       return;
     case "message.created@1":
@@ -71,6 +72,7 @@ export function assertCanonicalRawEventPayloadForWrite(
     case "reaction.added@1":
     case "reaction.removed@1":
       assertStringField(normalizedSchema, event.payload, "sourceMessageKey");
+      assertStringField(normalizedSchema, event.payload, "sourceConversationKey");
       assertStringField(normalizedSchema, event.payload, "emoji");
       return;
     case "participant.joined@1":

@@ -144,6 +144,32 @@ describe("normalized raw event registry", () => {
     ).toThrow(
       "Raw event payload for 'message.created@1' must include string field 'sourceMessageKey'.",
     );
+
+    expect(() =>
+      assertCanonicalRawEventPayloadForWrite({
+        entityKind: "reaction",
+        eventKind: "added",
+        payload: {
+          sourceMessageKey: "message-1",
+          emoji: "👍",
+        },
+      }),
+    ).toThrow(
+      "Raw event payload for 'reaction.added@1' must include string field 'sourceConversationKey'.",
+    );
+
+    expect(() =>
+      assertCanonicalRawEventPayloadForWrite({
+        entityKind: "call",
+        eventKind: "observed",
+        payload: {
+          sourceCallKey: "call-1",
+          startedAt: 1,
+        },
+      }),
+    ).toThrow(
+      "Raw event payload for 'call.observed@1' must include string field 'sourceConversationKey'.",
+    );
   });
 
   it("canonicalizes legacy normalized schemas during projection normalization", () => {
