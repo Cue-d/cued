@@ -25,7 +25,11 @@ import {
   resolveRawEventNormalizedSchema,
 } from "../core/types/provider.js";
 import { normalizePhone, toE164 } from "../core/utils/phone.js";
-import { assertCanonicalNormalizedSchemaForWrite } from "../runtime/projection/events.js";
+import { assertKnownSyncProofKindContract } from "../platforms/core/proofs.js";
+import {
+  assertCanonicalNormalizedSchemaForWrite,
+  assertCanonicalRawEventPayloadForWrite,
+} from "../runtime/projection/events.js";
 import type {
   PendingRollbackState,
   UpdateErrorState,
@@ -503,6 +507,7 @@ function buildRawEventValues(event: RawEventInput) {
   const provenance = normalizeRawEventProvenance(event.provenance);
   const normalizedSchema = resolveRawEventNormalizedSchema(event);
   assertCanonicalNormalizedSchemaForWrite(normalizedSchema);
+  assertCanonicalRawEventPayloadForWrite({ ...event, normalizedSchema });
   return {
     id: event.id,
     platform: event.platform,
@@ -1183,6 +1188,7 @@ export class CuedDatabase {
   }
 
   upsertSyncProof(input: { platform: Platform; accountKey: string; proof: SyncProofInput }): void {
+    assertKnownSyncProofKindContract(input.platform, input.proof);
     const timestamp = now();
     const scopeId = buildSyncScopeId(
       input.platform,

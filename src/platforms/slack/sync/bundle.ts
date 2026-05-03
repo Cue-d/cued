@@ -60,6 +60,18 @@ export interface SlackSourceCursor {
   scan?: SlackScanCursor;
 }
 
+type SlackSyncProofSnapshot = {
+  scopeKind: string;
+  scopeKey: string;
+  proofKind: string;
+  status: string;
+  resumeCursor: Record<string, unknown> | null;
+  coverage: Record<string, unknown> | null;
+  stats: Record<string, unknown> | null;
+};
+
+type SlackSyncProofState = Map<string, Map<string, SlackSyncProofSnapshot>>;
+
 function now(): number {
   return Date.now();
 }
@@ -320,6 +332,102 @@ function parseSlackSourceCursor(raw: unknown): SlackSourceCursor | undefined {
     lastSyncAt,
     knownConversationIds,
     scan,
+  };
+}
+
+function parseSlackSyncProofState(raw: unknown): SlackSyncProofState {
+  const state: SlackSyncProofState = new Map();
+  if (!Array.isArray(raw)) {
+    return state;
+  }
+  for (const entry of raw) {
+    if (!entry || typeof entry !== "object") {
+      continue;
+    }
+    const proof = entry as Record<string, unknown>;
+    const scope =
+      proof.scope && typeof proof.scope === "object"
+        ? (proof.scope as Record<string, unknown>)
+        : null;
+    const scopeKind = typeof proof.scopeKind === "string" ? proof.scopeKind : scope?.kind;
+    const scopeKey = typeof proof.scopeKey === "string" ? proof.scopeKey : scope?.key;
+    if (
+      scopeKind !== "conversation" ||
+      typeof scopeKey !== "string" ||
+      typeof proof.proofKind !== "string"
+    ) {
+      continue;
+    }
+    const byKind = state.get(scopeKey) ?? new Map<string, SlackSyncProofSnapshot>();
+    byKind.set(proof.proofKind, {
+      scopeKind,
+      scopeKey,
+      proofKind: proof.proofKind,
+      status: typeof proof.status === "string" ? proof.status : "",
+      resumeCursor:
+        proof.resumeCursor && typeof proof.resumeCursor === "object"
+          ? (proof.resumeCursor as Record<string, unknown>)
+          : null,
+      coverage:
+        proof.coverage && typeof proof.coverage === "object"
+          ? (proof.coverage as Record<string, unknown>)
+          : null,
+      stats:
+        proof.stats && typeof proof.stats === "object"
+          ? (proof.stats as Record<string, unknown>)
+          : null,
+    });
+    state.set(scopeKey, byKind);
+  }
+  return state;
+}
+
+function slackResumeStateFromProofs(
+  proofState: SlackSyncProofState,
+  conversationId: string,
+): Partial<SlackConversationResumeState> | undefined {
+  const proofs = proofState.get(conversationId);
+  if (!proofs) {
+    return undefined;
+  }
+  const messagesCursor = proofs.get("messages")?.resumeCursor;
+  const repliesProof = proofs.get("replies");
+  const repliesCursor = repliesProof?.resumeCursor;
+  const cursor = repliesCursor ?? messagesCursor;
+  if (!cursor) {
+    return undefined;
+  }
+  return {
+    historyCursor:
+      typeof messagesCursor?.historyCursor === "string" || messagesCursor?.historyCursor === null
+        ? messagesCursor.historyCursor
+        : null,
+    historyComplete:
+      messagesCursor?.conversationPhase === "threads" ||
+      messagesCursor?.conversationPhase === "complete" ||
+      repliesCursor?.conversationPhase === "threads" ||
+      repliesCursor?.conversationPhase === "complete",
+    threadRootCount:
+      typeof repliesProof?.stats?.threadRootCount === "number"
+        ? repliesProof.stats.threadRootCount
+        : typeof messagesCursor?.threadRootCount === "number"
+          ? messagesCursor.threadRootCount
+          : 0,
+    completedThreadCount:
+      typeof repliesProof?.coverage?.completedThreadCount === "number"
+        ? repliesProof.coverage.completedThreadCount
+        : 0,
+    pendingThreadTs: parseStringArray(
+      repliesCursor?.pendingThreadTs ?? messagesCursor?.pendingThreadTs,
+    ),
+    activeThreadTs:
+      typeof repliesCursor?.activeThreadTs === "string" || repliesCursor?.activeThreadTs === null
+        ? repliesCursor.activeThreadTs
+        : null,
+    repliesCursor:
+      typeof repliesCursor?.repliesCursor === "string" || repliesCursor?.repliesCursor === null
+        ? repliesCursor.repliesCursor
+        : null,
   };
 }
 
@@ -650,6 +758,7 @@ function buildSlackBackfillConversationProof(input: {
     pendingThreadCount:
       input.messageBatch.resumeState.pendingThreadTs.length +
       (input.messageBatch.resumeState.activeThreadTs ? 1 : 0),
+    pendingThreadTs: input.messageBatch.resumeState.pendingThreadTs,
     activeThreadTs: input.messageBatch.resumeState.activeThreadTs,
     repliesCursor: input.messageBatch.resumeState.repliesCursor,
     oldestMessageTs: range.oldest,
@@ -711,6 +820,7 @@ export async function buildSlackSyncBundle(options?: {
   accountKey?: string;
   lastSyncAt?: number;
   sourceCursor?: unknown;
+  syncProofs?: unknown;
   client?: SlackTransport;
   conversationPageLimit?: number;
   messagesPageLimit?: number;
@@ -720,6 +830,7 @@ export async function buildSlackSyncBundle(options?: {
   const loadedAuth = options?.client ? null : loadSlackAuthFromKeychain(accountKey);
   const client = options?.client ?? new SlackHelperClient(loadedAuth!);
   const savedCursor = parseSlackSourceCursor(options?.sourceCursor);
+  const syncProofState = parseSlackSyncProofState(options?.syncProofs);
   const previousLastSyncAt =
     typeof options?.lastSyncAt === "number" ? options.lastSyncAt : savedCursor?.lastSyncAt;
 
@@ -839,7 +950,7 @@ export async function buildSlackSyncBundle(options?: {
         messagesPageLimit,
         repliesPageLimit,
         scan.activeConversationId === conversation.id
-          ? {
+          ? (slackResumeStateFromProofs(syncProofState, conversation.id) ?? {
               historyCursor: scan.historyCursor ?? null,
               historyComplete: scan.historyComplete === true,
               threadRootCount: scan.threadRootCount ?? 0,
@@ -847,7 +958,7 @@ export async function buildSlackSyncBundle(options?: {
               pendingThreadTs: scan.pendingThreadTs ?? [],
               activeThreadTs: scan.activeThreadTs ?? null,
               repliesCursor: scan.repliesCursor ?? null,
-            }
+            })
           : undefined,
         apiPageBudget,
       );
@@ -898,27 +1009,40 @@ export async function buildSlackSyncBundle(options?: {
 
       if (!messageBatch.complete) {
         hasMore = true;
+        const proofKind =
+          messageBatch.resumeState.conversationPhase === "threads" ? "replies" : "messages";
         sourceCursor = {
           teamId,
           selfUserId,
           lastSyncAt: previousLastSyncAt,
           knownConversationIds: Array.from(knownConversationIds).sort(),
           scan: {
-            ...scan,
+            mode: scan.mode,
+            startedAt: scan.startedAt,
+            oldestMs: scan.oldestMs,
             usersComplete: scan.usersComplete,
             conversationFamily: family,
             conversationCursor: scan.conversationCursor ?? null,
             conversationIndex,
             activeConversationId: conversation.id,
-            historyCursor: messageBatch.resumeState.historyCursor,
-            historyComplete: messageBatch.resumeState.historyComplete,
-            conversationPhase: messageBatch.resumeState.conversationPhase,
-            threadRootCount: messageBatch.resumeState.threadRootCount,
-            completedThreadCount: messageBatch.resumeState.completedThreadCount,
-            pendingThreadTs: messageBatch.resumeState.pendingThreadTs,
-            activeThreadTs: messageBatch.resumeState.activeThreadTs,
-            repliesCursor: messageBatch.resumeState.repliesCursor,
           },
+        };
+        return {
+          sourceAccounts,
+          rawEvents,
+          sourceCursor,
+          syncMode: scan.mode,
+          hasMore,
+          continuation: {
+            reason: "scoped_proof_continuation",
+            detail: "Slack conversation history or replies proof is still running",
+            scope: {
+              kind: "conversation",
+              key: conversation.id,
+              proofKind,
+            },
+          },
+          proofs: slackConversationProofs.flatMap(buildSlackBackfillSyncProofs),
         };
       } else if (conversationIndex + 1 < orderedConversations.length) {
         hasMore = true;
@@ -986,6 +1110,17 @@ export async function buildSlackSyncBundle(options?: {
         sourceCursor,
         syncMode: scan.mode,
         hasMore,
+        continuation: hasMore
+          ? {
+              reason: "account_pagination",
+              detail: "Slack conversation scan page remains",
+              scope: {
+                kind: "account",
+                key: "conversations",
+                proofKind: "discovery",
+              },
+            }
+          : undefined,
         proofs: slackConversationProofs.flatMap(buildSlackBackfillSyncProofs),
       };
     }
@@ -1112,6 +1247,17 @@ export async function buildSlackSyncBundle(options?: {
     sourceCursor,
     syncMode: scan.mode,
     hasMore,
+    continuation: hasMore
+      ? {
+          reason: "account_pagination",
+          detail: "Slack conversation scan page remains",
+          scope: {
+            kind: "account",
+            key: "conversations",
+            proofKind: "discovery",
+          },
+        }
+      : undefined,
     proofs: slackConversationProofs.flatMap(buildSlackBackfillSyncProofs),
   };
 }
