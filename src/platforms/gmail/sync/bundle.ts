@@ -159,6 +159,12 @@ export async function buildGmailSyncBundle(
       sourceCursor,
       syncMode: "incremental",
       hasMore,
+      continuation: hasMore
+        ? {
+            reason: "account_pagination",
+            detail: "Gmail incremental history page token remains",
+          }
+        : undefined,
       proofs: [
         {
           scope: {
@@ -270,6 +276,12 @@ export async function buildGmailSyncBundle(
     sourceCursor,
     syncMode: historicalSyncComplete ? "full" : "full",
     hasMore,
+    continuation: hasMore
+      ? {
+          reason: "account_pagination",
+          detail: "Gmail historical message page token remains",
+        }
+      : undefined,
     proofs: [
       {
         scope: {

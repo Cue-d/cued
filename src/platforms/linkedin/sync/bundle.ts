@@ -87,6 +87,11 @@ interface LinkedInSourceCursor {
   scan?: LinkedInFullScanCursor;
 }
 
+type LinkedInSyncProofState = {
+  discoveryScan: LinkedInFullScanCursor | null;
+  messageCursors: Map<string, LinkedInMessageResumeCursor>;
+};
+
 interface LinkedInMessageBatchResult {
   messages: Message[];
   complete: boolean;
@@ -178,41 +183,42 @@ function parseLinkedInMessageResumeCursor(raw: unknown): LinkedInMessageResumeCu
   };
 }
 
+function parseLinkedInFullScanCursor(raw: unknown): LinkedInFullScanCursor | undefined {
+  if (!raw || typeof raw !== "object") {
+    return undefined;
+  }
+  const parsed = raw as Record<string, unknown>;
+  if (parsed.mode !== "full" || typeof parsed.startedAt !== "number") {
+    return undefined;
+  }
+  const activeMessageCursor = parseLinkedInMessageResumeCursor(parsed.activeMessageCursor);
+  return {
+    mode: "full",
+    startedAt: parsed.startedAt,
+    conversationCursor:
+      typeof parsed.conversationCursor === "string" || parsed.conversationCursor === null
+        ? parsed.conversationCursor
+        : undefined,
+    oldestLastActivity:
+      typeof parsed.oldestLastActivity === "number" || parsed.oldestLastActivity === null
+        ? parsed.oldestLastActivity
+        : undefined,
+    activeConversation:
+      parsed.activeConversation && typeof parsed.activeConversation === "object"
+        ? (parsed.activeConversation as Conversation)
+        : null,
+    activeMessageCursor,
+    pendingConversations: parseConversations(parsed.pendingConversations),
+  };
+}
+
 function parseLinkedInSourceCursor(raw: unknown): LinkedInSourceCursor | undefined {
   if (!raw || typeof raw !== "object") {
     return undefined;
   }
 
   const value = raw as Record<string, unknown>;
-  const rawScan = value.scan;
-  const scan =
-    rawScan && typeof rawScan === "object"
-      ? (() => {
-          const parsed = rawScan as Record<string, unknown>;
-          if (parsed.mode !== "full" || typeof parsed.startedAt !== "number") {
-            return undefined;
-          }
-          const activeMessageCursor = parseLinkedInMessageResumeCursor(parsed.activeMessageCursor);
-          return {
-            mode: "full",
-            startedAt: parsed.startedAt,
-            conversationCursor:
-              typeof parsed.conversationCursor === "string" || parsed.conversationCursor === null
-                ? parsed.conversationCursor
-                : undefined,
-            oldestLastActivity:
-              typeof parsed.oldestLastActivity === "number" || parsed.oldestLastActivity === null
-                ? parsed.oldestLastActivity
-                : undefined,
-            activeConversation:
-              parsed.activeConversation && typeof parsed.activeConversation === "object"
-                ? (parsed.activeConversation as Conversation)
-                : null,
-            activeMessageCursor,
-            pendingConversations: parseConversations(parsed.pendingConversations),
-          } satisfies LinkedInFullScanCursor;
-        })()
-      : undefined;
+  const scan = parseLinkedInFullScanCursor(value.scan);
 
   return {
     lastSyncAt: typeof value.lastSyncAt === "number" ? value.lastSyncAt : undefined,
@@ -221,6 +227,45 @@ function parseLinkedInSourceCursor(raw: unknown): LinkedInSourceCursor | undefin
     userEntityUrn: typeof value.userEntityUrn === "string" ? value.userEntityUrn : undefined,
     scan,
   };
+}
+
+function parseLinkedInSyncProofState(raw: unknown, accountKey: string): LinkedInSyncProofState {
+  const state: LinkedInSyncProofState = {
+    discoveryScan: null,
+    messageCursors: new Map(),
+  };
+  if (!Array.isArray(raw)) {
+    return state;
+  }
+
+  for (const entry of raw) {
+    if (!entry || typeof entry !== "object") {
+      continue;
+    }
+    const proof = entry as Record<string, unknown>;
+    const scope =
+      proof.scope && typeof proof.scope === "object"
+        ? (proof.scope as Record<string, unknown>)
+        : null;
+    const scopeKind = typeof proof.scopeKind === "string" ? proof.scopeKind : scope?.kind;
+    const scopeKey = typeof proof.scopeKey === "string" ? proof.scopeKey : scope?.key;
+    const proofKind = typeof proof.proofKind === "string" ? proof.proofKind : null;
+    const status = typeof proof.status === "string" ? proof.status : null;
+    if (status !== "running") {
+      continue;
+    }
+    if (scopeKind === "account" && scopeKey === accountKey && proofKind === "discovery") {
+      state.discoveryScan = parseLinkedInFullScanCursor(proof.resumeCursor) ?? null;
+      continue;
+    }
+    if (scopeKind === "conversation" && typeof scopeKey === "string" && proofKind === "messages") {
+      const cursor = parseLinkedInMessageResumeCursor(proof.resumeCursor);
+      if (cursor) {
+        state.messageCursors.set(scopeKey, cursor);
+      }
+    }
+  }
+  return state;
 }
 
 function hasInboxCategory(conversation: Conversation): boolean {
@@ -798,11 +843,14 @@ export async function buildLinkedInSyncBundle(options?: {
   lastSyncAt?: number;
   syncToken?: string | null;
   sourceCursor?: unknown;
+  syncProofs?: unknown;
   client?: LinkedInClientLike;
   loadProjectedReactions?: ProjectedReactionLookup;
 }): Promise<SyncBundle> {
   const accountKey = options?.accountKey ?? process.env.CUED_ACCOUNT_KEY ?? "default";
   const savedCursor = parseLinkedInSourceCursor(options?.sourceCursor);
+  const syncProofState = parseLinkedInSyncProofState(options?.syncProofs, accountKey);
+  const resumeScan = syncProofState.discoveryScan ?? savedCursor?.scan;
   const previousLastSyncAt =
     typeof options?.lastSyncAt === "number" ? options.lastSyncAt : savedCursor?.lastSyncAt;
   const savedSyncToken =
@@ -824,11 +872,11 @@ export async function buildLinkedInSyncBundle(options?: {
   try {
     const observedBase = now();
     const cutoffMs = incrementalOldestMs(previousLastSyncAt);
-    const incremental = Boolean(!savedCursor?.scan && (previousLastSyncAt || savedSyncToken));
+    const incremental = Boolean(!resumeScan && (previousLastSyncAt || savedSyncToken));
     const syncMode = incremental ? "incremental" : "full";
     const scan: LinkedInFullScanCursor | undefined =
-      !incremental && savedCursor?.scan
-        ? savedCursor.scan
+      !incremental && resumeScan
+        ? resumeScan
         : !incremental
           ? {
               mode: "full",
@@ -1005,9 +1053,10 @@ export async function buildLinkedInSyncBundle(options?: {
       }
     } else {
       for (const [index, conversation] of validConversations.entries()) {
+        const conversationKey = normalizeConversationUrn(conversation.entityURN);
         const resumeCursor =
           scan?.activeConversation?.entityURN === conversation.entityURN
-            ? scan.activeMessageCursor
+            ? (syncProofState.messageCursors.get(conversationKey) ?? scan.activeMessageCursor)
             : null;
         const result = await listMessagesForConversation(
           client,
@@ -1035,19 +1084,6 @@ export async function buildLinkedInSyncBundle(options?: {
       conversationResult.resumeScan?.conversationCursor ||
         typeof conversationResult.resumeScan?.oldestLastActivity === "number",
     );
-    proofs.unshift(
-      buildLinkedInDiscoveryProof({
-        accountKey,
-        accountDisplayName,
-        observedAt: observedBase,
-        runStartedAt: scan?.startedAt ?? observedBase,
-        syncMode,
-        complete: !hasMoreConversationPages,
-        resumeScan: hasMoreConversationPages ? conversationResult.resumeScan : null,
-        conversationCount: conversationResult.conversations.length,
-        syncToken: conversationResult.syncToken ?? savedSyncToken,
-      }),
-    );
     const hasMore =
       !incremental &&
       (Boolean(stoppedConversation) || hasMoreConversationPages || pendingConversations.length > 0);
@@ -1063,6 +1099,20 @@ export async function buildLinkedInSyncBundle(options?: {
             pendingConversations,
           }
         : undefined;
+    const discoveryComplete = !hasMore;
+    proofs.unshift(
+      buildLinkedInDiscoveryProof({
+        accountKey,
+        accountDisplayName,
+        observedAt: observedBase,
+        runStartedAt: scan?.startedAt ?? observedBase,
+        syncMode,
+        complete: discoveryComplete,
+        resumeScan: discoveryComplete ? null : (nextScan ?? null),
+        conversationCount: conversationResult.conversations.length,
+        syncToken: conversationResult.syncToken ?? savedSyncToken,
+      }),
+    );
 
     return {
       sourceAccounts,
@@ -1071,10 +1121,28 @@ export async function buildLinkedInSyncBundle(options?: {
         lastSyncAt: hasMore ? previousLastSyncAt : observedBase,
         syncToken: conversationResult.syncToken ?? savedSyncToken,
         userEntityUrn,
-        scan: nextScan,
       },
       syncMode,
       hasMore,
+      continuation: hasMore
+        ? {
+            reason: stoppedConversation ? "scoped_proof_continuation" : "account_pagination",
+            detail: stoppedConversation
+              ? "LinkedIn conversation message proof is still running"
+              : "LinkedIn conversation discovery page remains",
+            scope: stoppedConversation
+              ? {
+                  kind: "conversation",
+                  key: stoppedConversation.entityURN,
+                  proofKind: "messages",
+                }
+              : {
+                  kind: "account",
+                  key: "conversations",
+                  proofKind: "discovery",
+                },
+          }
+        : undefined,
       proofs,
     };
   } finally {

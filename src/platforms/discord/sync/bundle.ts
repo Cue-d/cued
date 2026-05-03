@@ -336,6 +336,10 @@ export async function buildDiscordSyncBundle(
     hydrationBreakChannelId,
     hydrationRetryAfterMs,
   });
+  const hasMore = hasRunningDiscordMessageProof(proofs);
+  const firstRunningMessageProof = proofs.find(
+    (proof) => proof.proofKind === "messages" && proof.status === "running",
+  );
 
   return {
     sourceAccounts,
@@ -347,7 +351,24 @@ export async function buildDiscordSyncBundle(
       channels: nextChannelCursor,
     } satisfies DiscordSyncCursor,
     syncMode: "incremental",
-    hasMore: hasRunningDiscordMessageProof(proofs),
+    hasMore,
+    continuation: hasMore
+      ? {
+          reason:
+            hydrationRetryAfterMs != null || backfillRetryAfterMs != null
+              ? "rate_limit_backoff"
+              : "scoped_proof_continuation",
+          detail: "Discord direct-message history proof is still running",
+          delayMs: hydrationRetryAfterMs ?? backfillRetryAfterMs ?? undefined,
+          scope: firstRunningMessageProof
+            ? {
+                kind: firstRunningMessageProof.scope.kind,
+                key: firstRunningMessageProof.scope.key,
+                proofKind: firstRunningMessageProof.proofKind,
+              }
+            : undefined,
+        }
+      : undefined,
     proofs,
     diagnostics: {
       discordHydration: buildDiscordHydrationDiagnostics({

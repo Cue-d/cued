@@ -24,6 +24,7 @@ export interface SlackBackfillConversationProof {
   threadRootCount: number;
   completedThreadCount: number;
   pendingThreadCount: number;
+  pendingThreadTs?: string[];
   activeThreadTs: string | null;
   repliesCursor: string | null;
   oldestMessageTs: string | null;
@@ -98,6 +99,7 @@ export function buildSlackBackfillSyncProofs(
           : {
               activeThreadTs: proof.activeThreadTs,
               repliesCursor: proof.repliesCursor,
+              pendingThreadTs: proof.pendingThreadTs ?? [],
               conversationPhase: proof.conversationPhase,
             },
       coverage: {

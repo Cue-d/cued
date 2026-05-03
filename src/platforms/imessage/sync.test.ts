@@ -297,6 +297,10 @@ describe("imessage worker loader resolution", () => {
     expect(first.hasMore).toBe(true);
     expect(first.syncMode).toBe("full");
     expect(first.sourceCursor).toEqual({ rowId: 500, callPk: 0 });
+    expect(first.continuation).toEqual({
+      reason: "account_pagination",
+      detail: "iMessage message or call batch limit was reached",
+    });
 
     const second = buildIMessageSyncBundle({
       path: chatDbPath,

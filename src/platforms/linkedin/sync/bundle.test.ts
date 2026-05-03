@@ -907,7 +907,7 @@ describe("buildLinkedInSyncBundle", () => {
     ).toBe(false);
   });
 
-  it("stores linkedin message proof cursors and resumes full backfill from source cursor", async () => {
+  it("stores linkedin proof cursors and resumes full backfill from proof rows", async () => {
     const conversation = {
       title: "Long Thread",
       entityURN: "urn:li:fsd_conversation:CONV_LONG",
@@ -989,19 +989,24 @@ describe("buildLinkedInSyncBundle", () => {
 
     expect(first.hasMore).toBe(true);
     expect(first.sourceCursor).toEqual(
-      expect.objectContaining({
-        scan: expect.objectContaining({
-          activeConversation: expect.objectContaining({
-            entityURN: conversation.entityURN,
-          }),
-          activeMessageCursor: expect.objectContaining({
-            prevCursor: "cursor-10",
-          }),
-        }),
+      expect.not.objectContaining({
+        scan: expect.anything(),
       }),
     );
     expect(first.proofs).toEqual(
       expect.arrayContaining([
+        expect.objectContaining({
+          proofKind: "discovery",
+          status: "running",
+          resumeCursor: expect.objectContaining({
+            activeConversation: expect.objectContaining({
+              entityURN: conversation.entityURN,
+            }),
+            activeMessageCursor: expect.objectContaining({
+              prevCursor: "cursor-10",
+            }),
+          }),
+        }),
         expect.objectContaining({
           proofKind: "messages",
           status: "running",
@@ -1013,7 +1018,7 @@ describe("buildLinkedInSyncBundle", () => {
     );
 
     const getConversations = vi.fn(async () => {
-      throw new Error("resume should use source cursor active conversation");
+      throw new Error("resume should use proof state active conversation");
     });
     const getMessages = vi.fn(async () => {
       throw new Error("resume should not refetch latest page");
@@ -1021,6 +1026,7 @@ describe("buildLinkedInSyncBundle", () => {
     const resumed = await buildLinkedInSyncBundle({
       accountKey: "default",
       sourceCursor: first.sourceCursor,
+      syncProofs: first.proofs,
       loadProjectedReactions: () => new Map(),
       client: {
         async fetchSelf() {

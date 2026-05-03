@@ -2143,41 +2143,7 @@ function refreshReplyLinksForIds(conn: LocalDbExecutor, messageIds: Set<string>)
   }
 }
 
-function refreshMessageSearchIndexForIds(conn: LocalDbExecutor, messageIds: Set<string>): void {
-  for (const chunk of chunkArray([...messageIds], SQL_CHUNK_SIZE)) {
-    conn.run(sql`
-      DELETE FROM messages_fts
-      WHERE rowid IN (
-        SELECT rowid
-        FROM messages
-        WHERE id IN (${sqlValueList(chunk)})
-      )
-    `);
-    conn.run(sql`
-      INSERT INTO messages_fts (
-        rowid,
-        message_id,
-        sender_name,
-        conversation_name,
-        participant_names,
-        attachment_text,
-        content
-      )
-      SELECT
-        message_rowid,
-        message_id,
-        sender_name,
-        conversation_name,
-        participant_names,
-        attachment_text,
-        content
-      FROM message_fts_source
-      WHERE message_id IN (${sqlValueList(chunk)})
-    `);
-  }
-}
-
-function insertMessageSearchIndexForIds(conn: LocalDbExecutor, messageIds: Set<string>): void {
+function replaceMessageSearchIndexForIds(conn: LocalDbExecutor, messageIds: Set<string>): void {
   for (const chunk of chunkArray([...messageIds], SQL_CHUNK_SIZE)) {
     conn.run(sql`
       DELETE FROM messages_fts
@@ -2246,11 +2212,7 @@ function finalizeDeferredProjection(
     if (changes.touchedReactions) {
       refreshReactionCountsForIds(conn, changes.dirtyMessageIds);
     }
-    if (options?.initialProjection) {
-      insertMessageSearchIndexForIds(conn, changes.dirtyMessageIds);
-    } else {
-      refreshMessageSearchIndexForIds(conn, changes.dirtyMessageIds);
-    }
+    replaceMessageSearchIndexForIds(conn, changes.dirtyMessageIds);
   }
 
   if (changes.dirtyReplyMessageIds.size > 0) {
