@@ -34,7 +34,7 @@ const ADAPTER_DEFINITIONS: Record<AdapterPlatform, AdapterDefinition> = {
     platform: "contacts",
     workerEntrypoint: join(MODULE_DIRNAME, "../contacts/worker.js"),
     autoSync: true,
-    workerTimeoutMs: 30_000,
+    workerTimeoutMs: 120_000,
   },
   gmail: {
     platform: "gmail",

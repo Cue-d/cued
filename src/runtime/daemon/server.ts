@@ -1,10 +1,22 @@
 import { type ChildProcess, spawn } from "node:child_process";
-import { existsSync, type FSWatcher, rmSync, watch } from "node:fs";
+import {
+  existsSync,
+  type FSWatcher,
+  readFileSync,
+  renameSync,
+  rmSync,
+  watch,
+  writeFileSync,
+} from "node:fs";
 import { createConnection, createServer, type Socket } from "node:net";
 import { basename, dirname } from "node:path";
 import process from "node:process";
 import { getCurrentAppVersion, getCurrentReleaseChannel } from "../../core/app-metadata.js";
-import { CUED_DAEMON_LOCK_PATH, CUED_SOCKET_PATH } from "../../core/config.js";
+import {
+  CUED_DAEMON_LOCK_PATH,
+  CUED_MENU_BAR_STATUS_PATH,
+  CUED_SOCKET_PATH,
+} from "../../core/config.js";
 import { createLogger } from "../../core/logging.js";
 import {
   acquireSingletonLock,
@@ -104,12 +116,7 @@ import { emitHookEvent } from "../hooks.js";
 import type { DaemonRequest, DaemonResponse } from "../ipc.js";
 import { collectInboundMessageHookPayloads } from "../message-hooks.js";
 import { resolveMacOSNativeBinary } from "../native-binary.js";
-import {
-  projectDeferredRange,
-  projectPendingRawEvents,
-  projectRealtimeRange,
-  rebuildProjectedState,
-} from "../projection/projector.js";
+import { projectRealtimeRange } from "../projection/projector.js";
 import {
   buildProjectionMessageHookBatches,
   mergeProjectionRunDetails,
@@ -118,10 +125,12 @@ import {
   type ProjectionRunDetails,
   parseProjectionRunDetails,
 } from "../projection/service.js";
+import type { ProjectionWorkerMessage, ProjectionWorkerSuccess } from "../projection/worker.js";
 import { RunQueueService } from "../run-queue.js";
 import {
   buildDaemonStatusSnapshot,
   buildDoctorSnapshot,
+  buildMenuBarDaemonStatusSnapshot,
   type DaemonBootstrapSnapshot,
 } from "../status.js";
 import { checkForUpdates } from "../updater/service.js";
@@ -142,10 +151,18 @@ const DEFAULT_INGEST_CONCURRENCY = 4;
 const DEFAULT_PROJECTION_BATCH_SIZE = 1_000;
 const DEFAULT_REALTIME_PROJECTION_ENABLED = true;
 const DEFAULT_DEFERRED_PROJECTION_COALESCE_MS = 250;
+const DEFAULT_PROJECTION_CONTINUE_DELAY_MS = 5_000;
+const DEFAULT_CONTINUATION_PROJECTION_INTERVAL_MS = 60_000;
+const DEFAULT_CONTINUATION_PROJECTION_BACKLOG_EVENTS = 10_000;
 const NATIVE_WATCH_DEBOUNCE_MS = 1_500;
 const DEFAULT_AUTOSYNC_SCHEDULER_TICK_MS = 15_000;
+const DEFAULT_SYNC_CONTINUE_DELAY_MS = 15_000;
+const DEFAULT_SIGNAL_RECONNECT_SYNC_COOLDOWN_MS = 5 * 60_000;
+const DAEMON_STATUS_BUSY_TIMEOUT_MS = 100;
+const MENU_BAR_STATUS_WRITE_INTERVAL_MS = 1_000;
 const UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
 const UPDATE_SHUTDOWN_GRACE_MS = 30_000;
+const QUEUE_DRAIN_RETRY_DELAY_MS = 1_000;
 const SIGNAL_SEND_SESSION_WAIT_MS = 3_000;
 const SIGNAL_SEND_ECHO_TIMEOUT_MS = 5_000;
 const WHATSAPP_SEND_SESSION_WAIT_MS = 3_000;
@@ -171,6 +188,61 @@ function getAppStatusMetadata(db: { getAppMetadata: () => unknown }): {
     releaseChannel: getCurrentReleaseChannel(),
     install: db.getAppMetadata(),
   };
+}
+
+function getFallbackAppStatusMetadata(): {
+  hostOs: HostOS;
+  version: string;
+  releaseChannel: string;
+  install: null;
+} {
+  return {
+    hostOs:
+      process.platform === "darwin" ? "macos" : process.platform === "win32" ? "windows" : "linux",
+    version: DAEMON_VERSION,
+    releaseChannel: getCurrentReleaseChannel(),
+    install: null,
+  };
+}
+
+function writeMenuBarStatusSnapshot(
+  db: CuedDatabase,
+  options: {
+    discordRealtime: DiscordRealtimeSupervisor;
+    slackRealtime: SlackRealtimeSupervisor;
+    linkedInRealtime: LinkedInRealtimeSupervisor;
+    signalRealtime: SignalRealtimeSupervisor;
+    whatsAppRealtime: WhatsAppRealtimeSupervisor;
+    bootstrap: DaemonBootstrapSnapshot;
+  },
+): void {
+  const snapshot = buildMenuBarDaemonStatusSnapshot(db, {
+    app: getAppStatusMetadata(db),
+    discordRealtime: options.discordRealtime,
+    slackRealtime: options.slackRealtime,
+    linkedInRealtime: options.linkedInRealtime,
+    signalRealtime: options.signalRealtime,
+    whatsAppRealtime: options.whatsAppRealtime,
+    socketPath: CUED_SOCKET_PATH,
+    bootstrap: options.bootstrap,
+  });
+  const tmpPath = `${CUED_MENU_BAR_STATUS_PATH}.${process.pid}.tmp`;
+  writeFileSync(tmpPath, `${JSON.stringify(snapshot)}\n`, { mode: 0o600 });
+  renameSync(tmpPath, CUED_MENU_BAR_STATUS_PATH);
+}
+
+function readCachedDaemonStatusSnapshot(): Record<string, unknown> | null {
+  try {
+    if (!existsSync(CUED_MENU_BAR_STATUS_PATH)) {
+      return null;
+    }
+    const parsed = JSON.parse(readFileSync(CUED_MENU_BAR_STATUS_PATH, "utf8")) as unknown;
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : null;
+  } catch {
+    return null;
+  }
 }
 
 function now(): number {
@@ -203,9 +275,9 @@ function parseJsonRecord(value: string | null | undefined): Record<string, unkno
 }
 
 type QueueSchedulers = {
-  wakeIngest: () => void;
+  wakeIngest: (delayMs?: number) => void;
   wakeOutbound: () => void;
-  wakeProjection: () => void;
+  wakeProjection: (delayMs?: number) => void;
 };
 
 type IngestTiming = {
@@ -271,14 +343,35 @@ type PendingSignalEcho = {
   outboundMessageId: string;
 };
 
-function getAutoSyncTargets(
-  db: Pick<ReturnType<typeof openCuedDatabase>, "listEnabledSyncTargets">,
-): Array<{ platform: AdapterPlatform; accountKey: string }> {
+function getConfiguredAutoSyncPlatforms(): AdapterPlatform[] | null {
   const configured = process.env.CUED_AUTOSYNC_PLATFORMS?.split(",")
     .map((value) => value.trim())
     .filter(isAdapterPlatform);
+  return configured && configured.length > 0 ? configured : null;
+}
 
-  if (configured && configured.length > 0) {
+function getConfiguredRealtimePlatforms(): Set<AdapterPlatform> | null {
+  const raw = process.env.CUED_REALTIME_PLATFORMS?.trim();
+  if (!raw) {
+    return null;
+  }
+  if (["0", "false", "none", "off"].includes(raw.toLowerCase())) {
+    return new Set();
+  }
+  return new Set(
+    raw
+      .split(",")
+      .map((value) => value.trim())
+      .filter(isAdapterPlatform),
+  );
+}
+
+function getAutoSyncTargets(
+  db: Pick<ReturnType<typeof openCuedDatabase>, "listEnabledSyncTargets">,
+): Array<{ platform: AdapterPlatform; accountKey: string }> {
+  const configured = getConfiguredAutoSyncPlatforms();
+
+  if (configured) {
     return configured.map((platform) => ({
       platform,
       accountKey: getDefaultAccountKeyForPlatform(platform),
@@ -428,6 +521,20 @@ function getRealtimeProjectionBatchSize(): number {
   return Number.isFinite(configured) && configured > 0 ? configured : getProjectionBatchSize();
 }
 
+function getSyncContinueDelayMs(): number {
+  const configured = Number(process.env.CUED_SYNC_CONTINUE_DELAY_MS);
+  return Number.isFinite(configured) && configured >= 0
+    ? Math.trunc(configured)
+    : DEFAULT_SYNC_CONTINUE_DELAY_MS;
+}
+
+function getSignalReconnectSyncCooldownMs(): number {
+  const configured = Number(process.env.CUED_SIGNAL_RECONNECT_SYNC_COOLDOWN_MS);
+  return Number.isFinite(configured) && configured >= 0
+    ? Math.trunc(configured)
+    : DEFAULT_SIGNAL_RECONNECT_SYNC_COOLDOWN_MS;
+}
+
 function getDeferredProjectionCoalesceMs(): number {
   const configured = Number(
     process.env.CUED_DEFERRED_PROJECTION_COALESCE_MS ?? DEFAULT_DEFERRED_PROJECTION_COALESCE_MS,
@@ -435,6 +542,133 @@ function getDeferredProjectionCoalesceMs(): number {
   return Number.isFinite(configured) && configured >= 0
     ? configured
     : DEFAULT_DEFERRED_PROJECTION_COALESCE_MS;
+}
+
+function getProjectionContinueDelayMs(): number {
+  const configured = Number(process.env.CUED_PROJECTION_CONTINUE_DELAY_MS);
+  return Number.isFinite(configured) && configured >= 0
+    ? Math.trunc(configured)
+    : DEFAULT_PROJECTION_CONTINUE_DELAY_MS;
+}
+
+function getContinuationProjectionIntervalMs(): number {
+  const configured = Number(process.env.CUED_CONTINUATION_PROJECTION_INTERVAL_MS);
+  return Number.isFinite(configured) && configured >= 0
+    ? Math.trunc(configured)
+    : DEFAULT_CONTINUATION_PROJECTION_INTERVAL_MS;
+}
+
+function getContinuationProjectionBacklogEvents(): number {
+  const configured = Number(process.env.CUED_CONTINUATION_PROJECTION_BACKLOG_EVENTS);
+  return Number.isFinite(configured) && configured >= 0
+    ? Math.trunc(configured)
+    : DEFAULT_CONTINUATION_PROJECTION_BACKLOG_EVENTS;
+}
+
+function resolveCliEntrypoint(): string {
+  const entrypoint = process.argv[1];
+  if (!entrypoint) {
+    throw new Error("Unable to resolve Cued CLI entrypoint for projection worker");
+  }
+  return entrypoint;
+}
+
+function runProjectionWorkerProcess(
+  run: NonNullable<ReturnType<CuedDatabase["claimNextQueuedRun"]>>,
+  projectionBatchSize: number,
+): Promise<ProjectionWorkerSuccess> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, [resolveCliEntrypoint(), "__projection-worker"], {
+      stdio: ["ignore", "pipe", "pipe"],
+      env: {
+        ...process.env,
+        CUED_PROJECTION_WORKER_RUN: JSON.stringify(run),
+        CUED_PROJECTION_BATCH_SIZE: String(projectionBatchSize),
+      },
+      detached: false,
+    });
+
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk.toString("utf8");
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk.toString("utf8");
+    });
+    child.on("error", reject);
+    child.on("exit", (code, signal) => {
+      const lines = stdout
+        .split("\n")
+        .map((line) => line.trim())
+        .filter(Boolean);
+      const lastLine = lines[lines.length - 1];
+      let message: ProjectionWorkerMessage | null = null;
+      if (lastLine) {
+        try {
+          message = JSON.parse(lastLine) as ProjectionWorkerMessage;
+        } catch {
+          message = null;
+        }
+      }
+
+      if (message?.ok) {
+        if (stderr.trim().length > 0) {
+          daemonLogger.warn("projection worker stderr", { runId: run.id, stderr: stderr.trim() });
+        }
+        resolve(message.result);
+        return;
+      }
+
+      const workerError =
+        message && !message.ok
+          ? message.error
+          : `Projection worker exited with code ${code ?? "null"} signal ${signal ?? "null"}`;
+      reject(
+        new Error(stderr.trim().length > 0 ? `${workerError}\n${stderr.trim()}` : workerError),
+      );
+    });
+  });
+}
+
+function buildDaemonBusyStatusSnapshot(options: {
+  discordRealtime: DiscordRealtimeSupervisor;
+  slackRealtime: SlackRealtimeSupervisor;
+  linkedInRealtime: LinkedInRealtimeSupervisor;
+  signalRealtime: SignalRealtimeSupervisor;
+  whatsAppRealtime: WhatsAppRealtimeSupervisor;
+  socketPath: string;
+  bootstrap: DaemonBootstrapSnapshot;
+  dbPath: string;
+  error: unknown;
+}) {
+  return {
+    app: getFallbackAppStatusMetadata(),
+    bootstrap: options.bootstrap,
+    daemon: {
+      pid: process.pid,
+      started_at: null,
+      updated_at: now(),
+      status: "running",
+      version: DAEMON_VERSION,
+      details_json: JSON.stringify(getDaemonIdentity()),
+    },
+    daemonDbBusy: true,
+    daemonDbBusyError:
+      options.error instanceof Error ? options.error.message : String(options.error),
+    overview: null,
+    projection: null,
+    checkpoints: [],
+    recentRuns: [],
+    discordRealtimeSessions: options.discordRealtime.getStatuses(),
+    slackRealtimeSessions: options.slackRealtime.getStatuses(),
+    linkedinRealtimeSessions: options.linkedInRealtime.getStatuses(),
+    signalRealtimeSessions: options.signalRealtime.getStatuses(),
+    whatsappRealtimeSessions: options.whatsAppRealtime.getStatuses(),
+    integrations: [],
+    socketPath: options.socketPath,
+    dbPath: options.dbPath,
+  };
 }
 
 function resolveCheckpointSyncMode(
@@ -1355,6 +1589,14 @@ export async function runDaemon(): Promise<void> {
   const realtimeProjectionEnabled = getRealtimeProjectionEnabled();
   const realtimeProjectionBatchSize = getRealtimeProjectionBatchSize();
   const deferredProjectionCoalesceMs = getDeferredProjectionCoalesceMs();
+  const projectionContinueDelayMs = getProjectionContinueDelayMs();
+  const continuationProjectionIntervalMs = getContinuationProjectionIntervalMs();
+  const continuationProjectionBacklogEvents = getContinuationProjectionBacklogEvents();
+  const syncContinueDelayMs = getSyncContinueDelayMs();
+  const signalReconnectSyncCooldownMs = getSignalReconnectSyncCooldownMs();
+  const configuredRealtimePlatforms = getConfiguredRealtimePlatforms();
+  const shouldRunRealtimePlatform = (platform: AdapterPlatform): boolean =>
+    configuredRealtimePlatforms == null || configuredRealtimePlatforms.has(platform);
   const activeAuthSessions = new Map<
     string,
     { child: ChildProcess; platform: Platform; accountKey: string }
@@ -1365,8 +1607,13 @@ export async function runDaemon(): Promise<void> {
   let ingestDrainScheduled = false;
   let outboundDrainScheduled = false;
   let projectionDrainScheduled = false;
+  let ingestDrainTimer: NodeJS.Timeout | null = null;
   let projectionDrainTimer: NodeJS.Timeout | null = null;
+  let ingestDrainDueAt: number | null = null;
+  let projectionDrainDueAt: number | null = null;
   const lastAutoSyncQueuedAt = new Map<string, number>();
+  const lastSignalReconnectSyncQueuedAt = new Map<string, number>();
+  const lastContinuationProjectionQueuedAt = new Map<string, number>();
   const pendingSignalSendEchoes = new Map<string, PendingSignalEcho[]>();
   const projectionMessageHooks = new ProjectionMessageHookBarrier();
   const suppressNextSignalReconnectSync = new Set<string>();
@@ -2277,30 +2524,57 @@ export async function runDaemon(): Promise<void> {
 
   const drainIngestQueue = () => {
     ingestDrainScheduled = false;
+    ingestDrainDueAt = null;
     if (isUpdateShutdownRequested) {
+      return;
+    }
+    if (isProcessingProjection) {
+      scheduleIngestDrain(QUEUE_DRAIN_RETRY_DELAY_MS);
       return;
     }
     while (activeIngestRuns.size < ingestConcurrency) {
       const currentRun = db.claimNextQueuedRun(["sync", "sync_resume"], "ingesting");
       if (!currentRun) {
+        const nextScheduledAt = db.getNextQueuedRunScheduledAt(["sync", "sync_resume"]);
+        if (nextScheduledAt != null) {
+          scheduleIngestDrain(Math.max(QUEUE_DRAIN_RETRY_DELAY_MS, nextScheduledAt - now()));
+        }
         break;
       }
 
       const promise = processIngestRun(currentRun).finally(() => {
         activeIngestRuns.delete(currentRun.id);
         scheduleIngestDrain();
+        scheduleProjectionDrain();
         maybeFinishUpdateShutdown();
       });
       activeIngestRuns.set(currentRun.id, promise);
     }
   };
 
-  const scheduleIngestDrain = () => {
+  const scheduleIngestDrain = (delayMs = 0) => {
+    const normalizedDelayMs = Math.max(0, delayMs);
+    const dueAt = now() + normalizedDelayMs;
     if (ingestDrainScheduled) {
-      return;
+      if (ingestDrainDueAt != null && ingestDrainDueAt <= dueAt) {
+        return;
+      }
+      if (ingestDrainTimer) {
+        clearTimeout(ingestDrainTimer);
+        ingestDrainTimer = null;
+      }
     }
     ingestDrainScheduled = true;
-    setImmediate(drainIngestQueue);
+    ingestDrainDueAt = dueAt;
+    if (normalizedDelayMs <= 0) {
+      setImmediate(drainIngestQueue);
+      return;
+    }
+
+    ingestDrainTimer = setTimeout(() => {
+      ingestDrainTimer = null;
+      drainIngestQueue();
+    }, normalizedDelayMs);
   };
 
   const drainOutboundQueue = () => {
@@ -2442,15 +2716,52 @@ export async function runDaemon(): Promise<void> {
 
   const drainProjectionQueue = () => {
     projectionDrainScheduled = false;
+    projectionDrainDueAt = null;
     if (isUpdateShutdownRequested) {
       return;
     }
     if (isProcessingProjection) {
       return;
     }
+    if (bootstrap.state !== "ready") {
+      scheduleProjectionDrain(QUEUE_DRAIN_RETRY_DELAY_MS);
+      return;
+    }
+    if (activeIngestRuns.size > 0) {
+      scheduleProjectionDrain(QUEUE_DRAIN_RETRY_DELAY_MS);
+      return;
+    }
 
-    const currentRun = db.claimNextQueuedRun(["project", "rebuild"], "projecting");
+    let currentRun: ReturnType<typeof db.claimNextQueuedRun>;
+    try {
+      currentRun = db.withBusyTimeoutSync(DAEMON_STATUS_BUSY_TIMEOUT_MS, () =>
+        db.claimNextQueuedRun(["project", "rebuild"], "projecting"),
+      );
+    } catch (error) {
+      if (!isSqliteBusyError(error)) {
+        throw error;
+      }
+      daemonLogger.warn("projection drain skipped because SQLite is busy");
+      scheduleProjectionDrain(QUEUE_DRAIN_RETRY_DELAY_MS);
+      return;
+    }
     if (!currentRun) {
+      let nextScheduledAt: number | null = null;
+      try {
+        nextScheduledAt = db.withBusyTimeoutSync(DAEMON_STATUS_BUSY_TIMEOUT_MS, () =>
+          db.getNextQueuedRunScheduledAt(["project", "rebuild"]),
+        );
+      } catch (error) {
+        if (!isSqliteBusyError(error)) {
+          throw error;
+        }
+        daemonLogger.warn("projection drain skipped because SQLite is busy");
+        scheduleProjectionDrain(QUEUE_DRAIN_RETRY_DELAY_MS);
+        return;
+      }
+      if (nextScheduledAt != null) {
+        scheduleProjectionDrain(Math.max(QUEUE_DRAIN_RETRY_DELAY_MS, nextScheduledAt - now()));
+      }
       return;
     }
 
@@ -2459,11 +2770,20 @@ export async function runDaemon(): Promise<void> {
   };
 
   const scheduleProjectionDrain = (delayMs = 0) => {
+    const normalizedDelayMs = Math.max(0, delayMs);
+    const dueAt = now() + normalizedDelayMs;
     if (projectionDrainScheduled) {
-      return;
+      if (projectionDrainDueAt != null && projectionDrainDueAt <= dueAt) {
+        return;
+      }
+      if (projectionDrainTimer) {
+        clearTimeout(projectionDrainTimer);
+        projectionDrainTimer = null;
+      }
     }
     projectionDrainScheduled = true;
-    if (delayMs <= 0) {
+    projectionDrainDueAt = dueAt;
+    if (normalizedDelayMs <= 0) {
       setImmediate(drainProjectionQueue);
       return;
     }
@@ -2471,13 +2791,13 @@ export async function runDaemon(): Promise<void> {
     projectionDrainTimer = setTimeout(() => {
       projectionDrainTimer = null;
       drainProjectionQueue();
-    }, delayMs);
+    }, normalizedDelayMs);
   };
 
   const schedulers = {
     wakeIngest: scheduleIngestDrain,
     wakeOutbound: scheduleOutboundDrain,
-    wakeProjection: () => scheduleProjectionDrain(),
+    wakeProjection: scheduleProjectionDrain,
   };
   const queueDebouncedNativeSync = createDebouncedSyncEnqueuer(db, schedulers.wakeIngest);
   const discordRealtime = new DiscordRealtimeSupervisor({
@@ -2595,6 +2915,12 @@ export async function runDaemon(): Promise<void> {
         suppressNextSignalReconnectSync.delete(accountKey);
         return;
       }
+      const queuedAt = now();
+      const lastQueuedAt = lastSignalReconnectSyncQueuedAt.get(accountKey) ?? 0;
+      if (queuedAt - lastQueuedAt < signalReconnectSyncCooldownMs) {
+        return;
+      }
+      lastSignalReconnectSyncQueuedAt.set(accountKey, queuedAt);
       queueNativeTriggeredSync(
         db,
         "signal",
@@ -2633,6 +2959,10 @@ export async function runDaemon(): Promise<void> {
   };
 
   const requestDiscordRealtimeReconcile = () => {
+    if (!shouldRunRealtimePlatform("discord")) {
+      discordRealtime.stopAll();
+      return;
+    }
     if (discordRealtimeReconcilePromise) {
       discordRealtimeReconcileQueued = true;
       return;
@@ -2652,6 +2982,10 @@ export async function runDaemon(): Promise<void> {
   };
 
   const requestSlackRealtimeReconcile = () => {
+    if (!shouldRunRealtimePlatform("slack")) {
+      slackRealtime.stopAll();
+      return;
+    }
     if (slackRealtimeReconcilePromise) {
       slackRealtimeReconcileQueued = true;
       return;
@@ -2676,6 +3010,10 @@ export async function runDaemon(): Promise<void> {
   };
 
   const requestLinkedInRealtimeReconcile = () => {
+    if (!shouldRunRealtimePlatform("linkedin")) {
+      linkedInRealtime.stopAll();
+      return;
+    }
     if (linkedInRealtimeReconcilePromise) {
       linkedInRealtimeReconcileQueued = true;
       return;
@@ -2700,6 +3038,10 @@ export async function runDaemon(): Promise<void> {
   };
 
   const requestSignalRealtimeReconcile = () => {
+    if (!shouldRunRealtimePlatform("signal")) {
+      signalRealtime.stopAll();
+      return;
+    }
     if (signalRealtimeReconcilePromise) {
       signalRealtimeReconcileQueued = true;
       return;
@@ -2724,6 +3066,10 @@ export async function runDaemon(): Promise<void> {
   };
 
   const requestWhatsAppRealtimeReconcile = () => {
+    if (!shouldRunRealtimePlatform("whatsapp")) {
+      whatsAppRealtime.stopAll();
+      return;
+    }
     if (whatsAppRealtimeReconcilePromise) {
       whatsAppRealtimeReconcileQueued = true;
       return;
@@ -2767,13 +3113,15 @@ export async function runDaemon(): Promise<void> {
   const heartbeat = setInterval(() => {
     try {
       daemonLease.heartbeat();
-      db.upsertDaemonState({
-        pid: process.pid,
-        startedAt,
-        updatedAt: now(),
-        status: "running",
-        version: DAEMON_VERSION,
-        details: daemonIdentity,
+      db.withBusyTimeoutSync(DAEMON_STATUS_BUSY_TIMEOUT_MS, () => {
+        db.upsertDaemonState({
+          pid: process.pid,
+          startedAt,
+          updatedAt: now(),
+          status: "running",
+          version: DAEMON_VERSION,
+          details: daemonIdentity,
+        });
       });
     } catch (error) {
       if (!isSqliteBusyError(error)) {
@@ -2783,56 +3131,81 @@ export async function runDaemon(): Promise<void> {
     }
   }, SINGLETON_LOCK_HEARTBEAT_MS);
 
+  const writeMenuBarStatus = () => {
+    try {
+      db.withBusyTimeoutSync(DAEMON_STATUS_BUSY_TIMEOUT_MS, () => {
+        writeMenuBarStatusSnapshot(db, {
+          discordRealtime,
+          slackRealtime,
+          linkedInRealtime,
+          signalRealtime,
+          whatsAppRealtime,
+          bootstrap,
+        });
+      });
+    } catch (error) {
+      if (!isSqliteBusyError(error)) {
+        daemonLogger.warn("menu bar status cache write failed", error);
+        return;
+      }
+      daemonLogger.warn("menu bar status cache write skipped because SQLite is busy");
+    }
+  };
+  writeMenuBarStatus();
+  const menuBarStatusLoop = setInterval(writeMenuBarStatus, MENU_BAR_STATUS_WRITE_INTERVAL_MS);
+
   const queueAutoSyncRuns = (trigger: string) => {
     if (isUpdateShutdownRequested) {
       return;
     }
     try {
-      if (trigger === "scheduler" && bootstrap.state !== "ready") {
-        return;
-      }
-      const autoSyncTargets = getAutoSyncTargets(db);
-      let queuedAny = false;
-      const queuedAt = now();
-      for (const target of autoSyncTargets) {
-        if (trigger === "scheduler") {
-          const targetKey = `${target.platform}:${target.accountKey}`;
-          const lastQueuedAt = lastAutoSyncQueuedAt.get(targetKey) ?? startedAt;
-          if (queuedAt - lastQueuedAt < getAutoSyncIntervalMs(target.platform)) {
+      db.withBusyTimeoutSync(DAEMON_STATUS_BUSY_TIMEOUT_MS, () => {
+        if (trigger === "scheduler" && bootstrap.state !== "ready") {
+          return;
+        }
+        const autoSyncTargets = getAutoSyncTargets(db);
+        let queuedAny = false;
+        const queuedAt = now();
+        for (const target of autoSyncTargets) {
+          if (trigger === "scheduler") {
+            const targetKey = `${target.platform}:${target.accountKey}`;
+            const lastQueuedAt = lastAutoSyncQueuedAt.get(targetKey) ?? startedAt;
+            if (queuedAt - lastQueuedAt < getAutoSyncIntervalMs(target.platform)) {
+              continue;
+            }
+          }
+
+          if (
+            shouldSkipConnectedDiscordSchedulerSync(
+              target.platform,
+              trigger,
+              target.platform === "discord"
+                ? (discordRealtime.getSession(target.accountKey)?.getStatus() ?? null)
+                : null,
+            )
+          ) {
             continue;
           }
-        }
 
-        if (
-          shouldSkipConnectedDiscordSchedulerSync(
-            target.platform,
+          if (db.hasQueuedOrRunningRun(target.platform, target.accountKey)) {
+            continue;
+          }
+
+          db.queueSyncRun({
+            platform: target.platform,
+            accountKey: target.accountKey,
+            runType: "sync",
             trigger,
-            target.platform === "discord"
-              ? (discordRealtime.getSession(target.accountKey)?.getStatus() ?? null)
-              : null,
-          )
-        ) {
-          continue;
+            details: { source: target.platform, accountKey: target.accountKey, trigger },
+          });
+          lastAutoSyncQueuedAt.set(`${target.platform}:${target.accountKey}`, queuedAt);
+          queuedAny = true;
         }
 
-        if (db.hasQueuedOrRunningRun(target.platform, target.accountKey)) {
-          continue;
+        if (queuedAny) {
+          schedulers.wakeIngest();
         }
-
-        db.queueSyncRun({
-          platform: target.platform,
-          accountKey: target.accountKey,
-          runType: "sync",
-          trigger,
-          details: { source: target.platform, accountKey: target.accountKey, trigger },
-        });
-        lastAutoSyncQueuedAt.set(`${target.platform}:${target.accountKey}`, queuedAt);
-        queuedAny = true;
-      }
-
-      if (queuedAny) {
-        schedulers.wakeIngest();
-      }
+      });
     } catch (error) {
       if (!isSqliteBusyError(error)) {
         throw error;
@@ -2849,57 +3222,69 @@ export async function runDaemon(): Promise<void> {
     if (isUpdateShutdownRequested) {
       return null;
     }
-    const backlog = db.getProjectionBacklog();
-    const incomingDetails = mergeProjectionRunDetails({
-      existing: null,
-      incoming: {
-        trigger,
-        startRowId: range?.startRowId ?? backlog.projection_watermark + 1,
-        endRowId: range?.endRowId ?? backlog.max_raw_event_rowid,
-        projectionWatermark: backlog.projection_watermark,
-        maxRawEventRowid: backlog.max_raw_event_rowid,
-      },
-      projectionWatermark: backlog.projection_watermark,
-      maxRawEventRowid: backlog.max_raw_event_rowid,
-    });
+    try {
+      return db.withBusyTimeoutSync(DAEMON_STATUS_BUSY_TIMEOUT_MS, () => {
+        const backlog = db.getProjectionBacklog();
+        const incomingDetails = mergeProjectionRunDetails({
+          existing: null,
+          incoming: {
+            trigger,
+            startRowId: range?.startRowId ?? backlog.projection_watermark + 1,
+            endRowId: range?.endRowId ?? backlog.max_raw_event_rowid,
+          },
+          projectionWatermark: backlog.projection_watermark,
+          maxRawEventRowid: backlog.max_raw_event_rowid,
+        });
 
-    const queuedProjectionRun = db.getQueuedProjectionRun();
-    if (queuedProjectionRun) {
-      const existingDetails = parseProjectionRunDetails(queuedProjectionRun.details_json);
-      const mergedDetails =
-        incomingDetails == null
-          ? existingDetails
-            ? mergeProjectionRunDetails({
-                existing: null,
-                incoming: existingDetails,
-                projectionWatermark: backlog.projection_watermark,
-                maxRawEventRowid: backlog.max_raw_event_rowid,
-              })
-            : null
-          : mergeProjectionRunDetails({
-              existing: existingDetails,
-              incoming: incomingDetails,
-              projectionWatermark: backlog.projection_watermark,
-              maxRawEventRowid: backlog.max_raw_event_rowid,
-            });
-      if (mergedDetails) {
-        db.updateRunDetails(queuedProjectionRun.id, mergedDetails satisfies ProjectionRunDetails);
+        const queuedProjectionRun = db.getQueuedProjectionRun();
+        if (queuedProjectionRun) {
+          const existingDetails = parseProjectionRunDetails(queuedProjectionRun.details_json);
+          const mergedDetails =
+            incomingDetails == null
+              ? existingDetails
+                ? mergeProjectionRunDetails({
+                    existing: null,
+                    incoming: existingDetails,
+                    projectionWatermark: backlog.projection_watermark,
+                    maxRawEventRowid: backlog.max_raw_event_rowid,
+                  })
+                : null
+              : mergeProjectionRunDetails({
+                  existing: existingDetails,
+                  incoming: incomingDetails,
+                  projectionWatermark: backlog.projection_watermark,
+                  maxRawEventRowid: backlog.max_raw_event_rowid,
+                });
+          if (mergedDetails) {
+            db.updateRunDetails(
+              queuedProjectionRun.id,
+              mergedDetails satisfies ProjectionRunDetails,
+            );
+          }
+          scheduleProjectionDrain(options?.delayMs ?? deferredProjectionCoalesceMs);
+          return queuedProjectionRun.id;
+        }
+
+        if (!incomingDetails) {
+          return null;
+        }
+
+        const runId = db.queueSyncRun({
+          runType: "project",
+          trigger,
+          delayMs: options?.delayMs ?? deferredProjectionCoalesceMs,
+          details: incomingDetails satisfies ProjectionRunDetails,
+        });
+        scheduleProjectionDrain(options?.delayMs ?? deferredProjectionCoalesceMs);
+        return runId;
+      });
+    } catch (error) {
+      if (!isSqliteBusyError(error)) {
+        throw error;
       }
-      scheduleProjectionDrain(options?.delayMs ?? deferredProjectionCoalesceMs);
-      return queuedProjectionRun.id;
-    }
-
-    if (!incomingDetails) {
+      daemonLogger.warn("projection queue skipped because SQLite is busy", { trigger });
       return null;
     }
-
-    const runId = db.queueSyncRun({
-      runType: "project",
-      trigger,
-      details: incomingDetails satisfies ProjectionRunDetails,
-    });
-    scheduleProjectionDrain(options?.delayMs ?? deferredProjectionCoalesceMs);
-    return runId;
   };
   scheduleOutboundDrain();
 
@@ -3288,6 +3673,7 @@ export async function runDaemon(): Promise<void> {
           startRowId: insertResult.firstInsertedRowId!,
           endRowId: insertResult.lastInsertedRowId!,
           batchSize: realtimeProjectionBatchSize,
+          includeOverview: false,
         });
       }
       const afterRealtimeProjection = now();
@@ -3357,10 +3743,34 @@ export async function runDaemon(): Promise<void> {
 
       let projectionQueued = false;
       if (projection.pending_raw_events > 0) {
-        queueProjectionRun(`ingest:${currentRun.platform}:${accountKey}`, undefined, {
-          delayMs: deferredProjectionCoalesceMs,
-        });
-        projectionQueued = true;
+        const continuationProjectionKey = `${currentRun.platform}:${accountKey}`;
+        const lastContinuationProjectionAt =
+          lastContinuationProjectionQueuedAt.get(continuationProjectionKey) ?? 0;
+        const shouldDeferContinuationProjection =
+          bundleHasMore &&
+          projection.pending_raw_events < continuationProjectionBacklogEvents &&
+          now() - lastContinuationProjectionAt < continuationProjectionIntervalMs;
+
+        if (shouldDeferContinuationProjection) {
+          daemonLogger.info("projection deferred during continuation sync", {
+            runId: currentRun.id,
+            platform: currentRun.platform,
+            accountKey,
+            pendingRawEvents: projection.pending_raw_events,
+            continuationProjectionIntervalMs,
+            continuationProjectionBacklogEvents,
+          });
+        } else {
+          queueProjectionRun(`ingest:${currentRun.platform}:${accountKey}`, undefined, {
+            delayMs: deferredProjectionCoalesceMs,
+          });
+          if (bundleHasMore) {
+            lastContinuationProjectionQueuedAt.set(continuationProjectionKey, now());
+          } else {
+            lastContinuationProjectionQueuedAt.delete(continuationProjectionKey);
+          }
+          projectionQueued = true;
+        }
       } else if (
         insertResult.firstInsertedRowId != null &&
         insertResult.lastInsertedRowId != null
@@ -3388,13 +3798,14 @@ export async function runDaemon(): Promise<void> {
           accountKey,
           runType: "sync_resume",
           trigger: "ingest_continue",
+          delayMs: syncContinueDelayMs,
           details: {
             source: currentRun.platform,
             accountKey,
             trigger: "ingest_continue",
           },
         });
-        schedulers.wakeIngest();
+        schedulers.wakeIngest(syncContinueDelayMs);
       }
       await safeEmitHookEvent("sync.completed", {
         runId: currentRun.id,
@@ -3455,60 +3866,26 @@ export async function runDaemon(): Promise<void> {
   const processProjectionRun = async (
     currentRun: NonNullable<ReturnType<typeof db.claimNextQueuedRun>>,
   ) => {
-    const projectionStartedAt = now();
     daemonLogger.info("projection run started", {
       runId: currentRun.id,
       trigger: currentRun.trigger,
       runType: currentRun.run_type,
     });
     try {
-      const projectionDetails = parseProjectionRunDetails(currentRun.details_json);
-      const projected =
-        currentRun.run_type === "rebuild"
-          ? rebuildProjectedState(db)
-          : projectionDetails
-            ? projectDeferredRange(db, {
-                startRowId: projectionDetails.startRowId,
-                endRowId: projectionDetails.endRowId,
-                limit: projectionBatchSize,
-              })
-            : (() => {
-                const backlog = db.getProjectionBacklog();
-                return backlog.pending_raw_events === 0
-                  ? projectPendingRawEvents(db, { limit: projectionBatchSize })
-                  : projectDeferredRange(db, {
-                      startRowId: backlog.projection_watermark + 1,
-                      endRowId: backlog.max_raw_event_rowid,
-                      limit: projectionBatchSize,
-                    });
-              })();
-      const projectionFinishedAt = now();
-      const timings = {
-        projectionMs: projectionFinishedAt - projectionStartedAt,
-        totalMs: projectionFinishedAt - projectionStartedAt,
-      };
-      const deferredProjected =
-        currentRun.run_type === "project"
-          ? (projected as ReturnType<typeof projectDeferredRange>)
-          : null;
-      db.finishRun(currentRun.id, {
+      const workerResult = await runProjectionWorkerProcess(currentRun, projectionBatchSize);
+      const {
         projected,
         timings,
-        range: projectionDetails,
-      });
+        projectionDetails,
+        deferredProjected,
+        projectedRangeStart,
+        projectedRangeEnd,
+      } = workerResult;
       if (currentRun.run_type === "rebuild") {
         await projectionMessageHooks.releaseAll(async (payload) => {
           await safeEmitHookEvent("message.received", payload);
         });
       }
-      const projectedRangeStart =
-        deferredProjected?.rangeStartRowId ?? projectionDetails?.startRowId ?? null;
-      const projectedRangeEnd =
-        deferredProjected == null
-          ? null
-          : deferredProjected.nextStartRowId != null
-            ? deferredProjected.nextStartRowId - 1
-            : (deferredProjected.rangeEndRowId ?? projectionDetails?.endRowId ?? null);
       if (
         currentRun.run_type !== "rebuild" &&
         projectedRangeStart != null &&
@@ -3535,10 +3912,12 @@ export async function runDaemon(): Promise<void> {
               projectionDetails?.endRowId ??
               deferredProjected.projectionWatermark,
           },
-          { delayMs: 0 },
+          { delayMs: projectionContinueDelayMs },
         );
       }
-      queueProjectionRun(`projection:${currentRun.run_type}`, undefined, { delayMs: 0 });
+      queueProjectionRun(`projection:${currentRun.run_type}`, undefined, {
+        delayMs: projectionContinueDelayMs,
+      });
       await safeEmitHookEvent("sync.completed", {
         runId: currentRun.id,
         platform: currentRun.platform,
@@ -3602,6 +3981,7 @@ export async function runDaemon(): Promise<void> {
       },
       reconcileLocalWatchers,
       requestUpdateShutdown,
+      () => isProcessingProjection || activeIngestRuns.size > 0 || activeOutboundSend !== null,
     );
   });
 
@@ -3625,11 +4005,16 @@ export async function runDaemon(): Promise<void> {
     shutdownInitiated = true;
     daemonLogger.info("daemon shutting down", { pid: process.pid });
     clearInterval(heartbeat);
+    clearInterval(menuBarStatusLoop);
     clearInterval(schedulerLoop);
     clearInterval(updateLoop);
     if (projectionDrainTimer) {
       clearTimeout(projectionDrainTimer);
       projectionDrainTimer = null;
+    }
+    if (ingestDrainTimer) {
+      clearTimeout(ingestDrainTimer);
+      ingestDrainTimer = null;
     }
     stopRealtimeAndWatchers();
     for (const session of activeAuthSessions.values()) {
@@ -3799,6 +4184,7 @@ function handleSocket(
   requestRealtimeReconcile: () => void,
   reconcileLocalWatchers: () => void,
   requestUpdateShutdown: () => { shuttingDown: boolean; requestedAt: number | null },
+  isBackgroundWorkActive: () => boolean,
 ): void {
   let buffer = "";
 
@@ -3840,6 +4226,7 @@ function handleSocket(
           requestRealtimeReconcile,
           reconcileLocalWatchers,
           requestUpdateShutdown,
+          isBackgroundWorkActive,
         )
           .then((response) => writeResponse(socket, response))
           .catch((error) => {
@@ -3870,6 +4257,7 @@ async function dispatchRequest(
   requestRealtimeReconcile: () => void,
   reconcileLocalWatchers: () => void,
   requestUpdateShutdown: () => { shuttingDown: boolean; requestedAt: number | null },
+  isBackgroundWorkActive: () => boolean,
 ): Promise<DaemonResponse> {
   try {
     const runQueueService = new RunQueueService(db, schedulers);
@@ -3890,49 +4278,176 @@ async function dispatchRequest(
           },
         };
       case "status":
-        return {
-          id: request.id,
-          ok: true,
-          result: buildDaemonStatusSnapshot(db, {
-            app: getAppStatusMetadata(db),
-            discordRealtime,
-            slackRealtime,
-            linkedInRealtime,
-            signalRealtime,
-            whatsAppRealtime,
-            socketPath: CUED_SOCKET_PATH,
-            bootstrap,
-          }),
-        };
-      case "doctor":
-        return {
-          id: request.id,
-          ok: true,
-          result: await buildDoctorSnapshot(db, {
-            app: getAppStatusMetadata(db),
-            discordRealtime,
-            slackRealtime,
-            linkedInRealtime,
-            signalRealtime,
-            whatsAppRealtime,
-            autoSyncTargets: getAutoSyncTargets(db),
-            autoSyncIntervalMs: getAutoSyncIntervalMs(),
-            autoSyncIntervalsMs: Object.fromEntries(
-              getAutoSyncTargets(db).map((target) => [
-                `${target.platform}:${target.accountKey}`,
-                getAutoSyncIntervalMs(target.platform),
-              ]),
+        if (isBackgroundWorkActive()) {
+          const cached = readCachedDaemonStatusSnapshot();
+          if (cached) {
+            return {
+              id: request.id,
+              ok: true,
+              result: {
+                ...cached,
+                daemonDbBusy: true,
+                daemonDbBusyError: "Cued daemon is running background sync/projection work",
+              },
+            };
+          }
+          return {
+            id: request.id,
+            ok: true,
+            result: buildDaemonBusyStatusSnapshot({
+              discordRealtime,
+              slackRealtime,
+              linkedInRealtime,
+              signalRealtime,
+              whatsAppRealtime,
+              socketPath: CUED_SOCKET_PATH,
+              bootstrap,
+              dbPath: db.dbPath,
+              error: new Error("Cued daemon is running background sync/projection work"),
+            }),
+          };
+        }
+        try {
+          return {
+            id: request.id,
+            ok: true,
+            result: await db.withBusyTimeout(DAEMON_STATUS_BUSY_TIMEOUT_MS, () =>
+              buildDaemonStatusSnapshot(db, {
+                app: getAppStatusMetadata(db),
+                discordRealtime,
+                slackRealtime,
+                linkedInRealtime,
+                signalRealtime,
+                whatsAppRealtime,
+                socketPath: CUED_SOCKET_PATH,
+                bootstrap,
+              }),
             ),
-            signalCatchupIntervalMs: getAutoSyncIntervalMs("signal"),
-            whatsappCatchupIntervalMs: getAutoSyncIntervalMs("whatsapp"),
-            ingestConcurrency: getIngestConcurrency(),
-            projectionBatchSize: getProjectionBatchSize(),
-            realtimeProjectionEnabled: getRealtimeProjectionEnabled(),
-            realtimeProjectionBatchSize: getRealtimeProjectionBatchSize(),
-            deferredProjectionCoalesceMs: getDeferredProjectionCoalesceMs(),
-            bootstrap,
-          }),
-        };
+          };
+        } catch (error) {
+          if (!isSqliteBusyError(error)) {
+            throw error;
+          }
+          const cached = readCachedDaemonStatusSnapshot();
+          if (cached) {
+            return {
+              id: request.id,
+              ok: true,
+              result: {
+                ...cached,
+                daemonDbBusy: true,
+                daemonDbBusyError: error instanceof Error ? error.message : String(error),
+              },
+            };
+          }
+          return {
+            id: request.id,
+            ok: true,
+            result: buildDaemonBusyStatusSnapshot({
+              discordRealtime,
+              slackRealtime,
+              linkedInRealtime,
+              signalRealtime,
+              whatsAppRealtime,
+              socketPath: CUED_SOCKET_PATH,
+              bootstrap,
+              dbPath: db.dbPath,
+              error,
+            }),
+          };
+        }
+      case "doctor":
+        if (isBackgroundWorkActive()) {
+          return {
+            id: request.id,
+            ok: true,
+            result: {
+              ...buildDaemonBusyStatusSnapshot({
+                discordRealtime,
+                slackRealtime,
+                linkedInRealtime,
+                signalRealtime,
+                whatsAppRealtime,
+                socketPath: CUED_SOCKET_PATH,
+                bootstrap,
+                dbPath: db.dbPath,
+                error: new Error("Cued daemon is running background sync/projection work"),
+              }),
+              checks: [],
+              warnings: [
+                {
+                  id: "daemon_background_work_active",
+                  severity: "warning",
+                  message:
+                    "Cued is syncing/projecting in the background; retry doctor after it yields.",
+                },
+              ],
+            },
+          };
+        }
+        try {
+          return {
+            id: request.id,
+            ok: true,
+            result: await db.withBusyTimeout(
+              DAEMON_STATUS_BUSY_TIMEOUT_MS,
+              async () =>
+                await buildDoctorSnapshot(db, {
+                  app: getAppStatusMetadata(db),
+                  discordRealtime,
+                  slackRealtime,
+                  linkedInRealtime,
+                  signalRealtime,
+                  whatsAppRealtime,
+                  autoSyncTargets: getAutoSyncTargets(db),
+                  autoSyncIntervalMs: getAutoSyncIntervalMs(),
+                  autoSyncIntervalsMs: Object.fromEntries(
+                    getAutoSyncTargets(db).map((target) => [
+                      `${target.platform}:${target.accountKey}`,
+                      getAutoSyncIntervalMs(target.platform),
+                    ]),
+                  ),
+                  signalCatchupIntervalMs: getAutoSyncIntervalMs("signal"),
+                  whatsappCatchupIntervalMs: getAutoSyncIntervalMs("whatsapp"),
+                  ingestConcurrency: getIngestConcurrency(),
+                  projectionBatchSize: getProjectionBatchSize(),
+                  realtimeProjectionEnabled: getRealtimeProjectionEnabled(),
+                  realtimeProjectionBatchSize: getRealtimeProjectionBatchSize(),
+                  deferredProjectionCoalesceMs: getDeferredProjectionCoalesceMs(),
+                  bootstrap,
+                }),
+            ),
+          };
+        } catch (error) {
+          if (!isSqliteBusyError(error)) {
+            throw error;
+          }
+          return {
+            id: request.id,
+            ok: true,
+            result: {
+              ...buildDaemonBusyStatusSnapshot({
+                discordRealtime,
+                slackRealtime,
+                linkedInRealtime,
+                signalRealtime,
+                whatsAppRealtime,
+                socketPath: CUED_SOCKET_PATH,
+                bootstrap,
+                dbPath: db.dbPath,
+                error,
+              }),
+              checks: [],
+              warnings: [
+                {
+                  id: "daemon_db_busy",
+                  severity: "warning",
+                  message: "Cued database is busy; retry doctor after background work yields.",
+                },
+              ],
+            },
+          };
+        }
       case "integrations-list": {
         const integrationAuthService = await getIntegrationAuthService();
         return {

@@ -84,6 +84,13 @@ describe("adapter runner", () => {
 
     await assertion;
     expect(child.kill).toHaveBeenCalledWith("SIGKILL");
+    expect(spawnMock).toHaveBeenCalledWith(
+      process.execPath,
+      [...process.execArgv, "/tmp/fake-worker.js"],
+      expect.objectContaining({
+        detached: true,
+      }),
+    );
   });
 
   it("falls back to a TypeScript worker entrypoint when running from source", async () => {
@@ -125,6 +132,7 @@ describe("adapter runner", () => {
       process.execPath,
       [...process.execArgv, tsWorker],
       expect.objectContaining({
+        detached: true,
         stdio: ["ignore", "pipe", "pipe"],
       }),
     );

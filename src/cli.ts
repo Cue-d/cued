@@ -5,7 +5,7 @@ import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
-import { sendDaemonRequest } from "./client.js";
+import { DaemonRequestTimeoutError, sendDaemonRequest } from "./client.js";
 import { getCurrentAppVersion, getCurrentReleaseChannel } from "./core/app-metadata.js";
 import { CUED_DB_PATH, CUED_SOCKET_PATH, ensureCuedDirs } from "./core/config.js";
 import { resolveHostOS } from "./core/platform-capabilities.js";
@@ -59,6 +59,7 @@ import {
   readRecentLogLines,
 } from "./runtime/logs.js";
 import { buildOnboardingSnapshot } from "./runtime/onboarding.js";
+import { runProjectionWorkerFromEnv } from "./runtime/projection/worker.js";
 import {
   checkForUpdates,
   clearUpdateHelperPendingState,
@@ -171,6 +172,10 @@ function printJson(value: unknown): void {
   console.log(JSON.stringify(value, null, 2));
 }
 
+function isDaemonTimeout(error: unknown): error is DaemonRequestTimeoutError {
+  return error instanceof DaemonRequestTimeoutError;
+}
+
 function parseFlagValue(args: string[], flag: string): string | undefined {
   const index = args.findIndex((value) => value === flag);
   return index >= 0 ? args[index + 1] : undefined;
@@ -264,6 +269,68 @@ async function safeEmitHookEvent(
   }
 }
 
+async function buildLocalStatusFallback(error: DaemonRequestTimeoutError) {
+  try {
+    const db = openExistingCuedDatabase(undefined, { readonly: true });
+    try {
+      return {
+        app: getAppStatusMetadata(db),
+        daemon: db.getDaemonState(),
+        overview: db.getOverview(),
+        projection: db.getProjectionBacklog({ initializeProjectionState: false }),
+        checkpoints: db.listCheckpointSummary(),
+        recentRuns: db.listRecentRuns(),
+        integrations: listIntegrationStates(db),
+        hooks: doctorHooksConfig(),
+        update: getUpdateStatus(db),
+        socketRunning: existsSync(CUED_SOCKET_PATH),
+        daemonResponsive: false,
+        daemonBusyError: error.message,
+        dbPath: db.dbPath,
+      };
+    } finally {
+      db.close();
+    }
+  } catch (fallbackError) {
+    return {
+      socketRunning: existsSync(CUED_SOCKET_PATH),
+      daemonResponsive: false,
+      daemonBusyError: error.message,
+      fallbackError: fallbackError instanceof Error ? fallbackError.message : String(fallbackError),
+      dbPath: CUED_DB_PATH,
+    };
+  }
+}
+
+async function buildLocalDoctorFallback(error: DaemonRequestTimeoutError) {
+  try {
+    const db = openExistingCuedDatabase(undefined, { readonly: true });
+    try {
+      return {
+        app: getAppStatusMetadata(db),
+        ...(await buildDoctorReport(db)),
+        projection: db.getProjectionBacklog({ initializeProjectionState: false }),
+        hooks: doctorHooksConfig(),
+        update: getUpdateStatus(db),
+        socketRunning: existsSync(CUED_SOCKET_PATH),
+        daemonResponsive: false,
+        daemonBusyError: error.message,
+        dbPath: db.dbPath,
+      };
+    } finally {
+      db.close();
+    }
+  } catch (fallbackError) {
+    return {
+      socketRunning: existsSync(CUED_SOCKET_PATH),
+      daemonResponsive: false,
+      daemonBusyError: error.message,
+      fallbackError: fallbackError instanceof Error ? fallbackError.message : String(fallbackError),
+      dbPath: CUED_DB_PATH,
+    };
+  }
+}
+
 async function handleLocalIntegrationCommand(
   subcommand: string | undefined,
   rest: string[],
@@ -346,6 +413,11 @@ async function main(): Promise<void> {
 
   if (command === "daemon") {
     await runDaemon();
+    return;
+  }
+
+  if (command === "__projection-worker") {
+    await runProjectionWorkerFromEnv();
     return;
   }
 
@@ -707,10 +779,26 @@ async function main(): Promise<void> {
       return;
     }
     case "status":
-      response = await sendDaemonRequest({ command: "status" });
+      try {
+        response = await sendDaemonRequest({ command: "status" });
+      } catch (error) {
+        if (!isDaemonTimeout(error)) {
+          throw error;
+        }
+        printJson(await buildLocalStatusFallback(error));
+        return;
+      }
       break;
     case "doctor":
-      response = await sendDaemonRequest({ command: "doctor" });
+      try {
+        response = await sendDaemonRequest({ command: "doctor" });
+      } catch (error) {
+        if (!isDaemonTimeout(error)) {
+          throw error;
+        }
+        printJson(await buildLocalDoctorFallback(error));
+        return;
+      }
       break;
     case "integrations":
       switch (subcommand) {

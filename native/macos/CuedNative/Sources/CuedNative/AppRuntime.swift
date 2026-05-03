@@ -1308,6 +1308,9 @@ final class DaemonSupervisor {
 
   private nonisolated func daemonEnvironment() -> [String: String] {
     var environment = ProcessInfo.processInfo.environment
+    for (key, value) in loadConfiguredDaemonEnvironment(environment: environment) {
+      environment[key] = value
+    }
     let executablePath = Bundle.main.executablePath?.trimmingCharacters(in: .whitespacesAndNewlines)
 
     if let helperPath = bundledNativeHelperPath() {
@@ -1537,7 +1540,7 @@ final class MenuBarAppController: NSObject, NSApplicationDelegate {
     daemonSupervisor.startIfNeeded()
     rebuildMenu()
     statusMonitor.start()
-    timer = Timer.scheduledTimer(timeInterval: 5, target: self, selector: #selector(refreshStatus), userInfo: nil, repeats: true)
+    timer = Timer.scheduledTimer(timeInterval: 1, target: self, selector: #selector(refreshStatus), userInfo: nil, repeats: true)
     if let timer {
       RunLoop.main.add(timer, forMode: .common)
     }

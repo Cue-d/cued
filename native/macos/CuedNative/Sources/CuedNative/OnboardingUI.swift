@@ -295,9 +295,12 @@ final class OnboardingWindowController: NSWindowController {
   }
 
   private func finishOnboarding() {
-    _ = daemonSupervisor.runCLI(arguments: ["onboarding", "complete"])
+    let daemonSupervisor = self.daemonSupervisor
     close()
     onRefresh()
+    Task.detached(priority: .utility) { [daemonSupervisor] in
+      _ = daemonSupervisor.runCLI(arguments: ["onboarding", "complete"])
+    }
   }
 
   override func close() {

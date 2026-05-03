@@ -121,6 +121,22 @@ function isSlackWorkspaceUrl(url: string): boolean {
   );
 }
 
+async function continueSlackInBrowser(page: Page): Promise<void> {
+  if (!page.url().includes("slack.com")) {
+    return;
+  }
+
+  const continueControl = page
+    .getByRole("button", { name: /continue in browser/i })
+    .or(page.getByRole("link", { name: /continue in browser/i }))
+    .first();
+  if ((await continueControl.count().catch(() => 0)) === 0) {
+    return;
+  }
+
+  await continueControl.click({ timeout: 1_000 }).catch(() => {});
+}
+
 function isLinkedInAuthPage(url: string): boolean {
   return url.includes("/login") || url.includes("/authwall") || url.includes("/checkpoint");
 }
@@ -215,8 +231,8 @@ async function captureLinkedInSessionData(
     if (!isLinkedInMessagingUrl(page.url())) {
       await page.goto("https://www.linkedin.com/messaging/", { waitUntil: "domcontentloaded" });
     }
-    await page.waitForLoadState("networkidle", { timeout: 10_000 }).catch(() => {});
-    await page.waitForTimeout(3_000);
+    await page.waitForLoadState("domcontentloaded", { timeout: 5_000 }).catch(() => {});
+    await page.waitForTimeout(500);
     return capture;
   } finally {
     context.off("request", onRequest);
@@ -496,6 +512,9 @@ async function run(): Promise<void> {
 
       for (const candidatePage of openPages) {
         try {
+          if (args.platform === "slack") {
+            await continueSlackInBrowser(candidatePage);
+          }
           const extracted = await maybeExtractAuth(args, context, candidatePage);
           if (!extracted) {
             continue;

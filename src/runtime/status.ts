@@ -1,5 +1,8 @@
 import type { CuedDatabase } from "../db/database.js";
-import { buildIntegrationStatus } from "../platforms/core/state/status.js";
+import {
+  buildIntegrationStatus,
+  listMenuBarIntegrationStates,
+} from "../platforms/core/state/status.js";
 import type { DiscordRealtimeSupervisor } from "../platforms/discord/realtime/session.js";
 import type { LinkedInRealtimeSupervisor } from "../platforms/linkedin/realtime/session.js";
 import type { SignalRealtimeSupervisor } from "../platforms/signal/realtime/session.js";
@@ -94,6 +97,37 @@ export function buildDaemonStatusSnapshot(
     ...buildIntegrationStatus(db, {
       includeLiveLocalIntegrations: false,
     }),
+    update: getUpdateStatus(db),
+    socketPath: options.socketPath,
+    dbPath: db.dbPath,
+  };
+}
+
+export function buildMenuBarDaemonStatusSnapshot(
+  db: CuedDatabase,
+  options: {
+    app: unknown;
+    discordRealtime: DiscordRealtimeSupervisor;
+    slackRealtime: SlackRealtimeSupervisor;
+    linkedInRealtime: LinkedInRealtimeSupervisor;
+    signalRealtime: SignalRealtimeSupervisor;
+    whatsAppRealtime: WhatsAppRealtimeSupervisor;
+    socketPath: string;
+    bootstrap: DaemonBootstrapSnapshot;
+  },
+) {
+  return {
+    app: options.app,
+    bootstrap: options.bootstrap,
+    daemon: db.getDaemonState(),
+    overview: db.getMenuBarOverview(),
+    projection: db.getProjectionBacklog({ initializeProjectionState: false }),
+    integrations: listMenuBarIntegrationStates(db),
+    discordRealtimeSessions: options.discordRealtime.getStatuses(),
+    slackRealtimeSessions: options.slackRealtime.getStatuses(),
+    linkedinRealtimeSessions: options.linkedInRealtime.getStatuses(),
+    signalRealtimeSessions: options.signalRealtime.getStatuses(),
+    whatsappRealtimeSessions: options.whatsAppRealtime.getStatuses(),
     update: getUpdateStatus(db),
     socketPath: options.socketPath,
     dbPath: db.dbPath,

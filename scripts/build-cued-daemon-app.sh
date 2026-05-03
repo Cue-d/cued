@@ -280,6 +280,18 @@ rm -rf "$RUNTIME_DIR/node_modules/cued" "$RUNTIME_DIR/node_modules/@cued/app"
 # repo's native helper sources/build output duplicates unsigned binaries inside
 # the portable runtime and breaks notarization.
 rm -rf "$RUNTIME_DIR/native"
+# Local smoke artifacts are useful during release testing, but must never ship
+# inside the app bundle.
+rm -rf \
+  "$RUNTIME_DIR/.cued-smoke" \
+  "$RUNTIME_DIR/.github" \
+  "$RUNTIME_DIR/.husky" \
+  "$RUNTIME_DIR/.turbo" \
+  "$RUNTIME_DIR/docs/smoke"
+if [[ -d "$RUNTIME_DIR/dist" ]]; then
+  find "$RUNTIME_DIR/dist" -type f \( -name '*.test.js' -o -name '*.test.js.map' \) -delete
+  find "$RUNTIME_DIR/dist" -type d -name '__tests__' -prune -exec rm -rf {} +
+fi
 
 mkdir -p "$RESOURCES_DIR/scripts"
 cp "$PERMISSIONS_SCRIPT_SOURCE" "$RESOURCES_DIR/scripts/request-macos-access.sh"

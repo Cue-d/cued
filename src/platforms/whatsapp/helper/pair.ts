@@ -228,6 +228,10 @@ export function startWhatsAppPairSession(options: {
           pushName: data.pushName ?? null,
           helperVersion: data.helperVersion ?? null,
         };
+        if (!completionSettled) {
+          completionSettled = true;
+          resolveCompletion(connectedResult);
+        }
         continue;
       }
       if (parsed.event === "error") {

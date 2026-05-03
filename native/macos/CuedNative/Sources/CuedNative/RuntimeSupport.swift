@@ -1,6 +1,7 @@
 import Foundation
 
 private let permissionRelaunchSetupIntentFilename = "permission-relaunch-setup.intent"
+private let daemonEnvironmentFilename = "daemon.env"
 
 func trimmedEnvironmentPath(_ environment: [String: String], name: String) -> String? {
   let value = environment[name]?.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -26,6 +27,41 @@ func configuredCuedDBPath(
 ) -> String {
   trimmedEnvironmentPath(environment, name: "CUED_DB_PATH")
     ?? "\(configuredCuedHomePath(environment: environment, homeDirectory: homeDirectory))/local.db"
+}
+
+func configuredDaemonEnvironmentPath(
+  environment: [String: String] = ProcessInfo.processInfo.environment,
+  homeDirectory: String = NSHomeDirectory()
+) -> String {
+  "\(configuredCuedHomePath(environment: environment, homeDirectory: homeDirectory))/\(daemonEnvironmentFilename)"
+}
+
+func loadConfiguredDaemonEnvironment(
+  environment: [String: String] = ProcessInfo.processInfo.environment,
+  homeDirectory: String = NSHomeDirectory()
+) -> [String: String] {
+  let path = configuredDaemonEnvironmentPath(environment: environment, homeDirectory: homeDirectory)
+  guard let contents = try? String(contentsOfFile: path, encoding: .utf8) else {
+    return [:]
+  }
+
+  var values: [String: String] = [:]
+  for rawLine in contents.components(separatedBy: .newlines) {
+    let line = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
+    if line.isEmpty || line.hasPrefix("#") {
+      continue
+    }
+    let parts = line.split(separator: "=", maxSplits: 1, omittingEmptySubsequences: false)
+    guard parts.count == 2 else {
+      continue
+    }
+    let key = parts[0].trimmingCharacters(in: .whitespacesAndNewlines)
+    let value = parts[1].trimmingCharacters(in: .whitespacesAndNewlines)
+    if key.hasPrefix("CUED_"), key.allSatisfy({ $0.isLetter || $0.isNumber || $0 == "_" }) {
+      values[key] = value
+    }
+  }
+  return values
 }
 
 func permissionRelaunchSetupIntentPath(

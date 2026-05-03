@@ -78,6 +78,7 @@ const APP_SETTING_KEYS = {
   updatePendingRollback: "update_pending_rollback_json",
   updateReleaseState: "update_release_state_json",
 } as const;
+const DEFAULT_SQLITE_BUSY_TIMEOUT_MS = 5_000;
 
 export interface DaemonStatusRow {
   singleton_key: "daemon";
@@ -97,6 +98,7 @@ export interface QueuedSyncRun {
   status: SyncRunStatus;
   trigger: string;
   queued_at: number;
+  scheduled_at: number;
   started_at: number | null;
   details_json: string | null;
 }
@@ -533,7 +535,7 @@ export class CuedDatabase {
   ) {
     ensureCuedDirs();
     this.sqlite = openSqliteDatabase(dbPath, { readonly: options.readonly });
-    this.sqlite.exec("PRAGMA busy_timeout = 5000");
+    this.sqlite.exec(`PRAGMA busy_timeout = ${DEFAULT_SQLITE_BUSY_TIMEOUT_MS}`);
     this.sqlite.exec("PRAGMA foreign_keys = ON");
     if (!options.readonly) {
       this.sqlite.exec("PRAGMA journal_mode = WAL");
@@ -1496,21 +1498,55 @@ export class CuedDatabase {
       .prepare(
         `
         SELECT
-          COALESCE(MAX(rowid), 0) AS max_raw_event_rowid,
-          COALESCE(SUM(CASE WHEN rowid > ? THEN 1 ELSE 0 END), 0) AS pending_raw_events
-        FROM raw_events
+          (SELECT COALESCE(MAX(rowid), 0) FROM raw_events) AS max_raw_event_rowid,
+          (SELECT COUNT(*) FROM raw_events WHERE rowid > ?) AS pending_raw_events
       `,
       )
       .get(state.projection_watermark) as {
       max_raw_event_rowid: number | null;
       pending_raw_events: number | null;
     };
+    const maxRawEventRowid = Number(row.max_raw_event_rowid ?? 0);
 
     return {
       projection_watermark: state.projection_watermark,
-      max_raw_event_rowid: Number(row.max_raw_event_rowid ?? 0),
+      max_raw_event_rowid: maxRawEventRowid,
       pending_raw_events: Number(row.pending_raw_events ?? 0),
     };
+  }
+
+  getProjectionOverview(): {
+    contacts: number;
+    conversations: number;
+    messages: number;
+    rawEvents: number;
+  } {
+    return {
+      contacts: this.countRows(contacts),
+      conversations: this.countRows(conversations),
+      messages: this.countRows(messages),
+      rawEvents: this.countRows(rawEvents),
+    };
+  }
+
+  async withBusyTimeout<T>(timeoutMs: number, task: () => T | Promise<T>): Promise<T> {
+    const boundedTimeoutMs = Math.max(0, Math.trunc(timeoutMs));
+    this.sqlite.exec(`PRAGMA busy_timeout = ${boundedTimeoutMs}`);
+    try {
+      return await task();
+    } finally {
+      this.sqlite.exec(`PRAGMA busy_timeout = ${DEFAULT_SQLITE_BUSY_TIMEOUT_MS}`);
+    }
+  }
+
+  withBusyTimeoutSync<T>(timeoutMs: number, task: () => T): T {
+    const boundedTimeoutMs = Math.max(0, Math.trunc(timeoutMs));
+    this.sqlite.exec(`PRAGMA busy_timeout = ${boundedTimeoutMs}`);
+    try {
+      return task();
+    } finally {
+      this.sqlite.exec(`PRAGMA busy_timeout = ${DEFAULT_SQLITE_BUSY_TIMEOUT_MS}`);
+    }
   }
 
   getIntegrationProjectionStats(
@@ -3153,9 +3189,16 @@ export class CuedDatabase {
     runType: SyncRunType;
     trigger: string;
     details?: unknown;
+    scheduledAt?: number;
+    delayMs?: number;
   }): string {
     const id = randomUUID();
     const queuedAt = now();
+    const scheduledAt =
+      input.scheduledAt ??
+      (input.delayMs != null && Number.isFinite(input.delayMs)
+        ? queuedAt + Math.max(0, Math.trunc(input.delayMs))
+        : queuedAt);
     this.db
       .insert(syncRuns)
       .values({
@@ -3166,6 +3209,7 @@ export class CuedDatabase {
         status: "queued",
         trigger: input.trigger,
         queuedAt,
+        scheduledAt,
         startedAt: null,
         finishedAt: null,
         detailsJson: safeStringifyJson(input.details),
@@ -3181,6 +3225,8 @@ export class CuedDatabase {
       runType: SyncRunType;
       trigger: string;
       details?: unknown;
+      scheduledAt?: number;
+      delayMs?: number;
     }>,
   ): string[] {
     if (inputs.length === 0) {
@@ -3193,6 +3239,11 @@ export class CuedDatabase {
       for (const chunk of chunkArray(inputs, WRITE_BATCH_SIZE)) {
         const rows = chunk.map((input) => {
           const id = randomUUID();
+          const scheduledAt =
+            input.scheduledAt ??
+            (input.delayMs != null && Number.isFinite(input.delayMs)
+              ? queuedAt + Math.max(0, Math.trunc(input.delayMs))
+              : queuedAt);
           runIds.push(id);
           return {
             id,
@@ -3202,6 +3253,7 @@ export class CuedDatabase {
             status: "queued" as const,
             trigger: input.trigger,
             queuedAt,
+            scheduledAt,
             startedAt: null,
             finishedAt: null,
             detailsJson: safeStringifyJson(input.details),
@@ -3317,6 +3369,7 @@ export class CuedDatabase {
         runTypes && runTypes.length > 0
           ? and(eq(syncRuns.status, "queued"), inArray(syncRuns.runType, runTypes))
           : eq(syncRuns.status, "queued");
+      const claimablePredicate = and(statusPredicate, sql`${syncRuns.scheduledAt} <= ${now()}`);
 
       const row = tx
         .select({
@@ -3327,12 +3380,13 @@ export class CuedDatabase {
           status: syncRuns.status,
           trigger: syncRuns.trigger,
           queued_at: syncRuns.queuedAt,
+          scheduled_at: syncRuns.scheduledAt,
           started_at: syncRuns.startedAt,
           details_json: syncRuns.detailsJson,
         })
         .from(syncRuns)
-        .where(statusPredicate)
-        .orderBy(asc(syncRuns.queuedAt))
+        .where(claimablePredicate)
+        .orderBy(asc(syncRuns.scheduledAt), asc(syncRuns.queuedAt))
         .limit(1)
         .get() as
         | {
@@ -3343,6 +3397,7 @@ export class CuedDatabase {
             status: SyncRunStatus;
             trigger: string;
             queued_at: number;
+            scheduled_at: number;
             started_at: number | null;
             details_json: string | null;
           }
@@ -3360,6 +3415,21 @@ export class CuedDatabase {
 
       return { ...row, status: nextStatus, started_at: startedAt };
     });
+  }
+
+  getNextQueuedRunScheduledAt(runTypes?: SyncRunType[]): number | null {
+    const statusPredicate =
+      runTypes && runTypes.length > 0
+        ? and(eq(syncRuns.status, "queued"), inArray(syncRuns.runType, runTypes))
+        : eq(syncRuns.status, "queued");
+    const row = this.db
+      .select({ scheduled_at: syncRuns.scheduledAt })
+      .from(syncRuns)
+      .where(statusPredicate)
+      .orderBy(asc(syncRuns.scheduledAt), asc(syncRuns.queuedAt))
+      .limit(1)
+      .get() as { scheduled_at: number } | undefined;
+    return row?.scheduled_at ?? null;
   }
 
   updateRunStatus(runId: string, status: SyncRunStatus, details?: unknown): void {
