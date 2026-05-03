@@ -23,6 +23,8 @@ if [[ -z "${CUED_NOTARY_PROFILE:-}" ]]; then
   exit 1
 fi
 
+export CUED_RELEASE_CHANNEL="${CUED_RELEASE_CHANNEL:-stable}"
+
 runtime_entitlements_for_binary() {
   local target="$1"
 
