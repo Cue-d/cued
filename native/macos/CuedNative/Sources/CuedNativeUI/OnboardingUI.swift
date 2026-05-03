@@ -1264,7 +1264,9 @@ public struct InstallerPlatformIcon: View {
 
   private var brandLogoPadding: CGFloat {
     switch platform {
-    case "discord", "slack", "linkedin", "signal", "whatsapp":
+    case "slack":
+      9
+    case "discord", "linkedin", "signal", "whatsapp":
       7
     default:
       7
