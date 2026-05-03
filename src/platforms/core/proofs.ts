@@ -20,6 +20,15 @@ const PROOF_KIND_CONTRACTS: SyncProofKindContract[] = [
   },
   {
     platform: "discord",
+    proofKind: "discovery",
+    scopeKind: "conversation",
+    completeMeans: "The direct-message conversation was observed during account discovery.",
+    invalidatedBy: "A later account discovery run no longer observes the conversation.",
+    resumeCursorMeans:
+      "No cursor when complete; coverage carries the latest known message edge for the conversation.",
+  },
+  {
+    platform: "discord",
     proofKind: "latest_messages",
     scopeKind: "conversation",
     completeMeans: "The current newest known message edge for the conversation was checked.",

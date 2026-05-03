@@ -10,6 +10,18 @@ describe("sync proof contracts", () => {
     expect(
       getSyncProofKindContract("discord", {
         scope: { kind: "conversation", key: "dm-1" },
+        proofKind: "discovery",
+      }),
+    ).toMatchObject({
+      platform: "discord",
+      scopeKind: "conversation",
+      proofKind: "discovery",
+      completeMeans: expect.stringContaining("direct-message conversation"),
+    });
+
+    expect(
+      getSyncProofKindContract("discord", {
+        scope: { kind: "conversation", key: "dm-1" },
         proofKind: "latest_messages",
       }),
     ).toMatchObject({
