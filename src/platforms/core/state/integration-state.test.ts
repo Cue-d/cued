@@ -621,6 +621,39 @@ process.exit(44);
     db.close();
   });
 
+  it("uses synced LinkedIn source account name for connected account display", () => {
+    const db = createDb();
+    db.upsertIntegrationState({
+      platform: "linkedin",
+      accountKey: "default",
+      displayName: "LinkedIn",
+      authState: "authenticated",
+      enabled: true,
+      connectionKind: "browser-session",
+      syncCapable: true,
+      launchStrategy: "chromium-auth",
+      launchTarget: "https://www.linkedin.com/login",
+      importedFrom: "local-cli",
+      metadata: {},
+    });
+    db.upsertSourceAccount({
+      platform: "linkedin",
+      accountKey: "default",
+      displayName: "Theo Tarr",
+    });
+
+    expect(listIntegrationStates(db)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          platform: "linkedin",
+          accountKey: "default",
+          displayName: "Theo Tarr",
+        }),
+      ]),
+    );
+    db.close();
+  });
+
   it("imports stored LinkedIn auth into a fresh database on refresh", async () => {
     installSecurityTool({
       "so.cued.desktop.auth.linkedin:default": {

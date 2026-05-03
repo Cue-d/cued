@@ -343,10 +343,17 @@ export function summarizeIntegrationStates(
     }
 
     const metadata = safeParseJsonRecord(row.metadata_json, "integration_states.metadata_json");
+    const displayName =
+      row.platform === "linkedin" && (row.display_name?.trim() ?? "") === "LinkedIn"
+        ? (firstNonEmptyDisplayName(
+            db.getSourceAccountDisplayName(row.platform, row.account_key),
+            row.display_name,
+          ) ?? row.display_name)
+        : row.display_name;
     const summary: IntegrationStateSummary = {
       platform: row.platform,
       accountKey: row.account_key,
-      displayName: row.display_name,
+      displayName,
       authState: row.auth_state,
       enabled: row.enabled === 1,
       connectionKind: row.connection_kind,

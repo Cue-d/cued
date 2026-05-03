@@ -1651,6 +1651,18 @@ export class CuedDatabase {
     );
   }
 
+  getSourceAccountDisplayName(platform: Platform, accountKey: string): string | null {
+    const row =
+      (this.db
+        .select({ display_name: sourceAccounts.displayName })
+        .from(sourceAccounts)
+        .where(
+          and(eq(sourceAccounts.platform, platform), eq(sourceAccounts.accountKey, accountKey)),
+        )
+        .get() as { display_name: string | null } | undefined) ?? null;
+    return row?.display_name ?? null;
+  }
+
   upsertIntegrationState(input: {
     platform: Platform;
     accountKey: string;

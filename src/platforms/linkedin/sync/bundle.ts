@@ -631,8 +631,37 @@ function conversationScope(conversation: Conversation): SyncProofInput["scope"] 
   };
 }
 
+function trimJoinedName(firstName?: string, lastName?: string): string | null {
+  const displayName = [firstName, lastName]
+    .map((part) => part?.trim())
+    .filter((part): part is string => Boolean(part))
+    .join(" ")
+    .trim();
+  return displayName.length > 0 ? displayName : null;
+}
+
+function inferLinkedInAccountDisplayName(
+  conversations: Conversation[],
+  userEntityUrn: string,
+): string {
+  for (const conversation of conversations) {
+    for (const participant of conversation.conversationParticipants) {
+      if (normalizeMemberUrn(participant.entityURN) !== userEntityUrn) {
+        continue;
+      }
+      const member = participant.participantType.member;
+      const displayName = trimJoinedName(member?.firstName, member?.lastName);
+      if (displayName) {
+        return displayName;
+      }
+    }
+  }
+  return "LinkedIn";
+}
+
 function buildLinkedInDiscoveryProof(input: {
   accountKey: string;
+  accountDisplayName: string;
   observedAt: number;
   runStartedAt: number;
   syncMode: "full" | "incremental";
@@ -645,7 +674,7 @@ function buildLinkedInDiscoveryProof(input: {
     scope: {
       kind: "account",
       key: input.accountKey,
-      displayName: "LinkedIn",
+      displayName: input.accountDisplayName,
     },
     proofKind: "discovery",
     status: input.complete ? "complete" : "running",
@@ -813,12 +842,16 @@ export async function buildLinkedInSyncBundle(options?: {
       listConnections(client, incremental),
     ]);
     const userEntityUrn = normalizeMemberUrn(selfEntityUrn);
+    const accountDisplayName = inferLinkedInAccountDisplayName(
+      conversationResult.conversations,
+      userEntityUrn,
+    );
 
     const sourceAccounts: SourceAccountInput[] = [
       {
         platform: "linkedin",
         accountKey,
-        displayName: "LinkedIn",
+        displayName: accountDisplayName,
       },
     ];
 
@@ -1005,6 +1038,7 @@ export async function buildLinkedInSyncBundle(options?: {
     proofs.unshift(
       buildLinkedInDiscoveryProof({
         accountKey,
+        accountDisplayName,
         observedAt: observedBase,
         runStartedAt: scan?.startedAt ?? observedBase,
         syncMode,

@@ -1764,7 +1764,7 @@ private func fallbackAccountTitle(for platform: String, authState: String) -> St
   if installerIsConnectedIntegrationState(authState) {
     switch platform {
     case "linkedin":
-      return "Saved browser session"
+      return "LinkedIn account"
     case "signal":
       return "Linked Signal device"
     case "whatsapp":
