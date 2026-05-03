@@ -54,15 +54,15 @@ jobs:
         env:
           CUED_CODESIGN_IDENTITY: ${{ secrets.CUED_CODESIGN_IDENTITY }}
           CUED_NOTARY_PROFILE: ${{ secrets.CUED_NOTARY_PROFILE }}
-          CUED_RELEASE_CHANNEL: internal
+          CUED_RELEASE_CHANNEL: stable
 
       - name: Build release metadata
         run: node scripts/build-cued-release-metadata.mjs
         env:
-          CUED_RELEASE_CHANNEL: internal
+          CUED_RELEASE_CHANNEL: stable
           CUED_RELEASE_REPO: Cue-d/cued
 
-      - name: Create or update prerelease
+      - name: Create or update release
         run: |
           VERSION="${{ inputs.version }}"
           if [[ -z "$VERSION" ]]; then
@@ -70,9 +70,9 @@ jobs:
           fi
           TAG="v${VERSION}"
           if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release edit "$TAG" --prerelease --title "Cued ${VERSION}"
+            gh release edit "$TAG" --prerelease=false --title "Cued ${VERSION}"
           else
-            gh release create "$TAG" --prerelease --title "Cued ${VERSION}" --notes "Internal beta release ${VERSION}"
+            gh release create "$TAG" --title "Cued ${VERSION}" --notes "Cued release ${VERSION}"
           fi
           gh release upload "$TAG" \
             native/macos/dist/Cued.dmg \
