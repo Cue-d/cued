@@ -725,12 +725,18 @@ function buildOverview(db: CuedDatabase): {
   messages: number;
   rawEvents: number;
 } {
-  const overview = db.getOverview();
+  return db.getProjectionOverview();
+}
+
+function emptyProjectionOverview(): Pick<
+  ProjectionOverview,
+  "contacts" | "conversations" | "messages" | "rawEvents"
+> {
   return {
-    contacts: overview.contacts,
-    conversations: overview.conversations,
-    messages: overview.messages,
-    rawEvents: overview.rawEvents,
+    contacts: 0,
+    conversations: 0,
+    messages: 0,
+    rawEvents: 0,
   };
 }
 
@@ -2260,8 +2266,10 @@ function summarizeResult(
   rangeEndRowId: number | null,
   completed: boolean,
   nextStartRowId: number | null,
+  options: { includeOverview?: boolean } = {},
 ): ProjectionRangeResult {
-  const overview = buildOverview(db);
+  const overview =
+    options.includeOverview === false ? emptyProjectionOverview() : buildOverview(db);
   return {
     ...overview,
     appliedRawEvents,
@@ -2368,11 +2376,14 @@ function projectRangeInternal(
     startRowId: number;
     endRowId: number;
     limit?: number;
+    includeOverview?: boolean;
   },
 ): ProjectionRangeResult {
   if (input.endRowId < input.startRowId) {
     const projection = db.getProjectionState();
-    return summarizeResult(db, 0, projection.projection_watermark, null, null, true, null);
+    return summarizeResult(db, 0, projection.projection_watermark, null, null, true, null, {
+      includeOverview: input.includeOverview,
+    });
   }
 
   const currentProjectionState = db.getProjectionState();
@@ -2386,6 +2397,7 @@ function projectRangeInternal(
       input.endRowId,
       true,
       null,
+      { includeOverview: input.includeOverview },
     );
   }
 
@@ -2422,6 +2434,7 @@ function projectRangeInternal(
     input.endRowId,
     completed,
     nextStartRowId,
+    { includeOverview: input.includeOverview },
   );
 }
 
@@ -2431,6 +2444,7 @@ export function projectRealtimeRange(
     startRowId: number;
     endRowId: number;
     batchSize?: number;
+    includeOverview?: boolean;
   },
 ): ProjectionRangeResult {
   let currentStartRowId = options.startRowId;
@@ -2449,6 +2463,7 @@ export function projectRealtimeRange(
       startRowId: currentStartRowId,
       endRowId: options.endRowId,
       limit: options.batchSize,
+      includeOverview: options.includeOverview,
     });
     lastResult = {
       ...result,
@@ -2476,6 +2491,7 @@ export function projectDeferredRange(
     startRowId: number;
     endRowId: number;
     limit?: number;
+    includeOverview?: boolean;
   },
 ): ProjectionRangeResult {
   return projectRangeInternal(db, {
@@ -2483,6 +2499,7 @@ export function projectDeferredRange(
     startRowId: options.startRowId,
     endRowId: options.endRowId,
     limit: options.limit,
+    includeOverview: options.includeOverview,
   });
 }
 

@@ -1049,6 +1049,33 @@ describe("CuedDatabase", () => {
     db.close();
   });
 
+  it("does not claim queued sync runs before their scheduled time", () => {
+    const db = createDb();
+    const futureRunId = db.queueSyncRun({
+      platform: "slack",
+      accountKey: "T123",
+      runType: "sync_resume",
+      trigger: "ingest_continue",
+      delayMs: 60_000,
+    });
+
+    expect(db.claimNextQueuedRun(["sync_resume"])).toBeNull();
+    const nextScheduledAt = db.getNextQueuedRunScheduledAt(["sync_resume"]);
+    expect(nextScheduledAt).toBeGreaterThan(Date.now());
+
+    db.queueSyncRun({
+      platform: "contacts",
+      accountKey: "local",
+      runType: "sync",
+      trigger: "manual",
+    });
+
+    expect(db.claimNextQueuedRun(["sync"])?.platform).toBe("contacts");
+    expect(db.listRecentRuns(5).find((run) => run.id === futureRunId)?.status).toBe("queued");
+
+    db.close();
+  });
+
   it("stores checkpoints and raw events", () => {
     const db = createDb();
 
@@ -1506,10 +1533,12 @@ describe("CuedDatabase", () => {
         "idx_message_reactions_reactor_contact",
       ]),
     );
-    expect(syncRunColumns).toContain("queued_at");
+    expect(syncRunColumns).toEqual(expect.arrayContaining(["queued_at", "scheduled_at"]));
     expect(
-      sql.prepare("SELECT queued_at, started_at FROM sync_runs WHERE id = ?").get("legacy-run"),
-    ).toEqual({ queued_at: 123, started_at: null });
+      sql
+        .prepare("SELECT queued_at, scheduled_at, started_at FROM sync_runs WHERE id = ?")
+        .get("legacy-run"),
+    ).toEqual({ queued_at: 123, scheduled_at: 123, started_at: null });
     expect(messageAttachmentColumns).toEqual(
       expect.arrayContaining([
         "access_kind",

@@ -269,6 +269,7 @@ function repairLegacySyncRunsIfNeeded(db: MigrationDatabase): void {
       status TEXT NOT NULL,
       trigger TEXT NOT NULL,
       queued_at INTEGER NOT NULL,
+      scheduled_at INTEGER NOT NULL,
       started_at INTEGER,
       finished_at INTEGER,
       details_json TEXT
@@ -299,6 +300,7 @@ function repairLegacySyncRunsIfNeeded(db: MigrationDatabase): void {
       status,
       trigger,
       queued_at,
+      scheduled_at,
       started_at,
       finished_at,
       details_json
@@ -310,6 +312,7 @@ function repairLegacySyncRunsIfNeeded(db: MigrationDatabase): void {
       run_type,
       status,
       trigger,
+      COALESCE(started_at, strftime('%s','now') * 1000),
       COALESCE(started_at, strftime('%s','now') * 1000),
       CASE
         WHEN status IN ('ingesting', 'projecting', 'completed', 'failed') THEN started_at
@@ -911,6 +914,7 @@ export const MIGRATIONS: Migration[] = [
         status TEXT NOT NULL,
         trigger TEXT NOT NULL,
         queued_at INTEGER NOT NULL,
+        scheduled_at INTEGER NOT NULL DEFAULT 0,
         started_at INTEGER,
         finished_at INTEGER,
         details_json TEXT
@@ -1312,10 +1316,10 @@ export const MIGRATIONS: Migration[] = [
       ON sync_proofs(platform, account_key, status, updated_at);
 
       CREATE INDEX IF NOT EXISTS idx_sync_runs_status_type_queue
-      ON sync_runs(status, run_type, queued_at);
+      ON sync_runs(status, run_type, scheduled_at, queued_at);
 
       CREATE INDEX IF NOT EXISTS idx_sync_runs_platform_account_status_queue
-      ON sync_runs(platform, account_key, status, queued_at);
+      ON sync_runs(platform, account_key, status, scheduled_at, queued_at);
 
       CREATE INDEX IF NOT EXISTS idx_raw_events_lookup
       ON raw_events(platform, account_key, observed_at);
@@ -1939,6 +1943,31 @@ export const MIGRATIONS: Migration[] = [
 
         CREATE INDEX IF NOT EXISTS idx_contact_memories_created
         ON contact_memories(created_at DESC);
+      `);
+    },
+  },
+  {
+    id: "0013_sync_run_scheduling",
+    apply: (db) => {
+      if (!tableExists(db, "sync_runs")) {
+        return;
+      }
+
+      addColumnIfMissing(db, "sync_runs", "scheduled_at INTEGER");
+      db.exec(`
+        UPDATE sync_runs
+        SET scheduled_at = COALESCE(scheduled_at, queued_at, started_at, strftime('%s','now') * 1000)
+        WHERE scheduled_at IS NULL
+      `);
+      db.exec(`
+        DROP INDEX IF EXISTS idx_sync_runs_status_type_queue;
+        DROP INDEX IF EXISTS idx_sync_runs_platform_account_status_queue;
+
+        CREATE INDEX IF NOT EXISTS idx_sync_runs_status_type_queue
+        ON sync_runs(status, run_type, scheduled_at, queued_at);
+
+        CREATE INDEX IF NOT EXISTS idx_sync_runs_platform_account_status_queue
+        ON sync_runs(platform, account_key, status, scheduled_at, queued_at);
       `);
     },
   },

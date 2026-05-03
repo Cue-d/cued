@@ -63,8 +63,18 @@ function loadContactsFromFile(path: string): ContactRecordInput[] {
 }
 
 function loadContactsFromNativeBinary(path: string): ContactRecordInput[] {
+  const statusStdout = execFileSync(path, ["contacts", "status"], {
+    encoding: "utf8",
+    timeout: 10_000,
+  });
+  const status = JSON.parse(statusStdout) as { status?: string };
+  if (status.status !== "authorized") {
+    throw new Error(`Contacts permission is ${status.status ?? "unknown"}`);
+  }
+
   const stdout = execFileSync(path, ["contacts", "dump"], {
     encoding: "utf8",
+    timeout: 120_000,
   });
   return JSON.parse(stdout) as ContactRecordInput[];
 }

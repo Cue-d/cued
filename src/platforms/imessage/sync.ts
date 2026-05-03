@@ -18,7 +18,7 @@ import {
 import { DEFAULT_CHAT_DB_PATH, IMessageReader } from "./reader.js";
 import type { ImsSyncBatch } from "./types.js";
 
-const DEFAULT_IMESSAGE_BATCH_LIMIT = 2_000;
+export const DEFAULT_IMESSAGE_BATCH_LIMIT = 2_000;
 
 type IMessageSourceCursor = {
   rowId?: number;

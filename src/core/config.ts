@@ -30,6 +30,7 @@ export const CUED_DB_PATH = resolveCuedDbPath();
 export const CUED_SOCKET_PATH = join(CUED_HOME, "cued.sock");
 export const CUED_DAEMON_LOCK_PATH = join(CUED_HOME, "daemon.lock");
 export const CUED_MENU_BAR_LOCK_PATH = join(CUED_HOME, "menu-bar.lock");
+export const CUED_MENU_BAR_STATUS_PATH = join(CUED_HOME, "menu-bar-status.json");
 export const CUED_LOG_DIR = join(CUED_HOME, "logs");
 export const CUED_DAEMON_LOG_PATH = join(CUED_LOG_DIR, "daemon.log");
 export const CUED_BROWSER_DIR = join(CUED_HOME, "browser");

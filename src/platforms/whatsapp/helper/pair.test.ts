@@ -110,7 +110,7 @@ exit 1
     });
   });
 
-  it("waits for the pair helper to exit before resolving completion", async () => {
+  it("resolves completion as soon as the pair helper reports connected", async () => {
     const child = new MockPairChild();
     spawnMock.mockReturnValue(child);
 
@@ -134,9 +134,11 @@ exit 1
     const settled = vi.fn();
     handle.completion.then(settled).catch(() => {});
     await Promise.resolve();
-    expect(settled).not.toHaveBeenCalled();
-
-    child.emit("exit", 0, null);
+    expect(settled).toHaveBeenCalledWith({
+      accountJid: "15551234567:18@s.whatsapp.net",
+      pushName: "Theo",
+      helperVersion: "0.1.0",
+    });
 
     await expect(handle.completion).resolves.toEqual({
       accountJid: "15551234567:18@s.whatsapp.net",

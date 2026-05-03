@@ -1,5 +1,5 @@
 import type { AdapterWorkerOutput } from "../core/sync.js";
-import { buildIMessageSyncBundle } from "./sync.js";
+import { buildIMessageSyncBundle, DEFAULT_IMESSAGE_BATCH_LIMIT } from "./sync.js";
 
 async function main(): Promise<void> {
   try {
@@ -10,7 +10,7 @@ async function main(): Promise<void> {
       path: process.env.CUED_IMESSAGE_DB_PATH || undefined,
       lastRowId: Number(process.env.CUED_IMESSAGE_LAST_ROWID || "0"),
       sourceCursor,
-      limit: Number(process.env.CUED_IMESSAGE_BATCH_LIMIT || "2000"),
+      limit: Number(process.env.CUED_IMESSAGE_BATCH_LIMIT || String(DEFAULT_IMESSAGE_BATCH_LIMIT)),
       callHistoryPath: process.env.CUED_CALL_HISTORY_DB_PATH || undefined,
     });
     const output: AdapterWorkerOutput = { ok: true, bundle };

@@ -19,6 +19,7 @@ export async function runAdapter(
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [...process.execArgv, workerEntrypoint], {
       stdio: ["ignore", "pipe", "pipe"],
+      detached: true,
       env: {
         ...process.env,
         ...(accountKey ? { CUED_ACCOUNT_KEY: accountKey } : {}),
@@ -34,7 +35,7 @@ export async function runAdapter(
         return;
       }
       settled = true;
-      child.kill("SIGKILL");
+      killAdapterProcessTree(child.pid, () => child.kill("SIGKILL"));
       reject(
         new Error(
           `Adapter worker timed out after ${definition.workerTimeoutMs}ms for platform '${platform}'${accountKey ? ` account '${accountKey}'` : ""}`,
@@ -92,6 +93,19 @@ export async function runAdapter(
       resolve(parsed.bundle);
     });
   });
+}
+
+function killAdapterProcessTree(pid: number | undefined, fallback: () => void): void {
+  if (typeof pid !== "number" || pid <= 0) {
+    fallback();
+    return;
+  }
+
+  try {
+    process.kill(-pid, "SIGKILL");
+  } catch {
+    fallback();
+  }
 }
 
 function parseWorkerError(stdout: string): string | null {
