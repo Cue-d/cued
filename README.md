@@ -6,7 +6,15 @@
 
 Local-only message and contact sync for agents.
 
-[Releases](https://github.com/Cue-d/cued/releases) · [Installing](docs/installing.md) · [Development](docs/development.md)
+[Releases](https://github.com/Cue-d/cued/releases) · [Installing](docs/installing.md) · [Development](docs/development.md) · [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md) · [Privacy](PRIVACY.md)
+
+## Project Status
+
+Cued is open source under the [Apache-2.0 license](LICENSE).
+
+The supported install path today is GitHub Releases. Homebrew and npm installation are planned, but the package remains private until those install paths are designed and tested.
+
+Most integrations in the matrix below are ready for normal use. Gmail source builds work with local OAuth credentials, but the official Cued build is waiting on Google OAuth approval before Gmail is presented as a normal no-credential user flow.
 
 ## Install
 
@@ -124,13 +132,15 @@ LinkedIn history is currently partial: Cued imports inbox-visible threads and bo
 
 Discord currently runs in DM-only mode: it discovers direct messages, hydrates up to 50 recent messages in the 5 most recent unproven DMs during sync, uses per-DM message cursors plus snowflake-based pagination to fetch newer messages on later syncs, and continues incomplete historical `messages` proofs with bounded `before` pagination. It sends only to known DMs and stores the captured Discord account token locally in the Keychain. On Discord auth invalidation such as `401` responses or forced password resets, Cued blocks the integration and stops reconnect attempts until you reconnect manually.
 
+Gmail official builds are waiting on Google OAuth approval. Source builds can connect Gmail with a local Google OAuth desktop client JSON.
+
 ## Install From Source
 
 ### Prerequisites
 
 | Requirement | Version                      | Check             |
 | ----------- | ---------------------------- | ----------------- |
-| Node.js     | 22+                          | `node --version`  |
+| Node.js     | 24+                          | `node --version`  |
 | pnpm        | 10+                          | `pnpm --version`  |
 | macOS       | 13+ on Apple Silicon         | `sw_vers`         |
 | Swift       | 6+                           | `swift --version` |
@@ -188,7 +198,7 @@ cued sync run discord
 
 ### Gmail OAuth credentials
 
-Official Cued builds include the Cued Desktop Google OAuth client, so normal users can connect Gmail without creating Google Cloud credentials. Source builds keep credentials external: put a Google OAuth desktop client JSON at `~/.cued/google-oauth-client.json`, or set `CUED_GOOGLE_OAUTH_CLIENT_FILE` / `GOOGLE_OAUTH_CLIENT_FILE` before running the Gmail connect flow. Explicit env vars override the bundled client for local development.
+Official Cued builds are waiting on Google OAuth approval before Gmail is presented as a normal no-credential user flow. Source builds keep credentials external: put a Google OAuth desktop client JSON at `~/.cued/google-oauth-client.json`, or set `CUED_GOOGLE_OAUTH_CLIENT_FILE` / `GOOGLE_OAUTH_CLIENT_FILE` before running the Gmail connect flow. Explicit env vars override any bundled client for local development.
 
 Cued requests only `https://www.googleapis.com/auth/gmail.readonly`. It stores per-account access and refresh tokens in Keychain and stores synced Gmail message content locally in `~/.cued/local.db`.
 
@@ -254,6 +264,12 @@ Signal support ships as a bundled `signal-cli` payload fetched by `scripts/fetch
 | `pnpm permissions:macos`   | Open/request macOS permissions                                                     |
 
 More detail: [scripts/README.md](scripts/README.md)
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for local setup, architecture rules, integration policy, and PR expectations.
+
+Security reports should go to `theo@cued.so`; see [SECURITY.md](SECURITY.md). Do not open public issues with real local databases, message exports, browser profiles, tokens, cookies, OAuth secrets, or private logs.
 
 ## Daemon Benchmarking
 

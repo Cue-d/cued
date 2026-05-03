@@ -74,7 +74,7 @@ The setup TUI summarizes install state, daemon state, permissions, and next acti
 - `cued integrations connect linkedin default`
 - `cued integrations connect gmail`
 
-Official Cued builds include the Cued Desktop Google OAuth client, so Gmail does not require user-provided client credentials. Source builds can provide a Google OAuth desktop client JSON at `~/.cued/google-oauth-client.json`, or through `CUED_GOOGLE_OAUTH_CLIENT_FILE` / `GOOGLE_OAUTH_CLIENT_FILE`. Cued stores account tokens in Keychain and keeps synced Gmail message content local in `~/.cued/local.db`.
+Official Cued builds are waiting on Google OAuth approval before Gmail is presented as a normal no-credential user flow. Source builds can provide a Google OAuth desktop client JSON at `~/.cued/google-oauth-client.json`, or through `CUED_GOOGLE_OAUTH_CLIENT_FILE` / `GOOGLE_OAUTH_CLIENT_FILE`. Cued stores account tokens in Keychain and keeps synced Gmail message content local in `~/.cued/local.db`.
 
 ## Verify
 
@@ -102,7 +102,7 @@ Use this path when you are developing on the repo itself.
 
 | Requirement | Version | Why it is needed |
 | ----------- | ------- | ---------------- |
-| Node.js | 22+ | Builds and runs the root daemon and CLI runtime. |
+| Node.js | 24+ | Builds and runs the root daemon and CLI runtime. |
 | pnpm | 10+ | Installs dependencies and drives the workspace scripts. |
 | macOS | 13+ on Apple Silicon | Matches the current native packaging and release target. |
 | Swift | 6+ | Builds the native host and macOS helper binaries. |
