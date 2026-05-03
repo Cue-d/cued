@@ -1701,6 +1701,8 @@ private func installerReadableIntegrationState(_ value: String) -> String {
     return "Needs attention"
   case "missing":
     return "Not authenticated"
+  case "needs_auth":
+    return "Not authenticated"
   case "blocked":
     return "Blocked"
   case "not_determined":

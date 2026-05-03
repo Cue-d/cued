@@ -312,6 +312,7 @@ export const INTEGRATION_AUTH_STATE_VALUES = [
   "in_progress",
   "missing",
   "native_helper_missing",
+  "needs_auth",
   "needs_full_disk_access",
   "not_determined",
   "outdated",

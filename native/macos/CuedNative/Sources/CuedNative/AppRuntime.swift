@@ -1100,6 +1100,8 @@ private func integrationStateLabel(_ value: String) -> String {
     return "check failed"
   case "missing":
     return "missing"
+  case "needs_auth":
+    return "not authenticated"
   case "blocked":
     return "blocked"
   case "not_determined":
