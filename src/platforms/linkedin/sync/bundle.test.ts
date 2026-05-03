@@ -120,7 +120,7 @@ describe("buildLinkedInSyncBundle", () => {
     });
 
     expect(bundle.sourceAccounts).toEqual([
-      { platform: "linkedin", accountKey: "default", displayName: "LinkedIn" },
+      { platform: "linkedin", accountKey: "default", displayName: "Theo Tarr" },
     ]);
     expect(bundle.sourceCursor).toEqual(
       expect.objectContaining({

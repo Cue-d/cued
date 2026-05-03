@@ -762,10 +762,20 @@ final class AppStatusStore: @unchecked Sendable {
 
   private func queryIntegrations(db: OpaquePointer) -> [AppIntegrationStatus] {
     let sql = """
-      SELECT platform, account_key, auth_state, enabled
-      , display_name, metadata_json
-      FROM integration_states
-      ORDER BY platform, account_key
+      SELECT i.platform, i.account_key, i.auth_state, i.enabled
+      , CASE
+          WHEN i.platform = 'linkedin'
+            AND TRIM(COALESCE(i.display_name, '')) = 'LinkedIn'
+            AND TRIM(COALESCE(s.display_name, '')) NOT IN ('', 'LinkedIn')
+          THEN s.display_name
+          ELSE i.display_name
+        END AS display_name
+      , i.metadata_json
+      FROM integration_states i
+      LEFT JOIN source_accounts s
+        ON s.platform = i.platform
+       AND s.account_key = i.account_key
+      ORDER BY i.platform, i.account_key
     """
 
     var statement: OpaquePointer?
