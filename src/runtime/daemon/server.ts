@@ -36,7 +36,10 @@ import {
 } from "../../core/types/provider.js";
 import { safeParseJsonRecord, safeParseJsonStringArray } from "../../db/codecs.js";
 import { type CuedDatabase, type OutboundMessageRow, openCuedDatabase } from "../../db/database.js";
-import { buildAdapterInvocationEnv } from "../../platforms/core/invocation.js";
+import {
+  buildAdapterInvocationEnv,
+  selectAdapterInvocationProofs,
+} from "../../platforms/core/invocation.js";
 import { isAdapterPlatform, listAutoSyncPlatforms } from "../../platforms/core/registry.js";
 import { runAdapter } from "../../platforms/core/runner.js";
 import { loadIntegrationSecret } from "../../platforms/core/secrets/keychain.js";
@@ -3406,7 +3409,11 @@ export async function runDaemon(): Promise<void> {
       const envOverrides = buildAdapterInvocationEnv({
         platform,
         checkpointSourceCursorJson: checkpoint?.source_cursor_json ?? null,
-        proofs: db.listSyncProofs(platform, accountKey),
+        proofs: selectAdapterInvocationProofs({
+          platform,
+          proofs: db.listSyncProofs(platform, accountKey),
+          sourceCursor,
+        }),
       });
 
       const adapterStartedAt = now();
