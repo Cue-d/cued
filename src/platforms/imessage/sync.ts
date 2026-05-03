@@ -428,5 +428,11 @@ export function buildIMessageSyncBundle(options?: {
     sourceCursor: { rowId: batch.cursor, callPk: effectiveCallBatch.cursor },
     syncMode: (cursor.rowId > 0 || cursor.callPk > 0) && !hasMore ? "incremental" : "full",
     hasMore,
+    continuation: hasMore
+      ? {
+          reason: "account_pagination",
+          detail: "iMessage message or call batch limit was reached",
+        }
+      : undefined,
   };
 }

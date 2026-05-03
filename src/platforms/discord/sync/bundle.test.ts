@@ -207,6 +207,15 @@ describe("buildDiscordSyncBundle", () => {
       }),
     );
     expect(bundle.hasMore).toBe(true);
+    expect(bundle.continuation).toEqual({
+      reason: "scoped_proof_continuation",
+      detail: "Discord direct-message history proof is still running",
+      scope: {
+        kind: "conversation",
+        key: "dm-2",
+        proofKind: "messages",
+      },
+    });
     expect(findDiscordProof(bundle, "conversation", "dm-1", "latest_messages")).toBeUndefined();
   });
 

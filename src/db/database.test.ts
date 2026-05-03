@@ -387,7 +387,7 @@ describe("CuedDatabase", () => {
       accountKey: "a:b",
       proof: {
         scope: {
-          kind: "c",
+          kind: "conversation",
           key: "d",
         },
         proofKind: "messages",
@@ -400,7 +400,7 @@ describe("CuedDatabase", () => {
       accountKey: "a",
       proof: {
         scope: {
-          kind: "b",
+          kind: "conversation",
           key: "c:d",
         },
         proofKind: "messages",
@@ -412,21 +412,21 @@ describe("CuedDatabase", () => {
     expect(db.listSyncScopes("slack", "a:b")).toEqual([
       expect.objectContaining({
         account_key: "a:b",
-        scope_kind: "c",
+        scope_kind: "conversation",
         scope_key: "d",
       }),
     ]);
     expect(db.listSyncScopes("slack", "a")).toEqual([
       expect.objectContaining({
         account_key: "a",
-        scope_kind: "b",
+        scope_kind: "conversation",
         scope_key: "c:d",
       }),
     ]);
     expect(db.listSyncProofs("slack", "a:b")).toEqual([
       expect.objectContaining({
         account_key: "a:b",
-        scope_kind: "c",
+        scope_kind: "conversation",
         scope_key: "d",
         status: "running",
       }),
@@ -434,11 +434,33 @@ describe("CuedDatabase", () => {
     expect(db.listSyncProofs("slack", "a")).toEqual([
       expect.objectContaining({
         account_key: "a",
-        scope_kind: "b",
+        scope_kind: "conversation",
         scope_key: "c:d",
         status: "complete",
       }),
     ]);
+
+    db.close();
+  });
+
+  it("rejects sync proofs without a known proof contract", () => {
+    const db = createDb();
+
+    expect(() =>
+      db.upsertSyncProof({
+        platform: "slack",
+        accountKey: "workspace-a",
+        proof: {
+          scope: {
+            kind: "account",
+            key: "workspace-a",
+          },
+          proofKind: "replies",
+          status: "running",
+          observedAt: 100,
+        },
+      }),
+    ).toThrow("No sync proof contract for slack:account:replies");
 
     db.close();
   });
@@ -1111,7 +1133,11 @@ describe("CuedDatabase", () => {
       eventKind: "observed",
       observedAt: 1_700_000_000_000,
       dedupeKey: "contacts:1",
-      payload: { hello: "world" },
+      payload: {
+        sourceEntityKey: "contacts:1",
+        fields: { display_name: "Ava" },
+        handles: [],
+      },
       sourceVersion: "contacts-v1",
     });
 
@@ -1151,7 +1177,11 @@ describe("CuedDatabase", () => {
         normalized_schema: "contact.observed@1",
         provenance_json: null,
         observed_at: 1_700_000_000_000,
-        payload_json: JSON.stringify({ hello: "world" }),
+        payload_json: JSON.stringify({
+          sourceEntityKey: "contacts:1",
+          fields: { display_name: "Ava" },
+          handles: [],
+        }),
       },
     ]);
 
@@ -1692,7 +1722,7 @@ describe("CuedDatabase", () => {
         eventKind: "created",
         observedAt: 100,
         dedupeKey: "event-1",
-        payload: { sourceMessageKey: "m1" },
+        payload: { sourceMessageKey: "m1", sourceConversationKey: "c1" },
       },
       {
         id: "event-1",
@@ -1702,7 +1732,7 @@ describe("CuedDatabase", () => {
         eventKind: "created",
         observedAt: 100,
         dedupeKey: "event-1",
-        payload: { sourceMessageKey: "m1" },
+        payload: { sourceMessageKey: "m1", sourceConversationKey: "c1" },
       },
       {
         id: "event-2",
@@ -1712,7 +1742,7 @@ describe("CuedDatabase", () => {
         eventKind: "created",
         observedAt: 101,
         dedupeKey: "event-2",
-        payload: { sourceMessageKey: "m2" },
+        payload: { sourceMessageKey: "m2", sourceConversationKey: "c1" },
       },
     ]);
 

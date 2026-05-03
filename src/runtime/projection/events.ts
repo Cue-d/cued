@@ -42,6 +42,74 @@ export function assertCanonicalNormalizedSchemaForWrite(schema: string): void {
   }
 }
 
+export function assertCanonicalRawEventPayloadForWrite(
+  event: Pick<ProviderRawEventInput, "entityKind" | "eventKind" | "normalizedSchema" | "payload">,
+): void {
+  const normalizedSchema =
+    event.normalizedSchema ?? buildNormalizedRawEventSchema(event.entityKind, event.eventKind);
+  assertCanonicalNormalizedSchemaForWrite(normalizedSchema);
+  assertObjectPayload(normalizedSchema, event.payload);
+  switch (normalizedSchema) {
+    case "contact.observed@1":
+      assertStringField(normalizedSchema, event.payload, "sourceEntityKey");
+      return;
+    case "conversation.observed@1":
+    case "conversation.removed@1":
+      assertStringField(normalizedSchema, event.payload, "sourceConversationKey");
+      return;
+    case "call.observed@1":
+      assertStringField(normalizedSchema, event.payload, "sourceCallKey");
+      assertStringField(normalizedSchema, event.payload, "sourceConversationKey");
+      assertNumberField(normalizedSchema, event.payload, "startedAt");
+      return;
+    case "message.created@1":
+    case "message.updated@1":
+    case "message.deleted@1":
+    case "message.read_receipt@1":
+      assertStringField(normalizedSchema, event.payload, "sourceMessageKey");
+      assertStringField(normalizedSchema, event.payload, "sourceConversationKey");
+      return;
+    case "reaction.added@1":
+    case "reaction.removed@1":
+      assertStringField(normalizedSchema, event.payload, "sourceMessageKey");
+      assertStringField(normalizedSchema, event.payload, "sourceConversationKey");
+      assertStringField(normalizedSchema, event.payload, "emoji");
+      return;
+    case "participant.joined@1":
+    case "participant.left@1":
+      assertStringField(normalizedSchema, event.payload, "sourceConversationKey");
+      assertStringField(normalizedSchema, event.payload, "participantSourceKey");
+      return;
+    case "timeline_event.system_message@1":
+      assertStringField(normalizedSchema, event.payload, "sourceEventKey");
+      assertStringField(normalizedSchema, event.payload, "sourceConversationKey");
+      return;
+    default:
+      throw new Error(`Unsupported canonical raw event schema '${normalizedSchema}'`);
+  }
+}
+
+function assertObjectPayload(
+  schema: string,
+  payload: RawEventPayload,
+): asserts payload is Record<string, unknown> {
+  if (typeof payload !== "object" || payload === null || Array.isArray(payload)) {
+    throw new Error(`Raw event payload for '${schema}' must be an object.`);
+  }
+}
+
+function assertStringField(schema: string, payload: Record<string, unknown>, field: string): void {
+  if (typeof payload[field] !== "string" || payload[field].trim().length === 0) {
+    throw new Error(`Raw event payload for '${schema}' must include string field '${field}'.`);
+  }
+}
+
+function assertNumberField(schema: string, payload: Record<string, unknown>, field: string): void {
+  if (typeof payload[field] !== "number" || !Number.isFinite(payload[field])) {
+    throw new Error(`Raw event payload for '${schema}' must include number field '${field}'.`);
+  }
+}
+
 function parseNormalizedSchema(schema: string): {
   entityKind: RawEventEntityKind;
   eventKind: string;
