@@ -1264,7 +1264,7 @@ public struct InstallerPlatformIcon: View {
 
   private var brandLogoPadding: CGFloat {
     switch platform {
-    case "slack", "linkedin", "signal", "whatsapp":
+    case "discord", "slack", "linkedin", "signal", "whatsapp":
       7
     default:
       7
@@ -1445,8 +1445,10 @@ private func installerDefaultPermissionStatus(for key: String) -> InstallerPermi
 
 private func installerPlatformIconAssetName(for platform: String) -> String? {
   switch platform {
-  case "contacts", "discord", "phone_calls", "imessage":
+  case "contacts", "phone_calls", "imessage":
     return nil  // Use SF Symbol fallback icons
+  case "discord":
+    return "discord-logo-white"
   case "slack":
     return "slack-logo"
   case "linkedin":
@@ -1469,7 +1471,7 @@ private func installerPlatformAccentColor(for platform: String) -> Color {
   case "imessage":
     return Color(red: 0.24, green: 0.81, blue: 0.39)
   case "discord":
-    return Color(red: 0.35, green: 0.40, blue: 0.95)
+    return Color(red: 0.345, green: 0.396, blue: 0.949)
   case "slack":
     return Color(red: 0.36, green: 0.18, blue: 0.52)
   case "linkedin":
