@@ -1,7 +1,8 @@
+import { lookup } from "node:dns/promises";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { CuedDatabase } from "../db/database.js";
 import {
   fetchAttachment,
@@ -10,12 +11,18 @@ import {
   searchAttachments,
 } from "./attachments.js";
 
+vi.mock("node:dns/promises", () => ({
+  lookup: vi.fn(),
+}));
+
 describe("attachment service", () => {
+  const lookupMock = vi.mocked(lookup);
   const tempDirs: string[] = [];
   const cleanupPaths: string[] = [];
   const originalHome = process.env.HOME;
 
   afterEach(() => {
+    lookupMock.mockReset();
     process.env.HOME = originalHome;
     while (cleanupPaths.length > 0) {
       const path = cleanupPaths.pop();
@@ -496,6 +503,78 @@ describe("attachment service", () => {
     await expect(fetchAttachment(db, { attachmentId: "attachment-private" })).rejects.toThrow(
       "Attachment URL host is not allowed",
     );
+
+    db.close();
+  });
+
+  it("rejects remote attachment hosts that resolve to private IPs before fetching", async () => {
+    const db = createDb();
+    const timestamp = Date.now();
+    const sql = sqlite(db);
+    lookupMock.mockResolvedValue([{ address: "100.67.40.45", family: 4 }] as never);
+    sql
+      .prepare(
+        `
+        INSERT INTO conversations (
+          id, platform, account_key, source_conversation_key, native_conversation_key, type, is_active,
+          service, name, topic, participant_names, last_message_id, last_message_at, last_message_preview,
+          unread_count, created_at, updated_at
+        ) VALUES (?, 'discord', 'default', ?, NULL, 'dm', 1, 'Discord', ?, NULL, '', NULL, NULL, NULL, 0, ?, ?)
+      `,
+      )
+      .run(
+        "conversation-dns-private",
+        "source-conversation-dns-private",
+        "Thread",
+        timestamp,
+        timestamp,
+      );
+    sql
+      .prepare(
+        `
+        INSERT INTO messages (
+          id, platform, account_key, platform_message_id, conversation_id, sender_contact_id,
+          sender_source_key, sender_name, conversation_name, sent_at, service, status, is_from_me,
+          content, delivered_at, read_at, edited_at, deleted_at, reply_to_message_id, is_deleted,
+          is_edited, attachment_count, reaction_count, created_at, updated_at
+        ) VALUES (?, 'discord', 'default', ?, ?, NULL, NULL, 'Ben', 'Thread', ?, 'Discord', NULL, 0, 'hello', NULL, NULL, NULL, NULL, NULL, 0, 0, 1, 0, ?, ?)
+      `,
+      )
+      .run(
+        "message-dns-private",
+        "platform-message-dns-private",
+        "conversation-dns-private",
+        timestamp,
+        timestamp,
+        timestamp,
+      );
+    sql
+      .prepare(
+        `
+        INSERT INTO message_attachments (
+          id, message_id, platform, account_key, source_attachment_key, kind, mime_type, filename,
+          title, local_path, remote_url, size_bytes, text_content, access_kind, access_ref_json,
+          preview_ref_json, availability_status, provider_metadata_json, metadata_json, created_at, updated_at
+        ) VALUES (?, ?, 'discord', 'default', ?, 'file', 'text/plain', 'note.txt', 'Note', NULL, ?, NULL, NULL, 'remote_url', ?, NULL, 'available', '{}', '{}', ?, ?)
+      `,
+      )
+      .run(
+        "attachment-dns-private",
+        "message-dns-private",
+        "source-attachment-dns-private",
+        "https://attachments.example.test/note.txt",
+        JSON.stringify({ url: "https://attachments.example.test/note.txt" }),
+        timestamp,
+        timestamp,
+      );
+
+    await expect(fetchAttachment(db, { attachmentId: "attachment-dns-private" })).rejects.toThrow(
+      "Attachment URL host is not allowed",
+    );
+    expect(lookupMock).toHaveBeenCalledWith("attachments.example.test", {
+      all: true,
+      verbatim: true,
+    });
 
     db.close();
   });

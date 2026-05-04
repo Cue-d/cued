@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
+import { lookup } from "node:dns/promises";
 import {
   copyFileSync,
   existsSync,
@@ -193,33 +194,67 @@ function parseFetchUrl(url: string): URL {
   return parsed;
 }
 
-function isPrivateIpv4(host: string): boolean {
+function ipv4ToNumber(host: string): number | null {
   const parts = host.split(".").map((part) => Number(part));
   if (
     parts.length !== 4 ||
     parts.some((part) => !Number.isInteger(part) || part < 0 || part > 255)
   ) {
+    return null;
+  }
+  return parts.reduce((value, part) => value * 256 + part, 0);
+}
+
+function ipv4InRange(address: number, base: string, prefixLength: number): boolean {
+  const baseAddress = ipv4ToNumber(base);
+  if (baseAddress === null) {
     return false;
   }
-  const [first, second] = parts as [number, number, number, number];
-  return (
-    first === 10 ||
-    first === 127 ||
-    first === 0 ||
-    (first === 169 && second === 254) ||
-    (first === 172 && second >= 16 && second <= 31) ||
-    (first === 192 && second === 168)
-  );
+  const mask = (0xffffffff << (32 - prefixLength)) >>> 0;
+  return (address & mask) === (baseAddress & mask);
+}
+
+function isPrivateIpv4(host: string): boolean {
+  const address = ipv4ToNumber(host);
+  if (address === null) {
+    return false;
+  }
+  return [
+    ["0.0.0.0", 8],
+    ["10.0.0.0", 8],
+    ["100.64.0.0", 10],
+    ["127.0.0.0", 8],
+    ["169.254.0.0", 16],
+    ["172.16.0.0", 12],
+    ["192.0.0.0", 24],
+    ["192.168.0.0", 16],
+    ["198.18.0.0", 15],
+    ["224.0.0.0", 4],
+    ["240.0.0.0", 4],
+  ].some(([base, prefixLength]) => ipv4InRange(address, base as string, prefixLength as number));
 }
 
 function isPrivateIpv6(host: string): boolean {
   const normalized = host.toLowerCase();
+  const mappedIpv4 = normalized.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/)?.[1];
   return (
     normalized === "::1" ||
     normalized === "::" ||
     normalized.startsWith("fc") ||
     normalized.startsWith("fd") ||
-    normalized.startsWith("fe80:")
+    normalized.startsWith("fe8") ||
+    normalized.startsWith("fe9") ||
+    normalized.startsWith("fea") ||
+    normalized.startsWith("feb") ||
+    normalized.startsWith("ff") ||
+    (mappedIpv4 ? isPrivateIpv4(mappedIpv4) : false)
+  );
+}
+
+function isBlockedIpAddress(hostname: string): boolean {
+  const ipVersion = isIP(hostname);
+  return (
+    (ipVersion === 4 && isPrivateIpv4(hostname)) || (ipVersion === 6 && isPrivateIpv6(hostname))
   );
 }
 
@@ -227,16 +262,25 @@ function policyHostname(parsed: URL): string {
   return parsed.hostname.toLowerCase().replace(/^\[(.*)\]$/, "$1");
 }
 
-function assertSafeExternalAttachmentUrl(parsed: URL): void {
+async function assertSafeExternalAttachmentUrl(parsed: URL): Promise<void> {
   const hostname = policyHostname(parsed);
   if (hostname === "localhost" || hostname.endsWith(".localhost") || hostname.endsWith(".local")) {
     throw new Error("Attachment URL host is not allowed");
   }
-  const ipVersion = isIP(hostname);
-  if (
-    (ipVersion === 4 && isPrivateIpv4(hostname)) ||
-    (ipVersion === 6 && isPrivateIpv6(hostname))
-  ) {
+  if (isBlockedIpAddress(hostname)) {
+    throw new Error("Attachment URL host is not allowed");
+  }
+  if (isIP(hostname) !== 0) {
+    return;
+  }
+
+  let addresses: Array<{ address: string }>;
+  try {
+    addresses = await lookup(hostname, { all: true, verbatim: true });
+  } catch {
+    throw new Error("Attachment URL host could not be resolved");
+  }
+  if (addresses.some(({ address }) => isBlockedIpAddress(address))) {
     throw new Error("Attachment URL host is not allowed");
   }
 }
@@ -263,11 +307,11 @@ export function resolveRemoteAttachmentFetchPolicy(
   return "external";
 }
 
-function assertFetchPolicy(url: string, policy: RemoteFetchPolicy): URL {
+async function assertFetchPolicy(url: string, policy: RemoteFetchPolicy): Promise<URL> {
   const parsed = parseFetchUrl(url);
   const hostname = policyHostname(parsed);
   if (policy === "external") {
-    assertSafeExternalAttachmentUrl(parsed);
+    await assertSafeExternalAttachmentUrl(parsed);
     return parsed;
   }
   if (parsed.protocol !== "https:") {
@@ -289,7 +333,7 @@ async function fetchWithPolicy(
 ): Promise<Response> {
   let currentUrl = url;
   for (let redirectCount = 0; redirectCount <= MAX_ATTACHMENT_REDIRECTS; redirectCount += 1) {
-    assertFetchPolicy(currentUrl, policy);
+    await assertFetchPolicy(currentUrl, policy);
     const response = await fetch(currentUrl, {
       ...init,
       redirect: "manual",
