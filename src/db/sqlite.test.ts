@@ -79,4 +79,40 @@ describe("sqlite key loading", async () => {
     expect(() => unreadable.prepare("SELECT value FROM t").get()).toThrow();
     unreadable.close();
   });
+
+  it("tries legacy keychain keys when the current-service key is stale", () => {
+    vi.stubEnv("VITEST_WORKER_ID", "");
+    vi.stubEnv("CUED_DB_KEY", "legacy-encryption-key");
+
+    const dir = mkdtempSync(join(tmpdir(), "cued-sqlite-legacy-key-"));
+    tempDirs.push(dir);
+    const dbPath = join(dir, "local.db");
+    const sqlite = openSqliteDatabase(dbPath);
+    sqlite.prepare("CREATE TABLE t (id INTEGER PRIMARY KEY, value TEXT)").run();
+    sqlite.prepare("INSERT INTO t (value) VALUES (?)").run("legacy");
+    sqlite.close();
+
+    vi.stubEnv("CUED_DB_KEY", "");
+    execFileSyncMock.mockImplementation((_command: string, args: string[]) => {
+      if (args.includes("find-generic-password") && args.includes("so.cued.desktop.db")) {
+        return "stale-current-key\n";
+      }
+      if (args.includes("find-generic-password") && args.includes("dev.cued.db")) {
+        return "legacy-encryption-key\n";
+      }
+      if (args.includes("add-generic-password")) {
+        return "";
+      }
+      throw new Error(`unexpected security command: ${args.join(" ")}`);
+    });
+
+    const reopened = openSqliteDatabase(dbPath);
+    expect(reopened.prepare("SELECT value FROM t").get()).toEqual({ value: "legacy" });
+    reopened.close();
+    expect(
+      execFileSyncMock.mock.calls.some(
+        ([, args]) => Array.isArray(args) && args.includes("add-generic-password"),
+      ),
+    ).toBe(true);
+  });
 });

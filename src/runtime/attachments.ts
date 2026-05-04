@@ -9,6 +9,7 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
+import { isIP } from "node:net";
 import { basename, extname, join } from "node:path";
 import { promisify } from "node:util";
 import {
@@ -22,6 +23,7 @@ import { loadIntegrationSecret } from "../platforms/core/secrets/keychain.js";
 const execFileAsync = promisify(execFile);
 const DEFAULT_ATTACHMENT_CACHE_LIMIT_BYTES = 10 * 1024 * 1024 * 1024;
 const DEFAULT_ATTACHMENT_FETCH_MAX_BYTES = 100 * 1024 * 1024;
+const MAX_ATTACHMENT_REDIRECTS = 5;
 const TEXT_MIME_TYPES = new Set([
   "application/json",
   "application/ld+json",
@@ -83,6 +85,8 @@ type ProviderFetchHandlers = Partial<
     }>
   >
 >;
+
+export type RemoteFetchPolicy = "external" | "slack-authenticated" | "linkedin-authenticated";
 
 function now(): number {
   return Date.now();
@@ -173,6 +177,136 @@ function materializeObjectPath(sha256: string, extension: string): string {
   return join(CUED_ATTACHMENTS_OBJECTS_DIR, `${sha256}${normalizedExtension}`);
 }
 
+function parseFetchUrl(url: string): URL {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    throw new Error("Attachment URL is invalid");
+  }
+  if (parsed.username || parsed.password) {
+    throw new Error("Attachment URLs with embedded credentials are not supported");
+  }
+  if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
+    throw new Error("Attachment URL must use http or https");
+  }
+  return parsed;
+}
+
+function isPrivateIpv4(host: string): boolean {
+  const parts = host.split(".").map((part) => Number(part));
+  if (
+    parts.length !== 4 ||
+    parts.some((part) => !Number.isInteger(part) || part < 0 || part > 255)
+  ) {
+    return false;
+  }
+  const [first, second] = parts as [number, number, number, number];
+  return (
+    first === 10 ||
+    first === 127 ||
+    first === 0 ||
+    (first === 169 && second === 254) ||
+    (first === 172 && second >= 16 && second <= 31) ||
+    (first === 192 && second === 168)
+  );
+}
+
+function isPrivateIpv6(host: string): boolean {
+  const normalized = host.toLowerCase();
+  return (
+    normalized === "::1" ||
+    normalized === "::" ||
+    normalized.startsWith("fc") ||
+    normalized.startsWith("fd") ||
+    normalized.startsWith("fe80:")
+  );
+}
+
+function policyHostname(parsed: URL): string {
+  return parsed.hostname.toLowerCase().replace(/^\[(.*)\]$/, "$1");
+}
+
+function assertSafeExternalAttachmentUrl(parsed: URL): void {
+  const hostname = policyHostname(parsed);
+  if (hostname === "localhost" || hostname.endsWith(".localhost") || hostname.endsWith(".local")) {
+    throw new Error("Attachment URL host is not allowed");
+  }
+  const ipVersion = isIP(hostname);
+  if (
+    (ipVersion === 4 && isPrivateIpv4(hostname)) ||
+    (ipVersion === 6 && isPrivateIpv6(hostname))
+  ) {
+    throw new Error("Attachment URL host is not allowed");
+  }
+}
+
+function isSlackCredentialHost(hostname: string): boolean {
+  return hostname === "slack.com" || hostname.endsWith(".slack.com");
+}
+
+function isLinkedInCredentialHost(hostname: string): boolean {
+  return hostname === "linkedin.com" || hostname.endsWith(".linkedin.com");
+}
+
+export function resolveRemoteAttachmentFetchPolicy(
+  platform: string,
+  url: string,
+): RemoteFetchPolicy {
+  const hostname = policyHostname(parseFetchUrl(url));
+  if (platform === "slack" && isSlackCredentialHost(hostname)) {
+    return "slack-authenticated";
+  }
+  if (platform === "linkedin" && isLinkedInCredentialHost(hostname)) {
+    return "linkedin-authenticated";
+  }
+  return "external";
+}
+
+function assertFetchPolicy(url: string, policy: RemoteFetchPolicy): URL {
+  const parsed = parseFetchUrl(url);
+  const hostname = policyHostname(parsed);
+  if (policy === "external") {
+    assertSafeExternalAttachmentUrl(parsed);
+    return parsed;
+  }
+  if (parsed.protocol !== "https:") {
+    throw new Error("Credentialed attachment URL must use https");
+  }
+  if (policy === "slack-authenticated" && !isSlackCredentialHost(hostname)) {
+    throw new Error("Slack credentials can only be sent to Slack attachment URLs");
+  }
+  if (policy === "linkedin-authenticated" && !isLinkedInCredentialHost(hostname)) {
+    throw new Error("LinkedIn credentials can only be sent to LinkedIn attachment URLs");
+  }
+  return parsed;
+}
+
+async function fetchWithPolicy(
+  url: string,
+  policy: RemoteFetchPolicy,
+  init: RequestInit = {},
+): Promise<Response> {
+  let currentUrl = url;
+  for (let redirectCount = 0; redirectCount <= MAX_ATTACHMENT_REDIRECTS; redirectCount += 1) {
+    assertFetchPolicy(currentUrl, policy);
+    const response = await fetch(currentUrl, {
+      ...init,
+      redirect: "manual",
+    });
+    if (![301, 302, 303, 307, 308].includes(response.status)) {
+      return response;
+    }
+    const location = response.headers.get("location");
+    await response.body?.cancel();
+    if (!location) {
+      return response;
+    }
+    currentUrl = new URL(location, currentUrl).toString();
+  }
+  throw new Error("Attachment download followed too many redirects");
+}
+
 function ensureWithinLimit(
   db: CuedDatabase,
   limitBytes = DEFAULT_ATTACHMENT_CACHE_LIMIT_BYTES,
@@ -221,6 +355,11 @@ function ensureWithinLimit(
 }
 
 async function fetchSlackRemote(url: string, accountKey: string): Promise<Response> {
+  const policy = resolveRemoteAttachmentFetchPolicy("slack", url);
+  if (policy === "external") {
+    return await fetchWithPolicy(url, "external");
+  }
+
   const secret = loadIntegrationSecret("slack", accountKey).secret;
   const token = typeof secret.token === "string" ? secret.token : null;
   const cookie = typeof secret.cookie === "string" ? secret.cookie : null;
@@ -228,21 +367,21 @@ async function fetchSlackRemote(url: string, accountKey: string): Promise<Respon
     throw new Error(`Slack credentials missing token for '${accountKey}'`);
   }
 
-  const authResponse = await fetch(url, {
+  const authResponse = await fetchWithPolicy(url, policy, {
     headers: {
-      Authorization: `Bearer ${token}`,
-      ...(cookie ? { Cookie: `d=${cookie}` } : {}),
+      ...(policy === "slack-authenticated" ? { Authorization: `Bearer ${token}` } : {}),
+      ...(policy === "slack-authenticated" && cookie ? { Cookie: `d=${cookie}` } : {}),
     },
   });
   if (authResponse.ok) {
     return authResponse;
   }
-  if (!cookie) {
+  if (!cookie || policy !== "slack-authenticated") {
     return authResponse;
   }
   await authResponse.body?.cancel();
 
-  return await fetch(url, {
+  return await fetchWithPolicy(url, "slack-authenticated", {
     headers: {
       Cookie: `d=${cookie}`,
     },
@@ -250,6 +389,11 @@ async function fetchSlackRemote(url: string, accountKey: string): Promise<Respon
 }
 
 async function fetchLinkedInRemote(url: string, accountKey: string): Promise<Response> {
+  const policy = resolveRemoteAttachmentFetchPolicy("linkedin", url);
+  if (policy === "external") {
+    return await fetchWithPolicy(url, "external");
+  }
+
   const secret = loadIntegrationSecret("linkedin", accountKey).secret;
   const cookies = Array.isArray(secret.cookies)
     ? secret.cookies.filter(
@@ -261,8 +405,9 @@ async function fetchLinkedInRemote(url: string, accountKey: string): Promise<Res
       )
     : [];
   const cookieHeader = cookies.map((cookie) => `${cookie.name}=${cookie.value}`).join("; ");
-  return await fetch(url, {
-    headers: cookieHeader ? { Cookie: cookieHeader } : undefined,
+  return await fetchWithPolicy(url, policy, {
+    headers:
+      policy === "linkedin-authenticated" && cookieHeader ? { Cookie: cookieHeader } : undefined,
   });
 }
 
@@ -275,7 +420,7 @@ async function downloadRemoteAttachment(
       ? await fetchSlackRemote(url, attachment.account_key)
       : attachment.platform === "linkedin"
         ? await fetchLinkedInRemote(url, attachment.account_key)
-        : await fetch(url);
+        : await fetchWithPolicy(url, resolveRemoteAttachmentFetchPolicy(attachment.platform, url));
   if (!response.ok) {
     throw new Error(`Attachment download failed: ${response.status} ${response.statusText}`);
   }
