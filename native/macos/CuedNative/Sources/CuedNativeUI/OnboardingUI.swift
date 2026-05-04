@@ -824,8 +824,7 @@ public struct CuedOnboardingView: View {
 
   private func platformConfigurationCard(_ configuration: InstallerPlatformConfiguration) -> some View {
     let isFullyConnected = platformIsFullyConnected(configuration)
-    let shouldShowAccountControls =
-      configuration.supportsMultipleAccounts || configuration.isRequestable || !isFullyConnected
+    let shouldShowAccountControls = shouldShowAccountRows(for: configuration)
     let shouldDimCard = isFullyConnected && !shouldShowAccountControls
 
     return VStack(alignment: .leading, spacing: 14) {
@@ -849,6 +848,12 @@ public struct CuedOnboardingView: View {
             .font(.title3.weight(.semibold))
             .foregroundStyle(.green)
             .accessibilityLabel("\(configuration.title) connected")
+        } else if !shouldShowAccountControls && platformIsPending(configuration) {
+          ProgressView()
+            .controlSize(.small)
+            .padding(.top, 10)
+        } else if !shouldShowAccountControls, let action = platformLevelAction(for: configuration) {
+          actionButton(title: action.title, action: action.handler)
         }
       }
 
@@ -862,6 +867,35 @@ public struct CuedOnboardingView: View {
     }
     .padding(.vertical, 2)
     .opacity(shouldDimCard ? 0.7 : 1.0)
+  }
+
+  private func shouldShowAccountRows(for configuration: InstallerPlatformConfiguration) -> Bool {
+    if configuration.supportsMultipleAccounts {
+      return !configuration.accounts.isEmpty
+    }
+
+    guard let integration = configuration.accounts.first else {
+      return false
+    }
+
+    if installerIsConnectedIntegrationState(integration.authState) {
+      return true
+    }
+
+    return integration.authState == "requested"
+      || integration.authState == "in_progress"
+      || integration.authState == "blocked"
+      || integration.authState == "check_failed"
+  }
+
+  private func platformIsPending(_ configuration: InstallerPlatformConfiguration) -> Bool {
+    if pendingPlatformConnectPlatforms.contains(configuration.platform) {
+      return true
+    }
+
+    return configuration.knownAccounts.contains { integration in
+      pendingIntegrationActionIDs.contains(integration.id)
+    }
   }
 
   private func singleAccountPlatformRow(
@@ -928,7 +962,7 @@ public struct CuedOnboardingView: View {
           .padding(.top, 3)
       }
       if let removeAction {
-        removalButton(label: removeAction.label, action: removeAction.handler)
+        actionButton(title: removeAction.title, action: removeAction.handler)
       }
       if let action {
         actionButton(title: action.title, action: action.handler)
@@ -961,21 +995,6 @@ public struct CuedOnboardingView: View {
           )
       }
     }
-  }
-
-  private func removalButton(
-    label: String,
-    action: @escaping () -> Void
-  ) -> some View {
-    Button(action: action) {
-      Image(systemName: "xmark")
-        .font(.headline.weight(.semibold))
-        .foregroundStyle(.secondary)
-        .frame(width: 18, height: 18, alignment: .center)
-    }
-    .frame(width: 24, height: 24, alignment: .center)
-    .buttonStyle(.plain)
-    .accessibilityLabel(label)
   }
 
   private func pendingIntegrationIndicator() -> some View {
@@ -1065,7 +1084,7 @@ public struct CuedOnboardingView: View {
   private func removeAction(
     for configuration: InstallerPlatformConfiguration,
     integration: InstallerIntegrationStatus
-  ) -> (label: String, handler: () -> Void)? {
+  ) -> (title: String, handler: () -> Void)? {
     guard configuration.accounts.contains(where: {
       $0.platform == integration.platform && $0.accountKey == integration.accountKey
     }) else {
@@ -1079,7 +1098,7 @@ public struct CuedOnboardingView: View {
     }
 
     return (
-      "Remove \(accountTitle(for: configuration, integration: integration))",
+      "Remove",
       {
         removalPrompt = InstallerRemovalPrompt(
           platform: configuration.platform,
@@ -1615,23 +1634,23 @@ private func installerDefaultAccountKey(for platform: String) -> String {
 private func platformWalkthrough(for configuration: InstallerPlatformConfiguration) -> String {
   switch configuration.platform {
   case "contacts":
-    return "Uses the Contacts permission from the previous step to resolve people across local data."
+    return "Adds your local contacts so Cued can recognize people across conversations."
   case "phone_calls":
-    return "Local Mac call history is always available once Cued can read this device's databases."
+    return "Adds your recent phone calls from this Mac."
   case "imessage":
-    return "Uses Full Disk Access for local Messages sync and Messages automation for AppleScript sending."
+    return "Syncs your Messages conversations from this Mac."
   case "slack":
-    return "Authenticate each workspace in a browser sign-in flow. You can add more workspaces at any time."
+    return "Syncs messages from each Slack workspace you connect."
   case "discord":
-    return "Authenticate in a browser sign-in flow on this Mac. Discord v1 syncs newly observed messages after connection."
+    return "Syncs new Discord messages after you connect your account."
   case "linkedin":
-    return "Authenticate in a browser window and Cued will save the session on this Mac."
+    return "Syncs your LinkedIn messages on this Mac."
   case "whatsapp":
-    return "Authenticate by linking your phone in a QR flow with the local WhatsApp helper."
+    return "Syncs WhatsApp messages after you link your phone."
   case "signal":
-    return "Authenticate by linking Signal with a QR flow using the local signal-cli helper."
+    return "Syncs Signal messages after you link your device."
   default:
-    return "Authenticate this source on this Mac."
+    return "Syncs this source on this Mac."
   }
 }
 
@@ -1646,7 +1665,7 @@ private func authFlowDetail(for platform: String) -> String {
   case "whatsapp":
     return "Starts a QR linking flow for your phone."
   case "signal":
-    return "Starts a QR linking flow with the local Signal helper."
+    return "Starts a QR linking flow for Signal."
   default:
     return "Starts the authentication flow for this source."
   }
