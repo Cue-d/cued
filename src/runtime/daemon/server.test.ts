@@ -48,28 +48,54 @@ describe("ingest projection strategy", () => {
     expect(
       shouldProjectIngestRunInline({
         platform: "discord",
+        runType: "sync",
         realtimeProjectionEnabled: true,
         firstInsertedRowId: 1,
         lastInsertedRowId: 373,
+        insertedRawEvents: 373,
       }),
     ).toBe(false);
   });
 
-  it("keeps inline projection for non-discord sync batches when enabled", () => {
+  it("keeps inline projection only for small non-resume batches when enabled", () => {
     expect(
       shouldProjectIngestRunInline({
         platform: "slack",
+        runType: "sync",
         realtimeProjectionEnabled: true,
         firstInsertedRowId: 1,
         lastInsertedRowId: 10,
+        insertedRawEvents: 10,
       }),
     ).toBe(true);
     expect(
       shouldProjectIngestRunInline({
         platform: "slack",
+        runType: "sync",
         realtimeProjectionEnabled: false,
         firstInsertedRowId: 1,
         lastInsertedRowId: 10,
+        insertedRawEvents: 10,
+      }),
+    ).toBe(false);
+    expect(
+      shouldProjectIngestRunInline({
+        platform: "imessage",
+        runType: "sync_resume",
+        realtimeProjectionEnabled: true,
+        firstInsertedRowId: 1,
+        lastInsertedRowId: 10,
+        insertedRawEvents: 10,
+      }),
+    ).toBe(false);
+    expect(
+      shouldProjectIngestRunInline({
+        platform: "imessage",
+        runType: "sync",
+        realtimeProjectionEnabled: true,
+        firstInsertedRowId: 1,
+        lastInsertedRowId: 2_000,
+        insertedRawEvents: 2_000,
       }),
     ).toBe(false);
   });

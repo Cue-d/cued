@@ -156,6 +156,7 @@ const DEFAULT_SLACK_REALTIME_ENABLED = false;
 const DEFAULT_INGEST_CONCURRENCY = 4;
 const DEFAULT_PROJECTION_BATCH_SIZE = 1_000;
 const DEFAULT_REALTIME_PROJECTION_ENABLED = true;
+const DEFAULT_INLINE_PROJECTION_MAX_RAW_EVENTS = 250;
 const DEFAULT_DEFERRED_PROJECTION_COALESCE_MS = 250;
 const DEFAULT_PROJECTION_CONTINUE_DELAY_MS = 5_000;
 const DEFAULT_CONTINUATION_PROJECTION_INTERVAL_MS = 60_000;
@@ -457,15 +458,20 @@ export function shouldSkipConnectedDiscordSchedulerSync(
 
 export function shouldProjectIngestRunInline(input: {
   platform: Platform;
+  runType: "sync" | "sync_resume";
   realtimeProjectionEnabled: boolean;
   firstInsertedRowId: number | null;
   lastInsertedRowId: number | null;
+  insertedRawEvents: number;
 }): boolean {
   return (
     input.platform !== "discord" &&
+    input.runType !== "sync_resume" &&
     input.realtimeProjectionEnabled &&
     input.firstInsertedRowId != null &&
-    input.lastInsertedRowId != null
+    input.lastInsertedRowId != null &&
+    input.insertedRawEvents > 0 &&
+    input.insertedRawEvents <= DEFAULT_INLINE_PROJECTION_MAX_RAW_EVENTS
   );
 }
 
@@ -3637,9 +3643,11 @@ export async function runDaemon(): Promise<void> {
       if (
         shouldProjectIngestRunInline({
           platform,
+          runType: currentRun.run_type,
           realtimeProjectionEnabled,
           firstInsertedRowId: insertResult.firstInsertedRowId,
           lastInsertedRowId: insertResult.lastInsertedRowId,
+          insertedRawEvents: insertResult.insertedCount,
         })
       ) {
         projectRealtimeRange(db, {

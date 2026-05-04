@@ -7,7 +7,12 @@ import process from "node:process";
 import { fileURLToPath } from "node:url";
 import { DaemonRequestTimeoutError, sendDaemonRequest } from "./client.js";
 import { getCurrentAppVersion, getCurrentReleaseChannel } from "./core/app-metadata.js";
-import { CUED_DB_PATH, CUED_SOCKET_PATH, ensureCuedDirs } from "./core/config.js";
+import {
+  CUED_DB_PATH,
+  CUED_MENU_BAR_STATUS_PATH,
+  CUED_SOCKET_PATH,
+  ensureCuedDirs,
+} from "./core/config.js";
 import { resolveHostOS } from "./core/platform-capabilities.js";
 import {
   openCuedDatabase,
@@ -270,6 +275,20 @@ async function safeEmitHookEvent(
 }
 
 async function buildLocalStatusFallback(error: DaemonRequestTimeoutError) {
+  const cached = readCachedStatusSnapshot();
+  if (cached) {
+    return {
+      ...cached,
+      socketRunning: existsSync(CUED_SOCKET_PATH),
+      daemonResponsive: false,
+      daemonBusyError: error.message,
+      staleCache: true,
+      dbPath:
+        typeof cached.dbPath === "string" && cached.dbPath.length > 0
+          ? cached.dbPath
+          : CUED_DB_PATH,
+    };
+  }
   try {
     const db = openExistingCuedDatabase(undefined, { readonly: true });
     try {
@@ -299,6 +318,20 @@ async function buildLocalStatusFallback(error: DaemonRequestTimeoutError) {
       fallbackError: fallbackError instanceof Error ? fallbackError.message : String(fallbackError),
       dbPath: CUED_DB_PATH,
     };
+  }
+}
+
+function readCachedStatusSnapshot(): Record<string, unknown> | null {
+  try {
+    if (!existsSync(CUED_MENU_BAR_STATUS_PATH)) {
+      return null;
+    }
+    const parsed = JSON.parse(readFileSync(CUED_MENU_BAR_STATUS_PATH, "utf8")) as unknown;
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : null;
+  } catch {
+    return null;
   }
 }
 
