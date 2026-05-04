@@ -117,6 +117,7 @@ import type {
   WhatsAppSnapshot,
 } from "../../platforms/whatsapp/types.js";
 import { fetchAttachment, listAttachments, searchAttachments } from "../attachments.js";
+import { buildPermissionStatus } from "../doctor.js";
 import { emitHookEvent } from "../hooks.js";
 import type { DaemonRequest, DaemonResponse } from "../ipc.js";
 import { collectInboundMessageHookPayloads } from "../message-hooks.js";
@@ -4422,6 +4423,25 @@ async function dispatchRequest(
             },
           };
         }
+      case "permissions-status":
+        return {
+          id: request.id,
+          ok: true,
+          result: await db.withBusyTimeout(DAEMON_STATUS_BUSY_TIMEOUT_MS, () =>
+            buildPermissionStatus({
+              mode: "passive",
+              db,
+            }),
+          ),
+        };
+      case "sql":
+        return {
+          id: request.id,
+          ok: true,
+          result: await db.withBusyTimeout(DAEMON_STATUS_BUSY_TIMEOUT_MS, () =>
+            db.executeReadOnlySql(request.query),
+          ),
+        };
       case "integrations-list": {
         const integrationAuthService = await getIntegrationAuthService();
         return {

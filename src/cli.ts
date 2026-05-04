@@ -723,6 +723,19 @@ async function main(): Promise<void> {
           return;
         case "status":
           {
+            let daemonResponse: Awaited<ReturnType<typeof sendDaemonRequest>> | null = null;
+            try {
+              daemonResponse = await sendDaemonRequest({ command: "permissions-status" });
+            } catch {
+              // Fall back for development shells or older daemons that are not running yet.
+            }
+            if (daemonResponse && !isUnsupportedDaemonCommand(daemonResponse)) {
+              if (!daemonResponse.ok) {
+                throw new Error(daemonResponse.error ?? "Daemon permissions status failed");
+              }
+              printJson(daemonResponse.result ?? null);
+              return;
+            }
             const db = openCuedDatabaseReadOnly();
             try {
               printJson(
@@ -767,8 +780,18 @@ async function main(): Promise<void> {
       if (!query) {
         throw new Error("Usage: cued sql <query>");
       }
-      if (!existsSync(CUED_DB_PATH)) {
-        throw new Error(`Cued database does not exist at ${CUED_DB_PATH}`);
+      let daemonResponse: Awaited<ReturnType<typeof sendDaemonRequest>> | null = null;
+      try {
+        daemonResponse = await sendDaemonRequest({ command: "sql", query });
+      } catch {
+        // Fall back for development shells or older daemons that are not running yet.
+      }
+      if (daemonResponse && !isUnsupportedDaemonCommand(daemonResponse)) {
+        if (!daemonResponse.ok) {
+          throw new Error(daemonResponse.error ?? "Daemon SQL query failed");
+        }
+        printJson(daemonResponse.result ?? null);
+        return;
       }
       const db = openCuedDatabaseReadOnly();
       try {

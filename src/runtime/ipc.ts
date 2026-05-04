@@ -2,6 +2,8 @@ export type DaemonRequest =
   | { id: string; command: "ping" }
   | { id: string; command: "status" }
   | { id: string; command: "doctor" }
+  | { id: string; command: "permissions-status" }
+  | { id: string; command: "sql"; query: string }
   | { id: string; command: "integrations-list" }
   | { id: string; command: "integrations-refresh" }
   | { id: string; command: "integrations-connect"; platform: string; accountKey?: string }
