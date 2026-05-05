@@ -126,10 +126,11 @@ async function continueSlackInBrowser(page: Page): Promise<void> {
     return;
   }
 
-  const browserControlLabel = /(?:continue|open)(?: slack)? in browser/i;
+  const browserControlLabel = /(?:continue|open|use)(?:\s+slack)?\s+in\s+(?:your\s+)?browser/i;
   const continueControl = page
-    .getByRole("button", { name: browserControlLabel })
-    .or(page.getByRole("link", { name: browserControlLabel }))
+    .getByRole("link", { name: browserControlLabel })
+    .or(page.locator("a").filter({ hasText: browserControlLabel }))
+    .or(page.getByRole("button", { name: browserControlLabel }))
     .or(page.getByText(browserControlLabel))
     .first();
   if ((await continueControl.count().catch(() => 0)) === 0) {
