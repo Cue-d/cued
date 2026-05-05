@@ -1504,20 +1504,19 @@ export class CuedDatabase {
       .prepare(
         `
         SELECT
-          (SELECT COALESCE(MAX(rowid), 0) FROM raw_events) AS max_raw_event_rowid,
-          (SELECT COUNT(*) FROM raw_events WHERE rowid > ?) AS pending_raw_events
+          COALESCE(MAX(rowid), 0) AS max_raw_event_rowid
+        FROM raw_events
       `,
       )
-      .get(state.projection_watermark) as {
+      .get() as {
       max_raw_event_rowid: number | null;
-      pending_raw_events: number | null;
     };
     const maxRawEventRowid = Number(row.max_raw_event_rowid ?? 0);
 
     return {
       projection_watermark: state.projection_watermark,
       max_raw_event_rowid: maxRawEventRowid,
-      pending_raw_events: Number(row.pending_raw_events ?? 0),
+      pending_raw_events: Math.max(0, maxRawEventRowid - state.projection_watermark),
     };
   }
 

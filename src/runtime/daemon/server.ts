@@ -2544,6 +2544,14 @@ export async function runDaemon(): Promise<void> {
       scheduleIngestDrain(QUEUE_DRAIN_RETRY_DELAY_MS);
       return;
     }
+    if (activeIngestRuns.size === 0) {
+      const nextProjectionRunAt = db.getNextQueuedRunScheduledAt(["project", "rebuild"]);
+      if (nextProjectionRunAt != null && nextProjectionRunAt <= now()) {
+        scheduleProjectionDrain();
+        scheduleIngestDrain(QUEUE_DRAIN_RETRY_DELAY_MS);
+        return;
+      }
+    }
     while (activeIngestRuns.size < ingestConcurrency) {
       const currentRun = db.claimNextQueuedRun(["sync", "sync_resume"], "ingesting");
       if (!currentRun) {
@@ -2743,22 +2751,7 @@ export async function runDaemon(): Promise<void> {
       scheduleProjectionDrain(QUEUE_DRAIN_RETRY_DELAY_MS);
       return;
     }
-    let onboardingCompleted = false;
-    try {
-      onboardingCompleted = db.withBusyTimeoutSync(DAEMON_STATUS_BUSY_TIMEOUT_MS, () =>
-        Boolean(db.getAppMetadata().onboardingCompletedVersion),
-      );
-    } catch (error) {
-      if (!isSqliteBusyError(error)) {
-        throw error;
-      }
-      daemonLogger.warn(
-        "projection drain skipped while checking onboarding metadata because SQLite is busy",
-      );
-      scheduleProjectionDrain(QUEUE_DRAIN_RETRY_DELAY_MS);
-      return;
-    }
-    if (activeAuthSessions.size > 0 || now() < authProjectionPausedUntil || !onboardingCompleted) {
+    if (activeAuthSessions.size > 0 || now() < authProjectionPausedUntil) {
       scheduleProjectionDrain(PROJECTION_AUTH_RETRY_DELAY_MS);
       return;
     }
