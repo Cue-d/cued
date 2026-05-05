@@ -363,7 +363,7 @@ final class OnboardingWindowController: NSWindowController {
   private func scheduleAuthKickoffRefresh() {
     pendingAuthKickoffRefreshTask?.cancel()
     pendingAuthKickoffRefreshTask = Task { [weak self] in
-      for delay in [200, 700] {
+      for delay in [200, 700, 1_500, 3_000, 6_000, 10_000] {
         try? await Task.sleep(for: .milliseconds(delay))
         guard !Task.isCancelled else {
           return

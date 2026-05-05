@@ -397,8 +397,10 @@ export function summarizeIntegrationStates(
 export function summarizeManagedIntegrationState(
   db: CuedDatabase,
   integration: ManagedIntegrationState,
+  options: { includeDiagnostics?: boolean } = {},
 ): IntegrationStateSummary {
   const hostOs = resolveHostOS();
+  const includeDiagnostics = options.includeDiagnostics ?? true;
   return {
     platform: integration.platform,
     accountKey: integration.accountKey,
@@ -413,12 +415,18 @@ export function summarizeManagedIntegrationState(
     importedFrom: integration.importedFrom,
     artifactPaths: integration.artifactPaths ?? [],
     metadata: integration.metadata ?? null,
-    projectionStats: db.getIntegrationProjectionStats(integration.platform, integration.accountKey),
-    latestSyncDiagnostics: getLatestSyncDiagnostics(
-      db,
-      integration.platform,
-      integration.accountKey,
-    ),
+    projectionStats: includeDiagnostics
+      ? db.getIntegrationProjectionStats(integration.platform, integration.accountKey)
+      : {
+          rawEvents: 0,
+          rawEventsBySchema: {},
+          projectedContacts: 0,
+          projectedConversations: 0,
+          projectedMessages: 0,
+        },
+    latestSyncDiagnostics: includeDiagnostics
+      ? getLatestSyncDiagnostics(db, integration.platform, integration.accountKey)
+      : null,
     lastSeenAt: now(),
     updatedAt: now(),
     latestAuthSessionId:
@@ -482,6 +490,7 @@ export function upsertManagedIntegrationState(
 function buildBootstrappedLocalIntegration(
   db: CuedDatabase,
   platform: Extract<Platform, "contacts" | "imessage">,
+  options: { includeDiagnostics?: boolean } = {},
 ): IntegrationStateSummary {
   return summarizeManagedIntegrationState(
     db,
@@ -501,12 +510,13 @@ function buildBootstrappedLocalIntegration(
           : "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles",
       importedFrom: "bootstrap",
     }),
+    options,
   );
 }
 
 function buildSetupIntegrations(
   db: CuedDatabase,
-  options: { includeLiveLocalIntegrations?: boolean } = {},
+  options: { includeLiveLocalIntegrations?: boolean; includeDiagnostics?: boolean } = {},
 ): IntegrationStateSummary[] {
   const onboardingOrder: Platform[] = [
     "contacts",
@@ -519,7 +529,7 @@ function buildSetupIntegrations(
     "signal",
   ];
   const byPlatform = new Map<Platform, IntegrationStateSummary>();
-  for (const integration of listIntegrationStates(db)) {
+  for (const integration of listIntegrationStates(db, options)) {
     if (!isOnboardingVisiblePlatform(integration.platform)) {
       continue;
     }
@@ -533,14 +543,14 @@ function buildSetupIntegrations(
       if (!byPlatform.has(managed.platform)) {
         byPlatform.set(
           managed.platform,
-          summarizeManagedIntegrationState(db, addSupportedByDaemonMetadata(managed)),
+          summarizeManagedIntegrationState(db, addSupportedByDaemonMetadata(managed), options),
         );
       }
     }
   } else {
     for (const platform of ["contacts", "imessage"] as const) {
       if (!byPlatform.has(platform)) {
-        byPlatform.set(platform, buildBootstrappedLocalIntegration(db, platform));
+        byPlatform.set(platform, buildBootstrappedLocalIntegration(db, platform, options));
       }
     }
   }
@@ -568,6 +578,7 @@ function buildSetupIntegrations(
           importedFrom: "bootstrap",
           metadata: requested.metadata,
         }),
+        options,
       ),
     );
   }
@@ -578,10 +589,14 @@ function buildSetupIntegrations(
     .filter((value): value is IntegrationStateSummary => Boolean(value));
 }
 
-export function listIntegrationStates(db: CuedDatabase): IntegrationStateSummary[] {
+export function listIntegrationStates(
+  db: CuedDatabase,
+  options: { includeDiagnostics?: boolean } = {},
+): IntegrationStateSummary[] {
   return summarizeIntegrationStates(
     db,
     db.listIntegrationStates().filter((row) => !isUserRemovedIntegrationRow(row)),
+    options,
   );
 }
 
@@ -707,7 +722,7 @@ export function getPlatformRuntimeDefaults(platform: Platform): {
 
 export function buildIntegrationStatus(
   db: CuedDatabase,
-  options: { includeLiveLocalIntegrations?: boolean } = {},
+  options: { includeLiveLocalIntegrations?: boolean; includeDiagnostics?: boolean } = {},
 ): {
   hostOs: ReturnType<typeof resolveHostOS>;
   integrations: IntegrationStateSummary[];
@@ -715,7 +730,7 @@ export function buildIntegrationStatus(
 } {
   return {
     hostOs: resolveHostOS(),
-    integrations: listIntegrationStates(db),
+    integrations: listIntegrationStates(db, options),
     setupIntegrations: buildSetupIntegrations(db, options),
   };
 }
