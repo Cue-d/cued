@@ -59,6 +59,7 @@ const {
   integrationStates,
   jobs,
   messageAttachments,
+  messageFtsIndexQueue,
   messageReactions,
   messages,
   outboundMessages,
@@ -128,6 +129,16 @@ export interface QueuedJob {
   checkpoint_json: string | null;
   progress_json: string | null;
   error_json: string | null;
+}
+
+export interface MessageFtsIndexQueueRow {
+  message_id: string;
+  reason: string;
+  status: "queued" | "indexing" | "completed" | "failed";
+  attempt: number;
+  queued_at: number;
+  updated_at: number;
+  last_error: string | null;
 }
 
 export interface ContactMemoryRow {
@@ -3475,6 +3486,117 @@ export class CuedDatabase {
       })
       .where(eq(jobs.id, jobId))
       .run();
+  }
+
+  enqueueMessageFtsIndex(messageIds: Iterable<string>, reason: string): number {
+    const uniqueMessageIds = [...new Set([...messageIds].filter((id) => id.length > 0))];
+    if (uniqueMessageIds.length === 0) {
+      return 0;
+    }
+    const timestamp = now();
+    let changed = 0;
+    this.db.transaction((tx) => {
+      for (const chunk of chunkArray(uniqueMessageIds, WRITE_BATCH_SIZE)) {
+        for (const messageId of chunk) {
+          changed += tx
+            .insert(messageFtsIndexQueue)
+            .values({
+              messageId,
+              reason,
+              status: "queued",
+              attempt: 0,
+              queuedAt: timestamp,
+              updatedAt: timestamp,
+              lastError: null,
+            })
+            .onConflictDoUpdate({
+              target: messageFtsIndexQueue.messageId,
+              set: {
+                reason,
+                status: "queued",
+                updatedAt: timestamp,
+                lastError: null,
+              },
+            })
+            .run().changes;
+        }
+      }
+    });
+    return changed;
+  }
+
+  claimMessageFtsIndexBatch(limit: number): MessageFtsIndexQueueRow[] {
+    const normalizedLimit = Math.max(1, Math.trunc(limit));
+    const timestamp = now();
+    return this.sqlite.transaction(() => {
+      const rows = this.db
+        .select({
+          message_id: messageFtsIndexQueue.messageId,
+          reason: messageFtsIndexQueue.reason,
+          status: messageFtsIndexQueue.status,
+          attempt: messageFtsIndexQueue.attempt,
+          queued_at: messageFtsIndexQueue.queuedAt,
+          updated_at: messageFtsIndexQueue.updatedAt,
+          last_error: messageFtsIndexQueue.lastError,
+        })
+        .from(messageFtsIndexQueue)
+        .where(eq(messageFtsIndexQueue.status, "queued"))
+        .orderBy(asc(messageFtsIndexQueue.queuedAt))
+        .limit(normalizedLimit)
+        .all() as MessageFtsIndexQueueRow[];
+      if (rows.length === 0) {
+        return rows;
+      }
+      this.db
+        .update(messageFtsIndexQueue)
+        .set({
+          status: "indexing",
+          attempt: sql`${messageFtsIndexQueue.attempt} + 1`,
+          updatedAt: timestamp,
+          lastError: null,
+        })
+        .where(
+          inArray(
+            messageFtsIndexQueue.messageId,
+            rows.map((row) => row.message_id),
+          ),
+        )
+        .run();
+      return rows.map((row) => ({
+        ...row,
+        status: "indexing" as const,
+        attempt: row.attempt + 1,
+        updated_at: timestamp,
+        last_error: null,
+      }));
+    })();
+  }
+
+  completeMessageFtsIndex(messageIds: Iterable<string>): number {
+    const ids = [...new Set([...messageIds])];
+    if (ids.length === 0) {
+      return 0;
+    }
+    return this.db
+      .delete(messageFtsIndexQueue)
+      .where(inArray(messageFtsIndexQueue.messageId, ids))
+      .run().changes;
+  }
+
+  failMessageFtsIndex(messageIds: Iterable<string>, error: unknown): number {
+    const ids = [...new Set([...messageIds])];
+    if (ids.length === 0) {
+      return 0;
+    }
+    return this.db
+      .update(messageFtsIndexQueue)
+      .set({
+        status: "failed",
+        updatedAt: now(),
+        lastError: error instanceof Error ? error.message : String(error),
+      })
+      .where(inArray(messageFtsIndexQueue.messageId, ids))
+      .run().changes;
   }
 
   hasQueuedOrRunningRun(platform: Platform, accountKey?: string | null): boolean {

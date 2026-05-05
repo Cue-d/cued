@@ -202,6 +202,29 @@ describe("CuedDatabase", () => {
     db.close();
   });
 
+  it("queues and claims message FTS indexing work independently", () => {
+    const db = createDb();
+
+    expect(db.enqueueMessageFtsIndex(["message-a", "message-b", "message-a"], "projection")).toBe(
+      2,
+    );
+    expect(db.enqueueMessageFtsIndex(["message-a"], "conversation_renamed")).toBe(1);
+
+    const claimed = db.claimMessageFtsIndexBatch(10);
+    expect(claimed.map((row) => row.message_id).sort()).toEqual(["message-a", "message-b"]);
+    expect(claimed.every((row) => row.status === "indexing" && row.attempt === 1)).toBe(true);
+
+    expect(db.completeMessageFtsIndex(["message-a"])).toBe(1);
+    expect(db.failMessageFtsIndex(["message-b"], new Error("fts busy"))).toBe(1);
+    expect(
+      sqlite(db)
+        .prepare("SELECT message_id, status, last_error FROM message_fts_index_queue")
+        .all(),
+    ).toEqual([{ message_id: "message-b", status: "failed", last_error: "fts busy" }]);
+
+    db.close();
+  });
+
   it("executes read-only SQL for ad hoc inspection", () => {
     const db = createDb();
 
@@ -1658,6 +1681,7 @@ describe("CuedDatabase", () => {
         "sync_scopes",
         "sync_proofs",
         "jobs",
+        "message_fts_index_queue",
         "attachment_cache",
         "attachment_content",
         "projection_state",

@@ -134,6 +134,16 @@ export const syncRunErrors = sqliteTable("sync_run_errors", {
   createdAt: integer("created_at").notNull(),
 });
 
+export const messageFtsIndexQueue = sqliteTable("message_fts_index_queue", {
+  messageId: text("message_id").primaryKey(),
+  reason: text("reason").notNull(),
+  status: text("status", { enum: ["queued", "indexing", "completed", "failed"] }).notNull(),
+  attempt: integer("attempt").notNull(),
+  queuedAt: integer("queued_at").notNull(),
+  updatedAt: integer("updated_at").notNull(),
+  lastError: text("last_error"),
+});
+
 export const slackBackfillProofs = sqliteTable("slack_backfill_proofs", {
   id: text("id").primaryKey(),
   accountKey: text("account_key").notNull(),

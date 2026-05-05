@@ -952,6 +952,16 @@ export const MIGRATIONS: Migration[] = [
         created_at INTEGER NOT NULL
       );
 
+      CREATE TABLE IF NOT EXISTS message_fts_index_queue (
+        message_id TEXT PRIMARY KEY,
+        reason TEXT NOT NULL,
+        status TEXT NOT NULL,
+        attempt INTEGER NOT NULL DEFAULT 0,
+        queued_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        last_error TEXT
+      );
+
       CREATE TABLE IF NOT EXISTS slack_backfill_proofs (
         id TEXT PRIMARY KEY,
         account_key TEXT NOT NULL,
@@ -1350,6 +1360,9 @@ export const MIGRATIONS: Migration[] = [
 
       CREATE INDEX IF NOT EXISTS idx_jobs_platform_account_status
       ON jobs(platform, account_key, status, scheduled_at);
+
+      CREATE INDEX IF NOT EXISTS idx_message_fts_index_queue_status
+      ON message_fts_index_queue(status, queued_at);
 
       CREATE INDEX IF NOT EXISTS idx_raw_events_lookup
       ON raw_events(platform, account_key, observed_at);
@@ -2034,6 +2047,25 @@ export const MIGRATIONS: Migration[] = [
 
         CREATE INDEX IF NOT EXISTS idx_jobs_platform_account_status
         ON jobs(platform, account_key, status, scheduled_at);
+      `);
+    },
+  },
+  {
+    id: "0015_message_fts_index_queue",
+    apply: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS message_fts_index_queue (
+          message_id TEXT PRIMARY KEY,
+          reason TEXT NOT NULL,
+          status TEXT NOT NULL,
+          attempt INTEGER NOT NULL DEFAULT 0,
+          queued_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          last_error TEXT
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_message_fts_index_queue_status
+        ON message_fts_index_queue(status, queued_at);
       `);
     },
   },
