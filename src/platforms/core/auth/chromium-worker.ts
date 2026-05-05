@@ -126,9 +126,11 @@ async function continueSlackInBrowser(page: Page): Promise<void> {
     return;
   }
 
+  const browserControlLabel = /(?:continue|open)(?: slack)? in browser/i;
   const continueControl = page
-    .getByRole("button", { name: /continue in browser/i })
-    .or(page.getByRole("link", { name: /continue in browser/i }))
+    .getByRole("button", { name: browserControlLabel })
+    .or(page.getByRole("link", { name: browserControlLabel }))
+    .or(page.getByText(browserControlLabel))
     .first();
   if ((await continueControl.count().catch(() => 0)) === 0) {
     return;
