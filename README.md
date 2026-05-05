@@ -168,7 +168,7 @@ What each step does:
 | `swift build --package-path native/macos/CuedNative -c release` | Builds the native macOS host/helper used for permissions, menu bar control, and native windows. |
 | `GOWORK=off go build -C native/helpers/whatsapp-go -o .build/cued-whatsapp-helper` | Builds the local WhatsApp helper in a path Cued can actually discover during development. |
 | `pnpm dev -- install` | Uses the source CLI to build or refresh `Cued.app`, copy it into `/Applications/Cued.app`, and write the `~/.local/bin/cued` symlink for future invocations. |
-| `pnpm dev -- permissions request --all` | Triggers Contacts and Messages automation prompts and opens Full Disk Access settings for the manual step macOS requires. |
+| `pnpm dev -- permissions request --all` | Triggers the Contacts prompt and opens Full Disk Access settings for the manual step macOS requires. |
 | `pnpm dev -- setup` | Opens the interactive setup flow so you can verify permissions, install state, and next actions from one place. |
 
 Once `pnpm dev -- install` has completed, you can switch to the installed `cued` command. If `~/.local/bin` is not already on your `PATH`, add it before relying on that symlink.

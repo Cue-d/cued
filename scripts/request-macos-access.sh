@@ -23,7 +23,6 @@ NATIVE_BINARY="${CUED_NATIVE_BINARY:-$DEFAULT_NATIVE_BINARY}"
 PERMISSION_TARGET="${CUED_PERMISSION_TARGET:-${CUED_APP_PATH:-$NATIVE_BINARY}}"
 
 REQUEST_CONTACTS=0
-REQUEST_MESSAGES=0
 REQUEST_FULL_DISK=0
 BUILD_NATIVE=1
 OPEN_ONLY=0
@@ -47,18 +46,16 @@ Usage:
   bash scripts/request-macos-access.sh [options]
 
 Options:
-  --all                 Request Contacts + Messages automation and open the Full Disk Access pane
+  --all                 Request Contacts and open the Full Disk Access pane
   --contacts            Trigger the macOS Contacts permission prompt using the native exporter
-  --messages            Trigger Apple Events automation permission for Messages via AppleScript
   --full-disk-access    Open the Full Disk Access pane and print manual instructions
   --open-only           Skip prompt attempts and only open the relevant System Settings panes
   --skip-build          Do not build the native macOS helper before requesting Contacts access
   --help                Show this help
 
 Notes:
-  - Contacts and Apple Events automation can prompt automatically.
+  - Contacts can prompt automatically.
   - Full Disk Access cannot be granted programmatically on macOS.
-  - The process that runs this script is the one macOS authorizes for AppleScript automation.
 EOF
 }
 
@@ -111,28 +108,6 @@ request_contacts_access() {
   open_privacy_pane "Privacy_Contacts"
 }
 
-request_messages_automation_access() {
-  if [[ $OPEN_ONLY -eq 1 ]]; then
-    log "opening Automation privacy pane"
-    open_privacy_pane "Privacy_Automation"
-    return
-  fi
-
-  log "requesting Apple Events automation access for Messages"
-  if osascript <<'APPLESCRIPT' >/dev/null 2>&1
-tell application "Messages"
-  count of services
-end tell
-APPLESCRIPT
-  then
-    log "Messages automation access granted"
-    return
-  fi
-
-  warn "Automation access was not granted. Opening the Automation privacy pane."
-  open_privacy_pane "Privacy_Automation"
-}
-
 open_full_disk_access_help() {
   log "opening Full Disk Access privacy pane"
   open_privacy_pane "Privacy_AllFiles"
@@ -149,7 +124,6 @@ EOF
 
 if [[ $# -eq 0 ]]; then
   REQUEST_CONTACTS=1
-  REQUEST_MESSAGES=1
   REQUEST_FULL_DISK=1
 fi
 
@@ -159,14 +133,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --all)
       REQUEST_CONTACTS=1
-      REQUEST_MESSAGES=1
       REQUEST_FULL_DISK=1
       ;;
     --contacts)
       REQUEST_CONTACTS=1
-      ;;
-    --messages)
-      REQUEST_MESSAGES=1
       ;;
     --full-disk-access)
       REQUEST_FULL_DISK=1
@@ -190,16 +160,12 @@ done
 
 ensure_macos
 
-if [[ $REQUEST_CONTACTS -eq 0 && $REQUEST_MESSAGES -eq 0 && $REQUEST_FULL_DISK -eq 0 ]]; then
+if [[ $REQUEST_CONTACTS -eq 0 && $REQUEST_FULL_DISK -eq 0 ]]; then
   die "nothing requested; use --help for options"
 fi
 
 if [[ $REQUEST_CONTACTS -eq 1 ]]; then
   request_contacts_access
-fi
-
-if [[ $REQUEST_MESSAGES -eq 1 ]]; then
-  request_messages_automation_access
 fi
 
 if [[ $REQUEST_FULL_DISK -eq 1 ]]; then

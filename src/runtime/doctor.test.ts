@@ -18,11 +18,6 @@ function makeInput(
       status: "ok",
       summary: "Contacts access is authorized",
     },
-    messagesAutomation: {
-      name: "messages_automation",
-      status: "ok",
-      summary: "Apple Events automation access for Messages is available",
-    },
     messagesDatabase: {
       name: "messages_database",
       status: "ok",
@@ -75,11 +70,6 @@ describe("permission status summaries", () => {
         status: "granted",
         requestFlags: ["--full-disk-access"],
       }),
-      expect.objectContaining({
-        key: "messages_automation",
-        status: "granted",
-        requestFlags: ["--messages"],
-      }),
     ]);
   });
 
@@ -122,18 +112,13 @@ describe("permission status summaries", () => {
     );
   });
 
-  it("keeps not-determined Contacts promptable while flagging Messages automation", () => {
+  it("keeps not-determined Contacts promptable", () => {
     const permissions = summarizePermissionStatuses(
       makeInput({
         contacts: {
           name: "contacts_permission",
           status: "warning",
           summary: "Contacts access is not determined",
-        },
-        messagesAutomation: {
-          name: "messages_automation",
-          status: "warning",
-          summary: "Apple Events automation for Messages is not verified",
         },
       }),
     );
@@ -144,12 +129,10 @@ describe("permission status summaries", () => {
         status: "unknown",
       }),
     );
-    expect(permissions[2]).toEqual(
-      expect.objectContaining({
-        key: "messages_automation",
-        status: "needs_action",
-      }),
-    );
+    expect(permissions.map((permission) => permission.key)).toEqual([
+      "contacts",
+      "full_disk_access",
+    ]);
   });
 
   it("reports auth diagnostics for every setup platform without requiring broad keychain access", () => {

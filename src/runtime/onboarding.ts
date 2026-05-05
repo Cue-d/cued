@@ -28,10 +28,7 @@ export async function buildOnboardingSnapshot(
     }
   }
 
-  const permissions = await buildPermissionStatus({
-    mode: options.refreshPermissions ? "active" : "passive",
-    db,
-  });
+  const permissions = await buildPermissionStatus();
   const globalSkill = getGlobalCuedSkillStatus();
   const integrations = buildIntegrationStatus(db);
 

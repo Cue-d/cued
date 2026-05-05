@@ -55,7 +55,7 @@ export interface AuthDiagnostic {
   remediation?: string;
 }
 
-export type PermissionStatusKey = "contacts" | "full_disk_access" | "messages_automation";
+export type PermissionStatusKey = "contacts" | "full_disk_access";
 export type PermissionStatusState = "granted" | "needs_action" | "unknown";
 
 export interface PermissionStatusSummary {
@@ -67,21 +67,8 @@ export interface PermissionStatusSummary {
 
 export interface PermissionCheckSummaryInput {
   contacts: DoctorCheck;
-  messagesAutomation: DoctorCheck;
   messagesDatabase: DoctorCheck;
   messagesNativeHelper: DoctorCheck;
-}
-
-export type PermissionStatusMode = "active" | "passive";
-
-type PermissionStatusDatabase = Pick<
-  CuedDatabase,
-  "getMessagesAutomationVerification" | "setMessagesAutomationVerification"
->;
-
-export interface BuildPermissionStatusOptions {
-  mode?: PermissionStatusMode;
-  db?: PermissionStatusDatabase | null;
 }
 
 export function summarizePermissionStatuses(
@@ -123,24 +110,10 @@ export function summarizePermissionStatuses(
       summary: fullDiskSummary,
       requestFlags: ["--full-disk-access"],
     },
-    {
-      key: "messages_automation",
-      status:
-        checks.messagesAutomation.status === "ok"
-          ? "granted"
-          : checks.messagesAutomation.status === "unknown"
-            ? "unknown"
-            : "needs_action",
-      summary: checks.messagesAutomation.summary,
-      requestFlags: ["--messages"],
-    },
   ];
 }
 
-export async function buildPermissionStatus(
-  options: BuildPermissionStatusOptions = {},
-): Promise<{ permissions: PermissionStatusSummary[] }> {
-  const mode = options.mode ?? "passive";
+export async function buildPermissionStatus(): Promise<{ permissions: PermissionStatusSummary[] }> {
   const contacts =
     process.platform === "darwin"
       ? getContactsPermissionCheck()
@@ -165,19 +138,9 @@ export async function buildPermissionStatus(
           status: "unknown",
           summary: "Native Messages access can only be checked on macOS",
         } satisfies DoctorCheck);
-  const messagesAutomation =
-    process.platform === "darwin"
-      ? getMessagesAutomationPermissionCheck(mode, options.db)
-      : ({
-          name: "messages_automation",
-          status: "unknown",
-          summary: "Messages automation can only be checked on macOS",
-        } satisfies DoctorCheck);
-
   return {
     permissions: summarizePermissionStatuses({
       contacts,
-      messagesAutomation,
       messagesDatabase,
       messagesNativeHelper,
     }),
@@ -317,110 +280,6 @@ function getContactsPermissionCheck(): DoctorCheck {
       remediation: "Run `cued permissions request --contacts` and confirm the macOS prompt.",
     };
   }
-}
-
-function readCachedMessagesAutomationCheck(db?: PermissionStatusDatabase | null): DoctorCheck {
-  const cached = db?.getMessagesAutomationVerification() ?? null;
-  if (cached?.status === "granted") {
-    return {
-      name: "messages_automation",
-      status: "ok",
-      summary:
-        cached.summary ?? "Apple Events automation access for Messages was previously verified",
-      details: {
-        checkedAt: cached.checkedAt,
-        verifiedAt: cached.verifiedAt,
-        source: "cached_verification",
-      },
-    };
-  }
-
-  return {
-    name: "messages_automation",
-    status: "unknown",
-    summary: "Messages automation has not been explicitly verified yet",
-    remediation: "Run `cued permissions request --messages` or `cued permissions doctor`.",
-  };
-}
-
-function storeMessagesAutomationVerification(
-  db: PermissionStatusDatabase | null | undefined,
-  check: DoctorCheck,
-): void {
-  if (!db) {
-    return;
-  }
-
-  const checkedAt = Date.now();
-  if (check.status === "ok") {
-    db.setMessagesAutomationVerification({
-      status: "granted",
-      checkedAt,
-      verifiedAt: checkedAt,
-      summary: check.summary,
-    });
-    return;
-  }
-
-  db.setMessagesAutomationVerification({
-    status: "unknown",
-    checkedAt,
-    verifiedAt: null,
-    summary: check.summary,
-  });
-}
-
-export function refreshMessagesAutomationVerification(
-  db?: PermissionStatusDatabase | null,
-): DoctorCheck {
-  try {
-    execFileSync(
-      "osascript",
-      [
-        "-e",
-        "with timeout of 1 second",
-        "-e",
-        'tell application "Messages" to count of services',
-        "-e",
-        "end timeout",
-      ],
-      {
-        encoding: "utf8",
-        stdio: ["ignore", "pipe", "pipe"],
-      },
-    );
-
-    const check = {
-      name: "messages_automation",
-      status: "ok",
-      summary: "Apple Events automation access for Messages is available",
-    } satisfies DoctorCheck;
-    storeMessagesAutomationVerification(db, check);
-    return check;
-  } catch (error) {
-    const check = {
-      name: "messages_automation",
-      status: "warning",
-      summary: "Apple Events automation for Messages is not verified",
-      details: {
-        error: error instanceof Error ? error.message : String(error),
-      },
-      remediation: "Run `cued permissions request --messages` to trigger the Automation prompt.",
-    } satisfies DoctorCheck;
-    storeMessagesAutomationVerification(db, check);
-    return check;
-  }
-}
-
-function getMessagesAutomationPermissionCheck(
-  mode: PermissionStatusMode,
-  db?: PermissionStatusDatabase | null,
-): DoctorCheck {
-  if (mode === "passive") {
-    return readCachedMessagesAutomationCheck(db);
-  }
-
-  return refreshMessagesAutomationVerification(db);
 }
 
 function getSignalCliCheck(): DoctorCheck {
@@ -741,7 +600,6 @@ export async function buildDoctorReport(
     checks.push(getContactsPermissionCheck());
     checks.push(tryReadMessagesDatabase());
     checks.push(getMessagesNativeHelperCheck());
-    checks.push(refreshMessagesAutomationVerification(db));
   }
   checks.push(getSignalCliCheck());
   checks.push(getSignalLinkCheck());

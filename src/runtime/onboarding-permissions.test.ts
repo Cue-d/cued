@@ -26,7 +26,7 @@ describe("onboarding permission refresh", () => {
     vi.clearAllMocks();
   });
 
-  it("uses passive permission checks by default", async () => {
+  it("loads permission status for onboarding snapshots", async () => {
     buildPermissionStatusMock.mockResolvedValue({ permissions: [] });
     buildIntegrationStatusMock.mockReturnValue({
       hostOs: "macos",
@@ -44,13 +44,10 @@ describe("onboarding permission refresh", () => {
 
     await buildOnboardingSnapshot({} as never);
 
-    expect(buildPermissionStatusMock).toHaveBeenCalledWith({
-      mode: "passive",
-      db: {} as never,
-    });
+    expect(buildPermissionStatusMock).toHaveBeenCalledWith();
   });
 
-  it("can force a live permission refresh for onboarding snapshots", async () => {
+  it("keeps refreshPermissions as a snapshot-compatible no-op", async () => {
     buildPermissionStatusMock.mockResolvedValue({ permissions: [] });
     buildIntegrationStatusMock.mockReturnValue({
       hostOs: "macos",
@@ -68,9 +65,6 @@ describe("onboarding permission refresh", () => {
 
     await buildOnboardingSnapshot({} as never, { refreshPermissions: true });
 
-    expect(buildPermissionStatusMock).toHaveBeenCalledWith({
-      mode: "active",
-      db: {} as never,
-    });
+    expect(buildPermissionStatusMock).toHaveBeenCalledWith();
   });
 });

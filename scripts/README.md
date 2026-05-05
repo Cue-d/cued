@@ -36,15 +36,14 @@ This script builds the packaged development app at `native/macos/dist/Cued.app`.
 ```bash
 pnpm bootstrap:signal:macos
 pnpm permissions:macos
-pnpm permissions:macos -- --contacts --messages
+pnpm permissions:macos -- --contacts --full-disk-access
 pnpm permissions:macos -- --full-disk-access --open-only
 ```
 
 This bootstrap script will:
 
 - trigger the Contacts permission prompt through the native macOS helper
-- trigger Apple Events automation access for Messages through AppleScript
-- open the Full Disk Access and Automation panes when requested or when a prompt cannot be granted automatically
+- open the Full Disk Access pane when requested
 
 macOS does not allow scripts or apps to self-grant Full Disk Access. The script opens the correct pane and prints the manual steps instead.
 

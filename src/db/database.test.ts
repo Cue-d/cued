@@ -572,26 +572,6 @@ describe("CuedDatabase", () => {
     readonly.close();
   });
 
-  it("stores messages automation verification state", () => {
-    const db = createDb();
-
-    db.setMessagesAutomationVerification({
-      status: "granted",
-      checkedAt: 123,
-      verifiedAt: 123,
-      summary: "Apple Events automation access for Messages is available",
-    });
-
-    expect(db.getMessagesAutomationVerification()).toEqual({
-      status: "granted",
-      checkedAt: 123,
-      verifiedAt: 123,
-      summary: "Apple Events automation access for Messages is available",
-    });
-
-    db.close();
-  });
-
   it("manages integration states", () => {
     const db = createDb();
 

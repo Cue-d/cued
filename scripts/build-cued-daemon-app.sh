@@ -345,8 +345,6 @@ cat > "$CONTENTS_DIR/Info.plist" <<EOF
   <string>13.0</string>
   <key>LSUIElement</key>
   <true/>
-  <key>NSAppleEventsUsageDescription</key>
-  <string>Cued uses Apple Events to automate Messages when you explicitly ask it to send or control native messaging flows.</string>
   <key>NSContactsUsageDescription</key>
   <string>Cued reads local contacts so your local message database can resolve people consistently across platforms.</string>
   <key>CuedDaemonCommand</key>
