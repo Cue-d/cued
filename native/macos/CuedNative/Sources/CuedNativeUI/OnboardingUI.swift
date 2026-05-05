@@ -857,7 +857,7 @@ public struct CuedOnboardingView: View {
           Text(configuration.title)
             .font(.headline)
             .foregroundStyle(isFullyConnected ? .secondary : .primary)
-          Text(platformWalkthrough(for: configuration))
+          Text(platformDetail(for: configuration))
             .font(.subheadline)
             .foregroundStyle(isFullyConnected ? .tertiary : .secondary)
             .fixedSize(horizontal: false, vertical: true)
@@ -1256,6 +1256,14 @@ public struct CuedOnboardingView: View {
       return "\(installerFormatCount(stats.rawEvents)) items captured, indexing"
     }
     return nil
+  }
+
+  private func platformDetail(for configuration: InstallerPlatformConfiguration) -> String {
+    if let integration = configuration.accounts.first,
+       let dataSummary = integrationDataSummary(integration) {
+      return "\(dataSummary.prefix(1).uppercased())\(dataSummary.dropFirst())."
+    }
+    return platformWalkthrough(for: configuration)
   }
 
   private func platformIsFullyConnected(_ configuration: InstallerPlatformConfiguration) -> Bool {
