@@ -19,7 +19,7 @@ import {
   listRequestableIntegrationPlatforms,
   refreshPersistedRequestableIntegrationStates,
 } from "../state/status.js";
-import { type Platform, parsePlatform } from "../types.js";
+import { getDefaultAccountKeyForPlatform, type Platform, parsePlatform } from "../types.js";
 import { runAuthSessionSync, startAuthSession } from "./runtime.js";
 
 export type { AuthSessionSummary, IntegrationStateSummary } from "../state/types.js";
@@ -127,6 +127,11 @@ export class IntegrationAuthService {
     integration: ReturnType<typeof getIntegrationSummary>;
     authSession: ReturnType<typeof getAuthSessionSummary>;
   }> {
+    const active = this.findActiveManagedAuthSession(platform, accountKey, activeAuthSessions);
+    if (active) {
+      return active;
+    }
+
     const reusable = await this.connectReusableAuth(platform, accountKey, lifecycle);
     if (reusable?.integration) {
       return {
@@ -195,6 +200,45 @@ export class IntegrationAuthService {
       ),
       authSession: getAuthSessionSummary(this.db, running.id),
     };
+  }
+
+  private findActiveManagedAuthSession(
+    platform: string,
+    accountKey: string | undefined,
+    activeAuthSessions: RuntimeAuthSessionMap,
+  ): {
+    integration: ReturnType<typeof getIntegrationSummary>;
+    authSession: NonNullable<ReturnType<typeof getAuthSessionSummary>>;
+  } | null {
+    const normalized = parsePlatform(platform.trim().toLowerCase());
+    if (!normalized) {
+      return null;
+    }
+    const resolvedAccountKey = accountKey ?? getDefaultAccountKeyForPlatform(normalized);
+
+    for (const [sessionId, runtime] of activeAuthSessions) {
+      if (runtime.platform !== normalized || runtime.accountKey !== resolvedAccountKey) {
+        continue;
+      }
+      if (runtime.child.exitCode != null || runtime.child.signalCode != null) {
+        activeAuthSessions.delete(sessionId);
+        continue;
+      }
+      const authSession = getAuthSessionSummary(this.db, sessionId);
+      if (
+        !authSession ||
+        (authSession.state !== "requested" && authSession.state !== "in_progress")
+      ) {
+        activeAuthSessions.delete(sessionId);
+        continue;
+      }
+      return {
+        integration: getIntegrationSummary(this.db, normalized, resolvedAccountKey),
+        authSession,
+      };
+    }
+
+    return null;
   }
 
   private async completeAndSchedule(

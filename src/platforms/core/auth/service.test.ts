@@ -109,6 +109,63 @@ describe("IntegrationAuthService", () => {
     db.close();
   });
 
+  it("returns an active managed auth session instead of launching the same account twice", async () => {
+    const db = createDb();
+    db.upsertIntegrationState({
+      platform: "discord",
+      accountKey: "default",
+      displayName: "Discord",
+      authState: "in_progress",
+      enabled: true,
+      connectionKind: "browser-session",
+      syncCapable: false,
+      launchStrategy: "chromium-auth",
+      launchTarget: "https://discord.com/login",
+      importedFrom: "local-cli",
+      metadata: {
+        browserProfileDir: "/tmp/cued/discord/default",
+        runtimeKind: "chromium",
+      },
+    });
+    const sessionId = db.createAuthSession({
+      platform: "discord",
+      accountKey: "default",
+      integrationStateId: "discord:default",
+      state: "in_progress",
+    });
+    db.updateAuthSessionState({
+      id: sessionId,
+      state: "in_progress",
+      nativePid: 12345,
+      startedAt: Date.now(),
+    });
+    const service = new IntegrationAuthService(db);
+    const activeAuthSessions = new Map<
+      string,
+      { child: ChildProcess; platform: "discord"; accountKey: string }
+    >([
+      [
+        sessionId,
+        {
+          child: { pid: 12345, exitCode: null, signalCode: null } as ChildProcess,
+          platform: "discord",
+          accountKey: "default",
+        },
+      ],
+    ]);
+
+    const result = await service.connectManaged("discord", undefined, activeAuthSessions);
+
+    expect(result.integration.accountKey).toBe("default");
+    expect(result.integration.authState).toBe("in_progress");
+    expect(result.authSession?.id).toBe(sessionId);
+    expect(activeAuthSessions.size).toBe(1);
+    expect(startAuthSessionMock).not.toHaveBeenCalled();
+    expect(db.listAuthSessions(10)).toHaveLength(1);
+
+    db.close();
+  });
+
   it("reuses slack pending discovery only when desktop import authenticates a new workspace", async () => {
     const db = createDb();
     upsertAuthenticatedSlack(db, "T_EXISTING", "Existing");
