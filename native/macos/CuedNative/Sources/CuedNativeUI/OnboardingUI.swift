@@ -16,12 +16,32 @@ public struct InstallerCapabilityStatus: Decodable, Sendable {
   }
 }
 
+public struct InstallerProjectionStats: Decodable, Sendable {
+  public let rawEvents: Int
+  public let projectedContacts: Int
+  public let projectedConversations: Int
+  public let projectedMessages: Int
+
+  public init(
+    rawEvents: Int = 0,
+    projectedContacts: Int = 0,
+    projectedConversations: Int = 0,
+    projectedMessages: Int = 0
+  ) {
+    self.rawEvents = rawEvents
+    self.projectedContacts = projectedContacts
+    self.projectedConversations = projectedConversations
+    self.projectedMessages = projectedMessages
+  }
+}
+
 public struct InstallerIntegrationStatus: Decodable, Identifiable, Sendable {
   public let platform: String
   public let accountKey: String
   public let displayName: String?
   public let authState: String
   public let enabled: Bool
+  public let projectionStats: InstallerProjectionStats?
   public let capability: InstallerCapabilityStatus
 
   public var id: String { "\(platform):\(accountKey)" }
@@ -32,6 +52,7 @@ public struct InstallerIntegrationStatus: Decodable, Identifiable, Sendable {
     displayName: String?,
     authState: String,
     enabled: Bool,
+    projectionStats: InstallerProjectionStats? = nil,
     capability: InstallerCapabilityStatus
   ) {
     self.platform = platform
@@ -39,6 +60,7 @@ public struct InstallerIntegrationStatus: Decodable, Identifiable, Sendable {
     self.displayName = displayName
     self.authState = authState
     self.enabled = enabled
+    self.projectionStats = projectionStats
     self.capability = capability
   }
 }
@@ -1201,6 +1223,9 @@ public struct CuedOnboardingView: View {
     integration: InstallerIntegrationStatus
   ) -> String {
     var parts = [installerReadableIntegrationState(integration.authState)]
+    if let dataSummary = integrationDataSummary(integration) {
+      parts.append(dataSummary)
+    }
     if !integration.enabled && installerIsConnectedIntegrationState(integration.authState) {
       parts.append("turned off")
     }
@@ -1210,6 +1235,27 @@ public struct CuedOnboardingView: View {
       parts.append(integration.accountKey)
     }
     return parts.joined(separator: " • ")
+  }
+
+  private func integrationDataSummary(_ integration: InstallerIntegrationStatus) -> String? {
+    guard installerIsConnectedIntegrationState(integration.authState),
+          let stats = integration.projectionStats else {
+      return nil
+    }
+
+    if stats.projectedMessages > 0 {
+      return "\(installerFormatCount(stats.projectedMessages)) messages indexed"
+    }
+    if stats.projectedContacts > 0 {
+      return "\(installerFormatCount(stats.projectedContacts)) contacts indexed"
+    }
+
+    let projectedItems =
+      stats.projectedContacts + stats.projectedConversations + stats.projectedMessages
+    if stats.rawEvents > 0 && projectedItems == 0 {
+      return "\(installerFormatCount(stats.rawEvents)) items captured, indexing"
+    }
+    return nil
   }
 
   private func platformIsFullyConnected(_ configuration: InstallerPlatformConfiguration) -> Bool {
@@ -1731,6 +1777,12 @@ private func installerReadableIntegrationState(_ value: String) -> String {
   default:
     return value.replacingOccurrences(of: "_", with: " ").capitalized
   }
+}
+
+private func installerFormatCount(_ value: Int) -> String {
+  let formatter = NumberFormatter()
+  formatter.numberStyle = .decimal
+  return formatter.string(from: NSNumber(value: value)) ?? "\(value)"
 }
 
 private func installerPlatformTitle(_ platform: String, fallback: String?) -> String {

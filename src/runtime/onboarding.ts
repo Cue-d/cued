@@ -33,7 +33,7 @@ export async function buildOnboardingSnapshot(
     db,
   });
   const globalSkill = getGlobalCuedSkillStatus();
-  const integrations = buildIntegrationStatus(db, { includeDiagnostics: false });
+  const integrations = buildIntegrationStatus(db, { includeDiagnostics: true });
 
   return {
     permissions: permissions.permissions,
