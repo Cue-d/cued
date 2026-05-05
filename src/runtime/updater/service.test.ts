@@ -148,6 +148,10 @@ describe("updater service", () => {
     expect(script).toContain(
       'update helper-set-last-error --db-path "$DB_PATH" --message "$1" >/dev/null 2>&1 || true',
     );
+    expect(script).toContain(
+      "INSTALLED_CLI_PATH='/Applications/Cued.app/Contents/Resources/cued-cli'",
+    );
+    expect(script).toContain('"$INSTALLED_CLI_PATH" skill install-global >/dev/null 2>&1 || true');
     expect(script).not.toContain("/usr/bin/sqlite3");
   });
 
