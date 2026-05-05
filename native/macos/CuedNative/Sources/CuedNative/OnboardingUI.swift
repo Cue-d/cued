@@ -40,6 +40,8 @@ final class OnboardingWindowController: NSWindowController {
   private var pendingPermissionRefreshTask: Task<Void, Never>?
   private var pendingLivePermissionKeys = Set<String>()
   private var pendingLivePermissionDeadline: Date?
+  private var pendingRefreshAfterCurrent = false
+  private var pendingForceActivePermissionRefreshAfterCurrent = false
 
   init(daemonSupervisor: DaemonSupervisor, onRefresh: @escaping () -> Void) {
     self.daemonSupervisor = daemonSupervisor
@@ -101,6 +103,9 @@ final class OnboardingWindowController: NSWindowController {
 
   func refresh(forceActivePermissionRefresh: Bool = false) {
     guard !isRefreshing else {
+      pendingRefreshAfterCurrent = true
+      pendingForceActivePermissionRefreshAfterCurrent =
+        pendingForceActivePermissionRefreshAfterCurrent || forceActivePermissionRefresh
       return
     }
     isRefreshing = true
@@ -146,6 +151,7 @@ final class OnboardingWindowController: NSWindowController {
         )
         self.schedulePermissionRefreshRetry()
         self.schedulePendingStatusRefreshIfNeeded()
+        self.runPendingRefreshIfNeeded()
       }
     }
   }
@@ -304,6 +310,8 @@ final class OnboardingWindowController: NSWindowController {
   }
 
   override func close() {
+    pendingRefreshAfterCurrent = false
+    pendingForceActivePermissionRefreshAfterCurrent = false
     pendingAuthKickoffRefreshTask?.cancel()
     pendingAuthKickoffRefreshTask = nil
     pendingStatusRefreshTask?.cancel()
@@ -312,6 +320,16 @@ final class OnboardingWindowController: NSWindowController {
     pendingPermissionRefreshTask = nil
     PermissionGuideAssistant.shared.dismiss()
     super.close()
+  }
+
+  private func runPendingRefreshIfNeeded() {
+    guard pendingRefreshAfterCurrent else {
+      return
+    }
+    let forceActivePermissionRefresh = pendingForceActivePermissionRefreshAfterCurrent
+    pendingRefreshAfterCurrent = false
+    pendingForceActivePermissionRefreshAfterCurrent = false
+    refresh(forceActivePermissionRefresh: forceActivePermissionRefresh)
   }
 
   private func runConnectActions(argumentsList: [[String]]) {
