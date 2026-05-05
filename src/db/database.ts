@@ -11,6 +11,8 @@ import type {
   ConnectionKind,
   IntegrationAuthState,
   IntegrationLaunchStrategy,
+  JobKind,
+  JobStatus,
   Platform,
   ProviderRawEventInput,
   RawEventEntityKind,
@@ -55,6 +57,7 @@ const {
   conversations,
   daemonState,
   integrationStates,
+  jobs,
   messageAttachments,
   messageReactions,
   messages,
@@ -105,6 +108,26 @@ export interface QueuedSyncRun {
   scheduled_at: number;
   started_at: number | null;
   details_json: string | null;
+}
+
+export interface QueuedJob {
+  id: string;
+  kind: JobKind;
+  platform: Platform | null;
+  account_key: string | null;
+  priority: number;
+  status: JobStatus;
+  trigger: string;
+  queued_at: number;
+  scheduled_at: number;
+  started_at: number | null;
+  attempt: number;
+  owner_id: string | null;
+  lease_expires_at: number | null;
+  last_progress_at: number | null;
+  checkpoint_json: string | null;
+  progress_json: string | null;
+  error_json: string | null;
 }
 
 export interface ContactMemoryRow {
@@ -3270,6 +3293,188 @@ export class CuedDatabase {
     });
 
     return runIds;
+  }
+
+  queueJob(input: {
+    kind: JobKind;
+    platform?: Platform | null;
+    accountKey?: string | null;
+    priority: number;
+    trigger: string;
+    checkpoint?: unknown;
+    progress?: unknown;
+    scheduledAt?: number;
+    delayMs?: number;
+  }): string {
+    const id = randomUUID();
+    const queuedAt = now();
+    const scheduledAt =
+      input.scheduledAt ??
+      (input.delayMs != null && Number.isFinite(input.delayMs)
+        ? queuedAt + Math.max(0, Math.trunc(input.delayMs))
+        : queuedAt);
+    this.db
+      .insert(jobs)
+      .values({
+        id,
+        kind: input.kind,
+        platform: input.platform ?? null,
+        accountKey: input.accountKey ?? null,
+        priority: Math.trunc(input.priority),
+        status: "queued",
+        trigger: input.trigger,
+        queuedAt,
+        scheduledAt,
+        startedAt: null,
+        finishedAt: null,
+        attempt: 0,
+        ownerId: null,
+        leaseExpiresAt: null,
+        lastProgressAt: null,
+        checkpointJson: safeStringifyJson(input.checkpoint),
+        progressJson: safeStringifyJson(input.progress),
+        errorJson: null,
+      })
+      .run();
+    return id;
+  }
+
+  claimNextJob(input: { ownerId: string; leaseMs: number; kinds?: JobKind[] }): QueuedJob | null {
+    const timestamp = now();
+    const kindPredicate =
+      input.kinds && input.kinds.length > 0 ? inArray(jobs.kind, input.kinds) : sql`1 = 1`;
+    const claimablePredicate = and(
+      kindPredicate,
+      sql`(
+        (${jobs.status} IN ('queued', 'retry_wait') AND ${jobs.scheduledAt} <= ${timestamp})
+        OR (${jobs.status} = 'running' AND ${jobs.leaseExpiresAt} IS NOT NULL AND ${jobs.leaseExpiresAt} <= ${timestamp})
+      )`,
+    );
+
+    return this.sqlite.transaction(() => {
+      const row = this.db
+        .select({
+          id: jobs.id,
+          kind: jobs.kind,
+          platform: jobs.platform,
+          account_key: jobs.accountKey,
+          priority: jobs.priority,
+          status: jobs.status,
+          trigger: jobs.trigger,
+          queued_at: jobs.queuedAt,
+          scheduled_at: jobs.scheduledAt,
+          started_at: jobs.startedAt,
+          attempt: jobs.attempt,
+          owner_id: jobs.ownerId,
+          lease_expires_at: jobs.leaseExpiresAt,
+          last_progress_at: jobs.lastProgressAt,
+          checkpoint_json: jobs.checkpointJson,
+          progress_json: jobs.progressJson,
+          error_json: jobs.errorJson,
+        })
+        .from(jobs)
+        .where(claimablePredicate)
+        .orderBy(asc(jobs.priority), asc(jobs.scheduledAt), asc(jobs.queuedAt))
+        .limit(1)
+        .get() as QueuedJob | undefined;
+      if (!row) {
+        return null;
+      }
+
+      const startedAt = row.started_at ?? timestamp;
+      const leaseExpiresAt = timestamp + Math.max(1, Math.trunc(input.leaseMs));
+      this.db
+        .update(jobs)
+        .set({
+          status: "running",
+          ownerId: input.ownerId,
+          startedAt,
+          attempt: row.attempt + 1,
+          leaseExpiresAt,
+          lastProgressAt: row.last_progress_at ?? timestamp,
+          errorJson: null,
+        })
+        .where(eq(jobs.id, row.id))
+        .run();
+
+      return {
+        ...row,
+        status: "running" as const,
+        owner_id: input.ownerId,
+        started_at: startedAt,
+        attempt: row.attempt + 1,
+        lease_expires_at: leaseExpiresAt,
+        last_progress_at: row.last_progress_at ?? timestamp,
+        error_json: null,
+      };
+    })();
+  }
+
+  updateJobProgress(
+    jobId: string,
+    input: {
+      checkpoint?: unknown;
+      progress?: unknown;
+      leaseMs?: number;
+    },
+  ): void {
+    const timestamp = now();
+    this.db
+      .update(jobs)
+      .set({
+        checkpointJson:
+          input.checkpoint === undefined ? undefined : safeStringifyJson(input.checkpoint),
+        progressJson: input.progress === undefined ? undefined : safeStringifyJson(input.progress),
+        lastProgressAt: timestamp,
+        leaseExpiresAt:
+          input.leaseMs == null ? undefined : timestamp + Math.max(1, Math.trunc(input.leaseMs)),
+      })
+      .where(eq(jobs.id, jobId))
+      .run();
+  }
+
+  completeJob(jobId: string, progress?: unknown): void {
+    const timestamp = now();
+    this.db
+      .update(jobs)
+      .set({
+        status: "completed",
+        finishedAt: timestamp,
+        ownerId: null,
+        leaseExpiresAt: null,
+        lastProgressAt: timestamp,
+        progressJson: progress === undefined ? undefined : safeStringifyJson(progress),
+      })
+      .where(eq(jobs.id, jobId))
+      .run();
+  }
+
+  failJob(
+    jobId: string,
+    input: {
+      error: unknown;
+      retryAt?: number | null;
+    },
+  ): void {
+    const timestamp = now();
+    const retryAt = input.retryAt ?? null;
+    this.db
+      .update(jobs)
+      .set({
+        status: retryAt == null ? "failed" : "retry_wait",
+        scheduledAt: retryAt ?? undefined,
+        finishedAt: retryAt == null ? timestamp : null,
+        ownerId: null,
+        leaseExpiresAt: null,
+        lastProgressAt: timestamp,
+        errorJson: safeStringifyJson({
+          message: input.error instanceof Error ? input.error.message : String(input.error),
+          failedAt: timestamp,
+          retryAt,
+        }),
+      })
+      .where(eq(jobs.id, jobId))
+      .run();
   }
 
   hasQueuedOrRunningRun(platform: Platform, accountKey?: string | null): boolean {

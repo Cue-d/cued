@@ -285,6 +285,19 @@ export const SYNC_RUN_STATUS_VALUES = [
 ] as const;
 export type SyncRunStatus = (typeof SYNC_RUN_STATUS_VALUES)[number];
 
+export const JOB_KIND_VALUES = ["auth", "ingest", "project", "index", "cleanup", "status"] as const;
+export type JobKind = (typeof JOB_KIND_VALUES)[number];
+
+export const JOB_STATUS_VALUES = [
+  "queued",
+  "running",
+  "retry_wait",
+  "completed",
+  "failed",
+  "canceled",
+] as const;
+export type JobStatus = (typeof JOB_STATUS_VALUES)[number];
+
 export const RAW_EVENT_ENTITY_KIND_VALUES = [
   "contact",
   "conversation",

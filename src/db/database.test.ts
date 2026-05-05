@@ -128,6 +128,80 @@ describe("CuedDatabase", () => {
     db.close();
   });
 
+  it("claims jobs by priority and reclaims expired leases", () => {
+    const db = createDb();
+
+    const lowPriorityJobId = db.queueJob({
+      kind: "ingest",
+      platform: "slack",
+      accountKey: "T1",
+      priority: 30,
+      trigger: "test_low",
+      checkpoint: { cursor: "a" },
+    });
+    const highPriorityJobId = db.queueJob({
+      kind: "auth",
+      platform: "slack",
+      accountKey: "T1",
+      priority: 0,
+      trigger: "test_high",
+    });
+
+    const claimedHigh = db.claimNextJob({
+      ownerId: "worker-a",
+      leaseMs: 10_000,
+    });
+    expect(claimedHigh).toMatchObject({
+      id: highPriorityJobId,
+      kind: "auth",
+      status: "running",
+      owner_id: "worker-a",
+      attempt: 1,
+    });
+
+    db.updateJobProgress(highPriorityJobId, {
+      checkpoint: { openedBrowser: true },
+      progress: { state: "waiting_for_callback" },
+      leaseMs: 20_000,
+    });
+    db.failJob(highPriorityJobId, {
+      error: new Error("network offline"),
+      retryAt: Date.now() + 60_000,
+    });
+
+    const claimedLow = db.claimNextJob({
+      ownerId: "worker-b",
+      leaseMs: 10_000,
+    });
+    expect(claimedLow).toMatchObject({
+      id: lowPriorityJobId,
+      kind: "ingest",
+      status: "running",
+      owner_id: "worker-b",
+      attempt: 1,
+    });
+
+    sqlite(db).prepare("UPDATE jobs SET lease_expires_at = 1 WHERE id = ?").run(lowPriorityJobId);
+    const reclaimedLow = db.claimNextJob({
+      ownerId: "worker-c",
+      leaseMs: 10_000,
+    });
+    expect(reclaimedLow).toMatchObject({
+      id: lowPriorityJobId,
+      owner_id: "worker-c",
+      attempt: 2,
+    });
+
+    db.completeJob(lowPriorityJobId, { done: true });
+    expect(
+      sqlite(db)
+        .prepare("SELECT status, owner_id, lease_expires_at FROM jobs WHERE id = ?")
+        .get(lowPriorityJobId),
+    ).toEqual({ status: "completed", owner_id: null, lease_expires_at: null });
+
+    db.close();
+  });
+
   it("executes read-only SQL for ad hoc inspection", () => {
     const db = createDb();
 
@@ -1583,6 +1657,7 @@ describe("CuedDatabase", () => {
         "slack_backfill_proofs",
         "sync_scopes",
         "sync_proofs",
+        "jobs",
         "attachment_cache",
         "attachment_content",
         "projection_state",

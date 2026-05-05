@@ -920,6 +920,27 @@ export const MIGRATIONS: Migration[] = [
         details_json TEXT
       );
 
+      CREATE TABLE IF NOT EXISTS jobs (
+        id TEXT PRIMARY KEY,
+        kind TEXT NOT NULL,
+        platform TEXT,
+        account_key TEXT,
+        priority INTEGER NOT NULL,
+        status TEXT NOT NULL,
+        trigger TEXT NOT NULL,
+        queued_at INTEGER NOT NULL,
+        scheduled_at INTEGER NOT NULL,
+        started_at INTEGER,
+        finished_at INTEGER,
+        attempt INTEGER NOT NULL DEFAULT 0,
+        owner_id TEXT,
+        lease_expires_at INTEGER,
+        last_progress_at INTEGER,
+        checkpoint_json TEXT,
+        progress_json TEXT,
+        error_json TEXT
+      );
+
       CREATE TABLE IF NOT EXISTS sync_run_errors (
         id TEXT PRIMARY KEY,
         sync_run_id TEXT NOT NULL REFERENCES sync_runs(id) ON DELETE CASCADE,
@@ -1320,6 +1341,15 @@ export const MIGRATIONS: Migration[] = [
 
       CREATE INDEX IF NOT EXISTS idx_sync_runs_platform_account_status_queue
       ON sync_runs(platform, account_key, status, scheduled_at, queued_at);
+
+      CREATE INDEX IF NOT EXISTS idx_jobs_claim
+      ON jobs(status, scheduled_at, priority, queued_at);
+
+      CREATE INDEX IF NOT EXISTS idx_jobs_owner_lease
+      ON jobs(owner_id, lease_expires_at);
+
+      CREATE INDEX IF NOT EXISTS idx_jobs_platform_account_status
+      ON jobs(platform, account_key, status, scheduled_at);
 
       CREATE INDEX IF NOT EXISTS idx_raw_events_lookup
       ON raw_events(platform, account_key, observed_at);
@@ -1968,6 +1998,42 @@ export const MIGRATIONS: Migration[] = [
 
         CREATE INDEX IF NOT EXISTS idx_sync_runs_platform_account_status_queue
         ON sync_runs(platform, account_key, status, scheduled_at, queued_at);
+      `);
+    },
+  },
+  {
+    id: "0014_jobs_table",
+    apply: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS jobs (
+          id TEXT PRIMARY KEY,
+          kind TEXT NOT NULL,
+          platform TEXT,
+          account_key TEXT,
+          priority INTEGER NOT NULL,
+          status TEXT NOT NULL,
+          trigger TEXT NOT NULL,
+          queued_at INTEGER NOT NULL,
+          scheduled_at INTEGER NOT NULL,
+          started_at INTEGER,
+          finished_at INTEGER,
+          attempt INTEGER NOT NULL DEFAULT 0,
+          owner_id TEXT,
+          lease_expires_at INTEGER,
+          last_progress_at INTEGER,
+          checkpoint_json TEXT,
+          progress_json TEXT,
+          error_json TEXT
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_jobs_claim
+        ON jobs(status, scheduled_at, priority, queued_at);
+
+        CREATE INDEX IF NOT EXISTS idx_jobs_owner_lease
+        ON jobs(owner_id, lease_expires_at);
+
+        CREATE INDEX IF NOT EXISTS idx_jobs_platform_account_status
+        ON jobs(platform, account_key, status, scheduled_at);
       `);
     },
   },

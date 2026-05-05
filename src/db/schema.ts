@@ -6,6 +6,8 @@ import {
   CONVERSATION_TYPE_VALUES,
   INTEGRATION_AUTH_STATE_VALUES,
   INTEGRATION_LAUNCH_STRATEGY_VALUES,
+  JOB_KIND_VALUES,
+  JOB_STATUS_VALUES,
   PLATFORM_VALUES,
   RAW_EVENT_ENTITY_KIND_VALUES,
   SYNC_MODE_VALUES,
@@ -98,6 +100,27 @@ export const syncRuns = sqliteTable("sync_runs", {
   startedAt: integer("started_at"),
   finishedAt: integer("finished_at"),
   detailsJson: text("details_json"),
+});
+
+export const jobs = sqliteTable("jobs", {
+  id: text("id").primaryKey(),
+  kind: textEnum("kind", JOB_KIND_VALUES).notNull(),
+  platform: textEnum("platform", PLATFORM_VALUES),
+  accountKey: text("account_key"),
+  priority: integer("priority").notNull(),
+  status: textEnum("status", JOB_STATUS_VALUES).notNull(),
+  trigger: text("trigger").notNull(),
+  queuedAt: integer("queued_at").notNull(),
+  scheduledAt: integer("scheduled_at").notNull(),
+  startedAt: integer("started_at"),
+  finishedAt: integer("finished_at"),
+  attempt: integer("attempt").notNull(),
+  ownerId: text("owner_id"),
+  leaseExpiresAt: integer("lease_expires_at"),
+  lastProgressAt: integer("last_progress_at"),
+  checkpointJson: text("checkpoint_json"),
+  progressJson: text("progress_json"),
+  errorJson: text("error_json"),
 });
 
 export const syncRunErrors = sqliteTable("sync_run_errors", {
