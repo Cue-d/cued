@@ -980,6 +980,7 @@ function ensureMessageStub(
 
 function clearProjectedState(conn: LocalDbExecutor): void {
   conn.run(sql.raw("DELETE FROM messages_fts"));
+  conn.run(sql.raw("DELETE FROM message_fts_index_queue"));
   conn.delete(timelineEvents).run();
   conn.delete(messageAttachments).run();
   conn.delete(messageReactions).run();
@@ -2143,40 +2144,6 @@ function refreshReplyLinksForIds(conn: LocalDbExecutor, messageIds: Set<string>)
   }
 }
 
-function replaceMessageSearchIndexForIds(conn: LocalDbExecutor, messageIds: Set<string>): void {
-  for (const chunk of chunkArray([...messageIds], SQL_CHUNK_SIZE)) {
-    conn.run(sql`
-      DELETE FROM messages_fts
-      WHERE rowid IN (
-        SELECT rowid
-        FROM messages
-        WHERE id IN (${sqlValueList(chunk)})
-      )
-    `);
-    conn.run(sql`
-      INSERT INTO messages_fts (
-        rowid,
-        message_id,
-        sender_name,
-        conversation_name,
-        participant_names,
-        attachment_text,
-        content
-      )
-      SELECT
-        message_rowid,
-        message_id,
-        sender_name,
-        conversation_name,
-        participant_names,
-        attachment_text,
-        content
-      FROM message_fts_source
-      WHERE message_id IN (${sqlValueList(chunk)})
-    `);
-  }
-}
-
 function finalizeDeferredProjection(
   conn: LocalDbExecutor,
   cache: ProjectionCache,
@@ -2212,7 +2179,6 @@ function finalizeDeferredProjection(
     if (changes.touchedReactions) {
       refreshReactionCountsForIds(conn, changes.dirtyMessageIds);
     }
-    replaceMessageSearchIndexForIds(conn, changes.dirtyMessageIds);
   }
 
   if (changes.dirtyReplyMessageIds.size > 0) {
@@ -2254,10 +2220,10 @@ function projectEventBatch(
   },
 ): void {
   const cache = input.mode === "rebuild" ? resetProjectionCache(db) : getProjectionCache(db);
+  const changes = createProjectionChangeSet();
 
   db.orm().transaction((tx) => {
     const projectedAt = Date.now();
-    const changes = createProjectionChangeSet();
     if (input.mode === "rebuild") {
       clearProjectedState(tx);
     }
@@ -2329,6 +2295,7 @@ function projectEventBatch(
       });
     }
   });
+  db.enqueueMessageFtsIndex(changes.dirtyMessageIds, `projection:${input.mode}`);
 }
 
 function projectRangeInternal(

@@ -91,6 +91,10 @@ export type CanonicalProjectionSnapshot = {
 };
 
 export function readCanonicalProjectionSnapshot(db: CuedDatabase): CanonicalProjectionSnapshot {
+  while (db.drainMessageFtsIndexQueue(1_000).claimed > 0) {
+    // Keep replay snapshots canonical even though FTS indexing is deferred.
+  }
+
   const contacts = db.orm().all<{
     id: string;
     name: string | null;

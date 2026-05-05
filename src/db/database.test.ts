@@ -1699,6 +1699,11 @@ describe("CuedDatabase", () => {
         .prepare("SELECT 1 FROM schema_migrations WHERE id = ?")
         .get("0010_add_timeline_call_fields"),
     ).toBeTruthy();
+    expect(
+      sql
+        .prepare("SELECT 1 FROM schema_migrations WHERE id = ?")
+        .get("0016_drop_synchronous_message_fts_triggers"),
+    ).toBeTruthy();
     const indexNames = (
       sql.prepare("SELECT name FROM sqlite_master WHERE type = 'index'").all() as Array<{
         name: string;
@@ -1739,7 +1744,7 @@ describe("CuedDatabase", () => {
         "messages_fts",
       ]),
     );
-    expect(triggerSql?.sql).toContain("rowid = NEW.rowid");
+    expect(triggerSql).toBeUndefined();
 
     db.close();
   });

@@ -819,6 +819,22 @@ function rebuildMessagesFtsArtifacts(db: MigrationDatabase): void {
   }
 }
 
+function dropSynchronousMessageFtsTriggers(db: MigrationDatabase): void {
+  db.exec(`
+    DROP TRIGGER IF EXISTS trg_messages_inserted_fts;
+    DROP TRIGGER IF EXISTS trg_messages_updated_fts;
+    DROP TRIGGER IF EXISTS trg_messages_deleted_fts;
+    DROP TRIGGER IF EXISTS trg_message_attachments_inserted;
+    DROP TRIGGER IF EXISTS trg_message_attachments_updated;
+    DROP TRIGGER IF EXISTS trg_message_attachments_deleted;
+    DROP TRIGGER IF EXISTS trg_contacts_name_updated;
+    DROP TRIGGER IF EXISTS trg_conversations_name_updated;
+    DROP TRIGGER IF EXISTS trg_conversation_participants_inserted;
+    DROP TRIGGER IF EXISTS trg_conversation_participants_updated;
+    DROP TRIGGER IF EXISTS trg_conversation_participants_deleted;
+  `);
+}
+
 export const MIGRATIONS: Migration[] = [
   {
     id: "0000_prepare_schema_migrations_and_legacy_sync_runs",
@@ -2067,6 +2083,12 @@ export const MIGRATIONS: Migration[] = [
         CREATE INDEX IF NOT EXISTS idx_message_fts_index_queue_status
         ON message_fts_index_queue(status, queued_at);
       `);
+    },
+  },
+  {
+    id: "0016_drop_synchronous_message_fts_triggers",
+    apply: (db) => {
+      dropSynchronousMessageFtsTriggers(db);
     },
   },
 ];

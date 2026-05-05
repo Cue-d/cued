@@ -32,6 +32,12 @@ describe("projector", () => {
     return db;
   }
 
+  function drainSearchIndex(db: CuedDatabase): void {
+    while (db.drainMessageFtsIndexQueue(1_000).claimed > 0) {
+      // Drain all queued batches for assertions that inspect messages_fts.
+    }
+  }
+
   it("uses indexes for contact fanout refresh predicates", () => {
     const db = createDb();
 
@@ -259,6 +265,7 @@ describe("projector", () => {
       appliedRawEvents: 4,
       projectionWatermark: 4,
     });
+    drainSearchIndex(db);
 
     const ftsRows = db
       .orm()
@@ -839,6 +846,7 @@ describe("projector", () => {
     });
 
     projectPendingRawEvents(db);
+    drainSearchIndex(db);
 
     const row = db.orm().get<{
       message_rowid: number;
@@ -1547,6 +1555,7 @@ describe("projector", () => {
       sender_name: "Ava Chen",
       sender_contact_id: expect.any(String),
     });
+    drainSearchIndex(db);
 
     const hotFtsRows = db
       .orm()
@@ -1557,6 +1566,7 @@ describe("projector", () => {
       startRowId: insertResult.firstInsertedRowId!,
       endRowId: insertResult.lastInsertedRowId!,
     });
+    drainSearchIndex(db);
 
     const coldConversation = db.orm().get<{
       name: string | null;
@@ -2158,6 +2168,7 @@ describe("projector", () => {
       sender_name: "Ava Zhang",
       conversation_name: "Investor thread",
     });
+    drainSearchIndex(db);
 
     const ftsRow = db.orm().get<{
       sender_name: string;
