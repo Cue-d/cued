@@ -3,6 +3,40 @@ import XCTest
 @testable import CuedNativeUI
 
 final class OnboardingUITests: XCTestCase {
+  private func capability(_ availability: String = "available") -> InstallerCapabilityStatus {
+    InstallerCapabilityStatus(availability: availability, onboardingVisible: true, reason: nil)
+  }
+
+  private func integration(
+    platform: String,
+    authState: String,
+    enabled: Bool = true
+  ) -> InstallerIntegrationStatus {
+    InstallerIntegrationStatus(
+      platform: platform,
+      accountKey: platform == "slack" ? "workspace-a" : "local",
+      displayName: platform == "contacts" ? "Contacts.app" : nil,
+      authState: authState,
+      enabled: enabled,
+      capability: capability()
+    )
+  }
+
+  private func configuration(
+    platform: String,
+    authState: String,
+    supportsMultipleAccounts: Bool = false
+  ) -> InstallerPlatformConfiguration {
+    InstallerPlatformConfiguration(
+      platform: platform,
+      title: platform,
+      capability: capability(),
+      accounts: [integration(platform: platform, authState: authState)],
+      placeholder: nil,
+      supportsMultipleAccounts: supportsMultipleAccounts
+    )
+  }
+
   func testPermissionKeyMappingMatchesExpectedFlags() {
     XCTAssertEqual(onboardingPermissionKeys(for: ["--contacts"]), ["contacts"])
     XCTAssertEqual(onboardingPermissionKeys(for: ["--full-disk-access"]), ["full_disk_access"])
@@ -113,6 +147,49 @@ final class OnboardingUITests: XCTestCase {
       onboardingPermissionGuideFrameIsApproximatelyEqual(
         CGRect(x: 120, y: 80, width: 420, height: 126),
         CGRect(x: 120, y: 80, width: 470, height: 126)
+      )
+    )
+  }
+
+  func testCompletedLocalSourcesDoNotShowAccountRows() {
+    XCTAssertFalse(
+      installerShouldShowAccountRows(
+        for: configuration(platform: "contacts", authState: "authorized")
+      )
+    )
+    XCTAssertFalse(
+      installerShouldShowAccountRows(
+        for: configuration(platform: "imessage", authState: "authorized")
+      )
+    )
+  }
+
+  func testLocalSourceProblemsStillShowAccountRows() {
+    XCTAssertTrue(
+      installerShouldShowAccountRows(
+        for: configuration(platform: "imessage", authState: "blocked")
+      )
+    )
+    XCTAssertTrue(
+      installerShouldShowAccountRows(
+        for: configuration(platform: "contacts", authState: "check_failed")
+      )
+    )
+  }
+
+  func testRequestableConnectedSourcesStillShowAccountRows() {
+    XCTAssertTrue(
+      installerShouldShowAccountRows(
+        for: configuration(platform: "linkedin", authState: "authenticated")
+      )
+    )
+    XCTAssertTrue(
+      installerShouldShowAccountRows(
+        for: configuration(
+          platform: "slack",
+          authState: "authenticated",
+          supportsMultipleAccounts: true
+        )
       )
     )
   }

@@ -824,8 +824,7 @@ public struct CuedOnboardingView: View {
 
   private func platformConfigurationCard(_ configuration: InstallerPlatformConfiguration) -> some View {
     let isFullyConnected = platformIsFullyConnected(configuration)
-    let shouldShowAccountControls =
-      configuration.supportsMultipleAccounts || configuration.isRequestable || !isFullyConnected
+    let shouldShowAccountControls = shouldShowAccountRows(for: configuration)
     let shouldDimCard = isFullyConnected && !shouldShowAccountControls
 
     return VStack(alignment: .leading, spacing: 14) {
@@ -849,6 +848,12 @@ public struct CuedOnboardingView: View {
             .font(.title3.weight(.semibold))
             .foregroundStyle(.green)
             .accessibilityLabel("\(configuration.title) connected")
+        } else if !shouldShowAccountControls && platformIsPending(configuration) {
+          ProgressView()
+            .controlSize(.small)
+            .padding(.top, 10)
+        } else if !shouldShowAccountControls, let action = platformLevelAction(for: configuration) {
+          actionButton(title: action.title, action: action.handler)
         }
       }
 
@@ -862,6 +867,20 @@ public struct CuedOnboardingView: View {
     }
     .padding(.vertical, 2)
     .opacity(shouldDimCard ? 0.7 : 1.0)
+  }
+
+  private func shouldShowAccountRows(for configuration: InstallerPlatformConfiguration) -> Bool {
+    installerShouldShowAccountRows(for: configuration)
+  }
+
+  private func platformIsPending(_ configuration: InstallerPlatformConfiguration) -> Bool {
+    if pendingPlatformConnectPlatforms.contains(configuration.platform) {
+      return true
+    }
+
+    return configuration.knownAccounts.contains { integration in
+      pendingIntegrationActionIDs.contains(integration.id)
+    }
   }
 
   private func singleAccountPlatformRow(
@@ -1595,6 +1614,25 @@ private func installerShowsCompletionCheckmark(
     return configuration.capability.availability == "available"
   }
   return integration.enabled && installerIsConnectedIntegrationState(integration.authState)
+}
+
+func installerShouldShowAccountRows(for configuration: InstallerPlatformConfiguration) -> Bool {
+  if configuration.supportsMultipleAccounts {
+    return !configuration.accounts.isEmpty
+  }
+
+  guard let integration = configuration.accounts.first else {
+    return false
+  }
+
+  if installerIsConnectedIntegrationState(integration.authState) {
+    return configuration.isRequestable
+  }
+
+  return integration.authState == "requested"
+    || integration.authState == "in_progress"
+    || integration.authState == "blocked"
+    || integration.authState == "check_failed"
 }
 
 private func installerFallbackAuthState(for platform: String) -> String {
