@@ -446,6 +446,7 @@ public struct CuedOnboardingView: View {
     }
     .onChange(of: viewModel.refreshSequence) { _ in
       pendingGlobalSkillInstall = false
+      prunePendingIntegrationActions()
       if onboardingShouldDismissPermissionGuide(
         activePermissionKey: activePermissionGuideKey,
         permissions: viewModel.permissionStatuses
@@ -488,6 +489,19 @@ public struct CuedOnboardingView: View {
         secondaryButton: .cancel()
       )
     }
+  }
+
+  private func prunePendingIntegrationActions() {
+    let activePendingIDs = Set(
+      viewModel.platformConfigurations.flatMap { configuration in
+        configuration.knownAccounts.compactMap { integration in
+          integration.authState == "requested" || integration.authState == "in_progress"
+            ? integration.id
+            : nil
+        }
+      }
+    )
+    pendingIntegrationActionIDs.formIntersection(activePendingIDs)
   }
 
   private var platformRefreshSignature: [String] {

@@ -33,6 +33,7 @@ import {
   isPlatform,
   type Platform,
   type ProviderRawEventInput,
+  parsePlatform,
   type RawEventAcquisitionMode,
 } from "../../core/types/provider.js";
 import { safeParseJsonRecord, safeParseJsonStringArray } from "../../db/codecs.js";
@@ -4306,6 +4307,31 @@ function handleSocket(
   });
 }
 
+function stopActiveAuthSessionsForIntegration(
+  activeAuthSessions: Map<string, { child: ChildProcess; platform: Platform; accountKey: string }>,
+  platform: Platform,
+  accountKey: string | undefined,
+): void {
+  for (const [sessionId, session] of activeAuthSessions) {
+    if (session.platform !== platform) {
+      continue;
+    }
+    if (accountKey != null && session.accountKey !== accountKey) {
+      continue;
+    }
+    try {
+      session.child.kill("SIGTERM");
+    } catch (error) {
+      daemonLogger.warn("failed to stop auth session during integration removal", {
+        platform,
+        accountKey: session.accountKey,
+        error,
+      });
+    }
+    activeAuthSessions.delete(sessionId);
+  }
+}
+
 async function dispatchRequest(
   db: ReturnType<typeof openCuedDatabase>,
   request: DaemonRequest,
@@ -4600,7 +4626,20 @@ async function dispatchRequest(
       }
       case "integrations-remove": {
         const integrationAuthService = await getIntegrationAuthService();
+        const parsedPlatform = parsePlatform(request.platform);
+        if (parsedPlatform && request.accountKey != null) {
+          stopActiveAuthSessionsForIntegration(
+            activeAuthSessions,
+            parsedPlatform,
+            request.accountKey,
+          );
+        }
         const result = integrationAuthService.remove(request.platform, request.accountKey);
+        stopActiveAuthSessionsForIntegration(
+          activeAuthSessions,
+          result.platform,
+          result.accountKey,
+        );
         requestRealtimeReconcile();
         reconcileLocalWatchers();
         return {
