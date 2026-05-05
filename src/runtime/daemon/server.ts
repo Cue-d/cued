@@ -2562,6 +2562,7 @@ export async function runDaemon(): Promise<void> {
         break;
       }
 
+      requestMenuBarStatusWrite("ingest_started");
       const promise = processIngestRun(currentRun).finally(() => {
         activeIngestRuns.delete(currentRun.id);
         scheduleIngestDrain();
@@ -2788,6 +2789,7 @@ export async function runDaemon(): Promise<void> {
     }
 
     isProcessingProjection = true;
+    requestMenuBarStatusWrite("projection_started");
     void processProjectionRun(currentRun);
   };
 
