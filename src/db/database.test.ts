@@ -225,6 +225,57 @@ describe("CuedDatabase", () => {
     db.close();
   });
 
+  it("drains queued message FTS indexing work in bounded batches", () => {
+    const db = createDb();
+    const timestamp = Date.now();
+    sqlite(db)
+      .prepare(
+        `
+        INSERT INTO conversations (
+          id, platform, account_key, source_conversation_key, native_conversation_key, type,
+          is_active, removal_reason, service, name, topic, participant_names, last_message_id,
+          last_message_at, last_message_preview, unread_count, created_at, updated_at
+        ) VALUES (
+          'conversation-a', 'slack', 'team-a', 'channel-a', NULL, 'group',
+          1, NULL, NULL, 'Launch', NULL, 'Theo | Soham', NULL,
+          NULL, NULL, 0, ?, ?
+        )
+      `,
+      )
+      .run(timestamp, timestamp);
+    sqlite(db)
+      .prepare(
+        `
+        INSERT INTO messages (
+          id, platform, account_key, platform_message_id, conversation_id,
+          sender_contact_id, sender_source_key, sender_name, conversation_name, sent_at,
+          service, status, is_from_me, content, delivered_at, read_at, edited_at,
+          deleted_at, reply_to_message_id, is_deleted, is_edited, attachment_count,
+          reaction_count, created_at, updated_at
+        ) VALUES (
+          'message-a', 'slack', 'team-a', 'ts-a', 'conversation-a',
+          NULL, NULL, 'Soham', 'Launch', ?, NULL, NULL, 0,
+          'queued index content', NULL, NULL, NULL, NULL, NULL, 0, 0, 0, 0, ?, ?
+        )
+      `,
+      )
+      .run(timestamp, timestamp, timestamp);
+    sqlite(db).prepare("DELETE FROM messages_fts").run();
+
+    expect(db.enqueueMessageFtsIndex(["message-a"], "projection")).toBe(1);
+    expect(db.drainMessageFtsIndexQueue(1)).toEqual({ claimed: 1, indexed: 1, failed: 0 });
+    expect(
+      sqlite(db)
+        .prepare("SELECT message_id, content FROM messages_fts WHERE messages_fts MATCH ?")
+        .all("queued"),
+    ).toEqual([{ message_id: "message-a", content: "queued index content" }]);
+    expect(
+      sqlite(db).prepare("SELECT COUNT(*) AS count FROM message_fts_index_queue").get(),
+    ).toEqual({ count: 0 });
+
+    db.close();
+  });
+
   it("executes read-only SQL for ad hoc inspection", () => {
     const db = createDb();
 

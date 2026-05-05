@@ -537,6 +537,13 @@ function chunkArray<T>(items: readonly T[], size: number): T[][] {
   return chunks;
 }
 
+function sqlValueList(values: readonly (string | number)[]) {
+  return sql.join(
+    values.map((value) => sql`${value}`),
+    sql`, `,
+  );
+}
+
 function buildRawEventValues(event: RawEventInput) {
   const provenance = normalizeRawEventProvenance(event.provenance);
   const normalizedSchema = resolveRawEventNormalizedSchema(event);
@@ -3597,6 +3604,68 @@ export class CuedDatabase {
       })
       .where(inArray(messageFtsIndexQueue.messageId, ids))
       .run().changes;
+  }
+
+  replaceMessageFtsIndexForIds(messageIds: Iterable<string>): number {
+    const ids = [...new Set([...messageIds].filter((id) => id.length > 0))];
+    if (ids.length === 0) {
+      return 0;
+    }
+    let indexed = 0;
+    this.db.transaction((tx) => {
+      for (const chunk of chunkArray(ids, WRITE_BATCH_SIZE)) {
+        tx.run(sql`
+          DELETE FROM messages_fts
+          WHERE rowid IN (
+            SELECT rowid
+            FROM messages
+            WHERE id IN (${sqlValueList(chunk)})
+          )
+        `);
+        indexed += tx.run(sql`
+          INSERT INTO messages_fts (
+            rowid,
+            message_id,
+            sender_name,
+            conversation_name,
+            participant_names,
+            attachment_text,
+            content
+          )
+          SELECT
+            message_rowid,
+            message_id,
+            sender_name,
+            conversation_name,
+            participant_names,
+            attachment_text,
+            content
+          FROM message_fts_source
+          WHERE message_id IN (${sqlValueList(chunk)})
+        `).changes;
+      }
+    });
+    return indexed;
+  }
+
+  drainMessageFtsIndexQueue(limit: number): {
+    claimed: number;
+    indexed: number;
+    failed: number;
+  } {
+    const rows = this.claimMessageFtsIndexBatch(limit);
+    if (rows.length === 0) {
+      return { claimed: 0, indexed: 0, failed: 0 };
+    }
+    const messageIds = rows.map((row) => row.message_id);
+    try {
+      const indexed = this.replaceMessageFtsIndexForIds(messageIds);
+      this.completeMessageFtsIndex(messageIds);
+      return { claimed: rows.length, indexed, failed: 0 };
+    } catch (error) {
+      this.failMessageFtsIndex(messageIds, error);
+      return { claimed: rows.length, indexed: 0, failed: rows.length };
+    }
   }
 
   hasQueuedOrRunningRun(platform: Platform, accountKey?: string | null): boolean {

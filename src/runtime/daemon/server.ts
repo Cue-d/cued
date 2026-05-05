@@ -157,6 +157,7 @@ const DEFAULT_DISCORD_DM_POLL_MS = 45_000;
 const DEFAULT_SLACK_REALTIME_ENABLED = false;
 const DEFAULT_INGEST_CONCURRENCY = 4;
 const DEFAULT_PROJECTION_BATCH_SIZE = 100;
+const DEFAULT_MESSAGE_FTS_INDEX_BATCH_SIZE = 250;
 const DEFAULT_REALTIME_PROJECTION_ENABLED = true;
 const DEFAULT_INLINE_PROJECTION_MAX_RAW_EVENTS = 250;
 const DEFAULT_DEFERRED_PROJECTION_COALESCE_MS = 250;
@@ -300,6 +301,7 @@ type QueueSchedulers = {
   wakeIngest: (delayMs?: number) => void;
   wakeOutbound: () => void;
   wakeProjection: (delayMs?: number) => void;
+  wakeSearchIndex: (delayMs?: number) => void;
 };
 
 type IngestTiming = {
@@ -512,6 +514,15 @@ function getProjectionBatchSize(): number {
     process.env.CUED_PROJECTION_BATCH_SIZE ?? DEFAULT_PROJECTION_BATCH_SIZE,
   );
   return Number.isFinite(configured) && configured > 0 ? configured : DEFAULT_PROJECTION_BATCH_SIZE;
+}
+
+function getMessageFtsIndexBatchSize(): number {
+  const configured = Number(
+    process.env.CUED_MESSAGE_FTS_INDEX_BATCH_SIZE ?? DEFAULT_MESSAGE_FTS_INDEX_BATCH_SIZE,
+  );
+  return Number.isFinite(configured) && configured > 0
+    ? configured
+    : DEFAULT_MESSAGE_FTS_INDEX_BATCH_SIZE;
 }
 
 function getRealtimeProjectionEnabled(): boolean {
@@ -1597,6 +1608,7 @@ export async function runDaemon(): Promise<void> {
   const startedAt = now();
   const ingestConcurrency = getIngestConcurrency();
   const projectionBatchSize = getProjectionBatchSize();
+  const messageFtsIndexBatchSize = getMessageFtsIndexBatchSize();
   const realtimeProjectionEnabled = getRealtimeProjectionEnabled();
   const realtimeProjectionBatchSize = getRealtimeProjectionBatchSize();
   const deferredProjectionCoalesceMs = getDeferredProjectionCoalesceMs();
@@ -1615,14 +1627,18 @@ export async function runDaemon(): Promise<void> {
   const activeIngestRuns = new Map<string, Promise<void>>();
   let activeOutboundSend: Promise<void> | null = null;
   let isProcessingProjection = false;
+  let isProcessingSearchIndex = false;
   let authProjectionPausedUntil = 0;
   let ingestDrainScheduled = false;
   let outboundDrainScheduled = false;
   let projectionDrainScheduled = false;
+  let searchIndexDrainScheduled = false;
   let ingestDrainTimer: NodeJS.Timeout | null = null;
   let projectionDrainTimer: NodeJS.Timeout | null = null;
+  let searchIndexDrainTimer: NodeJS.Timeout | null = null;
   let ingestDrainDueAt: number | null = null;
   let projectionDrainDueAt: number | null = null;
+  let searchIndexDrainDueAt: number | null = null;
   const lastAutoSyncQueuedAt = new Map<string, number>();
   const lastSignalReconnectSyncQueuedAt = new Map<string, number>();
   const lastContinuationProjectionQueuedAt = new Map<string, number>();
@@ -2818,10 +2834,73 @@ export async function runDaemon(): Promise<void> {
     }, normalizedDelayMs);
   };
 
+  const drainSearchIndexQueue = () => {
+    searchIndexDrainScheduled = false;
+    searchIndexDrainDueAt = null;
+    if (isUpdateShutdownRequested) {
+      return;
+    }
+    if (isProcessingSearchIndex) {
+      return;
+    }
+    if (bootstrap.state !== "ready") {
+      scheduleSearchIndexDrain(QUEUE_DRAIN_RETRY_DELAY_MS);
+      return;
+    }
+    isProcessingSearchIndex = true;
+    try {
+      const result = db.withBusyTimeoutSync(DAEMON_STATUS_BUSY_TIMEOUT_MS, () =>
+        db.drainMessageFtsIndexQueue(messageFtsIndexBatchSize),
+      );
+      if (result.claimed > 0) {
+        daemonLogger.info("message FTS index batch completed", result);
+        requestMenuBarStatusWrite("message_fts_index_completed");
+        scheduleSearchIndexDrain();
+      }
+    } catch (error) {
+      if (!isSqliteBusyError(error)) {
+        daemonLogger.error("message FTS index batch failed", {
+          error: error instanceof Error ? error.message : String(error),
+        });
+      } else {
+        daemonLogger.warn("message FTS index drain skipped because SQLite is busy");
+      }
+      scheduleSearchIndexDrain(QUEUE_DRAIN_RETRY_DELAY_MS);
+    } finally {
+      isProcessingSearchIndex = false;
+    }
+  };
+
+  const scheduleSearchIndexDrain = (delayMs = 0) => {
+    const normalizedDelayMs = Math.max(0, delayMs);
+    const dueAt = now() + normalizedDelayMs;
+    if (searchIndexDrainScheduled) {
+      if (searchIndexDrainDueAt != null && searchIndexDrainDueAt <= dueAt) {
+        return;
+      }
+      if (searchIndexDrainTimer) {
+        clearTimeout(searchIndexDrainTimer);
+        searchIndexDrainTimer = null;
+      }
+    }
+    searchIndexDrainScheduled = true;
+    searchIndexDrainDueAt = dueAt;
+    if (normalizedDelayMs <= 0) {
+      setImmediate(drainSearchIndexQueue);
+      return;
+    }
+
+    searchIndexDrainTimer = setTimeout(() => {
+      searchIndexDrainTimer = null;
+      drainSearchIndexQueue();
+    }, normalizedDelayMs);
+  };
+
   const schedulers = {
     wakeIngest: scheduleIngestDrain,
     wakeOutbound: scheduleOutboundDrain,
     wakeProjection: scheduleProjectionDrain,
+    wakeSearchIndex: scheduleSearchIndexDrain,
   };
   const queueDebouncedNativeSync = createDebouncedSyncEnqueuer(db, schedulers.wakeIngest);
   const discordRealtime = new DiscordRealtimeSupervisor({
@@ -3967,6 +4046,7 @@ export async function runDaemon(): Promise<void> {
         totalMs: timings.totalMs,
       });
       requestMenuBarStatusWrite("projection_completed");
+      scheduleSearchIndexDrain();
     } catch (error) {
       daemonLogger.error("projection run failed", {
         runId: currentRun.id,
@@ -4043,6 +4123,7 @@ export async function runDaemon(): Promise<void> {
   });
   scheduleIngestDrain();
   scheduleProjectionDrain();
+  scheduleSearchIndexDrain();
   setImmediate(() => {
     void runBootstrap();
   });
@@ -4064,6 +4145,10 @@ export async function runDaemon(): Promise<void> {
     if (projectionDrainTimer) {
       clearTimeout(projectionDrainTimer);
       projectionDrainTimer = null;
+    }
+    if (searchIndexDrainTimer) {
+      clearTimeout(searchIndexDrainTimer);
+      searchIndexDrainTimer = null;
     }
     if (ingestDrainTimer) {
       clearTimeout(ingestDrainTimer);
