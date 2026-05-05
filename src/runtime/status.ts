@@ -80,12 +80,21 @@ export function buildDaemonStatusSnapshot(
     bootstrap: DaemonBootstrapSnapshot;
   },
 ) {
+  const overview = db.getOverview();
+  const projection = db.getProjectionBacklog();
   return {
     app: options.app,
     bootstrap: options.bootstrap,
     daemon: db.getDaemonState(),
-    overview: db.getOverview(),
-    projection: db.getProjectionBacklog(),
+    overview,
+    projection,
+    dataStatus: {
+      capturedRawEvents: overview.rawEvents,
+      projectedMessages: overview.messages,
+      pendingProjectionEvents: projection.pending_raw_events,
+      projectionWatermark: projection.projection_watermark,
+      maxRawEventRowid: projection.max_raw_event_rowid,
+    },
     checkpoints: db.listCheckpointSummary(),
     recentRuns: db.listRecentRuns(),
     discordRealtimeSessions: options.discordRealtime.getStatuses(),
@@ -116,12 +125,21 @@ export function buildMenuBarDaemonStatusSnapshot(
     bootstrap: DaemonBootstrapSnapshot;
   },
 ) {
+  const overview = db.getMenuBarOverview();
+  const projection = db.getProjectionBacklog({ initializeProjectionState: false });
   return {
     app: options.app,
     bootstrap: options.bootstrap,
     daemon: db.getDaemonState(),
-    overview: db.getMenuBarOverview(),
-    projection: db.getProjectionBacklog({ initializeProjectionState: false }),
+    overview,
+    projection,
+    dataStatus: {
+      capturedRawEvents: overview.rawEvents,
+      projectedMessages: overview.messages,
+      pendingProjectionEvents: projection.pending_raw_events,
+      projectionWatermark: projection.projection_watermark,
+      maxRawEventRowid: projection.max_raw_event_rowid,
+    },
     integrations: listMenuBarIntegrationStates(db),
     discordRealtimeSessions: options.discordRealtime.getStatuses(),
     slackRealtimeSessions: options.slackRealtime.getStatuses(),

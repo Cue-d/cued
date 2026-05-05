@@ -453,6 +453,9 @@ struct AppStatusSnapshot {
   let conversations: Int
   let messages: Int
   let rawEvents: Int
+  let capturedRawEvents: Int
+  let projectedMessages: Int
+  let pendingProjectionEvents: Int
   let messageBreakdown: [AppPlatformMessageCount]
   let integrations: [AppIntegrationStatus]
   let onboardingCompletedVersion: String?
@@ -480,6 +483,9 @@ final class AppStatusStore: @unchecked Sendable {
         conversations: 0,
         messages: 0,
         rawEvents: 0,
+        capturedRawEvents: 0,
+        projectedMessages: 0,
+        pendingProjectionEvents: 0,
         messageBreakdown: [],
         integrations: [],
         onboardingCompletedVersion: nil,
@@ -506,6 +512,9 @@ final class AppStatusStore: @unchecked Sendable {
         conversations: 0,
         messages: 0,
         rawEvents: 0,
+        capturedRawEvents: 0,
+        projectedMessages: 0,
+        pendingProjectionEvents: 0,
         messageBreakdown: [],
         integrations: [],
         onboardingCompletedVersion: nil,
@@ -540,6 +549,9 @@ final class AppStatusStore: @unchecked Sendable {
       conversations: counts[1],
       messages: counts[2],
       rawEvents: counts[3],
+      capturedRawEvents: counts[3],
+      projectedMessages: counts[2],
+      pendingProjectionEvents: 0,
       messageBreakdown: messageBreakdown,
       integrations: integrations,
       onboardingCompletedVersion: queryAppSetting(db: db, key: "onboarding_completed_version"),
@@ -569,6 +581,7 @@ final class AppStatusStore: @unchecked Sendable {
     daemonLockState: (running: Bool, pid: Int?, updatedAt: Int?)
   ) -> AppStatusSnapshot {
     let overview = payload["overview"] as? [String: Any] ?? [:]
+    let dataStatus = payload["dataStatus"] as? [String: Any] ?? [:]
     let integrations = parseIntegrations(payload["integrations"])
     let app = payload["app"] as? [String: Any] ?? [:]
     let install = app["install"] as? [String: Any] ?? [:]
@@ -596,6 +609,9 @@ final class AppStatusStore: @unchecked Sendable {
       conversations: intValue(overview["conversations"]) ?? 0,
       messages: intValue(overview["messages"]) ?? 0,
       rawEvents: intValue(overview["rawEvents"]) ?? 0,
+      capturedRawEvents: intValue(dataStatus["capturedRawEvents"]) ?? intValue(overview["rawEvents"]) ?? 0,
+      projectedMessages: intValue(dataStatus["projectedMessages"]) ?? intValue(overview["messages"]) ?? 0,
+      pendingProjectionEvents: intValue(dataStatus["pendingProjectionEvents"]) ?? 0,
       messageBreakdown: parseMessageBreakdown(overview["messageBreakdown"]),
       integrations: mergeLiveLocalIntegrations(integrations),
       onboardingCompletedVersion: stringValue(install["onboardingCompletedVersion"]),
@@ -1685,7 +1701,9 @@ final class MenuBarAppController: NSObject, NSApplicationDelegate {
     ).isEnabled = false
 
     menu.addItem(
-      withTitle: "\(snapshot.contacts) contacts • \(snapshot.messages) messages",
+      withTitle: snapshot.pendingProjectionEvents > 0
+        ? "\(snapshot.contacts) contacts • \(snapshot.projectedMessages) messages projected • \(snapshot.capturedRawEvents) events captured"
+        : "\(snapshot.contacts) contacts • \(snapshot.projectedMessages) messages",
       action: nil,
       keyEquivalent: ""
     ).isEnabled = false
