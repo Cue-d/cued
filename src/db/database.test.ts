@@ -213,9 +213,21 @@ describe("CuedDatabase", () => {
     const claimed = db.claimMessageFtsIndexBatch(10);
     expect(claimed.map((row) => row.message_id).sort()).toEqual(["message-a", "message-b"]);
     expect(claimed.every((row) => row.status === "indexing" && row.attempt === 1)).toBe(true);
+    expect(db.getMessageFtsIndexBacklog()).toEqual({
+      queued: 0,
+      indexing: 2,
+      failed: 0,
+      pending: 2,
+    });
 
     expect(db.completeMessageFtsIndex(["message-a"])).toBe(1);
     expect(db.failMessageFtsIndex(["message-b"], new Error("fts busy"))).toBe(1);
+    expect(db.getMessageFtsIndexBacklog()).toEqual({
+      queued: 0,
+      indexing: 0,
+      failed: 1,
+      pending: 0,
+    });
     expect(
       sqlite(db)
         .prepare("SELECT message_id, status, last_error FROM message_fts_index_queue")

@@ -82,6 +82,7 @@ export function buildDaemonStatusSnapshot(
 ) {
   const overview = db.getOverview();
   const projection = db.getProjectionBacklog();
+  const searchIndex = db.getMessageFtsIndexBacklog();
   return {
     app: options.app,
     bootstrap: options.bootstrap,
@@ -92,6 +93,8 @@ export function buildDaemonStatusSnapshot(
       capturedRawEvents: overview.rawEvents,
       projectedMessages: overview.messages,
       pendingProjectionEvents: projection.pending_raw_events,
+      pendingSearchIndexMessages: searchIndex.pending,
+      failedSearchIndexMessages: searchIndex.failed,
       projectionWatermark: projection.projection_watermark,
       maxRawEventRowid: projection.max_raw_event_rowid,
     },
@@ -127,6 +130,7 @@ export function buildMenuBarDaemonStatusSnapshot(
 ) {
   const overview = db.getMenuBarOverview();
   const projection = db.getProjectionBacklog({ initializeProjectionState: false });
+  const searchIndex = db.getMessageFtsIndexBacklog();
   return {
     app: options.app,
     bootstrap: options.bootstrap,
@@ -137,6 +141,8 @@ export function buildMenuBarDaemonStatusSnapshot(
       capturedRawEvents: overview.rawEvents,
       projectedMessages: overview.messages,
       pendingProjectionEvents: projection.pending_raw_events,
+      pendingSearchIndexMessages: searchIndex.pending,
+      failedSearchIndexMessages: searchIndex.failed,
       projectionWatermark: projection.projection_watermark,
       maxRawEventRowid: projection.max_raw_event_rowid,
     },

@@ -3668,6 +3668,33 @@ export class CuedDatabase {
     }
   }
 
+  getMessageFtsIndexBacklog(): {
+    queued: number;
+    indexing: number;
+    failed: number;
+    pending: number;
+  } {
+    const rows = this.sqlite
+      .prepare(
+        `
+        SELECT status, COUNT(*) AS count
+        FROM message_fts_index_queue
+        GROUP BY status
+      `,
+      )
+      .all() as Array<{ status: string; count: number }>;
+    const counts = { queued: 0, indexing: 0, failed: 0 };
+    for (const row of rows) {
+      if (row.status === "queued" || row.status === "indexing" || row.status === "failed") {
+        counts[row.status] = Number(row.count ?? 0);
+      }
+    }
+    return {
+      ...counts,
+      pending: counts.queued + counts.indexing,
+    };
+  }
+
   hasQueuedOrRunningRun(platform: Platform, accountKey?: string | null): boolean {
     const accountPredicate = accountKey == null ? sql`1 = 1` : eq(syncRuns.accountKey, accountKey);
     return Boolean(

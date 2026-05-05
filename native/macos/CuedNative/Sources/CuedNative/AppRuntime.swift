@@ -456,6 +456,8 @@ struct AppStatusSnapshot {
   let capturedRawEvents: Int
   let projectedMessages: Int
   let pendingProjectionEvents: Int
+  let pendingSearchIndexMessages: Int
+  let failedSearchIndexMessages: Int
   let messageBreakdown: [AppPlatformMessageCount]
   let integrations: [AppIntegrationStatus]
   let onboardingCompletedVersion: String?
@@ -486,6 +488,8 @@ final class AppStatusStore: @unchecked Sendable {
         capturedRawEvents: 0,
         projectedMessages: 0,
         pendingProjectionEvents: 0,
+        pendingSearchIndexMessages: 0,
+        failedSearchIndexMessages: 0,
         messageBreakdown: [],
         integrations: [],
         onboardingCompletedVersion: nil,
@@ -515,6 +519,8 @@ final class AppStatusStore: @unchecked Sendable {
         capturedRawEvents: 0,
         projectedMessages: 0,
         pendingProjectionEvents: 0,
+        pendingSearchIndexMessages: 0,
+        failedSearchIndexMessages: 0,
         messageBreakdown: [],
         integrations: [],
         onboardingCompletedVersion: nil,
@@ -552,6 +558,8 @@ final class AppStatusStore: @unchecked Sendable {
       capturedRawEvents: counts[3],
       projectedMessages: counts[2],
       pendingProjectionEvents: 0,
+      pendingSearchIndexMessages: 0,
+      failedSearchIndexMessages: 0,
       messageBreakdown: messageBreakdown,
       integrations: integrations,
       onboardingCompletedVersion: queryAppSetting(db: db, key: "onboarding_completed_version"),
@@ -612,6 +620,8 @@ final class AppStatusStore: @unchecked Sendable {
       capturedRawEvents: intValue(dataStatus["capturedRawEvents"]) ?? intValue(overview["rawEvents"]) ?? 0,
       projectedMessages: intValue(dataStatus["projectedMessages"]) ?? intValue(overview["messages"]) ?? 0,
       pendingProjectionEvents: intValue(dataStatus["pendingProjectionEvents"]) ?? 0,
+      pendingSearchIndexMessages: intValue(dataStatus["pendingSearchIndexMessages"]) ?? 0,
+      failedSearchIndexMessages: intValue(dataStatus["failedSearchIndexMessages"]) ?? 0,
       messageBreakdown: parseMessageBreakdown(overview["messageBreakdown"]),
       integrations: mergeLiveLocalIntegrations(integrations),
       onboardingCompletedVersion: stringValue(install["onboardingCompletedVersion"]),
@@ -1703,6 +1713,8 @@ final class MenuBarAppController: NSObject, NSApplicationDelegate {
     menu.addItem(
       withTitle: snapshot.pendingProjectionEvents > 0
         ? "\(snapshot.contacts) contacts • \(snapshot.projectedMessages) messages projected • \(snapshot.capturedRawEvents) events captured"
+        : snapshot.pendingSearchIndexMessages > 0
+          ? "\(snapshot.contacts) contacts • \(snapshot.projectedMessages) messages • indexing search"
         : "\(snapshot.contacts) contacts • \(snapshot.projectedMessages) messages",
       action: nil,
       keyEquivalent: ""
