@@ -160,6 +160,8 @@ const DEFAULT_REALTIME_PROJECTION_ENABLED = true;
 const DEFAULT_INLINE_PROJECTION_MAX_RAW_EVENTS = 250;
 const DEFAULT_DEFERRED_PROJECTION_COALESCE_MS = 250;
 const DEFAULT_PROJECTION_CONTINUE_DELAY_MS = 5_000;
+const PROJECTION_AUTH_RETRY_DELAY_MS = 2_000;
+const PROJECTION_AUTH_GRACE_MS = 30_000;
 const DEFAULT_CONTINUATION_PROJECTION_INTERVAL_MS = 60_000;
 const DEFAULT_CONTINUATION_PROJECTION_BACKLOG_EVENTS = 10_000;
 const NATIVE_WATCH_DEBOUNCE_MS = 1_500;
@@ -1612,6 +1614,7 @@ export async function runDaemon(): Promise<void> {
   const activeIngestRuns = new Map<string, Promise<void>>();
   let activeOutboundSend: Promise<void> | null = null;
   let isProcessingProjection = false;
+  let authProjectionPausedUntil = 0;
   let ingestDrainScheduled = false;
   let outboundDrainScheduled = false;
   let projectionDrainScheduled = false;
@@ -2737,6 +2740,25 @@ export async function runDaemon(): Promise<void> {
     }
     if (activeIngestRuns.size > 0) {
       scheduleProjectionDrain(QUEUE_DRAIN_RETRY_DELAY_MS);
+      return;
+    }
+    let onboardingCompleted = false;
+    try {
+      onboardingCompleted = db.withBusyTimeoutSync(DAEMON_STATUS_BUSY_TIMEOUT_MS, () =>
+        Boolean(db.getAppMetadata().onboardingCompletedVersion),
+      );
+    } catch (error) {
+      if (!isSqliteBusyError(error)) {
+        throw error;
+      }
+      daemonLogger.warn(
+        "projection drain skipped while checking onboarding metadata because SQLite is busy",
+      );
+      scheduleProjectionDrain(QUEUE_DRAIN_RETRY_DELAY_MS);
+      return;
+    }
+    if (activeAuthSessions.size > 0 || now() < authProjectionPausedUntil || !onboardingCompleted) {
+      scheduleProjectionDrain(PROJECTION_AUTH_RETRY_DELAY_MS);
       return;
     }
 
@@ -4002,6 +4024,19 @@ export async function runDaemon(): Promise<void> {
       reconcileLocalWatchers,
       requestUpdateShutdown,
       () => isProcessingProjection || activeIngestRuns.size > 0 || activeOutboundSend !== null,
+      () => {
+        authProjectionPausedUntil = now() + PROJECTION_AUTH_GRACE_MS;
+        schedulers.wakeProjection(PROJECTION_AUTH_RETRY_DELAY_MS);
+      },
+      () => {
+        requestDiscordRealtimeReconcile();
+        requestSlackRealtimeReconcile();
+        requestLinkedInRealtimeReconcile();
+        requestSignalRealtimeReconcile();
+        requestWhatsAppRealtimeReconcile();
+        schedulers.wakeProjection();
+        requestMenuBarStatusWrite("auth_state_changed");
+      },
     );
   });
 
@@ -4209,6 +4244,8 @@ function handleSocket(
   reconcileLocalWatchers: () => void,
   requestUpdateShutdown: () => { shuttingDown: boolean; requestedAt: number | null },
   isBackgroundWorkActive: () => boolean,
+  pauseProjectionForAuth: () => void,
+  onAuthRuntimeStateChanged: () => void,
 ): void {
   let buffer = "";
 
@@ -4251,6 +4288,8 @@ function handleSocket(
           reconcileLocalWatchers,
           requestUpdateShutdown,
           isBackgroundWorkActive,
+          pauseProjectionForAuth,
+          onAuthRuntimeStateChanged,
         )
           .then((response) => writeResponse(socket, response))
           .catch((error) => {
@@ -4282,6 +4321,8 @@ async function dispatchRequest(
   reconcileLocalWatchers: () => void,
   requestUpdateShutdown: () => { shuttingDown: boolean; requestedAt: number | null },
   isBackgroundWorkActive: () => boolean,
+  pauseProjectionForAuth: () => void,
+  onAuthRuntimeStateChanged: () => void,
 ): Promise<DaemonResponse> {
   try {
     const runQueueService = new RunQueueService(db, schedulers);
@@ -4527,13 +4568,14 @@ async function dispatchRequest(
       }
       case "integrations-connect": {
         const integrationAuthService = await getIntegrationAuthService();
+        pauseProjectionForAuth();
         const started = await integrationAuthService.connectManaged(
           request.platform,
           request.accountKey,
           activeAuthSessions,
           {
             wakeIngest: schedulers.wakeIngest,
-            onRuntimeStateChanged: requestRealtimeReconcile,
+            onRuntimeStateChanged: onAuthRuntimeStateChanged,
             emitAuthenticatedHook: async (platform, accountKey) => {
               await emitAuthenticatedHook(db, platform, accountKey);
             },
