@@ -168,6 +168,8 @@ const DEFAULT_SYNC_CONTINUE_DELAY_MS = 15_000;
 const DEFAULT_SIGNAL_RECONNECT_SYNC_COOLDOWN_MS = 5 * 60_000;
 const DAEMON_STATUS_BUSY_TIMEOUT_MS = 100;
 const MENU_BAR_STATUS_WRITE_INTERVAL_MS = 15_000;
+const MENU_BAR_STATUS_EVENT_DEBOUNCE_MS = 500;
+const MENU_BAR_STATUS_EVENT_MIN_INTERVAL_MS = 5_000;
 const DAEMON_STATUS_CACHE_MAX_AGE_MS = 30_000;
 const UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
 const UPDATE_SHUTDOWN_GRACE_MS = 30_000;
@@ -3137,7 +3139,13 @@ export async function runDaemon(): Promise<void> {
     }
   }, SINGLETON_LOCK_HEARTBEAT_MS);
 
-  const writeMenuBarStatus = () => {
+  let menuBarStatusWriteTimer: NodeJS.Timeout | null = null;
+  let lastMenuBarStatusWrittenAt = 0;
+  const writeMenuBarStatus = (reason = "interval") => {
+    if (menuBarStatusWriteTimer) {
+      clearTimeout(menuBarStatusWriteTimer);
+      menuBarStatusWriteTimer = null;
+    }
     try {
       db.withBusyTimeoutSync(DAEMON_STATUS_BUSY_TIMEOUT_MS, () => {
         writeMenuBarStatusSnapshot(db, {
@@ -3149,13 +3157,28 @@ export async function runDaemon(): Promise<void> {
           bootstrap,
         });
       });
+      lastMenuBarStatusWrittenAt = now();
     } catch (error) {
       if (!isSqliteBusyError(error)) {
-        daemonLogger.warn("menu bar status cache write failed", error);
+        daemonLogger.warn("menu bar status cache write failed", { reason, error });
         return;
       }
-      daemonLogger.warn("menu bar status cache write skipped because SQLite is busy");
+      daemonLogger.warn("menu bar status cache write skipped because SQLite is busy", { reason });
     }
+  };
+  const requestMenuBarStatusWrite = (reason: string) => {
+    if (menuBarStatusWriteTimer) {
+      return;
+    }
+    const elapsedMs = Math.max(0, now() - lastMenuBarStatusWrittenAt);
+    const delayMs = Math.max(
+      MENU_BAR_STATUS_EVENT_DEBOUNCE_MS,
+      MENU_BAR_STATUS_EVENT_MIN_INTERVAL_MS - elapsedMs,
+    );
+    menuBarStatusWriteTimer = setTimeout(() => {
+      menuBarStatusWriteTimer = null;
+      writeMenuBarStatus(reason);
+    }, delayMs);
   };
   writeMenuBarStatus();
   const menuBarStatusLoop = setInterval(writeMenuBarStatus, MENU_BAR_STATUS_WRITE_INTERVAL_MS);
@@ -3800,6 +3823,9 @@ export async function runDaemon(): Promise<void> {
         });
         schedulers.wakeIngest(syncContinueDelayMs);
       }
+      if (!bundleHasMore) {
+        requestMenuBarStatusWrite("ingest_completed");
+      }
       await safeEmitHookEvent("sync.completed", {
         runId: currentRun.id,
         platform,
@@ -3924,6 +3950,7 @@ export async function runDaemon(): Promise<void> {
         runType: currentRun.run_type,
         totalMs: timings.totalMs,
       });
+      requestMenuBarStatusWrite("projection_completed");
     } catch (error) {
       daemonLogger.error("projection run failed", {
         runId: currentRun.id,
@@ -4001,6 +4028,10 @@ export async function runDaemon(): Promise<void> {
     clearInterval(menuBarStatusLoop);
     clearInterval(schedulerLoop);
     clearInterval(updateLoop);
+    if (menuBarStatusWriteTimer) {
+      clearTimeout(menuBarStatusWriteTimer);
+      menuBarStatusWriteTimer = null;
+    }
     if (projectionDrainTimer) {
       clearTimeout(projectionDrainTimer);
       projectionDrainTimer = null;
