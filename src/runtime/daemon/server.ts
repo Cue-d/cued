@@ -2747,19 +2747,17 @@ export async function runDaemon(): Promise<void> {
       scheduleProjectionDrain(QUEUE_DRAIN_RETRY_DELAY_MS);
       return;
     }
-    if (activeIngestRuns.size > 0) {
-      scheduleProjectionDrain(QUEUE_DRAIN_RETRY_DELAY_MS);
-      return;
-    }
     if (activeAuthSessions.size > 0 || now() < authProjectionPausedUntil) {
       scheduleProjectionDrain(PROJECTION_AUTH_RETRY_DELAY_MS);
       return;
     }
 
     let currentRun: ReturnType<typeof db.claimNextQueuedRun>;
+    const claimableProjectionRunTypes =
+      activeIngestRuns.size > 0 ? (["project"] as const) : (["project", "rebuild"] as const);
     try {
       currentRun = db.withBusyTimeoutSync(DAEMON_STATUS_BUSY_TIMEOUT_MS, () =>
-        db.claimNextQueuedRun(["project", "rebuild"], "projecting"),
+        db.claimNextQueuedRun([...claimableProjectionRunTypes], "projecting"),
       );
     } catch (error) {
       if (!isSqliteBusyError(error)) {
@@ -2773,7 +2771,7 @@ export async function runDaemon(): Promise<void> {
       let nextScheduledAt: number | null = null;
       try {
         nextScheduledAt = db.withBusyTimeoutSync(DAEMON_STATUS_BUSY_TIMEOUT_MS, () =>
-          db.getNextQueuedRunScheduledAt(["project", "rebuild"]),
+          db.getNextQueuedRunScheduledAt([...claimableProjectionRunTypes]),
         );
       } catch (error) {
         if (!isSqliteBusyError(error)) {
