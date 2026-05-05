@@ -391,7 +391,7 @@ function getConfiguredRealtimePlatforms(): Set<AdapterPlatform> | null {
 }
 
 function getAutoSyncTargets(
-  db: Pick<ReturnType<typeof openCuedDatabase>, "listEnabledSyncTargets">,
+  db: Pick<ReturnType<typeof openCuedDatabase>, "listEnabledSyncTargets" | "listIntegrationStates">,
 ): Array<{ platform: AdapterPlatform; accountKey: string }> {
   const configured = getConfiguredAutoSyncPlatforms();
 
@@ -414,6 +414,9 @@ function getAutoSyncTargets(
   if (enabled.length > 0) {
     return enabled;
   }
+  if (db.listIntegrationStates().length > 0) {
+    return [];
+  }
 
   return listAutoSyncPlatforms().map((platform) => ({
     platform,
@@ -422,7 +425,10 @@ function getAutoSyncTargets(
 }
 
 export function buildSyncResumeTargets(
-  db: Pick<ReturnType<typeof openCuedDatabase>, "listEnabledSyncTargets" | "listCheckpointTargets">,
+  db: Pick<
+    ReturnType<typeof openCuedDatabase>,
+    "listEnabledSyncTargets" | "listIntegrationStates" | "listCheckpointTargets"
+  >,
 ): Array<{ platform: AdapterPlatform; accountKey: string }> {
   return [
     ...getAutoSyncTargets(db),

@@ -80,16 +80,18 @@ export function getIMessageAuthState(
 
 export function buildLocalIntegrationStates(): ManagedIntegrationState[] {
   const chatDbPath = process.env.CUED_IMESSAGE_DB_PATH ?? DEFAULT_CHAT_DB_PATH;
+  const contactsAuthState = getContactsAuthState();
+  const imessageAuthState = getIMessageAuthState();
   return [
     {
       platform: "contacts",
       accountKey: "local",
       displayName: "Contacts.app",
-      authState: getContactsAuthState(),
+      authState: contactsAuthState,
       enabled: true,
       connectionKind: "native",
       runtimeKind: "native",
-      syncCapable: true,
+      syncCapable: contactsAuthState === "authorized",
       launchStrategy: "system-settings",
       launchTarget: "x-apple.systempreferences:com.apple.preference.security?Privacy_Contacts",
       importedFrom: "local-system",
@@ -98,11 +100,11 @@ export function buildLocalIntegrationStates(): ManagedIntegrationState[] {
       platform: "imessage",
       accountKey: "local",
       displayName: "Messages",
-      authState: getIMessageAuthState(),
+      authState: imessageAuthState,
       enabled: true,
       connectionKind: "native",
       runtimeKind: "native",
-      syncCapable: true,
+      syncCapable: imessageAuthState === "authorized",
       launchStrategy: "system-settings",
       launchTarget: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles",
       importedFrom: "local-system",

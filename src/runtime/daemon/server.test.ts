@@ -128,6 +128,7 @@ describe("sync resume targets", () => {
             account_key: "workspace:team",
           },
         ],
+        listIntegrationStates: () => [],
         listCheckpointTargets: () => [
           {
             platform: "gmail",
@@ -145,5 +146,15 @@ describe("sync resume targets", () => {
         accountKey: "theo@example.com",
       },
     ]);
+  });
+
+  it("does not fall back to unauthenticated default targets after integration state exists", () => {
+    expect(
+      buildSyncResumeTargets({
+        listEnabledSyncTargets: () => [],
+        listIntegrationStates: () => [{ platform: "contacts" }] as never,
+        listCheckpointTargets: () => [],
+      }),
+    ).toEqual([]);
   });
 });
