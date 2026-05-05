@@ -257,7 +257,7 @@ describe("projector", () => {
       sourceVersion: "linkedin-v1",
     });
 
-    expect(rebuildProjectedState(db)).toEqual({
+    expect(rebuildProjectedState(db, { limit: 2 })).toEqual({
       contacts: 1,
       conversations: 1,
       messages: 1,
@@ -313,6 +313,78 @@ describe("projector", () => {
       FROM messages
     `);
     expect(reactionRows).toEqual([{ reaction_count: 1 }]);
+
+    db.close();
+  });
+
+  it("chunked rebuild refreshes rows projected before later identity events", () => {
+    const db = createDb();
+    db.insertRawEvents([
+      {
+        id: randomUUID(),
+        platform: "linkedin",
+        accountKey: "default",
+        entityKind: "conversation",
+        eventKind: "observed",
+        observedAt: 1_710_000_000_000,
+        dedupeKey: "linkedin:thread-chunked",
+        payload: {
+          sourceConversationKey: "thread-chunked",
+          conversationType: "dm",
+          service: "linkedin",
+          participants: [{ sourceEntityKey: "linkedin:casey" }],
+        },
+      },
+      {
+        id: randomUUID(),
+        platform: "linkedin",
+        accountKey: "default",
+        entityKind: "message",
+        eventKind: "created",
+        observedAt: 1_710_000_000_100,
+        dedupeKey: "linkedin:chunked-message",
+        payload: {
+          sourceMessageKey: "chunked-message",
+          sourceConversationKey: "thread-chunked",
+          senderSourceKey: "linkedin:casey",
+          sentAt: 1_710_000_000_050,
+          content: "identity arrives later",
+          service: "linkedin",
+          isFromMe: false,
+        },
+      },
+      {
+        id: randomUUID(),
+        platform: "linkedin",
+        accountKey: "default",
+        entityKind: "contact",
+        eventKind: "observed",
+        observedAt: 1_710_000_000_200,
+        dedupeKey: "linkedin:casey",
+        payload: {
+          sourceEntityKey: "linkedin:casey",
+          fields: { display_name: "Casey Later" },
+          handles: [],
+        },
+      },
+    ]);
+
+    expect(rebuildProjectedState(db, { limit: 2 })).toMatchObject({
+      contacts: 1,
+      conversations: 1,
+      messages: 1,
+      appliedRawEvents: 3,
+      projectionWatermark: 3,
+    });
+    drainSearchIndex(db);
+
+    expect(
+      db.orm().get<{ sender_name: string | null }>(sql`
+        SELECT sender_name
+        FROM messages
+        WHERE platform_message_id = 'chunked-message'
+      `),
+    ).toEqual({ sender_name: "Casey Later" });
 
     db.close();
   });

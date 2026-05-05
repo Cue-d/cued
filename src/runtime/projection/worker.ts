@@ -34,26 +34,27 @@ export async function runProjectionWorker(run: QueuedSyncRun): Promise<Projectio
   const projectionStartedAt = now();
   try {
     const projectionDetails = parseProjectionRunDetails(run.details_json);
+    const projectionBatchSize = Number(process.env.CUED_PROJECTION_BATCH_SIZE || "25");
     const projected =
       run.run_type === "rebuild"
-        ? rebuildProjectedState(db)
+        ? rebuildProjectedState(db, { limit: projectionBatchSize })
         : projectionDetails
           ? projectDeferredRange(db, {
               startRowId: projectionDetails.startRowId,
               endRowId: projectionDetails.endRowId,
-              limit: Number(process.env.CUED_PROJECTION_BATCH_SIZE || "25"),
+              limit: projectionBatchSize,
               includeOverview: false,
             })
           : (() => {
               const backlog = db.getProjectionBacklog();
               return backlog.pending_raw_events === 0
                 ? projectPendingRawEvents(db, {
-                    limit: Number(process.env.CUED_PROJECTION_BATCH_SIZE || "25"),
+                    limit: projectionBatchSize,
                   })
                 : projectDeferredRange(db, {
                     startRowId: backlog.projection_watermark + 1,
                     endRowId: backlog.max_raw_event_rowid,
-                    limit: Number(process.env.CUED_PROJECTION_BATCH_SIZE || "25"),
+                    limit: projectionBatchSize,
                     includeOverview: false,
                   });
             })();

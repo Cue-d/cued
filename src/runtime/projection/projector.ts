@@ -2217,14 +2217,16 @@ function projectEventBatch(
     projectionWatermark: number | null;
     lastRebuildAt?: number | null;
     initialProjection?: boolean;
+    resetCache?: boolean;
+    clearState?: boolean;
   },
 ): void {
-  const cache = input.mode === "rebuild" ? resetProjectionCache(db) : getProjectionCache(db);
+  const cache = input.resetCache ? resetProjectionCache(db) : getProjectionCache(db);
   const changes = createProjectionChangeSet();
 
   db.orm().transaction((tx) => {
     const projectedAt = Date.now();
-    if (input.mode === "rebuild") {
+    if (input.clearState) {
       clearProjectedState(tx);
     }
 
@@ -2467,14 +2469,25 @@ export function projectPendingRawEvents(
   };
 }
 
-export function rebuildProjectedState(db: CuedDatabase): ProjectionOverview {
-  const rawEvents = db.listRawEventsAfter(0);
-  if (rawEvents.length === 0) {
+export function rebuildProjectedState(
+  db: CuedDatabase,
+  options: {
+    limit?: number;
+  } = {},
+): ProjectionOverview {
+  const batchSize =
+    options.limit != null && Number.isFinite(options.limit) && options.limit > 0
+      ? Math.trunc(options.limit)
+      : Number.MAX_SAFE_INTEGER;
+  const firstRawEvents = db.listRawEventsAfter(0, batchSize);
+  if (firstRawEvents.length === 0) {
     projectEventBatch(db, {
       mode: "rebuild",
       rawEvents: [],
       projectionWatermark: 0,
       lastRebuildAt: Date.now(),
+      resetCache: true,
+      clearState: true,
     });
     const result = summarizeResult(db, 0, 0, null, null, true, null);
     return {
@@ -2487,19 +2500,33 @@ export function rebuildProjectedState(db: CuedDatabase): ProjectionOverview {
     };
   }
 
-  projectEventBatch(db, {
-    mode: "rebuild",
-    rawEvents,
-    projectionWatermark: rawEvents[rawEvents.length - 1]!.rowid,
-    lastRebuildAt: Date.now(),
-  });
+  const lastRebuildAt = Date.now();
+  let rawEvents = firstRawEvents;
+  let appliedRawEvents = 0;
+  let projectionWatermark = 0;
+  let clearState = true;
+  while (rawEvents.length > 0) {
+    projectionWatermark = rawEvents[rawEvents.length - 1]!.rowid;
+    projectEventBatch(db, {
+      mode: "rebuild",
+      rawEvents,
+      projectionWatermark,
+      lastRebuildAt,
+      initialProjection: clearState,
+      resetCache: clearState,
+      clearState,
+    });
+    appliedRawEvents += rawEvents.length;
+    clearState = false;
+    rawEvents = db.listRawEventsAfter(projectionWatermark, batchSize);
+  }
 
   const result = summarizeResult(
     db,
-    rawEvents.length,
-    rawEvents[rawEvents.length - 1]!.rowid,
+    appliedRawEvents,
+    projectionWatermark,
     1,
-    rawEvents[rawEvents.length - 1]!.rowid,
+    projectionWatermark,
     true,
     null,
   );
