@@ -5,6 +5,7 @@ import {
   readFileSync,
   renameSync,
   rmSync,
+  statSync,
   watch,
   writeFileSync,
 } from "node:fs";
@@ -166,7 +167,8 @@ const DEFAULT_AUTOSYNC_SCHEDULER_TICK_MS = 15_000;
 const DEFAULT_SYNC_CONTINUE_DELAY_MS = 15_000;
 const DEFAULT_SIGNAL_RECONNECT_SYNC_COOLDOWN_MS = 5 * 60_000;
 const DAEMON_STATUS_BUSY_TIMEOUT_MS = 100;
-const MENU_BAR_STATUS_WRITE_INTERVAL_MS = 1_000;
+const MENU_BAR_STATUS_WRITE_INTERVAL_MS = 15_000;
+const DAEMON_STATUS_CACHE_MAX_AGE_MS = 30_000;
 const UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
 const UPDATE_SHUTDOWN_GRACE_MS = 30_000;
 const QUEUE_DRAIN_RETRY_DELAY_MS = 1_000;
@@ -238,10 +240,18 @@ function writeMenuBarStatusSnapshot(
   renameSync(tmpPath, CUED_MENU_BAR_STATUS_PATH);
 }
 
-function readCachedDaemonStatusSnapshot(): Record<string, unknown> | null {
+function readCachedDaemonStatusSnapshot(options?: {
+  maxAgeMs?: number;
+}): Record<string, unknown> | null {
   try {
     if (!existsSync(CUED_MENU_BAR_STATUS_PATH)) {
       return null;
+    }
+    if (options?.maxAgeMs != null) {
+      const ageMs = now() - statSync(CUED_MENU_BAR_STATUS_PATH).mtimeMs;
+      if (ageMs > options.maxAgeMs) {
+        return null;
+      }
     }
     const parsed = JSON.parse(readFileSync(CUED_MENU_BAR_STATUS_PATH, "utf8")) as unknown;
     return parsed && typeof parsed === "object" && !Array.isArray(parsed)
@@ -4261,6 +4271,21 @@ async function dispatchRequest(
           },
         };
       case "status":
+        {
+          const cached = readCachedDaemonStatusSnapshot({
+            maxAgeMs: DAEMON_STATUS_CACHE_MAX_AGE_MS,
+          });
+          if (cached) {
+            return {
+              id: request.id,
+              ok: true,
+              result: {
+                ...cached,
+                statusCacheHit: true,
+              },
+            };
+          }
+        }
         if (isBackgroundWorkActive()) {
           const cached = readCachedDaemonStatusSnapshot();
           if (cached) {
