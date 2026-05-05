@@ -50,10 +50,9 @@ From the DMG flow, you can do this directly in the app onboarding flow. From the
 cued permissions request --all
 ```
 
-This performs three different actions:
+This performs two different actions:
 
 - triggers the Contacts prompt through the native helper
-- triggers the Messages Apple Events automation prompt through AppleScript
 - opens the Full Disk Access pane and prints the manual step for granting it
 
 macOS does not allow Cued to self-grant Full Disk Access. You must manually add and enable the installed app or binary shown by the command.

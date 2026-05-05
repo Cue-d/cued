@@ -47,7 +47,7 @@ Usage:
   bash scripts/request-macos-access.sh [options]
 
 Options:
-  --all                 Request Contacts + Messages automation and open the Full Disk Access pane
+  --all                 Request Contacts and open the Full Disk Access pane
   --contacts            Trigger the macOS Contacts permission prompt using the native exporter
   --messages            Trigger Apple Events automation permission for Messages via AppleScript
   --full-disk-access    Open the Full Disk Access pane and print manual instructions
@@ -56,7 +56,8 @@ Options:
   --help                Show this help
 
 Notes:
-  - Contacts and Apple Events automation can prompt automatically.
+  - Contacts can prompt automatically.
+  - Messages automation is only needed for explicit native Messages send/control flows.
   - Full Disk Access cannot be granted programmatically on macOS.
   - The process that runs this script is the one macOS authorizes for AppleScript automation.
 EOF
@@ -149,7 +150,6 @@ EOF
 
 if [[ $# -eq 0 ]]; then
   REQUEST_CONTACTS=1
-  REQUEST_MESSAGES=1
   REQUEST_FULL_DISK=1
 fi
 
@@ -159,7 +159,6 @@ while [[ $# -gt 0 ]]; do
       ;;
     --all)
       REQUEST_CONTACTS=1
-      REQUEST_MESSAGES=1
       REQUEST_FULL_DISK=1
       ;;
     --contacts)

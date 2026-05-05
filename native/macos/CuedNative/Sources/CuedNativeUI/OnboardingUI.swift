@@ -1472,7 +1472,6 @@ private struct InstallerAddAccountSheet: View {
 private let installerPermissionOrder = [
   "contacts",
   "full_disk_access",
-  "messages_automation",
 ]
 
 private let installerPlatformOrder = [
@@ -1513,13 +1512,6 @@ private func installerDefaultPermissionStatus(for key: String) -> InstallerPermi
       status: "unknown",
       summary: "Full Disk Access has not been checked yet",
       requestFlags: ["--full-disk-access"]
-    )
-  case "messages_automation":
-    return InstallerPermissionStatus(
-      key: key,
-      status: "unknown",
-      summary: "Messages automation access has not been checked yet",
-      requestFlags: ["--messages"]
     )
   default:
     return nil
@@ -2018,12 +2010,6 @@ private struct InstallerPreviewContainer: View {
         status: "needs_action",
         summary: "Messages database is not readable from the current process",
         requestFlags: ["--full-disk-access"]
-      ),
-      InstallerPermissionStatus(
-        key: "messages_automation",
-        status: "needs_action",
-        summary: "Apple Events automation for Messages is not verified",
-        requestFlags: ["--messages"]
       ),
     ],
     globalSkill: installerDefaultGlobalSkillStatus(),

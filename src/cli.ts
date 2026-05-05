@@ -791,7 +791,7 @@ async function main(): Promise<void> {
             command: ["bash", scriptPath, ...flags],
           });
           execFileSync("bash", [scriptPath, ...flags], { stdio: "inherit" });
-          if (flags.includes("--all") || flags.includes("--messages")) {
+          if (flags.includes("--messages")) {
             const db = openCuedDatabase();
             try {
               refreshMessagesAutomationVerification(db);

@@ -426,8 +426,7 @@ final class OnboardingWindowController: NSWindowController {
       pendingLivePermissionDeadline = nil
       return false
     }
-    return pendingLivePermissionKeys.contains("messages_automation")
-      || pendingLivePermissionKeys.contains("full_disk_access")
+    return pendingLivePermissionKeys.contains("full_disk_access")
   }
 
   private func markPendingLivePermissions(flags: [String]) {
@@ -481,7 +480,7 @@ final class OnboardingWindowController: NSWindowController {
 
 func onboardingPermissionKeys(for flags: [String]) -> Set<String> {
   if flags.contains("--all") {
-    return ["contacts", "full_disk_access", "messages_automation"]
+    return ["contacts", "full_disk_access"]
   }
 
   var keys = Set<String>()
@@ -490,9 +489,6 @@ func onboardingPermissionKeys(for flags: [String]) -> Set<String> {
   }
   if flags.contains("--full-disk-access") {
     keys.insert("full_disk_access")
-  }
-  if flags.contains("--messages") {
-    keys.insert("messages_automation")
   }
   return keys
 }
@@ -503,9 +499,9 @@ func onboardingShouldRetryPermissionRefresh(for flags: [String]) -> Bool {
 
 func onboardingShouldRefreshPermissionsActively(for flags: [String]) -> Bool {
   let keys = onboardingPermissionKeys(for: flags)
-  return keys.contains("messages_automation") || keys.contains("full_disk_access")
+  return keys.contains("full_disk_access")
 }
 
 func isRetryablePermissionKey(_ key: String) -> Bool {
-  key == "messages_automation" || key == "full_disk_access"
+  key == "full_disk_access"
 }
