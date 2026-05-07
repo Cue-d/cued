@@ -1698,11 +1698,31 @@ describe("CuedDatabase", () => {
         name: string;
       }>
     ).map((row) => row.name);
-    const triggerSql = sql
+    const synchronousProjectionTriggerRows = sql
       .prepare(
-        "SELECT sql FROM sqlite_master WHERE type = 'trigger' AND name = 'trg_messages_inserted_fts'",
+        `
+        SELECT name
+        FROM sqlite_master
+        WHERE type = 'trigger'
+          AND name IN (
+            'trg_messages_inserted_fts',
+            'trg_messages_updated_fts',
+            'trg_messages_deleted_fts',
+            'trg_message_attachments_inserted',
+            'trg_message_attachments_updated',
+            'trg_message_attachments_deleted',
+            'trg_message_reactions_inserted',
+            'trg_message_reactions_updated',
+            'trg_message_reactions_deleted',
+            'trg_contacts_name_updated',
+            'trg_conversations_name_updated',
+            'trg_conversation_participants_inserted',
+            'trg_conversation_participants_updated',
+            'trg_conversation_participants_deleted'
+          )
+      `,
       )
-      .get() as { sql: string } | undefined;
+      .all() as Array<{ name: string }>;
 
     expect(
       sql
@@ -1738,6 +1758,11 @@ describe("CuedDatabase", () => {
       sql
         .prepare("SELECT 1 FROM schema_migrations WHERE id = ?")
         .get("0016_drop_synchronous_message_fts_triggers"),
+    ).toBeTruthy();
+    expect(
+      sql
+        .prepare("SELECT 1 FROM schema_migrations WHERE id = ?")
+        .get("0017_drop_remaining_projection_side_effect_triggers"),
     ).toBeTruthy();
     const indexNames = (
       sql.prepare("SELECT name FROM sqlite_master WHERE type = 'index'").all() as Array<{
@@ -1779,7 +1804,7 @@ describe("CuedDatabase", () => {
         "messages_fts",
       ]),
     );
-    expect(triggerSql).toBeUndefined();
+    expect(synchronousProjectionTriggerRows).toEqual([]);
 
     db.close();
   });

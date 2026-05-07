@@ -2910,6 +2910,10 @@ export async function runDaemon(): Promise<void> {
     if (isProcessingSearchIndex) {
       return;
     }
+    if (isProcessingProjection) {
+      scheduleSearchIndexDrain(FTS_PROJECTION_THROTTLE_DELAY_MS);
+      return;
+    }
     if (bootstrap.state !== "ready") {
       scheduleSearchIndexDrain(QUEUE_DRAIN_RETRY_DELAY_MS);
       return;

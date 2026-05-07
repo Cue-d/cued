@@ -827,6 +827,9 @@ function dropSynchronousMessageFtsTriggers(db: MigrationDatabase): void {
     DROP TRIGGER IF EXISTS trg_message_attachments_inserted;
     DROP TRIGGER IF EXISTS trg_message_attachments_updated;
     DROP TRIGGER IF EXISTS trg_message_attachments_deleted;
+    DROP TRIGGER IF EXISTS trg_message_reactions_inserted;
+    DROP TRIGGER IF EXISTS trg_message_reactions_updated;
+    DROP TRIGGER IF EXISTS trg_message_reactions_deleted;
     DROP TRIGGER IF EXISTS trg_contacts_name_updated;
     DROP TRIGGER IF EXISTS trg_conversations_name_updated;
     DROP TRIGGER IF EXISTS trg_conversation_participants_inserted;
@@ -2087,6 +2090,12 @@ export const MIGRATIONS: Migration[] = [
   },
   {
     id: "0016_drop_synchronous_message_fts_triggers",
+    apply: (db) => {
+      dropSynchronousMessageFtsTriggers(db);
+    },
+  },
+  {
+    id: "0017_drop_remaining_projection_side_effect_triggers",
     apply: (db) => {
       dropSynchronousMessageFtsTriggers(db);
     },

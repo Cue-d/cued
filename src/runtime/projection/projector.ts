@@ -62,6 +62,7 @@ type ProjectionCache = {
 type ProjectionChangeSet = {
   dirtyContactIds: Set<string>;
   dirtyConversationIds: Set<string>;
+  dirtyConversationSummaryIds: Set<string>;
   dirtyMessageIds: Set<string>;
   dirtyReplyMessageIds: Set<string>;
   touchedAttachments: boolean;
@@ -712,6 +713,7 @@ function createProjectionChangeSet(): ProjectionChangeSet {
   return {
     dirtyContactIds: new Set<string>(),
     dirtyConversationIds: new Set<string>(),
+    dirtyConversationSummaryIds: new Set<string>(),
     dirtyMessageIds: new Set<string>(),
     dirtyReplyMessageIds: new Set<string>(),
     touchedAttachments: false,
@@ -976,6 +978,38 @@ function ensureMessageStub(
     .run();
 
   return { messageId, conversationId };
+}
+
+function resolveProjectedSenderName(
+  conn: LocalDbExecutor,
+  cache: ProjectionCache,
+  conversationId: string,
+  senderContactId: string | null,
+): string | null {
+  if (!senderContactId) {
+    return null;
+  }
+
+  const contactName = cache.contactNameMap.get(senderContactId) ?? null;
+  if (contactName != null && !isRawIdentifierDisplayName(contactName)) {
+    return contactName;
+  }
+
+  const participant = conn.get<{ participant_name: string | null }>(sql`
+    SELECT participant_name
+    FROM conversation_participants
+    WHERE conversation_id = ${conversationId}
+      AND contact_id = ${senderContactId}
+      AND is_active = 1
+    ORDER BY updated_at DESC
+    LIMIT 1
+  `);
+  const participantName = participant?.participant_name ?? null;
+  if (participantName != null && !isRawIdentifierDisplayName(participantName)) {
+    return participantName;
+  }
+
+  return contactName ?? participantName;
 }
 
 function clearProjectedState(conn: LocalDbExecutor): void {
@@ -1324,6 +1358,7 @@ function projectMessageEvent(
     payload.senderSourceKey,
     event.observed_at,
   );
+  const senderName = resolveProjectedSenderName(conn, cache, conversationId, senderContactId);
 
   conn
     .update(messages)
@@ -1334,7 +1369,7 @@ function projectMessageEvent(
       conversationId,
       senderContactId: senderContactId ?? null,
       senderSourceKey: payload.senderSourceKey,
-      senderName: senderContactId ? (cache.contactNameMap.get(senderContactId) ?? null) : null,
+      senderName,
       conversationName: cache.conversationNameMap.get(conversationId) ?? null,
       sentAt: payload.sentAt,
       service: normalizeText(payload.service ?? null),
@@ -1352,7 +1387,7 @@ function projectMessageEvent(
     .where(eq(messages.id, messageId))
     .run();
 
-  changes.dirtyConversationIds.add(conversationId);
+  changes.dirtyConversationSummaryIds.add(conversationId);
   changes.dirtyMessageIds.add(messageId);
   if (hasStringValue(payload.replyToSourceMessageKey)) {
     changes.dirtyReplyMessageIds.add(messageId);
@@ -1475,7 +1510,7 @@ function projectReactionEvent(
   event: ProjectableRawEvent,
 ): void {
   const payload = JSON.parse(event.payload_json) as ReactionPayload;
-  const { messageId, conversationId } = ensureMessageStub(
+  const { messageId } = ensureMessageStub(
     conn,
     cache,
     event.platform,
@@ -1527,7 +1562,6 @@ function projectReactionEvent(
     .run();
 
   changes.touchedReactions = true;
-  changes.dirtyConversationIds.add(conversationId);
   changes.dirtyMessageIds.add(messageId);
 }
 
@@ -1594,6 +1628,7 @@ function projectParticipantEvent(
     .run();
 
   changes.dirtyConversationIds.add(conversationId);
+  changes.dirtyConversationSummaryIds.add(conversationId);
 }
 
 function projectTimelineEvent(
@@ -1686,6 +1721,7 @@ function projectTimelineEvent(
     .run();
 
   changes.dirtyConversationIds.add(conversationId);
+  changes.dirtyConversationSummaryIds.add(conversationId);
 }
 
 function projectCallEvent(
@@ -1788,6 +1824,7 @@ function projectCallEvent(
     .run();
 
   changes.dirtyConversationIds.add(conversationId);
+  changes.dirtyConversationSummaryIds.add(conversationId);
 }
 
 function refreshConversationSummariesForIds(
@@ -2157,16 +2194,20 @@ function finalizeDeferredProjection(
     syncContactNameCache(conn, cache, changes.dirtyContactIds);
   }
 
-  if (!options?.initialProjection) {
-    expandDirtyConversationIds(conn, changes);
-  }
+  expandDirtyConversationIds(conn, changes);
   if (changes.dirtyConversationIds.size > 0) {
     refreshParticipantNamesForIds(conn, changes.dirtyConversationIds);
     refreshConversationNamesForIds(conn, changes.dirtyConversationIds);
     syncConversationNameCache(conn, cache, changes.dirtyConversationIds);
     refreshMessageSenderNamesForIds(conn, changes.dirtyConversationIds);
     refreshMessageConversationNamesForIds(conn, changes.dirtyConversationIds);
-    refreshConversationSummariesForIds(conn, changes.dirtyConversationIds);
+    for (const conversationId of changes.dirtyConversationIds) {
+      changes.dirtyConversationSummaryIds.add(conversationId);
+    }
+  }
+
+  if (changes.dirtyConversationSummaryIds.size > 0) {
+    refreshConversationSummariesForIds(conn, changes.dirtyConversationSummaryIds);
   }
 
   if (!options?.initialProjection) {
