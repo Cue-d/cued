@@ -32,7 +32,7 @@ describe("onboarding snapshot", () => {
   function createDb(): CuedDatabase {
     const dir = createTempDir("cued-onboarding-db-");
     const db = new CuedDatabase(join(dir, "local.db"));
-    db.migrate();
+    db.initializeSchema();
     return db;
   }
 

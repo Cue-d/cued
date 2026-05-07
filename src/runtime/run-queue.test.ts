@@ -1,10 +1,8 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { sql } from "drizzle-orm";
 import { afterEach, describe, expect, it } from "vitest";
 import { CuedDatabase } from "../db/database.js";
-import { rebuildProjectedState } from "./projection/projector.js";
 import { RunQueueService } from "./run-queue.js";
 
 describe("RunQueueService", () => {
@@ -23,7 +21,7 @@ describe("RunQueueService", () => {
     const dir = mkdtempSync(join(tmpdir(), "cued-run-queue-"));
     tempDirs.push(dir);
     const db = new CuedDatabase(join(dir, "local.db"));
-    db.migrate();
+    db.initializeSchema();
     return db;
   }
 
@@ -120,28 +118,19 @@ describe("RunQueueService", () => {
     db.close();
   });
 
-  it("preserves the legacy platform-only queue when no explicit sync targets exist", () => {
+  it("does not queue source syncs without an explicit target", () => {
     const db = createDb();
     const queue = new RunQueueService(db);
 
     const result = queue.queueSyncRun("slack");
 
     expect(result).toEqual({
-      queued: true,
-      runId: result.runIds[0] ?? null,
-      runIds: expect.any(Array),
-      targets: ["slack"],
+      queued: false,
+      runId: null,
+      runIds: [],
+      targets: [],
     });
-    expect(result.runIds).toHaveLength(1);
-
-    const [run] = db.listRecentRuns(1);
-    expect(run).toMatchObject({
-      platform: "slack",
-      account_key: null,
-      trigger: "cli",
-      run_type: "sync",
-      status: "queued",
-    });
+    expect(db.listRecentRuns(1)).toHaveLength(0);
 
     db.close();
   });
@@ -177,164 +166,6 @@ describe("RunQueueService", () => {
       run_type: "sync",
       status: "queued",
     });
-
-    db.close();
-  });
-
-  it("records a manual contact merge and rebuilds projected state immediately", () => {
-    const db = createDb();
-    db.insertRawEvent({
-      id: "contact-primary",
-      platform: "contacts",
-      accountKey: "local",
-      entityKind: "contact",
-      eventKind: "observed",
-      observedAt: 1,
-      dedupeKey: "contacts:primary",
-      payload: {
-        sourceEntityKey: "contacts:primary",
-        fields: { display_name: "Ava Chen" },
-        handles: [{ type: "phone", value: "+1 (555) 123-4567", deterministic: true }],
-      },
-      sourceVersion: "contacts-v1",
-    });
-    db.insertRawEvent({
-      id: "contact-secondary",
-      platform: "linkedin",
-      accountKey: "default",
-      entityKind: "contact",
-      eventKind: "observed",
-      observedAt: 2,
-      dedupeKey: "linkedin:secondary",
-      payload: {
-        sourceEntityKey: "linkedin:secondary",
-        fields: { display_name: "Ava Chen" },
-        handles: [{ type: "linkedin", value: "urn:li:person:ava-chen", deterministic: true }],
-      },
-      sourceVersion: "linkedin-v1",
-    });
-
-    rebuildProjectedState(db);
-    const contacts = db.orm().all<{ id: string }>(sql`
-      SELECT id
-      FROM contacts
-      ORDER BY created_at ASC, id ASC
-    `);
-    const queue = new RunQueueService(db);
-    const result = queue.mergeContacts({
-      primaryContactId: contacts[0]!.id,
-      secondaryContactId: contacts[1]!.id,
-      reason: "manual test",
-    });
-
-    expect(result).toEqual({
-      merged: true,
-      decisionId: expect.any(String),
-      primaryContactId: contacts[0]!.id,
-      secondaryContactId: contacts[1]!.id,
-      canonicalContactId: contacts[0]!.id,
-      projection: expect.objectContaining({
-        contacts: 1,
-        projectionWatermark: 2,
-      }),
-    });
-    expect(db.getOverview().contacts).toBe(1);
-
-    db.close();
-  });
-
-  it("validates batch contact merges before recording and rebuilds once on apply", () => {
-    const db = createDb();
-    for (const [id, platform, handle] of [
-      ["contact-a", "contacts", "+1 (555) 123-4567"],
-      ["contact-b", "linkedin", "urn:li:person:ava-chen"],
-      ["contact-c", "slack", "ava@example.com"],
-    ] as const) {
-      db.insertRawEvent({
-        id,
-        platform,
-        accountKey: "default",
-        entityKind: "contact",
-        eventKind: "observed",
-        observedAt: 1,
-        dedupeKey: `${platform}:${id}`,
-        payload: {
-          sourceEntityKey: `${platform}:${id}`,
-          fields: { display_name: "Ava Chen" },
-          handles: [
-            {
-              type: platform === "contacts" ? "phone" : platform,
-              value: handle,
-              deterministic: true,
-            },
-          ],
-        },
-        sourceVersion: `${platform}-v1`,
-      });
-    }
-
-    rebuildProjectedState(db);
-    const contacts = db.orm().all<{ id: string }>(sql`
-      SELECT id
-      FROM contacts
-      ORDER BY created_at ASC, id ASC
-    `);
-    expect(contacts).toHaveLength(3);
-
-    const queue = new RunQueueService(db);
-    const dryRun = queue.mergeContactsBatch({
-      apply: false,
-      merges: [
-        {
-          primaryContactId: contacts[0]!.id,
-          secondaryContactId: contacts[1]!.id,
-          reason: "batch dry-run one",
-        },
-        {
-          primaryContactId: contacts[0]!.id,
-          secondaryContactId: contacts[2]!.id,
-          reason: "batch dry-run two",
-        },
-      ],
-    });
-
-    expect(dryRun).toMatchObject({
-      applied: false,
-      mergeCount: 2,
-      decisions: [
-        expect.objectContaining({ canonicalContactId: contacts[0]!.id }),
-        expect.objectContaining({ canonicalContactId: contacts[0]!.id }),
-      ],
-    });
-    expect(db.listContactMergeDecisions()).toEqual([]);
-    expect(db.getOverview().contacts).toBe(3);
-
-    const applied = queue.mergeContactsBatch({
-      apply: true,
-      merges: [
-        {
-          primaryContactId: contacts[0]!.id,
-          secondaryContactId: contacts[1]!.id,
-          reason: "batch apply one",
-        },
-        {
-          primaryContactId: contacts[0]!.id,
-          secondaryContactId: contacts[2]!.id,
-          reason: "batch apply two",
-        },
-      ],
-    });
-
-    expect(applied).toMatchObject({
-      applied: true,
-      mergeCount: 2,
-      projection: expect.objectContaining({
-        contacts: 1,
-        projectionWatermark: 3,
-      }),
-    });
-    expect(db.listContactMergeDecisions()).toHaveLength(2);
-    expect(db.getOverview().contacts).toBe(1);
 
     db.close();
   });

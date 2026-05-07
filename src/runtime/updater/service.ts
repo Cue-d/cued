@@ -33,13 +33,10 @@ import {
 import { openSqliteDatabase } from "../../db/sqlite.js";
 import { terminateCompetingDaemons } from "../../macos/competing-daemons.js";
 import {
-  bootoutLaunchAgent,
   getAppBundleVersion,
   getAppExecutablePath,
   getCLISymlinkPath,
   getCurrentAppPath,
-  getLaunchAgentPlistPath,
-  getLegacyLaunchAgentStatus,
   isValidCuedAppBundle,
   resolveInstalledAppPath,
 } from "../../macos/install.js";
@@ -589,7 +586,6 @@ export function renderUpdateHelperScript(
     stagedAppPath: string;
     targetVersion: string;
     dbPath: string;
-    migrateLegacyLaunchAgent: boolean;
     stagingRoot: string;
   },
 ): string {
@@ -604,8 +600,6 @@ APP_BACKUP_PATH=${shellEscape(input.appBackupPath)}
 DB_PATH=${shellEscape(input.dbPath)}
 DB_BACKUP_PATH=${shellEscape(input.dbBackupPath)}
 CLI_SYMLINK_PATH=${shellEscape(getCLISymlinkPath())}
-LAUNCH_AGENT_PLIST=${shellEscape(getLaunchAgentPlistPath())}
-MIGRATE_LEGACY_LAUNCH_AGENT=${input.migrateLegacyLaunchAgent ? "1" : "0"}
 TARGET_VERSION=${shellEscape(input.targetVersion)}
 STAGING_ROOT=${shellEscape(input.stagingRoot)}
 WAIT_FOR_EXIT_MS=${UPDATE_HELPER_WAIT_FOR_EXIT_MS}
@@ -621,13 +615,6 @@ clear_last_error() {
 
 set_last_error() {
   "$HELPER_CLI_PATH" update helper-set-last-error --db-path "$DB_PATH" --message "$1" >/dev/null 2>&1 || true
-}
-
-cleanup_legacy_launch_agent() {
-  if [[ -f "$LAUNCH_AGENT_PLIST" ]]; then
-    /bin/launchctl bootout "gui/$(id -u)" "$LAUNCH_AGENT_PLIST" >/dev/null 2>&1 || true
-    rm -f "$LAUNCH_AGENT_PLIST"
-  fi
 }
 
 wait_for_old_app_exit() {
@@ -649,9 +636,6 @@ restore_previous() {
   /usr/bin/rsync -a --delete "$APP_BACKUP_PATH/" "$INSTALLED_APP_PATH/"
   cp "$DB_BACKUP_PATH" "$DB_PATH"
   rm -f "$DB_PATH-wal" "$DB_PATH-shm"
-  if [[ -f "$LAUNCH_AGENT_PLIST" ]]; then
-    /bin/launchctl bootstrap "gui/$(id -u)" "$LAUNCH_AGENT_PLIST" >/dev/null 2>&1 || true
-  fi
   /usr/bin/open "$INSTALLED_APP_PATH" >/dev/null 2>&1 || true
 }
 
@@ -671,16 +655,9 @@ mkdir -p "$INSTALLED_APP_PATH"
 /usr/bin/rsync -a --delete "$STAGED_APP_PATH/" "$INSTALLED_APP_PATH/"
 mkdir -p "$(dirname "$CLI_SYMLINK_PATH")"
 ln -sf "$INSTALLED_APP_PATH/Contents/Resources/cued-cli" "$CLI_SYMLINK_PATH"
-LOGIN_ITEM_MIGRATED=0
-if [[ "$MIGRATE_LEGACY_LAUNCH_AGENT" == "1" ]] && "$INSTALLED_APP_EXEC" login-item enable >/dev/null 2>&1; then
-  LOGIN_ITEM_MIGRATED=1
-fi
 /usr/bin/open "$INSTALLED_APP_PATH" >/dev/null 2>&1 || true
 
 if wait_for_health; then
-  if [[ "$LOGIN_ITEM_MIGRATED" == "1" ]]; then
-    cleanup_legacy_launch_agent
-  fi
   clear_pending
   clear_last_error
   rm -rf "$STAGING_ROOT"
@@ -700,7 +677,6 @@ function writeHelperScript(
     stagedAppPath: string;
     targetVersion: string;
     dbPath: string;
-    migrateLegacyLaunchAgent: boolean;
     stagingRoot: string;
   },
 ): string {
@@ -721,7 +697,6 @@ function spawnUpdateHelper(
     stagedAppPath,
     targetVersion: pendingRollback.targetVersion,
     dbPath,
-    migrateLegacyLaunchAgent: getLegacyLaunchAgentStatus().installed,
     stagingRoot: dirname(dirname(stagedAppPath)),
   });
   const child = spawn("/bin/bash", [scriptPath], {
@@ -739,7 +714,6 @@ export async function installAvailableUpdate(db: CuedDatabase): Promise<InstallR
   try {
     db.setUpdateLastError(null);
     await requestShutdownForUpdate(db);
-    bootoutLaunchAgent();
     terminateCompetingDaemons({
       expectedExecutablePath: getAppExecutablePath(installedAppPath),
     });

@@ -1,0 +1,19 @@
+{
+  "type": "contact.merge",
+  "version": "1",
+  "description": "Merge one duplicate contact into a canonical contact.",
+  "module": "actions/contact-merge.cjs",
+  "postExecution": {
+    "rebuildProjection": true
+  },
+  "requiresApprovalDefault": true,
+  "payload": {
+    "required": {
+      "primaryContactId": "string",
+      "secondaryContactId": "string"
+    },
+    "optional": {
+      "reason": "string"
+    }
+  }
+}

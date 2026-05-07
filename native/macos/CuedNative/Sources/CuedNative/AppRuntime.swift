@@ -1739,7 +1739,7 @@ final class MenuBarAppController: NSObject, NSApplicationDelegate {
       alert.alertStyle = .informational
       alert.messageText = "Update Available: v\(targetVersion)"
       alert.informativeText =
-        "Current version: v\(status.currentVersion)\nInstalling the update will restart Cued and migrate the local database if needed."
+        "Current version: v\(status.currentVersion)\nInstalling the update will restart Cued and initialize the local database schema if needed."
       alert.addButton(withTitle: "Install and Restart")
       alert.addButton(withTitle: "Later")
       if status.releaseUrl != nil {

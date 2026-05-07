@@ -13,7 +13,7 @@ type SignalClientLike = Pick<SignalCliClient, "listContacts" | "listGroups" | "r
 export async function buildSignalSyncBundle(options?: {
   accountKey?: string;
   account?: string;
-  lastSyncAt?: number;
+  sourceCursor?: unknown;
   client?: SignalClientLike;
 }): Promise<SyncBundle> {
   const accountKey = options?.accountKey ?? process.env.CUED_ACCOUNT_KEY ?? "default";
@@ -57,7 +57,15 @@ export async function buildSignalSyncBundle(options?: {
       account,
       lastSyncAt: observedBase,
     },
-    syncMode: options?.lastSyncAt ? "incremental" : "full",
+    syncMode: hasSignalSourceCursor(options?.sourceCursor) ? "incremental" : "full",
     hasMore: false,
   };
+}
+
+function hasSignalSourceCursor(value: unknown): boolean {
+  return Boolean(
+    value &&
+      typeof value === "object" &&
+      typeof (value as { lastSyncAt?: unknown }).lastSyncAt === "number",
+  );
 }

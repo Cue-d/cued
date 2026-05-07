@@ -1,5 +1,8 @@
 import { integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
 import {
+  ACTION_APPROVAL_STATUS_VALUES,
+  ACTION_EXECUTION_STATUS_VALUES,
+  ACTION_STATUS_VALUES,
   AUTH_SESSION_STATE_VALUES,
   CONNECTION_KIND_VALUES,
   CONTACT_KIND_VALUES,
@@ -21,11 +24,6 @@ function textEnum<const TValues extends readonly [string, ...string[]]>(
 ) {
   return text(name, { enum: values });
 }
-
-export const schemaMigrations = sqliteTable("schema_migrations", {
-  id: text("id").primaryKey(),
-  appliedAt: integer("applied_at").notNull(),
-});
 
 export const sourceAccounts = sqliteTable("source_accounts", {
   id: text("id").primaryKey(),
@@ -123,6 +121,48 @@ export const jobs = sqliteTable("jobs", {
   errorJson: text("error_json"),
 });
 
+export const actions = sqliteTable("actions", {
+  id: text("id").primaryKey(),
+  actionType: text("action_type").notNull(),
+  actionVersion: text("action_version").notNull(),
+  status: textEnum("status", ACTION_STATUS_VALUES).notNull(),
+  approvalStatus: textEnum("approval_status", ACTION_APPROVAL_STATUS_VALUES).notNull(),
+  executionStatus: textEnum("execution_status", ACTION_EXECUTION_STATUS_VALUES).notNull(),
+  priority: integer("priority").notNull(),
+  title: text("title"),
+  summary: text("summary"),
+  payloadJson: text("payload_json").notNull(),
+  payloadHash: text("payload_hash").notNull(),
+  resultJson: text("result_json"),
+  errorJson: text("error_json"),
+  sourceSkill: text("source_skill"),
+  sourceJobId: text("source_job_id"),
+  createdBy: text("created_by").notNull(),
+  approvedBy: text("approved_by"),
+  deniedBy: text("denied_by"),
+  executedBy: text("executed_by"),
+  requiresApproval: integer("requires_approval").notNull(),
+  queuedAt: integer("queued_at").notNull(),
+  approvedAt: integer("approved_at"),
+  deniedAt: integer("denied_at"),
+  lockedAt: integer("locked_at"),
+  startedAt: integer("started_at"),
+  executedAt: integer("executed_at"),
+  updatedAt: integer("updated_at").notNull(),
+  dedupeKey: text("dedupe_key"),
+});
+
+export const actionEffects = sqliteTable("action_effects", {
+  id: text("id").primaryKey(),
+  actionId: text("action_id").notNull(),
+  effectType: text("effect_type").notNull(),
+  targetTable: text("target_table"),
+  targetId: text("target_id"),
+  payloadJson: text("payload_json"),
+  appliedAt: integer("applied_at").notNull(),
+  revertedAt: integer("reverted_at"),
+});
+
 export const syncRunErrors = sqliteTable("sync_run_errors", {
   id: text("id").primaryKey(),
   syncRunId: text("sync_run_id").notNull(),
@@ -142,33 +182,6 @@ export const messageFtsIndexQueue = sqliteTable("message_fts_index_queue", {
   queuedAt: integer("queued_at").notNull(),
   updatedAt: integer("updated_at").notNull(),
   lastError: text("last_error"),
-});
-
-export const slackBackfillProofs = sqliteTable("slack_backfill_proofs", {
-  id: text("id").primaryKey(),
-  accountKey: text("account_key").notNull(),
-  teamId: text("team_id").notNull(),
-  conversationId: text("conversation_id").notNull(),
-  conversationName: text("conversation_name"),
-  conversationFamily: text("conversation_family").notNull(),
-  syncMode: text("sync_mode").notNull(),
-  scanStartedAt: integer("scan_started_at").notNull(),
-  knownConversationCount: integer("known_conversation_count").notNull(),
-  conversationPhase: text("conversation_phase").notNull(),
-  historyComplete: integer("history_complete").notNull(),
-  historyCursor: text("history_cursor"),
-  threadRootCount: integer("thread_root_count").notNull(),
-  completedThreadCount: integer("completed_thread_count").notNull(),
-  pendingThreadCount: integer("pending_thread_count").notNull(),
-  activeThreadTs: text("active_thread_ts"),
-  repliesCursor: text("replies_cursor"),
-  oldestMessageTs: text("oldest_message_ts"),
-  newestMessageTs: text("newest_message_ts"),
-  firstDiscoveredAt: integer("first_discovered_at").notNull(),
-  historyCompleteAt: integer("history_complete_at"),
-  repliesCompleteAt: integer("replies_complete_at"),
-  lastObservedAt: integer("last_observed_at").notNull(),
-  updatedAt: integer("updated_at").notNull(),
 });
 
 export const daemonState = sqliteTable("daemon_state", {
@@ -264,17 +277,6 @@ export const contactSources = sqliteTable("contact_sources", {
   firstSeenAt: integer("first_seen_at").notNull(),
   lastSeenAt: integer("last_seen_at").notNull(),
   metadataJson: text("metadata_json"),
-});
-
-export const contactMergeDecisions = sqliteTable("contact_merge_decisions", {
-  id: text("id").primaryKey(),
-  decisionType: text("decision_type").notNull(),
-  primaryContactId: text("primary_contact_id").notNull(),
-  secondaryContactId: text("secondary_contact_id").notNull(),
-  canonicalContactId: text("canonical_contact_id").notNull(),
-  reason: text("reason"),
-  createdBy: text("created_by"),
-  createdAt: integer("created_at").notNull(),
 });
 
 export const contactMemories = sqliteTable("contact_memories", {

@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, readdirSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readdirSync, rmSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { getCurrentAppPath } from "../macos/install.js";
 
@@ -30,12 +30,61 @@ export interface GlobalCuedSkillStatusResult {
   error?: string;
 }
 
+export interface LocalSkillInstallResult {
+  ok: boolean;
+  skillName: string;
+  scope: "daemon-local";
+  sourcePath: string | null;
+  installedPath: string;
+  actionDefinitionCount: number;
+  executorCount: number;
+  error?: string;
+}
+
+export interface LocalSkillStatusResult {
+  installed: boolean;
+  status: "installed" | "needs_action";
+  summary: string;
+  skillName: string;
+  sourcePath: string | null;
+  installedPath: string;
+  actionDefinitionCount: number;
+  executorCount: number;
+}
+
 function repoRoot(): string {
   return resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 }
 
 function hasSkillDefinition(path: string): boolean {
   return existsSync(join(path, "SKILL.md"));
+}
+
+function cuedHome(): string {
+  return process.env.CUED_HOME ?? join(homedir(), ".cued");
+}
+
+export function resolveLocalCuedSkillInstallPath(): string {
+  return resolveLocalSkillInstallPath(CUED_SKILL_NAME);
+}
+
+export function resolveLocalSkillInstallPath(skillName: string): string {
+  return join(cuedHome(), "skills", skillName);
+}
+
+function countFiles(path: string, suffix: string): number {
+  if (!existsSync(path)) {
+    return 0;
+  }
+  return readdirSync(path).filter((fileName) => fileName.endsWith(suffix)).length;
+}
+
+function countSkillActionDefinitions(path: string): number {
+  return countFiles(join(path, "actions"), ".json");
+}
+
+function countSkillExecutors(path: string): number {
+  return countFiles(join(path, "actions"), ".cjs");
 }
 
 export function resolveCuedSkillSourcePath(): string | null {
@@ -242,6 +291,26 @@ export function getGlobalCuedSkillStatus(): GlobalCuedSkillStatusResult {
   }
 }
 
+export function getLocalCuedSkillStatus(skillName = CUED_SKILL_NAME): LocalSkillStatusResult {
+  const sourcePath = skillName === CUED_SKILL_NAME ? resolveCuedSkillSourcePath() : null;
+  const installedPath = resolveLocalSkillInstallPath(skillName);
+  const installed = hasSkillDefinition(installedPath);
+  const actionDefinitionCount = countSkillActionDefinitions(installedPath);
+  const executorCount = countSkillExecutors(installedPath);
+  return {
+    installed,
+    status: installed ? "installed" : "needs_action",
+    summary: installed
+      ? `${skillName} daemon skill is installed locally.`
+      : `Install the ${skillName} daemon skill to enable local action loading.`,
+    skillName,
+    sourcePath,
+    installedPath,
+    actionDefinitionCount,
+    executorCount,
+  };
+}
+
 export function installGlobalCuedSkill(): GlobalCuedSkillInstallResult {
   const sourcePath = resolveCuedSkillSourcePath();
   if (!sourcePath) {
@@ -306,6 +375,66 @@ export function installGlobalCuedSkill(): GlobalCuedSkillInstallResult {
       stdout: formatted.stdout,
       stderr: formatted.stderr,
       error: formatted.message,
+    };
+  }
+}
+
+export function installLocalCuedSkill(sourcePathInput?: string): LocalSkillInstallResult {
+  const sourcePath = sourcePathInput ? resolve(sourcePathInput) : resolveCuedSkillSourcePath();
+  const skillName = sourcePath ? basename(sourcePath) : CUED_SKILL_NAME;
+  const installedPath = resolveLocalSkillInstallPath(skillName);
+  if (!sourcePath) {
+    return {
+      ok: false,
+      skillName,
+      scope: "daemon-local",
+      sourcePath: null,
+      installedPath,
+      actionDefinitionCount: 0,
+      executorCount: 0,
+      error: "Bundled Cued skill not found.",
+    };
+  }
+  if (!hasSkillDefinition(sourcePath)) {
+    return {
+      ok: false,
+      skillName,
+      scope: "daemon-local",
+      sourcePath,
+      installedPath,
+      actionDefinitionCount: 0,
+      executorCount: 0,
+      error: `Skill definition not found at ${sourcePath}.`,
+    };
+  }
+
+  try {
+    mkdirSync(dirname(installedPath), { recursive: true });
+    if (resolve(sourcePath) !== resolve(installedPath)) {
+      rmSync(installedPath, { recursive: true, force: true });
+      cpSync(sourcePath, installedPath, { recursive: true });
+      rmSync(join(installedPath, "cued-workspace"), { recursive: true, force: true });
+      rmSync(join(installedPath, "evals", "runs"), { recursive: true, force: true });
+    }
+    return {
+      ok: true,
+      skillName,
+      scope: "daemon-local",
+      sourcePath,
+      installedPath,
+      actionDefinitionCount: countSkillActionDefinitions(installedPath),
+      executorCount: countSkillExecutors(installedPath),
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      skillName,
+      scope: "daemon-local",
+      sourcePath,
+      installedPath,
+      actionDefinitionCount: 0,
+      executorCount: 0,
+      error: error instanceof Error ? error.message : String(error),
     };
   }
 }

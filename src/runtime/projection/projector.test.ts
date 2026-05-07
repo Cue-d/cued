@@ -28,7 +28,7 @@ describe("projector", () => {
     const dir = mkdtempSync(join(tmpdir(), "cued-projector-db-"));
     tempDirs.push(dir);
     const db = new CuedDatabase(join(dir, "local.db"));
-    db.migrate();
+    db.initializeSchema();
     return db;
   }
 
@@ -123,56 +123,6 @@ describe("projector", () => {
     expect(() => projectPendingRawEvents(db)).toThrowError(
       /Failed to normalize raw event \(row 1, event unsupported-schema, linkedin\/default, message:created, schema message\.created@99, sourceVersion linkedin-v99, providerApiVersion 2026-03, acquisitionMode realtime\): Unsupported normalized raw event schema 'message\.created@99'/,
     );
-
-    db.close();
-  });
-
-  it("projects legacy raw events without normalized schemas", () => {
-    const db = createDb();
-
-    db.orm().run(sql`
-      INSERT INTO raw_events (
-        id,
-        platform,
-        account_key,
-        entity_kind,
-        event_kind,
-        observed_at,
-        dedupe_key,
-        payload_json,
-        normalized_schema,
-        provenance_json,
-        source_version
-      ) VALUES (
-        'legacy-message-created',
-        'linkedin',
-        'default',
-        'message',
-        'message_created',
-        1710000000000,
-        'linkedin:legacy-message-created',
-        ${JSON.stringify({
-          sourceMessageKey: "msg-legacy",
-          sourceConversationKey: "thread-legacy",
-          senderSourceKey: "contacts:test",
-          sentAt: 1_710_000_000_000,
-          content: "legacy message",
-          service: "linkedin",
-          isFromMe: false,
-        })},
-        NULL,
-        NULL,
-        'linkedin-v1'
-      )
-    `);
-
-    expect(() => projectPendingRawEvents(db)).not.toThrow();
-    const rows = db.orm().all<{ content: string | null }>(sql`
-      SELECT content
-      FROM messages
-      WHERE platform_message_id = 'msg-legacy'
-    `);
-    expect(rows).toEqual([{ content: "legacy message" }]);
 
     db.close();
   });
@@ -2384,7 +2334,7 @@ describe("projector", () => {
     db.close();
   });
 
-  it("applies manual contact merge decisions during rebuild", () => {
+  it("applies executed contact merge action effects during rebuild", () => {
     const db = createDb();
 
     db.insertRawEvent({
@@ -2472,17 +2422,23 @@ describe("projector", () => {
     const primaryContactId = contactsBefore[0]!.id;
     const secondaryContactId = contactsBefore[1]!.id;
 
-    expect(
-      db.recordContactMergeDecision({
+    const action = db.createAction({
+      actionType: "contact.merge",
+      payload: {
         primaryContactId,
         secondaryContactId,
         reason: "manual merge",
-      }),
-    ).toEqual({
-      decisionId: expect.any(String),
-      primaryContactId,
-      secondaryContactId,
-      canonicalContactId: primaryContactId,
+      },
+      requiresApproval: false,
+    });
+    expect(db.executeApprovedAction(action.id, "test").result).toMatchObject({
+      decision: {
+        decisionId: expect.any(String),
+        primaryContactId,
+        secondaryContactId,
+        canonicalContactId: primaryContactId,
+        reason: "manual merge",
+      },
     });
 
     const projection = rebuildProjectedState(db);

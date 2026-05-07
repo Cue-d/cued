@@ -1,0 +1,19 @@
+{
+  "type": "contact.enrichment.recommend",
+  "version": "1",
+  "description": "Record a local-data-backed contact enrichment recommendation.",
+  "module": "actions/contact-enrichment-recommend.cjs",
+  "requiresApprovalDefault": true,
+  "payload": {
+    "required": {
+      "contactId": "string",
+      "field": "string",
+      "value": "string"
+    },
+    "optional": {
+      "sourceKind": "string",
+      "evidence": "object",
+      "confidence": "number"
+    }
+  }
+}

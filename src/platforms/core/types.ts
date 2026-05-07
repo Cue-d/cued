@@ -298,6 +298,34 @@ export const JOB_STATUS_VALUES = [
 ] as const;
 export type JobStatus = (typeof JOB_STATUS_VALUES)[number];
 
+export const ACTION_STATUS_VALUES = [
+  "proposed",
+  "approved",
+  "denied",
+  "executing",
+  "executed",
+  "failed",
+  "canceled",
+] as const;
+export type ActionStatus = (typeof ACTION_STATUS_VALUES)[number];
+
+export const ACTION_APPROVAL_STATUS_VALUES = [
+  "pending",
+  "approved",
+  "denied",
+  "auto_approved",
+] as const;
+export type ActionApprovalStatus = (typeof ACTION_APPROVAL_STATUS_VALUES)[number];
+
+export const ACTION_EXECUTION_STATUS_VALUES = [
+  "pending",
+  "running",
+  "succeeded",
+  "failed",
+  "skipped",
+] as const;
+export type ActionExecutionStatus = (typeof ACTION_EXECUTION_STATUS_VALUES)[number];
+
 export const RAW_EVENT_ENTITY_KIND_VALUES = [
   "contact",
   "conversation",

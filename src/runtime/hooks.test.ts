@@ -7,10 +7,16 @@ describe("hooks service", () => {
   const tempDirs: string[] = [];
   const originalHome = process.env.HOME;
   const originalUserProfile = process.env.USERPROFILE;
+  const originalCuedHome = process.env.CUED_HOME;
 
   afterEach(() => {
     process.env.HOME = originalHome;
     process.env.USERPROFILE = originalUserProfile;
+    if (originalCuedHome === undefined) {
+      delete process.env.CUED_HOME;
+    } else {
+      process.env.CUED_HOME = originalCuedHome;
+    }
     while (tempDirs.length > 0) {
       const dir = tempDirs.pop();
       if (dir) {
@@ -24,6 +30,7 @@ describe("hooks service", () => {
     tempDirs.push(dir);
     process.env.HOME = dir;
     process.env.USERPROFILE = dir;
+    process.env.CUED_HOME = join(dir, ".cued");
     return dir;
   }
 

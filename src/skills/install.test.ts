@@ -17,8 +17,11 @@ vi.mock("node:child_process", async (importOriginal) => {
 
 import {
   getGlobalCuedSkillStatus,
+  getLocalCuedSkillStatus,
   installGlobalCuedSkill,
+  installLocalCuedSkill,
   resolveCuedSkillSourcePath,
+  resolveLocalCuedSkillInstallPath,
   resolveNvmNpxPath,
 } from "./install.js";
 
@@ -90,6 +93,23 @@ describe("cued skill installer", () => {
     writeFileSync(
       join(skillDir, "SKILL.md"),
       "---\nname: cued\ndescription: test skill\n---\n",
+      "utf8",
+    );
+    mkdirSync(join(skillDir, "actions"), { recursive: true });
+    writeFileSync(
+      join(skillDir, "actions", "test.echo.json"),
+      JSON.stringify({
+        type: "test.echo",
+        version: "1",
+        description: "Echo test action",
+        module: "actions/test-echo.cjs",
+        payload: { required: {}, optional: {} },
+      }),
+      "utf8",
+    );
+    writeFileSync(
+      join(skillDir, "actions", "test-echo.cjs"),
+      "module.exports = { execute: () => ({ result: { ok: true }, effects: [] }) };\n",
       "utf8",
     );
     return appPath;
@@ -175,6 +195,84 @@ describe("cued skill installer", () => {
         installed: true,
         status: "installed",
         installedPath: "~/.agents/skills/cued",
+      }),
+    );
+  });
+
+  it("installs the bundled cued skill into the daemon-local skill root", () => {
+    const homeDir = setTempHome();
+    const appPath = createAppBundle(createTempDir("cued-skill-app-"));
+    process.env.CUED_APP_PATH = appPath;
+
+    expect(resolveLocalCuedSkillInstallPath()).toBe(join(homeDir, ".cued", "skills", "cued"));
+    expect(getLocalCuedSkillStatus()).toEqual(
+      expect.objectContaining({
+        installed: false,
+        status: "needs_action",
+        installedPath: join(homeDir, ".cued", "skills", "cued"),
+      }),
+    );
+    expect(installLocalCuedSkill()).toEqual(
+      expect.objectContaining({
+        ok: true,
+        scope: "daemon-local",
+        sourcePath: join(appPath, "Contents", "Resources", "skills", "cued"),
+        installedPath: join(homeDir, ".cued", "skills", "cued"),
+        actionDefinitionCount: 1,
+        executorCount: 1,
+      }),
+    );
+    expect(getLocalCuedSkillStatus()).toEqual(
+      expect.objectContaining({
+        installed: true,
+        status: "installed",
+        actionDefinitionCount: 1,
+        executorCount: 1,
+      }),
+    );
+  });
+
+  it("installs arbitrary skill roots into the daemon-local skill root", () => {
+    const homeDir = setTempHome();
+    const sourceRoot = join(createTempDir("cued-custom-skill-source-"), "custom-actions");
+    mkdirSync(join(sourceRoot, "actions"), { recursive: true });
+    writeFileSync(join(sourceRoot, "SKILL.md"), "---\nname: custom-actions\n---\n", "utf8");
+    writeFileSync(
+      join(sourceRoot, "actions", "custom.note.json"),
+      JSON.stringify({
+        type: "custom.note",
+        version: "1",
+        description: "Custom note action",
+        module: "actions/custom-note.cjs",
+        payload: { required: {}, optional: {} },
+      }),
+      "utf8",
+    );
+    writeFileSync(
+      join(sourceRoot, "actions", "custom-note.cjs"),
+      "module.exports = { execute: () => ({ result: { ok: true }, effects: [] }) };\n",
+      "utf8",
+    );
+
+    expect(installLocalCuedSkill(sourceRoot)).toEqual(
+      expect.objectContaining({
+        ok: true,
+        skillName: "custom-actions",
+        scope: "daemon-local",
+        sourcePath: sourceRoot,
+        installedPath: join(homeDir, ".cued", "skills", "custom-actions"),
+        actionDefinitionCount: 1,
+        executorCount: 1,
+      }),
+    );
+    expect(getLocalCuedSkillStatus("custom-actions")).toEqual(
+      expect.objectContaining({
+        installed: true,
+        skillName: "custom-actions",
+        sourcePath: null,
+        installedPath: join(homeDir, ".cued", "skills", "custom-actions"),
+        actionDefinitionCount: 1,
+        executorCount: 1,
       }),
     );
   });

@@ -57,7 +57,7 @@ describe("IntegrationAuthService", () => {
     const dir = mkdtempSync(join(tmpdir(), "cued-auth-service-db-"));
     tempDirs.push(dir);
     const db = new CuedDatabase(join(dir, "local.db"));
-    db.migrate();
+    db.initializeSchema();
     return db;
   }
 

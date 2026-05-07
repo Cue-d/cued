@@ -42,7 +42,7 @@ describe("attachment service", () => {
     const dir = mkdtempSync(join(tmpdir(), "cued-attachments-db-"));
     tempDirs.push(dir);
     const db = new CuedDatabase(join(dir, "local.db"));
-    db.migrate();
+    db.initializeSchema();
     return db;
   }
 

@@ -6,7 +6,7 @@ describe("signal worker lib", () => {
     const bundle = await buildSignalSyncBundle({
       accountKey: "default",
       account: "+14155550000",
-      lastSyncAt: 1_700_000_000_000,
+      sourceCursor: { lastSyncAt: 1_700_000_000_000 },
       client: {
         async listContacts() {
           return [

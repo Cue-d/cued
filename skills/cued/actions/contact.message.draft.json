@@ -1,0 +1,19 @@
+{
+  "type": "contact.message.draft",
+  "version": "1",
+  "description": "Record a harmless drafted message for a contact without sending it.",
+  "module": "actions/contact-message-draft.cjs",
+  "requiresApprovalDefault": true,
+  "payload": {
+    "required": {
+      "contactId": "string",
+      "body": "string",
+      "reason": "string"
+    },
+    "optional": {
+      "channelHint": "string",
+      "evidence": "object",
+      "confidence": "number"
+    }
+  }
+}

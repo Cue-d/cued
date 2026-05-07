@@ -204,7 +204,7 @@
         "Searched contact_handles for matching normalized_value across different contact_ids",
         "Joined to contacts to show names and to contact_sources for platform info",
         "Identified cross-platform duplicates (e.g., same person on iMessage and Slack)",
-        "Suggested using cued contacts merge <primary-id> <secondary-id> to merge duplicates",
+        "Suggested proposing contact.merge actions with primaryContactId and secondaryContactId payloads",
         "Handled phone-number-as-name contacts (name LIKE '+%') as likely duplicates"
       ]
     },
@@ -217,7 +217,7 @@
         "Searched contact_handles for the phone number's normalized_value",
         "Found both the phone-number contact and any named contacts sharing the same number",
         "Showed the named contact's details (name, platform, handles)",
-        "Suggested merging the two contacts using cued contacts merge <primary-id> <secondary-id>",
+        "Suggested merging the two contacts by proposing a contact.merge action",
         "Checked recent messages to provide additional context about who this person is"
       ]
     },
@@ -332,7 +332,7 @@
         "Joined contact_sources to show cross-platform evidence for each duplicate pair or cluster",
         "Proposed autonomous merges only for high-confidence cases, not weak same-name guesses",
         "Identified which contact should be canonical before merging",
-        "Suggested using cued contacts merge <primary-id> <secondary-id> for each safe merge"
+        "Suggested proposing one contact.merge action for each safe merge"
       ]
     },
     {
@@ -454,6 +454,84 @@
         "Specified which external profile targets would be useful next, such as LinkedIn, GitHub, Twitter, websites, or portfolio context",
         "Explained how local and external evidence should aggregate into one canonical contact record",
         "Did not skip the local-first pass before proposing external enrichment"
+      ]
+    },
+    {
+      "id": 36,
+      "prompt": "Find people I should follow up with from recent unanswered inbound messages, but do not send anything. Queue harmless follow-up recommendations that I can review.",
+      "expected_output": "A reviewable set of follow-up recommendations grounded in recent local messages. Each recommendation should map to a contact.followup.recommend action payload and should not send any message.",
+      "files": [],
+      "expectations": [
+        "Found contacts from conversations where a recent inbound message has no newer outbound reply",
+        "Resolved each candidate to a contact_id",
+        "Created or suggested contact.followup.recommend action payloads instead of sending messages",
+        "Included a reason and evidence for each recommendation",
+        "Did not mutate state unless an explicit approval/execution command was run"
+      ]
+    },
+    {
+      "id": 37,
+      "prompt": "Find profile fields that can be enriched from local data already in Cued, but do not rewrite contacts yet. Queue enrichment recommendations I can review.",
+      "expected_output": "A reviewable set of local-data-backed enrichment recommendations. Each recommendation should map to a contact.enrichment.recommend action payload and should not rewrite contact fields.",
+      "files": [],
+      "expectations": [
+        "Looked for enrichment evidence in contact_sources, contact_handles, conversations, and messages",
+        "Resolved each recommendation to a contact_id",
+        "Created or suggested contact.enrichment.recommend action payloads instead of updating contacts directly",
+        "Included field, value, sourceKind, confidence, and evidence for each recommendation",
+        "Did not mutate state unless an explicit approval/execution command was run"
+      ]
+    },
+    {
+      "id": 38,
+      "prompt": "Find people I might want to introduce to each other from my local message graph, but do not message anyone. Queue reviewable introduction recommendations only.",
+      "expected_output": "A reviewable set of introduction recommendations grounded in local Cued relationship evidence. Each recommendation should map to a contact.introduction.recommend action payload and should not send messages.",
+      "files": [],
+      "expectations": [
+        "Resolved each side of the recommendation to a contact_id",
+        "Used local relationship evidence such as shared topics, shared conversations, or complementary context",
+        "Created or suggested contact.introduction.recommend action payloads instead of sending messages",
+        "Included a reason, suggestedIntro when useful, confidence, and evidence for each recommendation",
+        "Did not mutate state unless an explicit approval/execution command was run"
+      ]
+    },
+    {
+      "id": 39,
+      "prompt": "Draft replies for recent unanswered inbound messages, but do not send them. Queue message drafts I can review.",
+      "expected_output": "A reviewable set of drafted message actions grounded in recent local conversations. Each draft should map to a contact.message.draft action payload and should not send anything.",
+      "files": [],
+      "expectations": [
+        "Found recent inbound messages with no newer outbound reply",
+        "Resolved each draft target to a contact_id",
+        "Created or suggested contact.message.draft action payloads instead of sending messages",
+        "Included body, reason, channelHint when known, confidence, and evidence for each draft",
+        "Did not mutate state unless an explicit approval/execution command was run"
+      ]
+    },
+    {
+      "id": 40,
+      "prompt": "Draft concise summaries for my recent active conversations so I can review them later, but do not rewrite messages or memories.",
+      "expected_output": "A reviewable set of drafted conversation summary actions grounded in recent local messages. Each item should map to a conversation.summary.draft action payload and should not mutate messages.",
+      "files": [],
+      "expectations": [
+        "Found recent active conversations with enough message history to summarize",
+        "Resolved each draft to a conversationId",
+        "Created or suggested conversation.summary.draft action payloads instead of writing summaries into messages or memories",
+        "Included summary, reason, timeWindow, confidence, and evidence for each draft",
+        "Did not mutate state unless an explicit approval/execution command was run"
+      ]
+    },
+    {
+      "id": 41,
+      "prompt": "Find recent conversations that need a next step, but do not message anyone. Queue conversation-level follow-up recommendations.",
+      "expected_output": "A reviewable set of conversation follow-up recommendation actions grounded in recent local messages. Each item should map to a conversation.followup.recommend action payload and should not send messages.",
+      "files": [],
+      "expectations": [
+        "Found recent active conversations that may need a next step",
+        "Resolved each recommendation to a conversationId",
+        "Created or suggested conversation.followup.recommend action payloads instead of sending messages",
+        "Included reason, suggestedNextStep when useful, confidence, and evidence for each recommendation",
+        "Did not mutate state unless an explicit approval/execution command was run"
       ]
     }
   ]

@@ -1,0 +1,19 @@
+{
+  "type": "contact.memory.add",
+  "version": "1",
+  "description": "Add an evidence-backed durable memory to a contact.",
+  "module": "actions/contact-memory-add.cjs",
+  "requiresApprovalDefault": true,
+  "payload": {
+    "required": {
+      "contactId": "string",
+      "body": "string"
+    },
+    "optional": {
+      "sourceKind": "string",
+      "evidence": "object",
+      "confidence": "number",
+      "supersedesMemoryId": "string"
+    }
+  }
+}

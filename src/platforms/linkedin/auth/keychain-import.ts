@@ -2,18 +2,12 @@ import { join } from "node:path";
 import { CUED_BROWSER_DIR } from "../../../core/config.js";
 import { safeParseJsonRecord, safeParseJsonStringArray } from "../../../db/codecs.js";
 import type { CuedDatabase } from "../../../db/database.js";
-import {
-  authKeychainService,
-  legacyAuthKeychainService,
-  loadKeychainSecret,
-  storeKeychainSecret,
-} from "../../core/secrets/keychain.js";
+import { authKeychainService, loadKeychainSecret } from "../../core/secrets/keychain.js";
 import { completeAuthSession } from "../../core/state/mutations.js";
 import { isUserRemovedIntegrationMetadata } from "../../core/state/status.js";
 import { type LinkedInSessionSecret, parseLinkedInSessionSecret } from "./session-store.js";
 
 const LINKEDIN_KEYCHAIN_SERVICE = authKeychainService("linkedin");
-const LEGACY_LINKEDIN_KEYCHAIN_SERVICE = legacyAuthKeychainService("linkedin");
 const LINKEDIN_DEFAULT_ACCOUNT_KEY = "default";
 
 export interface ImportedLinkedInSessionResult {
@@ -24,18 +18,6 @@ export interface ImportedLinkedInSessionResult {
 
 function getChromiumProfileDir(accountKey: string): string {
   return join(CUED_BROWSER_DIR, "linkedin", accountKey);
-}
-
-function readLinkedInKeychainSecret(accountKey: string): Record<string, unknown> | null {
-  const current = loadKeychainSecret(LINKEDIN_KEYCHAIN_SERVICE, accountKey);
-  if (current) {
-    return current;
-  }
-  const legacy = loadKeychainSecret(LEGACY_LINKEDIN_KEYCHAIN_SERVICE, accountKey);
-  if (legacy) {
-    storeKeychainSecret(LINKEDIN_KEYCHAIN_SERVICE, accountKey, legacy);
-  }
-  return legacy;
 }
 
 function getCookieNames(session: LinkedInSessionSecret): string[] {
@@ -55,7 +37,7 @@ export function importLinkedInStoredAuth(
   options: { reviveUserRemoved?: boolean } = {},
 ): ImportedLinkedInSessionResult[] {
   const accountKey = LINKEDIN_DEFAULT_ACCOUNT_KEY;
-  const secret = readLinkedInKeychainSecret(accountKey);
+  const secret = loadKeychainSecret(LINKEDIN_KEYCHAIN_SERVICE, accountKey);
   if (!secret) {
     return [];
   }

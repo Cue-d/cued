@@ -1,12 +1,18 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { existsSync, rmSync } from "node:fs";
 import type Database from "better-sqlite3-multiple-ciphers";
 import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import { type BetterSQLite3Database, drizzle } from "drizzle-orm/better-sqlite3";
 import type { SQLiteTable } from "drizzle-orm/sqlite-core";
+import { type ActionSkillDatabase, actionExecutionHelpers } from "../actions/execution.js";
+import { loadActionExecutor } from "../actions/executor-loader.js";
+import { ActionDefinitionRegistry } from "../actions/registry.js";
 import { getCurrentAppVersion, getCurrentReleaseChannel } from "../core/app-metadata.js";
 import { CUED_DB_PATH, ensureCuedDirs } from "../core/config.js";
 import type {
+  ActionApprovalStatus,
+  ActionExecutionStatus,
+  ActionStatus,
   AuthSessionState,
   ConnectionKind,
   IntegrationAuthState,
@@ -39,16 +45,17 @@ import type {
   UpdateStatusSnapshot,
 } from "../runtime/updater/types.js";
 import { safeParseJson, safeStringifyJson } from "./codecs.js";
-import { MIGRATIONS } from "./migrations.js";
 import * as schema from "./schema.js";
+import { CURRENT_SCHEMA_SQL } from "./schema-bootstrap.js";
 import { openSqliteDatabase } from "./sqlite.js";
 
 const {
+  actionEffects,
+  actions,
   attachmentCache,
   attachmentContent,
   appSettings,
   authSessions,
-  contactMergeDecisions,
   contactHandles,
   contactMemories,
   contactSources,
@@ -66,7 +73,6 @@ const {
   projectionState,
   rawEvents,
   sourceAccounts,
-  slackBackfillProofs,
   syncProofs,
   syncScopes,
   syncCheckpoints,
@@ -87,6 +93,10 @@ const APP_SETTING_KEYS = {
   updateReleaseState: "update_release_state_json",
 } as const;
 const DEFAULT_SQLITE_BUSY_TIMEOUT_MS = 5_000;
+
+function hashActionPayload(payloadJson: string): string {
+  return createHash("sha256").update(payloadJson).digest("hex");
+}
 
 export interface DaemonStatusRow {
   singleton_key: "daemon";
@@ -141,6 +151,85 @@ export interface MessageFtsIndexQueueRow {
   last_error: string | null;
 }
 
+export interface ActionRow {
+  id: string;
+  action_type: string;
+  action_version: string;
+  status: ActionStatus;
+  approval_status: ActionApprovalStatus;
+  execution_status: ActionExecutionStatus;
+  priority: number;
+  title: string | null;
+  summary: string | null;
+  payload_json: string;
+  payload_hash: string;
+  result_json: string | null;
+  error_json: string | null;
+  source_skill: string | null;
+  source_job_id: string | null;
+  created_by: string;
+  approved_by: string | null;
+  denied_by: string | null;
+  executed_by: string | null;
+  requires_approval: number;
+  queued_at: number;
+  approved_at: number | null;
+  denied_at: number | null;
+  locked_at: number | null;
+  started_at: number | null;
+  executed_at: number | null;
+  updated_at: number;
+  dedupe_key: string | null;
+}
+
+export interface ActionEffectRow {
+  id: string;
+  action_id: string;
+  effect_type: string;
+  target_table: string | null;
+  target_id: string | null;
+  payload_json: string | null;
+  applied_at: number;
+  reverted_at: number | null;
+}
+
+export interface ExecutedActionResult {
+  action: ActionRow;
+  effects: ActionEffectRow[];
+  result: unknown;
+}
+
+const ACTION_ROW_COLUMNS = `
+  id,
+  action_type,
+  action_version,
+  status,
+  approval_status,
+  execution_status,
+  priority,
+  title,
+  summary,
+  payload_json,
+  payload_hash,
+  result_json,
+  error_json,
+  source_skill,
+  source_job_id,
+  created_by,
+  approved_by,
+  denied_by,
+  executed_by,
+  requires_approval,
+  queued_at,
+  approved_at,
+  denied_at,
+  locked_at,
+  started_at,
+  executed_at,
+  updated_at,
+  dedupe_key
+`;
+
 export interface ContactMemoryRow {
   id: string;
   contact_id: string;
@@ -154,20 +243,6 @@ export interface ContactMemoryRow {
   created_by: string | null;
   created_at: number;
   updated_at: number;
-}
-
-export interface ContactMergeBatchInput {
-  primaryContactId: string;
-  secondaryContactId: string;
-  reason?: string | null;
-}
-
-export interface PlannedContactMergeDecision {
-  decisionId: string;
-  primaryContactId: string;
-  secondaryContactId: string;
-  canonicalContactId: string;
-  reason: string | null;
 }
 
 export interface ProjectionStateRow {
@@ -240,17 +315,6 @@ export interface SyncProofRow {
   error_json: string | null;
   created_at: number;
   updated_at: number;
-}
-
-export interface ContactMergeDecisionRow {
-  id: string;
-  decision_type: string;
-  primary_contact_id: string;
-  secondary_contact_id: string;
-  canonical_contact_id: string;
-  reason: string | null;
-  created_by: string | null;
-  created_at: number;
 }
 
 function buildSyncScopeId(
@@ -512,23 +576,6 @@ function now(): number {
   return Date.now();
 }
 
-function resolveCanonicalContactIdFromAliases(
-  contactId: string,
-  aliasMap: Map<string, string>,
-): string {
-  const seen = new Set<string>();
-  let current = contactId;
-  while (!seen.has(current)) {
-    seen.add(current);
-    const next = aliasMap.get(current);
-    if (!next || next === current) {
-      return current;
-    }
-    current = next;
-  }
-  throw new Error(`Contact merge alias cycle detected at ${current}`);
-}
-
 function chunkArray<T>(items: readonly T[], size: number): T[][] {
   const chunks: T[][] = [];
   for (let index = 0; index < items.length; index += size) {
@@ -590,39 +637,8 @@ export class CuedDatabase {
     this.db = drizzle(this.sqlite, { schema });
   }
 
-  migrate(): void {
-    for (const migration of MIGRATIONS) {
-      const alreadyApplied = this.sqlite
-        .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'schema_migrations'")
-        .get() as { 1: number } | undefined;
-
-      if (alreadyApplied) {
-        const migrationIds = [migration.id, ...(migration.legacyIds ?? [])];
-        const placeholders = migrationIds.map(() => "?").join(", ");
-        const applied = this.sqlite
-          .prepare(`SELECT id FROM schema_migrations WHERE id IN (${placeholders}) LIMIT 1`)
-          .get(...migrationIds) as { id: string } | undefined;
-        if (applied) {
-          continue;
-        }
-      }
-
-      this.sqlite.exec("BEGIN");
-      try {
-        if (migration.apply) {
-          migration.apply(this.sqlite);
-        } else if (migration.sql) {
-          this.sqlite.exec(migration.sql);
-        }
-        this.sqlite
-          .prepare("INSERT OR IGNORE INTO schema_migrations (id, applied_at) VALUES (?, ?)")
-          .run(migration.id, now());
-        this.sqlite.exec("COMMIT");
-      } catch (error) {
-        this.sqlite.exec("ROLLBACK");
-        throw error;
-      }
-    }
+  initializeSchema(): void {
+    this.sqlite.exec(CURRENT_SCHEMA_SQL);
   }
 
   close(): void {
@@ -648,165 +664,502 @@ export class CuedDatabase {
     return statement.all();
   }
 
-  listContactMergeDecisions(): ContactMergeDecisionRow[] {
-    return this.db
-      .select({
-        id: contactMergeDecisions.id,
-        decision_type: contactMergeDecisions.decisionType,
-        primary_contact_id: contactMergeDecisions.primaryContactId,
-        secondary_contact_id: contactMergeDecisions.secondaryContactId,
-        canonical_contact_id: contactMergeDecisions.canonicalContactId,
-        reason: contactMergeDecisions.reason,
-        created_by: contactMergeDecisions.createdBy,
-        created_at: contactMergeDecisions.createdAt,
-      })
-      .from(contactMergeDecisions)
-      .orderBy(asc(contactMergeDecisions.createdAt), asc(contactMergeDecisions.id))
-      .all() as ContactMergeDecisionRow[];
-  }
-
-  listContactMergeAliases(): Array<{
-    contact_id: string;
-    canonical_contact_id: string;
-  }> {
-    return this.db
-      .select({
-        contact_id: contactMergeDecisions.secondaryContactId,
-        canonical_contact_id: contactMergeDecisions.canonicalContactId,
-      })
-      .from(contactMergeDecisions)
-      .where(eq(contactMergeDecisions.decisionType, "merge"))
-      .orderBy(asc(contactMergeDecisions.createdAt), asc(contactMergeDecisions.id))
-      .all() as Array<{
-      contact_id: string;
-      canonical_contact_id: string;
-    }>;
-  }
-
-  resolveCanonicalContactId(contactId: string): string {
-    const aliasMap = new Map(
-      this.listContactMergeAliases().map((row) => [row.contact_id, row.canonical_contact_id]),
-    );
-    return resolveCanonicalContactIdFromAliases(contactId, aliasMap);
-  }
-
-  planContactMergeDecisions(input: ContactMergeBatchInput[]): PlannedContactMergeDecision[] {
-    if (input.length === 0) {
-      throw new Error("At least one contact merge is required.");
-    }
-
-    const aliasMap = new Map(
-      this.listContactMergeAliases().map((row) => [row.contact_id, row.canonical_contact_id]),
-    );
-    const planned: PlannedContactMergeDecision[] = [];
-    for (const merge of input) {
-      const primaryContactId = merge.primaryContactId.trim();
-      const secondaryContactId = merge.secondaryContactId.trim();
-      if (!primaryContactId || !secondaryContactId) {
-        throw new Error("Primary and secondary contact ids are required.");
-      }
-      if (primaryContactId === secondaryContactId) {
-        throw new Error("Cannot merge a contact into itself");
-      }
-
-      this.assertContactExists(primaryContactId, "Primary");
-      this.assertContactExists(secondaryContactId, "Secondary");
-
-      const canonicalPrimary = resolveCanonicalContactIdFromAliases(primaryContactId, aliasMap);
-      const canonicalSecondary = resolveCanonicalContactIdFromAliases(secondaryContactId, aliasMap);
-      if (canonicalPrimary === canonicalSecondary) {
-        throw new Error(
-          `Contacts already resolve to the same canonical contact: ${canonicalPrimary}`,
-        );
-      }
-
-      aliasMap.set(canonicalSecondary, canonicalPrimary);
-      resolveCanonicalContactIdFromAliases(canonicalSecondary, aliasMap);
-      planned.push({
-        decisionId: randomUUID(),
-        primaryContactId: canonicalPrimary,
-        secondaryContactId: canonicalSecondary,
-        canonicalContactId: canonicalPrimary,
-        reason: merge.reason ?? null,
-      });
-    }
-    return planned;
-  }
-
-  recordContactMergeDecision(input: {
-    primaryContactId: string;
-    secondaryContactId: string;
-    reason?: string | null;
+  createAction(input: {
+    actionType: string;
+    actionVersion?: string;
+    payload: unknown;
+    priority?: number;
+    title?: string | null;
+    summary?: string | null;
+    sourceSkill?: string | null;
+    sourceJobId?: string | null;
     createdBy?: string | null;
-  }): {
-    decisionId: string;
-    primaryContactId: string;
-    secondaryContactId: string;
-    canonicalContactId: string;
-  } {
-    const [decision] = this.recordContactMergeDecisionsBatch(
-      [
-        {
-          primaryContactId: input.primaryContactId,
-          secondaryContactId: input.secondaryContactId,
-          reason: input.reason ?? null,
-        },
-      ],
-      { createdBy: input.createdBy },
+    requiresApproval?: boolean;
+    dedupeKey?: string | null;
+  }): ActionRow {
+    const actionType = input.actionType.trim();
+    const actionVersion = (input.actionVersion ?? "1").trim();
+    const createdBy = (input.createdBy ?? "agent").trim() || "agent";
+    if (!actionType) {
+      throw new Error("Action type is required.");
+    }
+    if (!actionVersion) {
+      throw new Error("Action version is required.");
+    }
+
+    const payloadJson = safeStringifyJson(input.payload);
+    if (payloadJson === null) {
+      throw new Error("Action payload must be JSON-serializable.");
+    }
+
+    const queuedAt = now();
+    const requiresApproval = input.requiresApproval ?? true;
+    const id = randomUUID();
+    this.db
+      .insert(actions)
+      .values({
+        id,
+        actionType,
+        actionVersion,
+        status: requiresApproval ? "proposed" : "approved",
+        approvalStatus: requiresApproval ? "pending" : "auto_approved",
+        executionStatus: "pending",
+        priority: Math.trunc(input.priority ?? 0),
+        title: input.title ?? null,
+        summary: input.summary ?? null,
+        payloadJson,
+        payloadHash: hashActionPayload(payloadJson),
+        resultJson: null,
+        errorJson: null,
+        sourceSkill: input.sourceSkill ?? null,
+        sourceJobId: input.sourceJobId ?? null,
+        createdBy,
+        approvedBy: requiresApproval ? null : "system",
+        deniedBy: null,
+        executedBy: null,
+        requiresApproval: requiresApproval ? 1 : 0,
+        queuedAt,
+        approvedAt: requiresApproval ? null : queuedAt,
+        deniedAt: null,
+        lockedAt: null,
+        startedAt: null,
+        executedAt: null,
+        updatedAt: queuedAt,
+        dedupeKey: input.dedupeKey ?? null,
+      })
+      .run();
+
+    return this.getAction(id)!;
+  }
+
+  getAction(id: string): ActionRow | null {
+    return (
+      (this.sqlite
+        .prepare(
+          `
+          SELECT ${ACTION_ROW_COLUMNS}
+          FROM actions
+          WHERE id = ?
+          LIMIT 1
+        `,
+        )
+        .get(id) as ActionRow | undefined) ?? null
     );
+  }
+
+  listActions(input: { status?: ActionStatus; limit?: number } = {}): ActionRow[] {
+    const filters: string[] = [];
+    const params: unknown[] = [];
+    if (input.status) {
+      filters.push("status = ?");
+      params.push(input.status);
+    }
+    const limit =
+      typeof input.limit === "number" && Number.isFinite(input.limit)
+        ? Math.max(1, Math.min(500, Math.trunc(input.limit)))
+        : 100;
+    params.push(limit);
+
+    return this.sqlite
+      .prepare(
+        `
+        SELECT ${ACTION_ROW_COLUMNS}
+        FROM actions
+        ${filters.length > 0 ? `WHERE ${filters.join(" AND ")}` : ""}
+        ORDER BY priority ASC, queued_at ASC, id ASC
+        LIMIT ?
+      `,
+      )
+      .all(...params) as ActionRow[];
+  }
+
+  listApprovedPendingActions(limit = 25): ActionRow[] {
+    const normalizedLimit =
+      Number.isFinite(limit) && limit > 0 ? Math.max(1, Math.min(100, Math.trunc(limit))) : 25;
+    return this.sqlite
+      .prepare(
+        `
+        SELECT ${ACTION_ROW_COLUMNS}
+        FROM actions
+        WHERE status = 'approved'
+          AND approval_status IN ('approved', 'auto_approved')
+          AND execution_status = 'pending'
+        ORDER BY priority ASC, approved_at ASC, queued_at ASC, id ASC
+        LIMIT ?
+      `,
+      )
+      .all(normalizedLimit) as ActionRow[];
+  }
+
+  updateActionPayload(id: string, payload: unknown): ActionRow {
+    const action = this.getAction(id);
+    if (!action) {
+      throw new Error(`Action not found: ${id}`);
+    }
+    if (action.locked_at !== null || action.execution_status !== "pending") {
+      throw new Error("Cannot update an action payload after execution has started.");
+    }
+    if (action.status !== "proposed" && action.status !== "approved") {
+      throw new Error(`Cannot update an action payload in status '${action.status}'.`);
+    }
+
+    const payloadJson = safeStringifyJson(payload);
+    if (payloadJson === null) {
+      throw new Error("Action payload must be JSON-serializable.");
+    }
+    const timestamp = now();
+    this.db
+      .update(actions)
+      .set({
+        payloadJson,
+        payloadHash: hashActionPayload(payloadJson),
+        updatedAt: timestamp,
+      })
+      .where(eq(actions.id, id))
+      .run();
+    return this.getAction(id)!;
+  }
+
+  approveAction(id: string, approvedBy = "user"): ActionRow {
+    const action = this.getAction(id);
+    if (!action) {
+      throw new Error(`Action not found: ${id}`);
+    }
+    if (action.approval_status === "denied") {
+      throw new Error("Cannot approve a denied action.");
+    }
+    if (action.locked_at !== null || action.execution_status !== "pending") {
+      throw new Error("Cannot approve an action after execution has started.");
+    }
+    const timestamp = now();
+    this.db
+      .update(actions)
+      .set({
+        status: "approved",
+        approvalStatus: "approved",
+        approvedBy,
+        approvedAt: timestamp,
+        updatedAt: timestamp,
+      })
+      .where(eq(actions.id, id))
+      .run();
+    return this.getAction(id)!;
+  }
+
+  denyAction(id: string, deniedBy = "user"): ActionRow {
+    const action = this.getAction(id);
+    if (!action) {
+      throw new Error(`Action not found: ${id}`);
+    }
+    if (action.approval_status === "approved" || action.approval_status === "auto_approved") {
+      throw new Error("Cannot deny an approved action.");
+    }
+    if (action.locked_at !== null || action.execution_status !== "pending") {
+      throw new Error("Cannot deny an action after execution has started.");
+    }
+    const timestamp = now();
+    this.db
+      .update(actions)
+      .set({
+        status: "denied",
+        approvalStatus: "denied",
+        deniedBy,
+        deniedAt: timestamp,
+        updatedAt: timestamp,
+      })
+      .where(eq(actions.id, id))
+      .run();
+    return this.getAction(id)!;
+  }
+
+  lockActionForExecution(id: string, executedBy = "daemon"): ActionRow {
+    const timestamp = now();
+    const result = this.sqlite
+      .prepare(
+        `
+        UPDATE actions
+        SET status = 'executing',
+            execution_status = 'running',
+            executed_by = ?,
+            locked_at = ?,
+            started_at = ?,
+            updated_at = ?
+        WHERE id = ?
+          AND approval_status IN ('approved', 'auto_approved')
+          AND execution_status = 'pending'
+          AND locked_at IS NULL
+      `,
+      )
+      .run(executedBy, timestamp, timestamp, timestamp, id);
+    if (result.changes !== 1) {
+      const action = this.getAction(id);
+      if (!action) {
+        throw new Error(`Action not found: ${id}`);
+      }
+      if (action.approval_status !== "approved" && action.approval_status !== "auto_approved") {
+        throw new Error("Action must be approved before execution.");
+      }
+      throw new Error(
+        `Cannot execute an action with execution status '${action.execution_status}'.`,
+      );
+    }
+    return this.getAction(id)!;
+  }
+
+  completeAction(id: string, result?: unknown): ActionRow {
+    const action = this.getAction(id);
+    if (!action) {
+      throw new Error(`Action not found: ${id}`);
+    }
+    if (action.execution_status !== "running") {
+      throw new Error("Only running actions can be completed.");
+    }
+    const timestamp = now();
+    this.db
+      .update(actions)
+      .set({
+        status: "executed",
+        executionStatus: "succeeded",
+        resultJson: safeStringifyJson(result),
+        executedAt: timestamp,
+        updatedAt: timestamp,
+      })
+      .where(eq(actions.id, id))
+      .run();
+    return this.getAction(id)!;
+  }
+
+  failAction(id: string, error: unknown): ActionRow {
+    const action = this.getAction(id);
+    if (!action) {
+      throw new Error(`Action not found: ${id}`);
+    }
+    if (action.execution_status !== "running") {
+      throw new Error("Only running actions can fail.");
+    }
+    const timestamp = now();
+    this.db
+      .update(actions)
+      .set({
+        status: "failed",
+        executionStatus: "failed",
+        errorJson: safeStringifyJson({
+          message: error instanceof Error ? error.message : String(error),
+          failedAt: timestamp,
+        }),
+        executedAt: timestamp,
+        updatedAt: timestamp,
+      })
+      .where(eq(actions.id, id))
+      .run();
+    return this.getAction(id)!;
+  }
+
+  recordActionEffect(input: {
+    actionId: string;
+    effectType: string;
+    targetTable?: string | null;
+    targetId?: string | null;
+    payload?: unknown;
+    appliedAt?: number;
+  }): ActionEffectRow {
+    const action = this.getAction(input.actionId);
+    if (!action) {
+      throw new Error(`Action not found: ${input.actionId}`);
+    }
+    const effectType = input.effectType.trim();
+    if (!effectType) {
+      throw new Error("Action effect type is required.");
+    }
+    const id = randomUUID();
+    this.db
+      .insert(actionEffects)
+      .values({
+        id,
+        actionId: input.actionId,
+        effectType,
+        targetTable: input.targetTable ?? null,
+        targetId: input.targetId ?? null,
+        payloadJson: safeStringifyJson(input.payload),
+        appliedAt: input.appliedAt ?? now(),
+        revertedAt: null,
+      })
+      .run();
+    return this.getActionEffect(id)!;
+  }
+
+  getActionEffect(id: string): ActionEffectRow | null {
+    return (
+      (this.sqlite
+        .prepare(
+          `
+          SELECT
+            id,
+            action_id,
+            effect_type,
+            target_table,
+            target_id,
+            payload_json,
+            applied_at,
+            reverted_at
+          FROM action_effects
+          WHERE id = ?
+          LIMIT 1
+        `,
+        )
+        .get(id) as ActionEffectRow | undefined) ?? null
+    );
+  }
+
+  listActionEffects(actionId: string): ActionEffectRow[] {
+    return this.sqlite
+      .prepare(
+        `
+        SELECT
+          id,
+          action_id,
+          effect_type,
+          target_table,
+          target_id,
+          payload_json,
+          applied_at,
+          reverted_at
+        FROM action_effects
+        WHERE action_id = ?
+        ORDER BY applied_at ASC, id ASC
+      `,
+      )
+      .all(actionId) as ActionEffectRow[];
+  }
+
+  listActiveActionEffects(
+    input: { actionType?: string; effectType?: string; limit?: number } = {},
+  ): ActionEffectRow[] {
+    const filters = [
+      "a.status = 'executed'",
+      "a.execution_status = 'succeeded'",
+      "ae.reverted_at IS NULL",
+    ];
+    const params: unknown[] = [];
+    if (input.actionType) {
+      filters.push("a.action_type = ?");
+      params.push(input.actionType);
+    }
+    if (input.effectType) {
+      filters.push("ae.effect_type = ?");
+      params.push(input.effectType);
+    }
+    const limit =
+      typeof input.limit === "number" && Number.isFinite(input.limit)
+        ? Math.max(1, Math.min(10_000, Math.trunc(input.limit)))
+        : 10_000;
+    params.push(limit);
+
+    return this.sqlite
+      .prepare(
+        `
+        SELECT
+          ae.id,
+          ae.action_id,
+          ae.effect_type,
+          ae.target_table,
+          ae.target_id,
+          ae.payload_json,
+          ae.applied_at,
+          ae.reverted_at
+        FROM action_effects ae
+        JOIN actions a ON a.id = ae.action_id
+        WHERE ${filters.join(" AND ")}
+        ORDER BY a.queued_at ASC, ae.applied_at ASC, ae.id ASC
+        LIMIT ?
+      `,
+      )
+      .all(...params) as ActionEffectRow[];
+  }
+
+  executeApprovedAction(id: string, executedBy = "daemon"): ExecutedActionResult {
+    const locked = this.lockActionForExecution(id, executedBy);
+    try {
+      return this.sqlite.transaction(() => {
+        const registry = ActionDefinitionRegistry.load();
+        const definition = registry.get(locked.action_type, locked.action_version);
+        if (!definition) {
+          throw new Error(
+            `Unsupported executable action type: ${locked.action_type}@${locked.action_version}`,
+          );
+        }
+        const payload = safeParseJson<unknown>(
+          locked.payload_json,
+          `action:${locked.id}:payload`,
+          null,
+        );
+        const validation = registry.validatePayload(
+          locked.action_type,
+          locked.action_version,
+          payload,
+        );
+        if (!validation.ok) {
+          throw new Error(`Action payload failed validation: ${validation.errors.join(" ")}`);
+        }
+        const executor = loadActionExecutor(definition);
+        if (!executor) {
+          throw new Error(`Missing action executor module: ${definition.module}`);
+        }
+        const { result, effects } = executor({
+          action: locked,
+          db: this.createActionSkillDatabase(),
+          executedBy,
+          helpers: actionExecutionHelpers,
+        });
+
+        return {
+          action: this.completeAction(locked.id, result),
+          effects,
+          result,
+        };
+      })();
+    } catch (error) {
+      this.failAction(locked.id, error);
+      throw error;
+    }
+  }
+
+  private createActionSkillDatabase(): ActionSkillDatabase {
     return {
-      decisionId: decision!.decisionId,
-      primaryContactId: decision!.primaryContactId,
-      secondaryContactId: decision!.secondaryContactId,
-      canonicalContactId: decision!.canonicalContactId,
+      addContactMemory: (input) => this.addContactMemory(input),
+      markContactMemoryStale: (id, staleAt) => this.markContactMemoryStale(id, staleAt),
+      moveContactMemoriesToContact: (input) => this.moveContactMemoriesToContact(input),
+      contactExists: (id) => this.contactExists(id),
+      conversationExists: (id) => this.conversationExists(id),
+      recordActionEffect: (input) => this.recordActionEffect(input),
+      listActiveActionEffects: (input) => this.listActiveActionEffects(input),
     };
   }
 
-  recordContactMergeDecisionsBatch(
-    input: ContactMergeBatchInput[],
-    options: { createdBy?: string | null } = {},
-  ): PlannedContactMergeDecision[] {
-    const planned = this.planContactMergeDecisions(input);
-    const timestamp = now();
-    return this.sqlite.transaction(() => {
-      for (const decision of planned) {
-        this.db
-          .insert(contactMergeDecisions)
-          .values({
-            id: decision.decisionId,
-            decisionType: "merge",
-            primaryContactId: decision.primaryContactId,
-            secondaryContactId: decision.secondaryContactId,
-            canonicalContactId: decision.canonicalContactId,
-            reason: decision.reason,
-            createdBy: options.createdBy ?? "cli",
-            createdAt: timestamp,
-          })
-          .run();
-        this.db
-          .update(contactMemories)
-          .set({ contactId: decision.canonicalContactId, updatedAt: timestamp })
-          .where(eq(contactMemories.contactId, decision.secondaryContactId))
-          .run();
-      }
-      return planned;
-    })();
+  moveContactMemoriesToContact(input: {
+    fromContactId: string;
+    toContactId: string;
+    updatedAt?: number;
+  }): void {
+    this.db
+      .update(contactMemories)
+      .set({ contactId: input.toContactId, updatedAt: input.updatedAt ?? now() })
+      .where(eq(contactMemories.contactId, input.fromContactId))
+      .run();
   }
 
-  private assertContactExists(contactId: string, label: "Primary" | "Secondary"): void {
-    const contact = this.sqlite
-      .prepare(
-        `
-        SELECT id
-        FROM contacts
-        WHERE id = ?
-        LIMIT 1
-      `,
-      )
-      .get(contactId) as { id: string } | undefined;
-    if (!contact) {
-      throw new Error(`${label} contact not found: ${contactId}`);
-    }
+  contactExists(id: string): boolean {
+    const contact = this.sqlite.prepare("SELECT id FROM contacts WHERE id = ? LIMIT 1").get(id) as
+      | { id: string }
+      | undefined;
+    return contact !== undefined;
+  }
+
+  conversationExists(id: string): boolean {
+    const conversation = this.sqlite
+      .prepare("SELECT id FROM conversations WHERE id = ? LIMIT 1")
+      .get(id) as { id: string } | undefined;
+    return conversation !== undefined;
   }
 
   listAppSettings(): AppSettingRow[] {
@@ -1147,8 +1500,6 @@ export class CuedDatabase {
         .delete(syncScopes)
         .where(eq(syncScopes.platform, platform))
         .run().changes;
-      const removedSlackBackfillProofs =
-        platform === "slack" ? tx.delete(slackBackfillProofs).run().changes : 0;
       return (
         Number(removedSourceAccounts) +
         Number(removedRawEvents) +
@@ -1156,8 +1507,7 @@ export class CuedDatabase {
         Number(removedErrors) +
         Number(removedCheckpoints) +
         Number(removedSyncProofs) +
-        Number(removedSyncScopes) +
-        Number(removedSlackBackfillProofs)
+        Number(removedSyncScopes)
       );
     });
 
@@ -2032,22 +2382,13 @@ export class CuedDatabase {
         .delete(syncRuns)
         .where(and(eq(syncRuns.platform, platform), eq(syncRuns.accountKey, accountKey)))
         .run().changes;
-      const removedSlackBackfillProofs =
-        platform === "slack"
-          ? tx
-              .delete(slackBackfillProofs)
-              .where(eq(slackBackfillProofs.accountKey, accountKey))
-              .run().changes
-          : 0;
-
       return (
         Number(removedSourceAccounts) +
         Number(removedCheckpoints) +
         Number(removedSyncProofs) +
         Number(removedSyncScopes) +
         Number(removedRunErrors) +
-        Number(removedRuns) +
-        Number(removedSlackBackfillProofs)
+        Number(removedRuns)
       );
     });
   }
@@ -4609,7 +4950,7 @@ export class CuedDatabase {
 
 export function openCuedDatabase(dbPath?: string): CuedDatabase {
   const db = new CuedDatabase(dbPath);
-  db.migrate();
+  db.initializeSchema();
   db.recordAppMetadata({
     version: getCurrentAppVersion(),
     releaseChannel: getCurrentReleaseChannel(),

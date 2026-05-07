@@ -77,13 +77,19 @@ Temporary Items
 
 # Environment and secrets
 .env
+**/.env
 .env.local
+**/.env.local
 .env.*.local
+**/.env.*.local
 *.pem
 *.key
 credentials.json
 
 # Testing and coverage
+__pycache__/
+**/__pycache__/
+*.py[cod]
 **/coverage/
 **/test-results/
 **/playwright-report/

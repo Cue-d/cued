@@ -31,7 +31,7 @@ describe("updater service", () => {
     const dir = mkdtempSync(join(tmpdir(), "cued-updater-"));
     tempDirs.push(dir);
     const db = new CuedDatabase(join(dir, "local.db"));
-    db.migrate();
+    db.initializeSchema();
     return db;
   }
 
@@ -134,7 +134,6 @@ describe("updater service", () => {
       dbBackupPath: "/tmp/backup/local.db",
       targetVersion: "0.2.0",
       releaseUrl: null,
-      migrateLegacyLaunchAgent: false,
       stagingRoot: "/tmp/staging",
     });
 

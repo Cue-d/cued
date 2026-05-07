@@ -5,7 +5,8 @@ import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
-import { DaemonRequestTimeoutError, sendDaemonRequest } from "./client.js";
+import { ActionDefinitionRegistry, actionRequiresProjectionRebuild } from "./actions/registry.js";
+import { type DaemonRequestInput, DaemonRequestTimeoutError, sendDaemonRequest } from "./client.js";
 import { getCurrentAppVersion, getCurrentReleaseChannel } from "./core/app-metadata.js";
 import {
   CUED_DB_PATH,
@@ -36,6 +37,8 @@ import {
   listMenuBarIntegrationStates,
 } from "./platforms/core/state/status.js";
 import {
+  ACTION_STATUS_VALUES,
+  type ActionStatus,
   getPlatformFeatureMatrixRow,
   getPlatformHelperRequirements,
   getPlatformPermissionRequirements,
@@ -64,6 +67,7 @@ import {
   readRecentLogLines,
 } from "./runtime/logs.js";
 import { buildOnboardingSnapshot } from "./runtime/onboarding.js";
+import { rebuildProjectedState } from "./runtime/projection/projector.js";
 import { runProjectionWorkerFromEnv } from "./runtime/projection/worker.js";
 import {
   checkForUpdates,
@@ -75,7 +79,12 @@ import {
   setUpdateHelperLastError,
 } from "./runtime/updater/service.js";
 import { runSetupTUI } from "./setup.js";
-import { getGlobalCuedSkillStatus, installGlobalCuedSkill } from "./skills/install.js";
+import {
+  getGlobalCuedSkillStatus,
+  getLocalCuedSkillStatus,
+  installGlobalCuedSkill,
+  installLocalCuedSkill,
+} from "./skills/install.js";
 
 const DIST_ROOT = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(DIST_ROOT, "..");
@@ -138,9 +147,17 @@ Usage:
   cued cli install|status
   cued login-item enable|disable|status
   cued onboarding complete|snapshot|status [--refresh-managed] [--refresh-permissions]
-  cued skill install-global|status
+  cued skill install-global|install-local [skill-root]|status|status-local [skill-name]
   cued permissions doctor|status|request [--all|--contacts|--messages|--full-disk-access]
   cued sql <query>
+  cued actions definitions
+  cued actions propose <type> --payload JSON [--version VERSION] [--title TEXT] [--summary TEXT] [--source-skill NAME] [--no-approval]
+  cued actions list [--status STATUS] [--limit N]
+  cued actions show <action-id>
+  cued actions approve <action-id> [--by ACTOR]
+  cued actions deny <action-id> [--by ACTOR]
+  cued actions execute <action-id> [--by ACTOR]
+  cued actions run-approved [--limit N] [--by ACTOR]
   cued integrations list
   cued integrations status
   cued integrations capabilities
@@ -150,11 +167,9 @@ Usage:
   cued integrations remove <platform> [account]
   cued integrations enable <platform> [account]
   cued integrations disable <platform> [account]
-  cued contacts merge <primary-contact-id> <secondary-contact-id> [--reason TEXT]
-  cued contacts merge-batch <merges.json> [--apply]
-  cued contacts memory add <contact-id> <memory> [--source SOURCE] [--confidence 0-100] [--evidence JSON] [--supersedes MEMORY_ID]
+  cued contacts memory add <contact-id> <memory> [--source SOURCE] [--confidence 0-100] [--evidence JSON] [--supersedes MEMORY_ID] [--execute]
   cued contacts memory list <contact-id> [--limit N] [--include-stale]
-  cued contacts memory stale <memory-id>
+  cued contacts memory stale <memory-id> [--execute]
   cued attachments list [--message ID] [--conversation ID] [--platform PLATFORM] [--account ACCOUNT] [--limit N]
   cued attachments fetch <attachment-id> [--variant original] [--max-bytes N] [--allow-large] [--no-extract]
   cued attachments search <query> [--conversation ID] [--platform PLATFORM] [--account ACCOUNT] [--limit N]
@@ -211,6 +226,17 @@ function parseJsonFlag(args: string[], flag: string): unknown {
   }
 }
 
+function parseActionStatusFlag(args: string[], flag: string): ActionStatus | undefined {
+  const raw = parseFlagValue(args, flag);
+  if (raw === undefined) {
+    return undefined;
+  }
+  if (!ACTION_STATUS_VALUES.includes(raw as ActionStatus)) {
+    throw new Error(`${flag} must be one of: ${ACTION_STATUS_VALUES.join(", ")}.`);
+  }
+  return raw as ActionStatus;
+}
+
 function parseFreeTextArgument(args: string[], startIndex: number): string | undefined {
   const bodyTokens = args.slice(startIndex).filter((value, index, values) => {
     if (value.startsWith("--")) {
@@ -222,34 +248,10 @@ function parseFreeTextArgument(args: string[], startIndex: number): string | und
   return bodyTokens.length > 0 ? bodyTokens.join(" ") : undefined;
 }
 
-function parseContactMergeBatchFile(path: string): Array<{
-  primaryContactId: string;
-  secondaryContactId: string;
-  reason?: string | null;
-}> {
-  const parsed = JSON.parse(readFileSync(path, "utf8")) as unknown;
-  if (!Array.isArray(parsed)) {
-    throw new Error("Merge batch file must contain a JSON array.");
+function assertNoLegacyQueueFlag(args: string[]): void {
+  if (args.includes("--queue")) {
+    throw new Error("--queue was removed because contacts memory commands queue by default.");
   }
-  return parsed.map((value, index) => {
-    if (!value || typeof value !== "object") {
-      throw new Error(`Merge batch item ${index} must be an object.`);
-    }
-    const item = value as Record<string, unknown>;
-    if (typeof item.primaryContactId !== "string" || typeof item.secondaryContactId !== "string") {
-      throw new Error(
-        `Merge batch item ${index} must include primaryContactId and secondaryContactId strings.`,
-      );
-    }
-    if (item.reason !== undefined && item.reason !== null && typeof item.reason !== "string") {
-      throw new Error(`Merge batch item ${index} reason must be a string when provided.`);
-    }
-    return {
-      primaryContactId: item.primaryContactId,
-      secondaryContactId: item.secondaryContactId,
-      reason: item.reason ?? null,
-    };
-  });
 }
 
 function getAppStatusMetadata(db: ReturnType<typeof openCuedDatabase>) {
@@ -431,6 +433,39 @@ async function handleLocalIntegrationCommand(
 
 function isUnsupportedDaemonCommand(response: { ok: boolean; error?: string }): boolean {
   return !response.ok && response.error === "Unsupported command";
+}
+
+async function sendOptionalDaemonRequest(
+  request: DaemonRequestInput,
+): Promise<Awaited<ReturnType<typeof sendDaemonRequest>> | null> {
+  try {
+    const response = await sendDaemonRequest(request);
+    return isUnsupportedDaemonCommand(response) ? null : response;
+  } catch {
+    return null;
+  }
+}
+
+function printDaemonResultOrThrow(
+  response: Awaited<ReturnType<typeof sendDaemonRequest>>,
+  fallbackError: string,
+): void {
+  if (!response.ok) {
+    throw new Error(response.error ?? fallbackError);
+  }
+  printJson(response.result ?? null);
+}
+
+async function printOptionalDaemonResult(
+  request: DaemonRequestInput,
+  fallbackError: string,
+): Promise<boolean> {
+  const response = await sendOptionalDaemonRequest(request);
+  if (!response) {
+    return false;
+  }
+  printDaemonResultOrThrow(response, fallbackError);
+  return true;
 }
 
 async function main(): Promise<void> {
@@ -719,11 +754,19 @@ async function main(): Promise<void> {
         case "install-global":
           printJson(installGlobalCuedSkill());
           return;
+        case "install-local":
+          printJson(installLocalCuedSkill(rest[0]));
+          return;
         case "status":
           printJson(getGlobalCuedSkillStatus());
           return;
+        case "status-local":
+          printJson(getLocalCuedSkillStatus(rest[0]));
+          return;
         default:
-          throw new Error("Usage: cued skill install-global | status");
+          throw new Error(
+            "Usage: cued skill install-global | install-local [skill-root] | status | status-local [skill-name]",
+          );
       }
     case "login-item":
       switch (subcommand) {
@@ -833,6 +876,240 @@ async function main(): Promise<void> {
         db.close();
       }
       return;
+    }
+    case "actions": {
+      switch (subcommand) {
+        case "definitions":
+          printJson(ActionDefinitionRegistry.load().list());
+          return;
+        case "propose": {
+          const actionType = rest[0];
+          const actionVersion = parseFlagValue(rest, "--version") ?? "1";
+          const payload = parseJsonFlag(rest, "--payload");
+          if (!actionType || payload === undefined) {
+            throw new Error(
+              "Usage: cued actions propose <type> --payload JSON [--version VERSION] [--title TEXT] [--summary TEXT] [--source-skill NAME] [--no-approval]",
+            );
+          }
+          const requiresApproval = rest.includes("--no-approval") ? false : undefined;
+          const title = parseFlagValue(rest, "--title") ?? null;
+          const summary = parseFlagValue(rest, "--summary") ?? null;
+          const sourceSkill = parseFlagValue(rest, "--source-skill") ?? null;
+          const createdBy = parseFlagValue(rest, "--created-by") ?? "cued-cli";
+          const dedupeKey = parseFlagValue(rest, "--dedupe-key") ?? null;
+          if (
+            await printOptionalDaemonResult(
+              {
+                command: "actions-propose",
+                actionType,
+                actionVersion,
+                payload,
+                title,
+                summary,
+                sourceSkill,
+                createdBy,
+                requiresApproval,
+                dedupeKey,
+              },
+              "Daemon actions propose failed",
+            )
+          ) {
+            return;
+          }
+          const registry = ActionDefinitionRegistry.load();
+          const definition = registry.get(actionType, actionVersion);
+          if (!definition) {
+            throw new Error(`Unknown action definition: ${actionType}@${actionVersion}`);
+          }
+          const validation = registry.validatePayload(actionType, actionVersion, payload);
+          if (!validation.ok) {
+            throw new Error(validation.errors.join(" "));
+          }
+          const db = openCuedDatabase();
+          try {
+            printJson(
+              db.createAction({
+                actionType,
+                actionVersion,
+                title,
+                summary,
+                payload,
+                sourceSkill: sourceSkill ?? definition.skillName,
+                createdBy,
+                requiresApproval: requiresApproval ?? definition.requiresApprovalDefault,
+                dedupeKey,
+              }),
+            );
+          } finally {
+            db.close();
+          }
+          return;
+        }
+        case "list":
+          {
+            const status = parseActionStatusFlag(rest, "--status");
+            const limit = parseIntegerFlag(rest, "--limit");
+            if (
+              await printOptionalDaemonResult(
+                { command: "actions-list", status, limit },
+                "Daemon actions list failed",
+              )
+            ) {
+              return;
+            }
+            const db = openCuedDatabase();
+            try {
+              printJson(db.listActions({ status, limit }));
+            } finally {
+              db.close();
+            }
+          }
+          return;
+        case "show": {
+          const actionId = rest[0];
+          if (!actionId) {
+            throw new Error("Usage: cued actions show <action-id>");
+          }
+          if (
+            await printOptionalDaemonResult(
+              { command: "actions-show", actionId },
+              "Daemon actions show failed",
+            )
+          ) {
+            return;
+          }
+          const db = openCuedDatabase();
+          try {
+            const action = db.getAction(actionId);
+            if (!action) {
+              throw new Error(`Action not found: ${actionId}`);
+            }
+            printJson({
+              action,
+              effects: db.listActionEffects(actionId),
+            });
+          } finally {
+            db.close();
+          }
+          return;
+        }
+        case "approve": {
+          const actionId = rest[0];
+          if (!actionId) {
+            throw new Error("Usage: cued actions approve <action-id> [--by ACTOR]");
+          }
+          const approvedBy = parseFlagValue(rest, "--by") ?? "user";
+          if (
+            await printOptionalDaemonResult(
+              { command: "actions-approve", actionId, approvedBy },
+              "Daemon actions approve failed",
+            )
+          ) {
+            return;
+          }
+          const db = openCuedDatabase();
+          try {
+            printJson(db.approveAction(actionId, approvedBy));
+          } finally {
+            db.close();
+          }
+          return;
+        }
+        case "deny": {
+          const actionId = rest[0];
+          if (!actionId) {
+            throw new Error("Usage: cued actions deny <action-id> [--by ACTOR]");
+          }
+          const deniedBy = parseFlagValue(rest, "--by") ?? "user";
+          if (
+            await printOptionalDaemonResult(
+              { command: "actions-deny", actionId, deniedBy },
+              "Daemon actions deny failed",
+            )
+          ) {
+            return;
+          }
+          const db = openCuedDatabase();
+          try {
+            printJson(db.denyAction(actionId, deniedBy));
+          } finally {
+            db.close();
+          }
+          return;
+        }
+        case "execute": {
+          const actionId = rest[0];
+          if (!actionId) {
+            throw new Error("Usage: cued actions execute <action-id> [--by ACTOR]");
+          }
+          const executedBy = parseFlagValue(rest, "--by") ?? "cued-cli";
+          if (
+            await printOptionalDaemonResult(
+              { command: "actions-execute", actionId, executedBy },
+              "Daemon actions execute failed",
+            )
+          ) {
+            return;
+          }
+          const db = openCuedDatabase();
+          try {
+            const executed = db.executeApprovedAction(actionId, executedBy);
+            printJson({
+              ...executed,
+              projection: actionRequiresProjectionRebuild(executed.action)
+                ? rebuildProjectedState(db)
+                : null,
+            });
+          } finally {
+            db.close();
+          }
+          return;
+        }
+        case "run-approved": {
+          const limit = parseIntegerFlag(rest, "--limit");
+          const executedBy = parseFlagValue(rest, "--by") ?? "cued-cli";
+          if (
+            await printOptionalDaemonResult(
+              { command: "actions-run-approved", limit, executedBy },
+              "Daemon actions run-approved failed",
+            )
+          ) {
+            return;
+          }
+          const db = openCuedDatabase();
+          try {
+            const approved = db.listApprovedPendingActions(limit ?? 25);
+            const results = approved.map((action) => {
+              try {
+                const executed = db.executeApprovedAction(action.id, executedBy);
+                if (actionRequiresProjectionRebuild(executed.action)) {
+                  rebuildProjectedState(db);
+                }
+                return { actionId: action.id, ok: true, result: executed };
+              } catch (error) {
+                return {
+                  actionId: action.id,
+                  ok: false,
+                  error: error instanceof Error ? error.message : String(error),
+                };
+              }
+            });
+            printJson({
+              attempted: results.length,
+              succeeded: results.filter((result) => result.ok).length,
+              failed: results.filter((result) => !result.ok).length,
+              results,
+            });
+          } finally {
+            db.close();
+          }
+          return;
+        }
+        default:
+          throw new Error(
+            "Usage: cued actions definitions | cued actions propose <type> --payload JSON [--version VERSION] [--title TEXT] [--summary TEXT] [--source-skill NAME] [--no-approval] | cued actions list [--status STATUS] [--limit N] | cued actions show <action-id> | cued actions approve <action-id> [--by ACTOR] | cued actions deny <action-id> [--by ACTOR] | cued actions execute <action-id> [--by ACTOR] | cued actions run-approved [--limit N] [--by ACTOR]",
+          );
+      }
     }
     case "status":
       try {
@@ -1029,6 +1306,7 @@ async function main(): Promise<void> {
       if (subcommand === "memory" || subcommand === "memories") {
         const memoryCommand = rest[0];
         const args = rest.slice(1);
+        assertNoLegacyQueueFlag(args);
         const db = openCuedDatabase();
         try {
           switch (memoryCommand) {
@@ -1037,19 +1315,30 @@ async function main(): Promise<void> {
               const body = parseFlagValue(args, "--body") ?? parseFreeTextArgument(args, 1);
               if (!contactId || !body) {
                 throw new Error(
-                  "Usage: cued contacts memory add <contact-id> <memory> [--source SOURCE] [--confidence 0-100] [--evidence JSON] [--supersedes MEMORY_ID]",
+                  "Usage: cued contacts memory add <contact-id> <memory> [--source SOURCE] [--confidence 0-100] [--evidence JSON] [--supersedes MEMORY_ID] [--execute]",
                 );
               }
+              const payload = {
+                contactId,
+                body,
+                sourceKind: parseFlagValue(args, "--source") ?? "agent",
+                evidence: parseJsonFlag(args, "--evidence"),
+                confidence: parseIntegerFlag(args, "--confidence") ?? null,
+                supersedesMemoryId: parseFlagValue(args, "--supersedes") ?? null,
+              };
+              const action = db.createAction({
+                actionType: "contact.memory.add",
+                payload,
+                title: "Add contact memory",
+                summary: body,
+                sourceSkill: "cued",
+                createdBy: parseFlagValue(args, "--created-by") ?? "cued-cli",
+                requiresApproval: !args.includes("--execute"),
+              });
               printJson(
-                db.addContactMemory({
-                  contactId,
-                  body,
-                  sourceKind: parseFlagValue(args, "--source") ?? "agent",
-                  evidence: parseJsonFlag(args, "--evidence"),
-                  confidence: parseIntegerFlag(args, "--confidence") ?? null,
-                  supersedesMemoryId: parseFlagValue(args, "--supersedes") ?? null,
-                  createdBy: parseFlagValue(args, "--created-by") ?? "cued-cli",
-                }),
+                args.includes("--execute")
+                  ? db.executeApprovedAction(action.id, parseFlagValue(args, "--by") ?? "cued-cli")
+                  : action,
               );
               return;
             }
@@ -1072,60 +1361,38 @@ async function main(): Promise<void> {
             case "stale": {
               const memoryId = args[0];
               if (!memoryId) {
-                throw new Error("Usage: cued contacts memory stale <memory-id>");
+                throw new Error("Usage: cued contacts memory stale <memory-id> [--execute]");
               }
-              printJson(db.markContactMemoryStale(memoryId));
+              const action = db.createAction({
+                actionType: "contact.memory.stale",
+                payload: { memoryId },
+                title: "Mark contact memory stale",
+                sourceSkill: "cued",
+                createdBy: parseFlagValue(args, "--created-by") ?? "cued-cli",
+                requiresApproval: !args.includes("--execute"),
+              });
+              printJson(
+                args.includes("--execute")
+                  ? db.executeApprovedAction(action.id, parseFlagValue(args, "--by") ?? "cued-cli")
+                  : action,
+              );
               return;
             }
             default:
               throw new Error(
-                "Usage: cued contacts memory add <contact-id> <memory> [--source SOURCE] [--confidence 0-100] [--evidence JSON] [--supersedes MEMORY_ID] | cued contacts memory list <contact-id> [--limit N] [--include-stale] | cued contacts memory stale <memory-id>",
+                "Usage: cued contacts memory add <contact-id> <memory> [--source SOURCE] [--confidence 0-100] [--evidence JSON] [--supersedes MEMORY_ID] [--execute] | cued contacts memory list <contact-id> [--limit N] [--include-stale] | cued contacts memory stale <memory-id> [--execute]",
               );
           }
         } finally {
           db.close();
         }
       }
-      if (subcommand === "merge-batch") {
-        const batchPath = rest[0];
-        if (!batchPath) {
-          throw new Error("Usage: cued contacts merge-batch <merges.json> [--apply]");
-        }
-        const merges = parseContactMergeBatchFile(batchPath);
-        const apply = rest.includes("--apply");
-        if (!apply) {
-          const db = openCuedDatabaseReadOnly();
-          try {
-            const decisions = db.planContactMergeDecisions(merges);
-            printJson({
-              applied: false,
-              mergeCount: decisions.length,
-              decisions,
-            });
-          } finally {
-            db.close();
-          }
-          return;
-        }
-        response = await sendDaemonRequest({
-          command: "contacts-merge-batch",
-          merges,
-          apply: true,
-        });
-        break;
-      }
-      if (subcommand !== "merge" || !rest[0] || !rest[1]) {
+      if (subcommand) {
         throw new Error(
-          "Usage: cued contacts merge <primary-contact-id> <secondary-contact-id> [--reason TEXT] | cued contacts merge-batch <merges.json> [--apply] | cued contacts memory add|list|stale ...",
+          "Usage: cued contacts memory add|list|stale ... (use cued actions propose contact.merge for merges)",
         );
       }
-      response = await sendDaemonRequest({
-        command: "contacts-merge",
-        primaryContactId: rest[0],
-        secondaryContactId: rest[1],
-        reason: parseFlagValue(rest.slice(2), "--reason"),
-      });
-      break;
+      throw new Error("Usage: cued contacts memory add|list|stale ...");
     case "rebuild":
       response = await sendDaemonRequest({ command: "rebuild" });
       break;

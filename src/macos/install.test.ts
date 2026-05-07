@@ -1,4 +1,4 @@
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -83,33 +83,26 @@ describe("macOS app bundle resolution", () => {
     expect(isValidCuedAppBundle(appPath)).toBe(true);
   });
 
-  it("ignores legacy app bundles and falls back to the valid candidate", () => {
-    const legacy = createAppBundle(createTempDir("cued-legacy-app-"), "legacy.invalid.app");
+  it("ignores invalid app bundles and falls back to the valid candidate", () => {
+    const invalid = createAppBundle(createTempDir("cued-invalid-app-"), "invalid.app");
     const valid = createAppBundle(createTempDir("cued-valid-app-"), "so.cued.desktop");
 
-    expect(resolveInstalledAppPathFromCandidates([legacy, valid])).toBe(valid);
+    expect(resolveInstalledAppPathFromCandidates([invalid, valid])).toBe(valid);
   });
 
   it("resolves the built app path under the repo root after flattening", () => {
     expect(getBuiltAppPath()).toBe(join(process.cwd(), "native", "macos", "dist", "Cued.app"));
   });
 
-  it("reports login item status alongside legacy launch agent state", () => {
-    const homeDir = setTempHome();
+  it("reports native login item status", () => {
+    setTempHome();
     const appPath = createAppBundle(createTempDir("cued-valid-app-"), "so.cued.desktop");
     process.env.CUED_APP_PATH = appPath;
-
-    const plistPath = join(homeDir, "Library", "LaunchAgents", "dev.cued.daemon.plist");
-    mkdirSync(join(plistPath, ".."), { recursive: true });
-    writeFileSync(plistPath, "legacy");
 
     execFileSyncMock.mockImplementation((command: string, args?: string[]) => {
       if (command === join(appPath, "Contents", "MacOS", "CuedDaemon")) {
         expect(args).toEqual(["login-item", "status"]);
         return '{"enabled":false,"status":"not_registered","requiresApproval":false,"found":true}';
-      }
-      if (command === "launchctl" && args?.[0] === "print") {
-        return "legacy loaded";
       }
       throw new Error(`unexpected command: ${command}`);
     });
@@ -119,65 +112,19 @@ describe("macOS app bundle resolution", () => {
         appPath,
         enabled: false,
         status: "not_registered",
-        legacyLaunchAgent: expect.objectContaining({
-          installed: true,
-          loaded: true,
-        }),
       }),
     );
   });
 
-  it("uses the launchctl-reported plist path when the shell HOME differs", () => {
+  it("enables the native login item", () => {
     setTempHome();
     const appPath = createAppBundle(createTempDir("cued-valid-app-"), "so.cued.desktop");
     process.env.CUED_APP_PATH = appPath;
-
-    const actualHome = createTempDir("cued-actual-home-");
-    const actualPlistPath = join(actualHome, "Library", "LaunchAgents", "dev.cued.daemon.plist");
-    mkdirSync(join(actualPlistPath, ".."), { recursive: true });
-    writeFileSync(actualPlistPath, "legacy");
-
-    execFileSyncMock.mockImplementation((command: string, args?: string[]) => {
-      if (command === join(appPath, "Contents", "MacOS", "CuedDaemon")) {
-        return '{"enabled":false,"status":"not_registered","requiresApproval":false,"found":true}';
-      }
-      if (command === "launchctl" && args?.[0] === "print") {
-        return `gui/501/dev.cued.daemon = {\n\tpath = ${actualPlistPath}\n}`;
-      }
-      throw new Error(`unexpected command: ${command}`);
-    });
-
-    expect(getLoginItemStatus(appPath).legacyLaunchAgent).toEqual(
-      expect.objectContaining({
-        plistPath: actualPlistPath,
-        installed: true,
-        loaded: true,
-      }),
-    );
-  });
-
-  it("migrates an existing legacy launch agent when enabling the login item", () => {
-    const homeDir = setTempHome();
-    const appPath = createAppBundle(createTempDir("cued-valid-app-"), "so.cued.desktop");
-    process.env.CUED_APP_PATH = appPath;
-
-    const plistPath = join(homeDir, "Library", "LaunchAgents", "dev.cued.daemon.plist");
-    mkdirSync(join(plistPath, ".."), { recursive: true });
-    writeFileSync(plistPath, "legacy");
 
     execFileSyncMock.mockImplementation((command: string, args?: string[]) => {
       if (command === join(appPath, "Contents", "MacOS", "CuedDaemon")) {
         expect(args).toEqual(["login-item", "enable"]);
         return '{"enabled":true,"status":"enabled","requiresApproval":false,"found":true}';
-      }
-      if (command === "launchctl" && args?.[0] === "bootout") {
-        return "";
-      }
-      if (command === "launchctl" && args?.[0] === "print") {
-        if (existsSync(plistPath)) {
-          return "legacy loaded";
-        }
-        throw new Error("legacy not loaded");
       }
       if (command === "ps") {
         return "";
@@ -191,23 +138,14 @@ describe("macOS app bundle resolution", () => {
       expect.objectContaining({
         appPath,
         enabled: true,
-        migratedLegacyLaunchAgent: true,
-        legacyLaunchAgent: expect.objectContaining({
-          installed: false,
-          loaded: false,
-        }),
       }),
     );
   });
 
-  it("disables the native login item and removes any legacy plist", () => {
-    const homeDir = setTempHome();
+  it("disables the native login item", () => {
+    setTempHome();
     const appPath = createAppBundle(createTempDir("cued-valid-app-"), "so.cued.desktop");
     process.env.CUED_APP_PATH = appPath;
-
-    const plistPath = join(homeDir, "Library", "LaunchAgents", "dev.cued.daemon.plist");
-    mkdirSync(join(plistPath, ".."), { recursive: true });
-    writeFileSync(plistPath, "legacy");
 
     execFileSyncMock.mockImplementation((command: string, args?: string[]) => {
       if (command === join(appPath, "Contents", "MacOS", "CuedDaemon")) {
@@ -217,12 +155,6 @@ describe("macOS app bundle resolution", () => {
         if (args?.[1] === "disable") {
           return '{"enabled":false,"status":"not_registered","requiresApproval":false,"found":true}';
         }
-      }
-      if (command === "launchctl" && args?.[0] === "bootout") {
-        return "";
-      }
-      if (command === "launchctl" && args?.[0] === "print") {
-        throw new Error("legacy not loaded");
       }
       if (command === "ps") {
         return "";
@@ -237,10 +169,6 @@ describe("macOS app bundle resolution", () => {
         appPath,
         enabled: false,
         status: "not_registered",
-        migratedLegacyLaunchAgent: true,
-        legacyLaunchAgent: expect.objectContaining({
-          installed: false,
-        }),
       }),
     );
   });
