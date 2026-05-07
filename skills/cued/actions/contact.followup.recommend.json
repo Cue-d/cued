@@ -1,0 +1,18 @@
+{
+  "type": "contact.followup.recommend",
+  "version": "1",
+  "description": "Record a harmless follow-up recommendation for a contact.",
+  "module": "actions/contact-followup-recommend.cjs",
+  "requiresApprovalDefault": true,
+  "payload": {
+    "required": {
+      "contactId": "string",
+      "reason": "string"
+    },
+    "optional": {
+      "suggestedMessage": "string",
+      "dueAt": "number",
+      "evidence": "object"
+    }
+  }
+}

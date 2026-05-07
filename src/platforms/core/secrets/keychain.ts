@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { cuedAuthKeychainService, legacyCuedAuthKeychainService } from "../../../core/identity.js";
+import { cuedAuthKeychainService } from "../../../core/identity.js";
 import type { Platform } from "../../../core/types/provider.js";
 import { openCuedDatabaseReadOnly } from "../../../db/database.js";
 
@@ -12,10 +12,6 @@ export interface IntegrationSecretPayload {
 
 export function authKeychainService(platform: Platform): string {
   return cuedAuthKeychainService(platform);
-}
-
-export function legacyAuthKeychainService(platform: Platform): string {
-  return legacyCuedAuthKeychainService(platform);
 }
 
 export function loadKeychainSecret(

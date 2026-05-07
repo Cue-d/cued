@@ -1,0 +1,18 @@
+{
+  "type": "conversation.followup.recommend",
+  "version": "1",
+  "description": "Record a harmless follow-up recommendation for a conversation.",
+  "module": "actions/conversation-followup-recommend.cjs",
+  "requiresApprovalDefault": true,
+  "payload": {
+    "required": {
+      "conversationId": "string",
+      "reason": "string"
+    },
+    "optional": {
+      "suggestedNextStep": "string",
+      "evidence": "object",
+      "confidence": "number"
+    }
+  }
+}

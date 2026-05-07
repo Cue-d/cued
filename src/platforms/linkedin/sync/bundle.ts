@@ -496,7 +496,7 @@ async function listMessagesForConversation(
     try {
       latest = await client.getMessages(conversation.entityURN);
     } catch (error) {
-      if (isLinkedInLegacyPaginationError(error)) {
+      if (isLinkedInPaginationRequestError(error)) {
         return buildMessageBatchResult({
           messages: [...seen.values()]
             .filter((message) => message.entityURN)
@@ -506,7 +506,7 @@ async function listMessagesForConversation(
           resumeCursor: null,
           previousCursor: resumeCursor,
           error: {
-            code: "legacy_pagination_400",
+            code: "pagination_400",
             message: error.message,
           },
         });
@@ -542,7 +542,7 @@ async function listMessagesForConversation(
         ? await client.getMessagesWithPrevCursor(conversation.entityURN, prevCursor)
         : await client.getMessagesBefore(conversation.entityURN, oldestDeliveredAt - 1);
     } catch (error) {
-      if (isLinkedInLegacyPaginationError(error)) {
+      if (isLinkedInPaginationRequestError(error)) {
         return buildMessageBatchResult({
           messages: [...seen.values()]
             .filter((message) => message.entityURN)
@@ -552,7 +552,7 @@ async function listMessagesForConversation(
           resumeCursor: null,
           previousCursor: resumeCursor,
           error: {
-            code: "legacy_pagination_400",
+            code: "pagination_400",
             message: error.message,
           },
         });
@@ -615,7 +615,7 @@ function loadProjectedReactions(
   );
 }
 
-function isLinkedInLegacyPaginationError(error: unknown): error is LinkedInRequestError {
+function isLinkedInPaginationRequestError(error: unknown): error is LinkedInRequestError {
   return error instanceof LinkedInRequestError && error.statusCode === 400;
 }
 

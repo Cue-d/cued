@@ -1,0 +1,19 @@
+{
+  "type": "conversation.summary.draft",
+  "version": "1",
+  "description": "Record a harmless drafted summary for a conversation without modifying messages.",
+  "module": "actions/conversation-summary-draft.cjs",
+  "requiresApprovalDefault": true,
+  "payload": {
+    "required": {
+      "conversationId": "string",
+      "summary": "string",
+      "reason": "string"
+    },
+    "optional": {
+      "timeWindow": "string",
+      "evidence": "object",
+      "confidence": "number"
+    }
+  }
+}

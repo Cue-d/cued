@@ -1,7 +1,12 @@
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { CuedDatabase } from "../../db/database.js";
 import {
   buildSyncResumeTargets,
   buildWhatsAppRealtimeSnapshotFromEvent,
+  dispatchRequest,
   getAdaptiveProjectionBatchSize,
   getAdaptiveProjectionContinueDelayMs,
   getAutoSyncTargets,
@@ -13,6 +18,56 @@ import {
   shouldProjectIngestRunInline,
   shouldSkipConnectedDiscordSchedulerSync,
 } from "./server.js";
+
+function createDispatchHarness() {
+  const dir = mkdtempSync(join(tmpdir(), "cued-daemon-actions-"));
+  const db = new CuedDatabase(join(dir, "local.db"));
+  db.initializeSchema();
+  const schedulers = {
+    wakeIngest: () => {},
+    wakeProjection: () => {},
+    wakeOutbound: () => {},
+    wakeSearchIndex: () => {},
+  };
+  const realtime = {
+    getStatus: () => null,
+    ensureDesiredSessions: async () => {},
+    shutdown: async () => {},
+  };
+  const bootstrap = {
+    state: "ready",
+    startedAt: Date.now(),
+    finishedAt: Date.now(),
+    error: null,
+  };
+  const dispatch = (request: Parameters<typeof dispatchRequest>[1]) =>
+    dispatchRequest(
+      db,
+      request,
+      new Map(),
+      schedulers as never,
+      realtime as never,
+      realtime as never,
+      realtime as never,
+      realtime as never,
+      realtime as never,
+      bootstrap as never,
+      () => {},
+      () => {},
+      () => ({ shuttingDown: false, requestedAt: null }),
+      () => false,
+      () => {},
+      () => {},
+    );
+  return {
+    db,
+    dispatch,
+    cleanup: () => {
+      db.close();
+      rmSync(dir, { recursive: true, force: true });
+    },
+  };
+}
 
 describe("discord scheduler pacing", () => {
   const connectedStatus = {
@@ -316,6 +371,134 @@ describe("interactive auth sessions", () => {
       active: true,
       expiresAt: 46_000,
     });
+  });
+});
+
+describe("daemon action requests", () => {
+  it("proposes actions through dispatch", async () => {
+    const harness = createDispatchHarness();
+    try {
+      const response = await harness.dispatch({
+        id: "actions-propose",
+        command: "actions-propose",
+        actionType: "contact.message.draft",
+        payload: {
+          contactId: "contact-1",
+          body: "Following up on our last thread.",
+          reason: "Recent inbound message has no newer outbound reply.",
+        },
+        title: "Draft follow-up",
+        createdBy: "daemon-test",
+      });
+
+      expect(response).toMatchObject({
+        id: "actions-propose",
+        ok: true,
+        result: {
+          action_type: "contact.message.draft",
+          status: "proposed",
+          approval_status: "pending",
+          title: "Draft follow-up",
+          source_skill: "cued",
+          created_by: "daemon-test",
+        },
+      });
+    } finally {
+      harness.cleanup();
+    }
+  });
+
+  it("approves and executes actions through dispatch", async () => {
+    const harness = createDispatchHarness();
+    try {
+      const action = harness.db.createAction({
+        actionType: "contact.memory.stale",
+        payload: { memoryId: "missing-memory" },
+      });
+
+      const listResponse = await harness.dispatch({
+        id: "actions-list",
+        command: "actions-list",
+        status: "proposed",
+      });
+      expect(listResponse).toMatchObject({
+        id: "actions-list",
+        ok: true,
+      });
+      expect(listResponse.result).toEqual([expect.objectContaining({ id: action.id })]);
+
+      const approveResponse = await harness.dispatch({
+        id: "actions-approve",
+        command: "actions-approve",
+        actionId: action.id,
+        approvedBy: "soham",
+      });
+      expect(approveResponse.result).toMatchObject({
+        id: action.id,
+        status: "approved",
+        approved_by: "soham",
+      });
+
+      const executeResponse = await harness.dispatch({
+        id: "actions-execute",
+        command: "actions-execute",
+        actionId: action.id,
+        executedBy: "daemon-test",
+      });
+      expect(executeResponse).toMatchObject({
+        id: "actions-execute",
+        ok: false,
+        error: "Contact memory not found: missing-memory",
+      });
+      expect(harness.db.getAction(action.id)).toMatchObject({
+        status: "failed",
+        execution_status: "failed",
+        executed_by: "daemon-test",
+      });
+    } finally {
+      harness.cleanup();
+    }
+  });
+
+  it("runs approved actions through dispatch", async () => {
+    const harness = createDispatchHarness();
+    try {
+      const action = harness.db.createAction({
+        actionType: "contact.memory.stale",
+        payload: { memoryId: "missing-memory" },
+        requiresApproval: false,
+      });
+
+      const response = await harness.dispatch({
+        id: "actions-run-approved",
+        command: "actions-run-approved",
+        limit: 10,
+        executedBy: "daemon-test",
+      });
+
+      expect(response).toMatchObject({
+        id: "actions-run-approved",
+        ok: true,
+        result: {
+          attempted: 1,
+          succeeded: 0,
+          failed: 1,
+          results: [
+            {
+              actionId: action.id,
+              ok: false,
+              error: "Contact memory not found: missing-memory",
+            },
+          ],
+        },
+      });
+      expect(harness.db.getAction(action.id)).toMatchObject({
+        status: "failed",
+        execution_status: "failed",
+      });
+    } finally {
+      harness.cleanup();
+    }
   });
 });
 

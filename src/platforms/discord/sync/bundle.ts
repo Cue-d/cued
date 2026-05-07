@@ -121,18 +121,8 @@ export async function buildDiscordSyncBundle(
 ): Promise<SyncBundle> {
   const accountKey = input.accountKey ?? process.env.CUED_ACCOUNT_KEY ?? "default";
   const client = options.client ?? new DiscordApiClient(loadDiscordCredentials(accountKey));
-  const sourceCursor = parseDiscordSyncCursor(
-    options.sourceCursor ??
-      (typeof process.env.CUED_DISCORD_SOURCE_CURSOR === "string"
-        ? JSON.parse(process.env.CUED_DISCORD_SOURCE_CURSOR)
-        : null),
-  );
-  const syncProofState = parseDiscordProofState(
-    options.syncProofs ??
-      (typeof process.env.CUED_DISCORD_SYNC_PROOFS === "string"
-        ? JSON.parse(process.env.CUED_DISCORD_SYNC_PROOFS)
-        : null),
-  );
+  const sourceCursor = parseDiscordSyncCursor(options.sourceCursor ?? null);
+  const syncProofState = parseDiscordProofState(options.syncProofs ?? null);
   const syncMessageChannelLimit =
     options.syncMessageChannelLimit ?? getDiscordSyncMessageChannelLimit();
   const syncMessagesPerChannelLimit =

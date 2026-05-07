@@ -136,7 +136,7 @@ describe("slack e2e", () => {
     const envDir = mkdtempSync(join(tmpdir(), "cued-slack-e2e-"));
     tempDirs.push(envDir);
     const db = new CuedDatabase(join(envDir, "local.db"));
-    db.migrate();
+    db.initializeSchema();
     const originalExecArgv = [...process.execArgv];
     process.execArgv = ["--import", "tsx"];
 
@@ -646,20 +646,14 @@ async function runSlackCycle(
   },
 ) {
   const checkpoint = db.getCheckpoint("slack", "workspace-a");
-  const sourceCursor = checkpoint?.source_cursor_json
-    ? JSON.parse(checkpoint.source_cursor_json)
-    : null;
   const envOverrides: Record<string, string> = {
     CUED_DB_PATH: options.dbPath,
     CUED_SLACK_HELPER_BINARY: options.helperBinaryPath,
     CUED_SLACK_HELPER_API_URL: options.apiURL,
     PATH: `${options.securityDir}:${process.env.PATH ?? ""}`,
   };
-  if (typeof sourceCursor?.lastSyncAt === "number") {
-    envOverrides.CUED_SLACK_LAST_SYNC_AT = String(sourceCursor.lastSyncAt);
-  }
   if (checkpoint?.source_cursor_json) {
-    envOverrides.CUED_SLACK_SOURCE_CURSOR = checkpoint.source_cursor_json;
+    envOverrides.CUED_SYNC_SOURCE_CURSOR = checkpoint.source_cursor_json;
   }
   if (typeof options.apiPageBudget === "number") {
     envOverrides.CUED_SLACK_API_PAGE_BUDGET = String(options.apiPageBudget);

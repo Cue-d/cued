@@ -39,7 +39,7 @@ describe("permission status modes", () => {
     const dir = mkdtempSync(join(tmpdir(), "cued-doctor-status-"));
     tempDirs.push(dir);
     const db = new CuedDatabase(join(dir, "local.db"));
-    db.migrate();
+    db.initializeSchema();
     return db;
   }
 

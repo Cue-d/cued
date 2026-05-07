@@ -12,6 +12,27 @@ export type DaemonRequest =
     }
   | { id: string; command: "permissions-status" }
   | { id: string; command: "sql"; query: string }
+  | {
+      id: string;
+      command: "actions-propose";
+      actionType: string;
+      actionVersion?: string;
+      payload: unknown;
+      priority?: number;
+      title?: string | null;
+      summary?: string | null;
+      sourceSkill?: string | null;
+      sourceJobId?: string | null;
+      createdBy?: string | null;
+      requiresApproval?: boolean;
+      dedupeKey?: string | null;
+    }
+  | { id: string; command: "actions-list"; status?: string; limit?: number }
+  | { id: string; command: "actions-show"; actionId: string }
+  | { id: string; command: "actions-approve"; actionId: string; approvedBy?: string }
+  | { id: string; command: "actions-deny"; actionId: string; deniedBy?: string }
+  | { id: string; command: "actions-execute"; actionId: string; executedBy?: string }
+  | { id: string; command: "actions-run-approved"; limit?: number; executedBy?: string }
   | { id: string; command: "integrations-list" }
   | { id: string; command: "integrations-refresh" }
   | { id: string; command: "integrations-interaction-start"; sessionId?: string; ttlMs?: number }
@@ -51,23 +72,6 @@ export type DaemonRequest =
   | { id: string; command: "sync-run"; source?: string }
   | { id: string; command: "sync-resume" }
   | { id: string; command: "shutdown-for-update" }
-  | {
-      id: string;
-      command: "contacts-merge";
-      primaryContactId: string;
-      secondaryContactId: string;
-      reason?: string;
-    }
-  | {
-      id: string;
-      command: "contacts-merge-batch";
-      merges: Array<{
-        primaryContactId: string;
-        secondaryContactId: string;
-        reason?: string | null;
-      }>;
-      apply: boolean;
-    }
   | { id: string; command: "rebuild" }
   | { id: string; command: "reset"; source: string };
 

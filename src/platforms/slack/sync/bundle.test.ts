@@ -425,7 +425,7 @@ describe("slack worker lib", () => {
           startedAt: 1710000000000,
           oldestMs: 0,
           usersComplete: true,
-          conversationCursor: "team:legacy-cursor",
+          conversationCursor: "team:resume-cursor",
         },
       },
       client: {

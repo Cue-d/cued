@@ -3,7 +3,7 @@ import { buildGmailSyncBundle } from "./bundle.js";
 
 async function main(): Promise<void> {
   try {
-    const invocation = readAdapterInvocationEnv("gmail");
+    const invocation = readAdapterInvocationEnv();
     const pageBudget = process.env.CUED_GMAIL_PAGE_BUDGET
       ? Number(process.env.CUED_GMAIL_PAGE_BUDGET)
       : undefined;

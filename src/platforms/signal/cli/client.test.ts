@@ -114,13 +114,16 @@ describe("signal cli helpers", () => {
     expect(resolveSignalCliPath({}, repoRoot)).toBe(repoHelper);
   });
 
-  it("returns null when no bundled helper exists and ignores legacy env overrides", () => {
+  it("returns null when no bundled helper exists and ignores env overrides", () => {
     const repoRoot = createTempDir("cued-signal-repo-");
-    const legacyOverride = join(createTempDir("cued-signal-legacy-"), "signal-cli");
-    createSignalHelperBinary(legacyOverride);
+    const ignoredOverride = join(createTempDir("cued-signal-override-"), "signal-cli");
+    createSignalHelperBinary(ignoredOverride);
 
     expect(
-      resolveSignalCliPath({ CUED_SIGNAL_CLI_PATH: legacyOverride } as NodeJS.ProcessEnv, repoRoot),
+      resolveSignalCliPath(
+        { CUED_SIGNAL_CLI_PATH: ignoredOverride } as NodeJS.ProcessEnv,
+        repoRoot,
+      ),
     ).toBeNull();
   });
 
