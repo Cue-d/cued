@@ -6,7 +6,7 @@ import {
 } from "./invocation.js";
 
 describe("adapter invocation env", () => {
-  it("preserves legacy cursor env vars while adding generic cursor env", () => {
+  it("serializes source cursors through the generic env", () => {
     const env = buildAdapterInvocationEnv({
       platform: "linkedin",
       checkpointSourceCursorJson: JSON.stringify({
@@ -20,16 +20,10 @@ describe("adapter invocation env", () => {
         lastSyncAt: 123,
         syncToken: "sync-token",
       }),
-      CUED_LINKEDIN_SOURCE_CURSOR: JSON.stringify({
-        lastSyncAt: 123,
-        syncToken: "sync-token",
-      }),
-      CUED_LINKEDIN_LAST_SYNC_AT: "123",
-      CUED_LINKEDIN_SYNC_TOKEN: "sync-token",
     });
   });
 
-  it("serializes proof rows for generic and Discord legacy proof env", () => {
+  it("serializes proof rows through the generic env", () => {
     const env = buildAdapterInvocationEnv({
       platform: "discord",
       proofs: [
@@ -59,12 +53,12 @@ describe("adapter invocation env", () => {
         lastObservedAt: 456,
       },
     ]);
-    expect(env.CUED_DISCORD_SYNC_PROOFS).toBe(env.CUED_SYNC_PROOFS);
+    expect(env).not.toHaveProperty("CUED_DISCORD_SYNC_PROOFS");
   });
 
-  it("reads generic invocation env when platform legacy env is absent", () => {
+  it("reads generic invocation env", () => {
     expect(
-      readAdapterInvocationEnv("slack", {
+      readAdapterInvocationEnv({
         CUED_SYNC_SOURCE_CURSOR: JSON.stringify({ lastSyncAt: 123 }),
         CUED_SYNC_PROOFS: JSON.stringify([{ scopeKey: "C1", proofKind: "messages" }]),
       }),

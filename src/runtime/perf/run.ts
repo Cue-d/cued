@@ -634,7 +634,7 @@ function runProjectionReplayBenchmark(rawEvents: ProviderRawEventInput[]): void 
   const dir = createTempDir("cued-perf-projection-");
   const db = new CuedDatabase(join(dir, "local.db"));
   try {
-    db.migrate();
+    db.initializeSchema();
     db.insertRawEvents(rawEvents);
     projectPendingRawEvents(db);
   } finally {
@@ -647,7 +647,7 @@ function runIncrementalInsertBenchmark(rawEvents: ProviderRawEventInput[]): void
   const dir = createTempDir("cued-perf-incremental-insert-");
   const db = new CuedDatabase(join(dir, "local.db"));
   try {
-    db.migrate();
+    db.initializeSchema();
     db.insertRawEvents(rawEvents);
   } finally {
     db.close();
@@ -659,7 +659,7 @@ function runIncrementalRealtimeBenchmark(rawEvents: ProviderRawEventInput[]): vo
   const dir = createTempDir("cued-perf-incremental-hot-");
   const db = new CuedDatabase(join(dir, "local.db"));
   try {
-    db.migrate();
+    db.initializeSchema();
     const insertResult = db.insertRawEvents(rawEvents);
     if (insertResult.firstInsertedRowId != null && insertResult.lastInsertedRowId != null) {
       projectRealtimeRange(db, {
@@ -678,7 +678,7 @@ function runIncrementalCatchupBenchmark(rawEvents: ProviderRawEventInput[]): voi
   const dir = createTempDir("cued-perf-incremental-catchup-");
   const db = new CuedDatabase(join(dir, "local.db"));
   try {
-    db.migrate();
+    db.initializeSchema();
     const insertResult = db.insertRawEvents(rawEvents);
     if (insertResult.firstInsertedRowId != null && insertResult.lastInsertedRowId != null) {
       projectRealtimeRange(db, {

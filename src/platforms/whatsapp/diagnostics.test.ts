@@ -21,7 +21,7 @@ describe("whatsapp diagnostics", () => {
     const dir = mkdtempSync(join(tmpdir(), "cued-whatsapp-diagnostics-"));
     tempDirs.push(dir);
     const db = new CuedDatabase(join(dir, "local.db"));
-    db.migrate();
+    db.initializeSchema();
     return db;
   }
 

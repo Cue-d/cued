@@ -60,7 +60,7 @@ describe("slack desktop import removal tombstones", () => {
 
   function createDb(): CuedDatabase {
     const db = new CuedDatabase(join(createTempDir("cued-slack-import-db-"), "local.db"));
-    db.migrate();
+    db.initializeSchema();
     return db;
   }
 

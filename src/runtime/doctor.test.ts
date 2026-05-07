@@ -59,7 +59,7 @@ describe("permission status summaries", () => {
     const dir = mkdtempSync(join(tmpdir(), "cued-auth-doctor-"));
     tempDirs.push(dir);
     const db = new CuedDatabase(join(dir, "local.db"));
-    db.migrate();
+    db.initializeSchema();
     return db;
   }
 

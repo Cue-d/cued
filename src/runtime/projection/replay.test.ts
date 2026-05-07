@@ -27,7 +27,7 @@ describe("projection replay", () => {
     const dir = mkdtempSync(join(tmpdir(), "cued-projection-replay-"));
     tempDirs.push(dir);
     const db = new CuedDatabase(join(dir, "local.db"));
-    db.migrate();
+    db.initializeSchema();
     return db;
   }
 

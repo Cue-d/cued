@@ -12,6 +12,10 @@ import {
 import { createConnection, createServer, type Socket } from "node:net";
 import { basename, dirname } from "node:path";
 import process from "node:process";
+import {
+  ActionDefinitionRegistry,
+  actionRequiresProjectionRebuild,
+} from "../../actions/registry.js";
 import { getCurrentAppVersion, getCurrentReleaseChannel } from "../../core/app-metadata.js";
 import {
   CUED_DAEMON_LOCK_PATH,
@@ -49,6 +53,7 @@ import { refreshLocalIntegrationStates } from "../../platforms/core/state/local-
 import { refreshManagedIntegrationStates } from "../../platforms/core/state/refresh.js";
 import { getIntegrationSummary } from "../../platforms/core/state/status.js";
 import type { SyncContinuation } from "../../platforms/core/sync.js";
+import { ACTION_STATUS_VALUES, type ActionStatus } from "../../platforms/core/types.js";
 import {
   DiscordApiClient,
   isDiscordAuthInvalidationError,
@@ -124,7 +129,7 @@ import { emitHookEvent } from "../hooks.js";
 import type { DaemonRequest, DaemonResponse } from "../ipc.js";
 import { collectInboundMessageHookPayloads } from "../message-hooks.js";
 import { resolveMacOSNativeBinary } from "../native-binary.js";
-import { projectRealtimeRange } from "../projection/projector.js";
+import { projectRealtimeRange, rebuildProjectedState } from "../projection/projector.js";
 import {
   buildProjectionMessageHookBatches,
   mergeProjectionRunDetails,
@@ -4416,7 +4421,41 @@ function stopActiveAuthSessionsForIntegration(
   }
 }
 
-async function dispatchRequest(
+function runApprovedActions(
+  db: ReturnType<typeof openCuedDatabase>,
+  input: { limit?: number; executedBy?: string | null } = {},
+): {
+  attempted: number;
+  succeeded: number;
+  failed: number;
+  results: Array<{ actionId: string; ok: boolean; result?: unknown; error?: string }>;
+} {
+  const actions = db.listApprovedPendingActions(input.limit ?? 25);
+  const results: Array<{ actionId: string; ok: boolean; result?: unknown; error?: string }> = [];
+  for (const action of actions) {
+    try {
+      const executed = db.executeApprovedAction(action.id, input.executedBy ?? "daemon");
+      if (actionRequiresProjectionRebuild(executed.action)) {
+        rebuildProjectedState(db);
+      }
+      results.push({ actionId: action.id, ok: true, result: executed });
+    } catch (error) {
+      results.push({
+        actionId: action.id,
+        ok: false,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+  return {
+    attempted: results.length,
+    succeeded: results.filter((result) => result.ok).length,
+    failed: results.filter((result) => !result.ok).length,
+    results,
+  };
+}
+
+export async function dispatchRequest(
   db: ReturnType<typeof openCuedDatabase>,
   request: DaemonRequest,
   activeAuthSessions: Map<string, { child: ChildProcess; platform: Platform; accountKey: string }>,
@@ -4657,6 +4696,99 @@ async function dispatchRequest(
             db.executeReadOnlySql(request.query),
           ),
         };
+      case "actions-propose": {
+        const actionVersion = request.actionVersion ?? "1";
+        const registry = ActionDefinitionRegistry.load();
+        const definition = registry.get(request.actionType, actionVersion);
+        if (!definition) {
+          throw new Error(`Unknown action definition: ${request.actionType}@${actionVersion}`);
+        }
+        const validation = registry.validatePayload(
+          request.actionType,
+          actionVersion,
+          request.payload,
+        );
+        if (!validation.ok) {
+          throw new Error(validation.errors.join(" "));
+        }
+        return {
+          id: request.id,
+          ok: true,
+          result: db.createAction({
+            actionType: request.actionType,
+            actionVersion,
+            payload: request.payload,
+            priority: request.priority,
+            title: request.title ?? null,
+            summary: request.summary ?? null,
+            sourceSkill: request.sourceSkill ?? definition.skillName,
+            sourceJobId: request.sourceJobId ?? null,
+            createdBy: request.createdBy ?? "daemon",
+            requiresApproval: request.requiresApproval ?? definition.requiresApprovalDefault,
+            dedupeKey: request.dedupeKey ?? null,
+          }),
+        };
+      }
+      case "actions-list":
+        if (request.status && !ACTION_STATUS_VALUES.includes(request.status as ActionStatus)) {
+          throw new Error(`Invalid action status: ${request.status}`);
+        }
+        return {
+          id: request.id,
+          ok: true,
+          result: db.listActions({
+            status: request.status as ActionStatus | undefined,
+            limit: request.limit,
+          }),
+        };
+      case "actions-show": {
+        const action = db.getAction(request.actionId);
+        if (!action) {
+          throw new Error(`Action not found: ${request.actionId}`);
+        }
+        return {
+          id: request.id,
+          ok: true,
+          result: {
+            action,
+            effects: db.listActionEffects(request.actionId),
+          },
+        };
+      }
+      case "actions-approve":
+        return {
+          id: request.id,
+          ok: true,
+          result: db.approveAction(request.actionId, request.approvedBy ?? "user"),
+        };
+      case "actions-deny":
+        return {
+          id: request.id,
+          ok: true,
+          result: db.denyAction(request.actionId, request.deniedBy ?? "user"),
+        };
+      case "actions-execute": {
+        const executed = db.executeApprovedAction(request.actionId, request.executedBy ?? "daemon");
+        return {
+          id: request.id,
+          ok: true,
+          result: {
+            ...executed,
+            projection: actionRequiresProjectionRebuild(executed.action)
+              ? rebuildProjectedState(db)
+              : null,
+          },
+        };
+      }
+      case "actions-run-approved":
+        return {
+          id: request.id,
+          ok: true,
+          result: runApprovedActions(db, {
+            limit: request.limit,
+            executedBy: request.executedBy,
+          }),
+        };
       case "integrations-list": {
         const integrationAuthService = await getIntegrationAuthService();
         return {
@@ -4851,25 +4983,6 @@ async function dispatchRequest(
           id: request.id,
           ok: true,
           result: requestUpdateShutdown(),
-        };
-      case "contacts-merge":
-        return {
-          id: request.id,
-          ok: true,
-          result: runQueueService.mergeContacts({
-            primaryContactId: request.primaryContactId,
-            secondaryContactId: request.secondaryContactId,
-            reason: request.reason,
-          }),
-        };
-      case "contacts-merge-batch":
-        return {
-          id: request.id,
-          ok: true,
-          result: runQueueService.mergeContactsBatch({
-            merges: request.merges,
-            apply: request.apply,
-          }),
         };
       case "rebuild":
         return {

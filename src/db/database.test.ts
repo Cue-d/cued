@@ -3,6 +3,7 @@ import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { listContactMergeAliases } from "../actions/contact-merge-effects.js";
 import { CuedDatabase, openExistingCuedDatabase } from "./database.js";
 
 describe("CuedDatabase", () => {
@@ -21,7 +22,7 @@ describe("CuedDatabase", () => {
     const dir = mkdtempSync(join(tmpdir(), "cued-v2-db-"));
     tempDirs.push(dir);
     const db = new CuedDatabase(join(dir, "local.db"));
-    db.migrate();
+    db.initializeSchema();
     return db;
   }
 
@@ -51,6 +52,22 @@ describe("CuedDatabase", () => {
     `,
       )
       .run(input.id, input.name, timestamp, timestamp);
+  }
+
+  function executeContactMerge(
+    db: CuedDatabase,
+    input: { primaryContactId: string; secondaryContactId: string; reason?: string | null },
+  ) {
+    const action = db.createAction({
+      actionType: "contact.merge",
+      payload: {
+        primaryContactId: input.primaryContactId,
+        secondaryContactId: input.secondaryContactId,
+        reason: input.reason ?? null,
+      },
+      requiresApproval: false,
+    });
+    return db.executeApprovedAction(action.id, "test");
   }
 
   function insertHandle(
@@ -98,6 +115,21 @@ describe("CuedDatabase", () => {
       );
   }
 
+  function insertConversation(db: CuedDatabase, id: string, name: string): void {
+    const timestamp = Date.now();
+    sqlite(db)
+      .prepare(
+        `
+        INSERT INTO conversations (
+          id, platform, account_key, source_conversation_key, native_conversation_key, type,
+          is_active, removal_reason, service, name, topic, participant_names, last_message_id,
+          last_message_at, last_message_preview, unread_count, created_at, updated_at
+        ) VALUES (?, 'imessage', 'default', ?, NULL, 'dm', 1, NULL, NULL, ?, NULL, NULL, NULL, NULL, NULL, 0, ?, ?)
+      `,
+      )
+      .run(id, `imessage:${id}`, name, timestamp, timestamp);
+  }
+
   function sqlite(db: CuedDatabase) {
     return (
       db as unknown as {
@@ -125,6 +157,54 @@ describe("CuedDatabase", () => {
       authSessions: 0,
       messageBreakdown: [],
     });
+    expect(
+      (sqlite(db).prepare("PRAGMA table_info(actions)").all() as Array<{ name: string }>).map(
+        (row) => row.name,
+      ),
+    ).toEqual([
+      "id",
+      "action_type",
+      "action_version",
+      "status",
+      "approval_status",
+      "execution_status",
+      "priority",
+      "title",
+      "summary",
+      "payload_json",
+      "payload_hash",
+      "result_json",
+      "error_json",
+      "source_skill",
+      "source_job_id",
+      "created_by",
+      "approved_by",
+      "denied_by",
+      "executed_by",
+      "requires_approval",
+      "queued_at",
+      "approved_at",
+      "denied_at",
+      "locked_at",
+      "started_at",
+      "executed_at",
+      "updated_at",
+      "dedupe_key",
+    ]);
+    expect(
+      (
+        sqlite(db).prepare("PRAGMA table_info(action_effects)").all() as Array<{ name: string }>
+      ).map((row) => row.name),
+    ).toEqual([
+      "id",
+      "action_id",
+      "effect_type",
+      "target_table",
+      "target_id",
+      "payload_json",
+      "applied_at",
+      "reverted_at",
+    ]);
     db.close();
   });
 
@@ -198,6 +278,526 @@ describe("CuedDatabase", () => {
         .prepare("SELECT status, owner_id, lease_expires_at FROM jobs WHERE id = ?")
         .get(lowPriorityJobId),
     ).toEqual({ status: "completed", owner_id: null, lease_expires_at: null });
+
+    db.close();
+  });
+
+  it("records the full action lifecycle and execution effects", () => {
+    const db = createDb();
+
+    const action = db.createAction({
+      actionType: "contact.merge",
+      actionVersion: "1",
+      payload: {
+        primaryContactId: "contact-a",
+        secondaryContactId: "contact-b",
+        evidence: ["same normalized phone"],
+      },
+      priority: 10,
+      title: "Merge Ava duplicate",
+      summary: "Exact handle overlap.",
+      sourceSkill: "cued",
+      createdBy: "agent",
+      dedupeKey: "contact.merge:contact-a:contact-b",
+    });
+
+    expect(action).toMatchObject({
+      action_type: "contact.merge",
+      action_version: "1",
+      status: "proposed",
+      approval_status: "pending",
+      execution_status: "pending",
+      priority: 10,
+      source_skill: "cued",
+      created_by: "agent",
+      requires_approval: 1,
+      payload_hash: expect.stringMatching(/^[a-f0-9]{64}$/),
+      dedupe_key: "contact.merge:contact-a:contact-b",
+    });
+    expect(JSON.parse(action.payload_json)).toEqual({
+      primaryContactId: "contact-a",
+      secondaryContactId: "contact-b",
+      evidence: ["same normalized phone"],
+    });
+
+    const approved = db.approveAction(action.id, "soham");
+    expect(approved).toMatchObject({
+      status: "approved",
+      approval_status: "approved",
+      approved_by: "soham",
+      approved_at: expect.any(Number),
+    });
+
+    const locked = db.lockActionForExecution(action.id, "daemon");
+    expect(locked).toMatchObject({
+      status: "executing",
+      execution_status: "running",
+      executed_by: "daemon",
+      locked_at: expect.any(Number),
+      started_at: expect.any(Number),
+    });
+    expect(() =>
+      db.updateActionPayload(action.id, {
+        primaryContactId: "contact-c",
+        secondaryContactId: "contact-b",
+      }),
+    ).toThrow("Cannot update an action payload after execution has started.");
+
+    const effect = db.recordActionEffect({
+      actionId: action.id,
+      effectType: "contact.merge.recorded",
+      targetTable: "contacts",
+      targetId: "contact-a",
+      payload: { canonicalContactId: "contact-a" },
+      appliedAt: 1234,
+    });
+    expect(effect).toMatchObject({
+      action_id: action.id,
+      effect_type: "contact.merge.recorded",
+      target_table: "contacts",
+      target_id: "contact-a",
+      payload_json: JSON.stringify({ canonicalContactId: "contact-a" }),
+      applied_at: 1234,
+      reverted_at: null,
+    });
+
+    const completed = db.completeAction(action.id, { decisionId: "decision-1" });
+    expect(completed).toMatchObject({
+      status: "executed",
+      execution_status: "succeeded",
+      result_json: JSON.stringify({ decisionId: "decision-1" }),
+      executed_at: expect.any(Number),
+    });
+    expect(db.listActionEffects(action.id).map((row) => row.id)).toEqual([effect.id]);
+
+    db.close();
+  });
+
+  it("enforces action approval and failure transitions", () => {
+    const db = createDb();
+
+    const pending = db.createAction({
+      actionType: "contact.memory.add",
+      payload: { contactId: "contact-a", body: "Works on applied AI." },
+      createdBy: "agent",
+    });
+    expect(() => db.lockActionForExecution(pending.id)).toThrow(
+      "Action must be approved before execution.",
+    );
+
+    const updated = db.updateActionPayload(pending.id, {
+      contactId: "contact-a",
+      body: "Works on applied AI and founder tooling.",
+    });
+    expect(JSON.parse(updated.payload_json)).toEqual({
+      contactId: "contact-a",
+      body: "Works on applied AI and founder tooling.",
+    });
+    expect(updated.payload_hash).not.toBe(pending.payload_hash);
+
+    const denied = db.denyAction(pending.id, "soham");
+    expect(denied).toMatchObject({
+      status: "denied",
+      approval_status: "denied",
+      approved_by: null,
+      denied_by: "soham",
+      denied_at: expect.any(Number),
+    });
+    expect(() => db.approveAction(pending.id)).toThrow("Cannot approve a denied action.");
+
+    const autoApproved = db.createAction({
+      actionType: "contact.memory.stale",
+      payload: { memoryId: "memory-1" },
+      requiresApproval: false,
+      createdBy: "system",
+    });
+    expect(autoApproved).toMatchObject({
+      status: "approved",
+      approval_status: "auto_approved",
+      approved_by: "system",
+      approved_at: expect.any(Number),
+    });
+    db.lockActionForExecution(autoApproved.id, "daemon");
+    const failed = db.failAction(autoApproved.id, new Error("memory missing"));
+    expect(failed).toMatchObject({
+      status: "failed",
+      execution_status: "failed",
+      error_json: expect.stringContaining("memory missing"),
+      executed_at: expect.any(Number),
+    });
+
+    db.close();
+  });
+
+  it("executes approved contact merge actions and records effects", () => {
+    const db = createDb();
+    insertContact(db, { id: "contact-a", name: "Ava Chen" });
+    insertContact(db, { id: "contact-b", name: "Ava Duplicate" });
+
+    const action = db.createAction({
+      actionType: "contact.merge",
+      payload: {
+        primaryContactId: "contact-a",
+        secondaryContactId: "contact-b",
+        reason: "same normalized phone",
+      },
+      requiresApproval: false,
+    });
+
+    const executed = db.executeApprovedAction(action.id, "action-runner");
+    expect(executed.action).toMatchObject({
+      status: "executed",
+      execution_status: "succeeded",
+      executed_by: "action-runner",
+    });
+    expect(executed.effects).toHaveLength(1);
+    expect(executed.effects[0]).toMatchObject({
+      action_id: action.id,
+      effect_type: "contact.merge.recorded",
+      target_table: "contacts",
+      target_id: "contact-a",
+    });
+    expect(
+      db.listActiveActionEffects({
+        actionType: "contact.merge",
+        effectType: "contact.merge.recorded",
+      }),
+    ).toEqual([expect.objectContaining({ action_id: action.id, target_id: "contact-a" })]);
+
+    db.close();
+  });
+
+  it("validates action payloads again at execution time", () => {
+    const db = createDb();
+    const action = db.createAction({
+      actionType: "contact.memory.add",
+      payload: { contactId: "contact-a" },
+      requiresApproval: false,
+    });
+
+    expect(() => db.executeApprovedAction(action.id, "action-runner")).toThrow(
+      "Action payload failed validation: Missing required payload field 'body'.",
+    );
+    expect(db.getAction(action.id)).toMatchObject({
+      status: "failed",
+      execution_status: "failed",
+      error_json: expect.stringContaining("Missing required payload field 'body'."),
+    });
+
+    db.close();
+  });
+
+  it("executes approved contact memory actions and records effects", () => {
+    const db = createDb();
+    insertContact(db, { id: "contact-a", name: "Ava Chen" });
+
+    const addAction = db.createAction({
+      actionType: "contact.memory.add",
+      payload: {
+        contactId: "contact-a",
+        body: "Works on applied AI.",
+        sourceKind: "local_messages",
+        evidence: { messageIds: ["message-1"] },
+        confidence: 90,
+      },
+      requiresApproval: false,
+    });
+    const added = db.executeApprovedAction(addAction.id, "action-runner");
+    expect(added.action).toMatchObject({ status: "executed", execution_status: "succeeded" });
+    expect(added.effects[0]).toMatchObject({
+      effect_type: "contact_memory.added",
+      target_table: "contact_memories",
+    });
+    const memoryId = added.effects[0]!.target_id!;
+    expect(db.getContactMemory(memoryId)).toMatchObject({
+      contact_id: "contact-a",
+      body: "Works on applied AI.",
+      source_kind: "local_messages",
+      confidence: 90,
+      created_by: "action-runner",
+    });
+
+    const staleAction = db.createAction({
+      actionType: "contact.memory.stale",
+      payload: { memoryId },
+      requiresApproval: false,
+    });
+    const staled = db.executeApprovedAction(staleAction.id, "action-runner");
+    expect(staled.effects[0]).toMatchObject({
+      effect_type: "contact_memory.marked_stale",
+      target_table: "contact_memories",
+      target_id: memoryId,
+    });
+    expect(db.getContactMemory(memoryId)).toMatchObject({
+      id: memoryId,
+      stale_at: expect.any(Number),
+    });
+
+    db.close();
+  });
+
+  it("executes approved follow-up recommendation actions without mutating contact state", () => {
+    const db = createDb();
+    insertContact(db, { id: "contact-a", name: "Ava Chen" });
+
+    const action = db.createAction({
+      actionType: "contact.followup.recommend",
+      payload: {
+        contactId: "contact-a",
+        reason: "They replied last week and no follow-up has been sent.",
+        suggestedMessage: "Following up on our last thread.",
+        dueAt: 1_735_689_600_000,
+        evidence: { messageIds: ["message-1"] },
+      },
+      requiresApproval: false,
+    });
+
+    const executed = db.executeApprovedAction(action.id, "action-runner");
+    expect(executed.action).toMatchObject({
+      status: "executed",
+      execution_status: "succeeded",
+    });
+    expect(executed.effects).toHaveLength(1);
+    expect(executed.effects[0]).toMatchObject({
+      effect_type: "contact.followup.recommended",
+      target_table: "contacts",
+      target_id: "contact-a",
+    });
+    expect(JSON.parse(executed.effects[0]!.payload_json!)).toEqual({
+      contactId: "contact-a",
+      reason: "They replied last week and no follow-up has been sent.",
+      suggestedMessage: "Following up on our last thread.",
+      dueAt: 1_735_689_600_000,
+      evidence: { messageIds: ["message-1"] },
+    });
+
+    db.close();
+  });
+
+  it("executes approved enrichment recommendation actions as effects only", () => {
+    const db = createDb();
+    insertContact(db, { id: "contact-a", name: "Ava Chen" });
+
+    const action = db.createAction({
+      actionType: "contact.enrichment.recommend",
+      payload: {
+        contactId: "contact-a",
+        field: "linkedin",
+        value: "https://www.linkedin.com/in/ava-chen",
+        sourceKind: "contact_sources",
+        evidence: { sourceEntityKey: "linkedin:ava-chen" },
+        confidence: 95,
+      },
+      requiresApproval: false,
+    });
+
+    const executed = db.executeApprovedAction(action.id, "action-runner");
+    expect(executed.action).toMatchObject({
+      status: "executed",
+      execution_status: "succeeded",
+    });
+    expect(executed.effects).toHaveLength(1);
+    expect(executed.effects[0]).toMatchObject({
+      effect_type: "contact.enrichment.recommended",
+      target_table: "contacts",
+      target_id: "contact-a",
+    });
+    expect(JSON.parse(executed.effects[0]!.payload_json!)).toEqual({
+      contactId: "contact-a",
+      field: "linkedin",
+      value: "https://www.linkedin.com/in/ava-chen",
+      sourceKind: "contact_sources",
+      evidence: { sourceEntityKey: "linkedin:ava-chen" },
+      confidence: 95,
+    });
+
+    db.close();
+  });
+
+  it("executes approved introduction recommendation actions as effects only", () => {
+    const db = createDb();
+    insertContact(db, { id: "contact-a", name: "Ava Chen" });
+    insertContact(db, { id: "contact-b", name: "Ben Ross" });
+
+    const action = db.createAction({
+      actionType: "contact.introduction.recommend",
+      payload: {
+        fromContactId: "contact-a",
+        toContactId: "contact-b",
+        reason: "Both have discussed local-first agent infrastructure.",
+        suggestedIntro: "You should meet because you are working on overlapping problems.",
+        evidence: { sharedTopics: ["agents", "local context"] },
+        confidence: 75,
+      },
+      requiresApproval: false,
+    });
+
+    const executed = db.executeApprovedAction(action.id, "action-runner");
+    expect(executed.action).toMatchObject({
+      status: "executed",
+      execution_status: "succeeded",
+    });
+    expect(executed.effects).toHaveLength(1);
+    expect(executed.effects[0]).toMatchObject({
+      effect_type: "contact.introduction.recommended",
+      target_table: "contacts",
+      target_id: "contact-a",
+    });
+    expect(JSON.parse(executed.effects[0]!.payload_json!)).toEqual({
+      fromContactId: "contact-a",
+      toContactId: "contact-b",
+      reason: "Both have discussed local-first agent infrastructure.",
+      suggestedIntro: "You should meet because you are working on overlapping problems.",
+      evidence: { sharedTopics: ["agents", "local context"] },
+      confidence: 75,
+    });
+
+    db.close();
+  });
+
+  it("executes approved message draft actions as effects only", () => {
+    const db = createDb();
+    insertContact(db, { id: "contact-a", name: "Ava Chen" });
+
+    const action = db.createAction({
+      actionType: "contact.message.draft",
+      payload: {
+        contactId: "contact-a",
+        body: "Following up on our last thread.",
+        reason: "Recent inbound message has no newer outbound reply.",
+        channelHint: "imessage",
+        evidence: { messageIds: ["message-1"] },
+        confidence: 70,
+      },
+      requiresApproval: false,
+    });
+
+    const executed = db.executeApprovedAction(action.id, "action-runner");
+    expect(executed.action).toMatchObject({
+      status: "executed",
+      execution_status: "succeeded",
+    });
+    expect(executed.effects).toHaveLength(1);
+    expect(executed.effects[0]).toMatchObject({
+      effect_type: "contact.message.drafted",
+      target_table: "contacts",
+      target_id: "contact-a",
+    });
+    expect(JSON.parse(executed.effects[0]!.payload_json!)).toEqual({
+      contactId: "contact-a",
+      body: "Following up on our last thread.",
+      reason: "Recent inbound message has no newer outbound reply.",
+      channelHint: "imessage",
+      evidence: { messageIds: ["message-1"] },
+      confidence: 70,
+    });
+
+    db.close();
+  });
+
+  it("executes approved conversation summary draft actions as effects only", () => {
+    const db = createDb();
+    insertConversation(db, "conversation-a", "Ava / Ben");
+
+    const action = db.createAction({
+      actionType: "conversation.summary.draft",
+      payload: {
+        conversationId: "conversation-a",
+        summary: "Discussed local-first agent context and action queues.",
+        reason: "Recent conversation summary requested by agent smoke.",
+        timeWindow: "last_30_days",
+        evidence: { messageCount: 12 },
+        confidence: 65,
+      },
+      requiresApproval: false,
+    });
+
+    const executed = db.executeApprovedAction(action.id, "action-runner");
+    expect(executed.action).toMatchObject({
+      status: "executed",
+      execution_status: "succeeded",
+    });
+    expect(executed.effects).toHaveLength(1);
+    expect(executed.effects[0]).toMatchObject({
+      effect_type: "conversation.summary.drafted",
+      target_table: "conversations",
+      target_id: "conversation-a",
+    });
+    expect(JSON.parse(executed.effects[0]!.payload_json!)).toEqual({
+      conversationId: "conversation-a",
+      summary: "Discussed local-first agent context and action queues.",
+      reason: "Recent conversation summary requested by agent smoke.",
+      timeWindow: "last_30_days",
+      evidence: { messageCount: 12 },
+      confidence: 65,
+    });
+
+    db.close();
+  });
+
+  it("executes approved conversation follow-up recommendation actions as effects only", () => {
+    const db = createDb();
+    insertConversation(db, "conversation-a", "Ava / Ben");
+
+    const action = db.createAction({
+      actionType: "conversation.followup.recommend",
+      payload: {
+        conversationId: "conversation-a",
+        reason: "The thread has recent activity and needs a next step.",
+        suggestedNextStep: "Review the thread and decide whether to reply.",
+        evidence: { messageCount: 12 },
+        confidence: 60,
+      },
+      requiresApproval: false,
+    });
+
+    const executed = db.executeApprovedAction(action.id, "action-runner");
+    expect(executed.action).toMatchObject({
+      status: "executed",
+      execution_status: "succeeded",
+    });
+    expect(executed.effects).toHaveLength(1);
+    expect(executed.effects[0]).toMatchObject({
+      effect_type: "conversation.followup.recommended",
+      target_table: "conversations",
+      target_id: "conversation-a",
+    });
+    expect(JSON.parse(executed.effects[0]!.payload_json!)).toEqual({
+      conversationId: "conversation-a",
+      reason: "The thread has recent activity and needs a next step.",
+      suggestedNextStep: "Review the thread and decide whether to reply.",
+      evidence: { messageCount: 12 },
+      confidence: 60,
+    });
+
+    db.close();
+  });
+
+  it("lists approved pending actions in execution order", () => {
+    const db = createDb();
+    const proposed = db.createAction({
+      actionType: "contact.memory.stale",
+      payload: { memoryId: "memory-proposed" },
+    });
+    const lowPriority = db.createAction({
+      actionType: "contact.memory.stale",
+      payload: { memoryId: "memory-low" },
+      priority: 10,
+      requiresApproval: false,
+    });
+    const highPriority = db.createAction({
+      actionType: "contact.memory.stale",
+      payload: { memoryId: "memory-high" },
+      priority: -1,
+      requiresApproval: false,
+    });
+    db.approveAction(proposed.id, "soham");
+    db.lockActionForExecution(lowPriority.id, "runner");
+
+    expect(db.listApprovedPendingActions().map((action) => action.id)).toEqual([
+      highPriority.id,
+      proposed.id,
+    ]);
 
     db.close();
   });
@@ -1093,43 +1693,34 @@ describe("CuedDatabase", () => {
     db.close();
   });
 
-  it("records manual merge decisions and resolves canonical contact chains", () => {
+  it("records contact merge actions and resolves canonical contact chains", () => {
     const db = createDb();
 
     insertContact(db, { id: "contact-a", name: "Ava Prime" });
     insertContact(db, { id: "contact-b", name: "Ava Duplicate" });
     insertContact(db, { id: "contact-c", name: "Ava Canonical" });
 
-    expect(
-      db.recordContactMergeDecision({
-        primaryContactId: "contact-a",
-        secondaryContactId: "contact-b",
-        reason: "same phone",
-      }),
-    ).toEqual({
-      decisionId: expect.any(String),
+    executeContactMerge(db, {
       primaryContactId: "contact-a",
       secondaryContactId: "contact-b",
-      canonicalContactId: "contact-a",
+      reason: "same phone",
     });
-
-    expect(
-      db.recordContactMergeDecision({
-        primaryContactId: "contact-c",
-        secondaryContactId: "contact-a",
-        reason: "prefer contacts source",
-      }),
-    ).toEqual({
-      decisionId: expect.any(String),
+    executeContactMerge(db, {
       primaryContactId: "contact-c",
       secondaryContactId: "contact-a",
-      canonicalContactId: "contact-c",
+      reason: "prefer contacts source",
     });
 
-    expect(db.resolveCanonicalContactId("contact-b")).toBe("contact-c");
-    expect(db.resolveCanonicalContactId("contact-a")).toBe("contact-c");
-    expect(db.resolveCanonicalContactId("contact-c")).toBe("contact-c");
-    expect(db.listContactMergeDecisions()).toHaveLength(2);
+    expect(listContactMergeAliases(db)).toEqual([
+      { contact_id: "contact-b", canonical_contact_id: "contact-a" },
+      { contact_id: "contact-a", canonical_contact_id: "contact-c" },
+    ]);
+    expect(
+      db.listActiveActionEffects({
+        actionType: "contact.merge",
+        effectType: "contact.merge.recorded",
+      }),
+    ).toHaveLength(2);
 
     db.close();
   });
@@ -1145,7 +1736,7 @@ describe("CuedDatabase", () => {
       createdBy: "test",
     });
 
-    db.recordContactMergeDecision({
+    executeContactMerge(db, {
       primaryContactId: "contact-a",
       secondaryContactId: "contact-b",
       reason: "same email",
@@ -1413,453 +2004,6 @@ describe("CuedDatabase", () => {
         acquisitionMode: "realtime",
       }),
     });
-
-    db.close();
-  });
-
-  it("upgrades existing databases with refactor columns and lifecycle state", () => {
-    const dir = mkdtempSync(join(tmpdir(), "cued-v2-upgrade-db-"));
-    tempDirs.push(dir);
-    const db = new CuedDatabase(join(dir, "local.db"));
-    const sql = sqlite(db);
-
-    sql.exec(`
-      CREATE TABLE schema_migrations (
-        id TEXT PRIMARY KEY,
-        applied_at INTEGER NOT NULL
-      )
-    `);
-    sql.exec(
-      `INSERT INTO schema_migrations (id, applied_at) VALUES ('0014_messages_fts_rowid_alignment', 1)`,
-    );
-    sql.exec(`
-      CREATE TABLE raw_events (
-        id TEXT PRIMARY KEY,
-        platform TEXT NOT NULL,
-        account_key TEXT NOT NULL,
-        entity_kind TEXT NOT NULL,
-        event_kind TEXT NOT NULL,
-        external_event_id TEXT,
-        external_entity_id TEXT,
-        conversation_external_id TEXT,
-        occurred_at INTEGER,
-        observed_at INTEGER NOT NULL,
-        cursor_json TEXT,
-        dedupe_key TEXT NOT NULL,
-        payload_json TEXT NOT NULL,
-        source_version TEXT,
-        UNIQUE(platform, account_key, dedupe_key)
-      )
-    `);
-    sql.exec(`
-      CREATE TABLE conversations (
-        id TEXT PRIMARY KEY,
-        platform TEXT NOT NULL,
-        account_key TEXT NOT NULL,
-        source_conversation_key TEXT NOT NULL,
-        native_conversation_key TEXT,
-        type TEXT NOT NULL,
-        subtype TEXT,
-        service TEXT,
-        name TEXT,
-        topic TEXT,
-        participant_names TEXT,
-        last_message_id TEXT,
-        last_message_at INTEGER,
-        last_message_preview TEXT,
-        unread_count INTEGER NOT NULL DEFAULT 0,
-        created_at INTEGER NOT NULL,
-        updated_at INTEGER NOT NULL,
-        UNIQUE(platform, account_key, source_conversation_key)
-      )
-    `);
-    sql.exec(`
-      CREATE TABLE timeline_events (
-        id TEXT PRIMARY KEY,
-        platform TEXT NOT NULL,
-        account_key TEXT NOT NULL,
-        conversation_id TEXT NOT NULL,
-        source_event_key TEXT NOT NULL,
-        event_kind TEXT NOT NULL,
-        actor_contact_id TEXT,
-        actor_source_key TEXT,
-        actor_name TEXT,
-        subject_contact_id TEXT,
-        event_at INTEGER NOT NULL,
-        text TEXT,
-        metadata_json TEXT,
-        created_at INTEGER NOT NULL,
-        updated_at INTEGER NOT NULL,
-        UNIQUE(platform, account_key, source_event_key)
-      )
-    `);
-    sql
-      .prepare(`
-        INSERT INTO conversations (
-          id, platform, account_key, source_conversation_key, native_conversation_key, type, subtype,
-          service, name, topic, participant_names, last_message_id, last_message_at, last_message_preview,
-          unread_count, created_at, updated_at
-        ) VALUES (?, 'linkedin', 'default', ?, NULL, 'dm', 'deleted', 'linkedin', 'Thread', NULL, '', NULL, NULL, NULL, 0, ?, ?)
-      `)
-      .run("legacy-conversation", "thread-1", 1, 1);
-
-    db.migrate();
-
-    const rawEventColumns = (
-      sql.prepare("PRAGMA table_info(raw_events)").all() as Array<{ name: string }>
-    ).map((column) => column.name);
-    const conversationColumns = (
-      sql.prepare("PRAGMA table_info(conversations)").all() as Array<{ name: string }>
-    ).map((column) => column.name);
-    const timelineColumns = (
-      sql.prepare("PRAGMA table_info(timeline_events)").all() as Array<{ name: string }>
-    ).map((column) => column.name);
-
-    expect(rawEventColumns).toEqual(
-      expect.arrayContaining(["normalized_schema", "provenance_json"]),
-    );
-    expect(conversationColumns).toContain("is_active");
-    expect(conversationColumns).toContain("removal_reason");
-    expect(timelineColumns).toContain("subject_source_key");
-    expect(timelineColumns).toContain("system_kind");
-    expect(timelineColumns).toContain("call_provider");
-    expect(timelineColumns).toContain("call_direction");
-    expect(timelineColumns).toContain("call_status");
-    expect(timelineColumns).toContain("call_medium");
-    expect(timelineColumns).toContain("call_started_at");
-    expect(timelineColumns).toContain("call_duration_seconds");
-    expect(timelineColumns).toContain("call_ended_at");
-    expect(timelineColumns).toContain("call_disconnected_cause");
-    expect(
-      sql
-        .prepare("SELECT is_active, removal_reason FROM conversations WHERE id = ?")
-        .get("legacy-conversation"),
-    ).toEqual({ is_active: 0, removal_reason: "deleted" });
-
-    db.close();
-  });
-
-  it("repairs removal_reason for databases that already marked 0002 applied", () => {
-    const dir = mkdtempSync(join(tmpdir(), "cued-v2-removal-reason-repair-"));
-    tempDirs.push(dir);
-    const db = new CuedDatabase(join(dir, "local.db"));
-    const sql = sqlite(db);
-
-    sql.exec(`
-      CREATE TABLE schema_migrations (
-        id TEXT PRIMARY KEY,
-        applied_at INTEGER NOT NULL
-      )
-    `);
-    sql.exec(`
-      INSERT INTO schema_migrations (id, applied_at)
-      VALUES ('0001_bootstrap_current_schema', 1), ('0002_upgrade_existing_schema_columns', 2)
-    `);
-    sql.exec(`
-      CREATE TABLE conversations (
-        id TEXT PRIMARY KEY,
-        platform TEXT NOT NULL,
-        account_key TEXT NOT NULL,
-        source_conversation_key TEXT NOT NULL,
-        native_conversation_key TEXT,
-        type TEXT NOT NULL,
-        is_active INTEGER NOT NULL DEFAULT 1,
-        service TEXT,
-        name TEXT,
-        topic TEXT,
-        participant_names TEXT,
-        last_message_id TEXT,
-        last_message_at INTEGER,
-        last_message_preview TEXT,
-        unread_count INTEGER NOT NULL DEFAULT 0,
-        created_at INTEGER NOT NULL,
-        updated_at INTEGER NOT NULL,
-        UNIQUE(platform, account_key, source_conversation_key)
-      )
-    `);
-
-    db.migrate();
-
-    const conversationColumns = (
-      sql.prepare("PRAGMA table_info(conversations)").all() as Array<{ name: string }>
-    ).map((column) => column.name);
-
-    expect(conversationColumns).toContain("removal_reason");
-    expect(
-      sql
-        .prepare("SELECT 1 FROM schema_migrations WHERE id = ?")
-        .get("0003_repair_conversation_removal_reason"),
-    ).toBeTruthy();
-
-    db.close();
-  });
-
-  it("repairs partially migrated legacy databases after the squash", () => {
-    const dir = mkdtempSync(join(tmpdir(), "cued-v2-partial-legacy-repair-"));
-    tempDirs.push(dir);
-    const db = new CuedDatabase(join(dir, "local.db"));
-    const sql = sqlite(db);
-
-    sql.exec(`
-      CREATE TABLE schema_migrations (
-        id TEXT PRIMARY KEY,
-        applied_at INTEGER NOT NULL
-      )
-    `);
-    sql.exec(`
-      INSERT INTO schema_migrations (id, applied_at)
-      VALUES ('0010_requestable_sync_capable_backfill', 1)
-    `);
-    sql.exec(`
-      CREATE TABLE sync_runs (
-        id TEXT PRIMARY KEY,
-        platform TEXT,
-        account_key TEXT,
-        run_type TEXT NOT NULL,
-        status TEXT NOT NULL,
-        trigger TEXT NOT NULL,
-        started_at INTEGER,
-        finished_at INTEGER,
-        details_json TEXT
-      )
-    `);
-    sql.exec(`
-      CREATE TABLE sync_run_errors (
-        id TEXT PRIMARY KEY,
-        sync_run_id TEXT NOT NULL,
-        platform TEXT,
-        account_key TEXT,
-        error_code TEXT,
-        error_message TEXT NOT NULL,
-        details_json TEXT,
-        created_at INTEGER NOT NULL
-      )
-    `);
-    sql.exec(`
-      INSERT INTO sync_runs (
-        id, platform, account_key, run_type, status, trigger, started_at, finished_at, details_json
-      ) VALUES ('legacy-run', 'slack', 'default', 'sync', 'queued', 'scheduler', 123, NULL, '{}')
-    `);
-    sql.exec(`
-      CREATE TABLE message_attachments (
-        id TEXT PRIMARY KEY,
-        message_id TEXT NOT NULL,
-        platform TEXT NOT NULL,
-        account_key TEXT NOT NULL,
-        source_attachment_key TEXT NOT NULL,
-        kind TEXT,
-        mime_type TEXT,
-        filename TEXT,
-        title TEXT,
-        local_path TEXT,
-        remote_url TEXT,
-        size_bytes INTEGER,
-        text_content TEXT,
-        metadata_json TEXT,
-        created_at INTEGER NOT NULL,
-        updated_at INTEGER NOT NULL,
-        UNIQUE(platform, account_key, source_attachment_key)
-      )
-    `);
-
-    db.migrate();
-
-    const syncRunColumns = (
-      sql.prepare("PRAGMA table_info(sync_runs)").all() as Array<{ name: string }>
-    ).map((column) => column.name);
-    const messageAttachmentColumns = (
-      sql.prepare("PRAGMA table_info(message_attachments)").all() as Array<{ name: string }>
-    ).map((column) => column.name);
-    const tables = (
-      sql.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all() as Array<{
-        name: string;
-      }>
-    ).map((row) => row.name);
-    const triggerSql = sql
-      .prepare(
-        "SELECT sql FROM sqlite_master WHERE type = 'trigger' AND name = 'trg_messages_inserted_fts'",
-      )
-      .get() as { sql: string } | undefined;
-
-    expect(
-      sql
-        .prepare("SELECT 1 FROM schema_migrations WHERE id = ?")
-        .get("0001_bootstrap_current_schema"),
-    ).toBeTruthy();
-    expect(
-      sql
-        .prepare("SELECT 1 FROM schema_migrations WHERE id = ?")
-        .get("0004_repair_partial_legacy_bootstrap"),
-    ).toBeTruthy();
-    expect(
-      sql
-        .prepare("SELECT 1 FROM schema_migrations WHERE id = ?")
-        .get("0007_add_generic_sync_proof_tables"),
-    ).toBeTruthy();
-    expect(
-      sql
-        .prepare("SELECT 1 FROM schema_migrations WHERE id = ?")
-        .get("0008_migrate_slack_backfill_proofs_to_generic"),
-    ).toBeTruthy();
-    expect(
-      sql
-        .prepare("SELECT 1 FROM schema_migrations WHERE id = ?")
-        .get("0009_add_contact_fanout_projection_indexes"),
-    ).toBeTruthy();
-    expect(
-      sql
-        .prepare("SELECT 1 FROM schema_migrations WHERE id = ?")
-        .get("0010_add_timeline_call_fields"),
-    ).toBeTruthy();
-    expect(
-      sql
-        .prepare("SELECT 1 FROM schema_migrations WHERE id = ?")
-        .get("0016_drop_synchronous_message_fts_triggers"),
-    ).toBeTruthy();
-    const indexNames = (
-      sql.prepare("SELECT name FROM sqlite_master WHERE type = 'index'").all() as Array<{
-        name: string;
-      }>
-    ).map((row) => row.name);
-    expect(indexNames).toEqual(
-      expect.arrayContaining([
-        "idx_conversation_participants_contact",
-        "idx_timeline_events_actor_contact",
-        "idx_message_reactions_reactor_contact",
-      ]),
-    );
-    expect(syncRunColumns).toEqual(expect.arrayContaining(["queued_at", "scheduled_at"]));
-    expect(
-      sql
-        .prepare("SELECT queued_at, scheduled_at, started_at FROM sync_runs WHERE id = ?")
-        .get("legacy-run"),
-    ).toEqual({ queued_at: 123, scheduled_at: 123, started_at: null });
-    expect(messageAttachmentColumns).toEqual(
-      expect.arrayContaining([
-        "access_kind",
-        "access_ref_json",
-        "preview_ref_json",
-        "availability_status",
-        "provider_metadata_json",
-      ]),
-    );
-    expect(tables).toEqual(
-      expect.arrayContaining([
-        "slack_backfill_proofs",
-        "sync_scopes",
-        "sync_proofs",
-        "jobs",
-        "message_fts_index_queue",
-        "attachment_cache",
-        "attachment_content",
-        "projection_state",
-        "messages_fts",
-      ]),
-    );
-    expect(triggerSql).toBeUndefined();
-
-    db.close();
-  });
-
-  it("honors the pre-renumbered Discord fanout index migration id", () => {
-    const dir = mkdtempSync(join(tmpdir(), "cued-discord-fanout-legacy-id-"));
-    tempDirs.push(dir);
-    const db = new CuedDatabase(join(dir, "local.db"));
-    const sql = sqlite(db);
-
-    sql.exec(`
-      CREATE TABLE schema_migrations (
-        id TEXT PRIMARY KEY,
-        applied_at INTEGER NOT NULL
-      )
-    `);
-    sql
-      .prepare("INSERT INTO schema_migrations (id, applied_at) VALUES (?, ?)")
-      .run("0008_add_contact_fanout_projection_indexes", 1);
-
-    db.migrate();
-
-    expect(
-      sql
-        .prepare("SELECT 1 FROM schema_migrations WHERE id = ?")
-        .get("0008_add_contact_fanout_projection_indexes"),
-    ).toBeTruthy();
-    expect(
-      sql
-        .prepare("SELECT 1 FROM schema_migrations WHERE id = ?")
-        .get("0009_add_contact_fanout_projection_indexes"),
-    ).toBeUndefined();
-
-    db.close();
-  });
-
-  it("adds contact memories to existing migrated databases", () => {
-    const dir = mkdtempSync(join(tmpdir(), "cued-contact-memories-migration-"));
-    tempDirs.push(dir);
-    const db = new CuedDatabase(join(dir, "local.db"));
-    const sql = sqlite(db);
-
-    sql.exec(`
-      CREATE TABLE schema_migrations (
-        id TEXT PRIMARY KEY,
-        applied_at INTEGER NOT NULL
-      )
-    `);
-    sql.exec(`
-      INSERT INTO schema_migrations (id, applied_at)
-      VALUES
-        ('0001_bootstrap_current_schema', 1),
-        ('0002_upgrade_existing_schema_columns', 2),
-        ('0003_repair_conversation_removal_reason', 3),
-        ('0004_repair_partial_legacy_bootstrap', 4),
-        ('0005_add_contact_merge_decisions', 5),
-        ('0006_rename_contact_merge_columns', 6),
-        ('0007_add_generic_sync_proof_tables', 7),
-        ('0008_migrate_slack_backfill_proofs_to_generic', 8),
-        ('0009_add_contact_fanout_projection_indexes', 9),
-        ('0010_add_timeline_call_fields', 10),
-        ('0011_remove_telegram_runtime_state', 11)
-    `);
-    sql.exec(`
-      CREATE TABLE contacts (
-        id TEXT PRIMARY KEY,
-        kind TEXT NOT NULL DEFAULT 'person',
-        name TEXT,
-        photo_url TEXT,
-        company TEXT,
-        archived INTEGER NOT NULL DEFAULT 0,
-        created_at INTEGER NOT NULL,
-        updated_at INTEGER NOT NULL
-      )
-    `);
-
-    db.migrate();
-
-    const memoryColumns = (
-      sql.prepare("PRAGMA table_info(contact_memories)").all() as Array<{
-        name: string;
-      }>
-    ).map((column) => column.name);
-
-    expect(memoryColumns).toEqual(
-      expect.arrayContaining([
-        "contact_id",
-        "body",
-        "source_kind",
-        "evidence_json",
-        "confidence",
-        "supersedes_memory_id",
-        "stale_at",
-        "created_at",
-      ]),
-    );
-    expect(
-      sql.prepare("SELECT 1 FROM schema_migrations WHERE id = ?").get("0012_contact_memories"),
-    ).toBeTruthy();
-    const contactForeignKeys = (
-      sql.prepare("PRAGMA foreign_key_list(contact_memories)").all() as Array<{ table: string }>
-    ).filter((foreignKey) => foreignKey.table === "contacts");
-    expect(contactForeignKeys).toEqual([]);
 
     db.close();
   });

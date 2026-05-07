@@ -1,0 +1,13 @@
+{
+  "type": "contact.memory.stale",
+  "version": "1",
+  "description": "Mark a contact memory stale without deleting its audit trail.",
+  "module": "actions/contact-memory-stale.cjs",
+  "requiresApprovalDefault": true,
+  "payload": {
+    "required": {
+      "memoryId": "string"
+    },
+    "optional": {}
+  }
+}

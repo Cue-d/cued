@@ -112,7 +112,7 @@ export function readGoogleOAuthClientConfigForCredentials(
         authUri: "https://accounts.google.com/o/oauth2/v2/auth",
         tokenUri: credentials.tokenUri || "https://oauth2.googleapis.com/token",
       },
-      filePath: "keychain-legacy",
+      filePath: "keychain-inline",
     };
   }
   return readGoogleOAuthClientConfig();

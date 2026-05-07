@@ -3,7 +3,7 @@ import { buildDiscordSyncBundle } from "./bundle.js";
 
 async function main(): Promise<void> {
   try {
-    const invocation = readAdapterInvocationEnv("discord");
+    const invocation = readAdapterInvocationEnv();
     const bundle = await buildDiscordSyncBundle(
       {
         accountKey: process.env.CUED_ACCOUNT_KEY,

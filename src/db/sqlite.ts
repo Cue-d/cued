@@ -3,7 +3,7 @@ import { randomBytes } from "node:crypto";
 import { chmodSync, existsSync } from "node:fs";
 import Database from "better-sqlite3-multiple-ciphers";
 import { ensureCuedDirs } from "../core/config.js";
-import { CUED_DB_KEYCHAIN_SERVICE, CUED_LEGACY_DB_KEYCHAIN_SERVICES } from "../core/identity.js";
+import { CUED_DB_KEYCHAIN_SERVICE } from "../core/identity.js";
 
 const DB_KEYCHAIN_ACCOUNT = "local-db-key";
 
@@ -49,9 +49,6 @@ function hardenDbPaths(dbPath: string): void {
 export function loadOrCreateDatabaseKey(): string {
   const existingKey = loadExistingDatabaseKey();
   if (existingKey) {
-    if (shouldUseKeychainBackedDatabaseKey()) {
-      migrateDatabaseKeyToCurrentService();
-    }
     return existingKey;
   }
 
@@ -59,40 +56,25 @@ export function loadOrCreateDatabaseKey(): string {
 }
 
 export function loadExistingDatabaseKey(): string | null {
-  return loadExistingDatabaseKeyCandidates()[0] ?? null;
-}
-
-function loadExistingDatabaseKeyCandidates(): string[] {
   const configuredKey = process.env.CUED_DB_KEY?.trim();
   if (configuredKey) {
-    return [configuredKey];
+    return configuredKey;
   }
   const vitestWorkerKey = process.env.VITEST_WORKER_ID?.trim();
   if (vitestWorkerKey) {
-    return [`vitest-worker-${vitestWorkerKey}`];
+    return `vitest-worker-${vitestWorkerKey}`;
   }
 
-  const keys: string[] = [];
-  const services = [CUED_DB_KEYCHAIN_SERVICE, ...CUED_LEGACY_DB_KEYCHAIN_SERVICES];
-  for (const service of services) {
-    try {
-      const key = execFileSync(
-        "security",
-        ["find-generic-password", "-s", service, "-a", DB_KEYCHAIN_ACCOUNT, "-w"],
-        { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
-      ).trim();
-      if (key.length > 0) {
-        keys.push(key);
-      }
-    } catch {
-      // Try the next known service name.
-    }
+  try {
+    const key = execFileSync(
+      "security",
+      ["find-generic-password", "-s", CUED_DB_KEYCHAIN_SERVICE, "-a", DB_KEYCHAIN_ACCOUNT, "-w"],
+      { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
+    ).trim();
+    return key.length > 0 ? key : null;
+  } catch {
+    return null;
   }
-  return keys;
-}
-
-function shouldUseKeychainBackedDatabaseKey(): boolean {
-  return !process.env.CUED_DB_KEY?.trim() && !process.env.VITEST_WORKER_ID?.trim();
 }
 
 function storeDatabaseKey(key: string): void {
@@ -124,27 +106,6 @@ function createAndStoreDatabaseKey(): string {
     throw new Error("Failed to create or load the Cued database encryption key");
   }
   return key;
-}
-
-export function migrateDatabaseKeyToCurrentService(): boolean {
-  const key = loadExistingDatabaseKey();
-  if (!key) {
-    return false;
-  }
-  try {
-    const key = execFileSync(
-      "security",
-      ["find-generic-password", "-s", CUED_DB_KEYCHAIN_SERVICE, "-a", DB_KEYCHAIN_ACCOUNT, "-w"],
-      { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
-    ).trim();
-    if (key.length > 0) {
-      return false;
-    }
-  } catch {
-    storeDatabaseKey(key);
-    return true;
-  }
-  return false;
 }
 
 export function openSqliteDatabase(
@@ -185,28 +146,14 @@ export function openSqliteDatabase(
   }
 
   sqlite.close();
-  const keys = loadExistingDatabaseKeyCandidates();
-  if (keys.length === 0) {
+  const key = loadExistingDatabaseKey();
+  if (!key) {
     throw new Error("Failed to load the Cued database encryption key for an existing encrypted DB");
   }
 
-  for (const key of keys) {
-    sqlite = new Database(dbPath, openOptions);
-    try {
-      applyKey(sqlite, key);
-      verifyReadable(sqlite);
-      if (!options.readonly && shouldUseKeychainBackedDatabaseKey()) {
-        storeDatabaseKey(key);
-      }
-      hardenDbPaths(dbPath);
-      return sqlite;
-    } catch (error) {
-      sqlite.close();
-      if (key === keys[keys.length - 1]) {
-        throw error;
-      }
-    }
-  }
-
-  throw new Error("Failed to load the Cued database encryption key for an existing encrypted DB");
+  sqlite = new Database(dbPath, openOptions);
+  applyKey(sqlite, key);
+  verifyReadable(sqlite);
+  hardenDbPaths(dbPath);
+  return sqlite;
 }

@@ -1,0 +1,19 @@
+{
+  "type": "contact.introduction.recommend",
+  "version": "1",
+  "description": "Record a harmless introduction recommendation between two contacts.",
+  "module": "actions/contact-introduction-recommend.cjs",
+  "requiresApprovalDefault": true,
+  "payload": {
+    "required": {
+      "fromContactId": "string",
+      "toContactId": "string",
+      "reason": "string"
+    },
+    "optional": {
+      "suggestedIntro": "string",
+      "evidence": "object",
+      "confidence": "number"
+    }
+  }
+}

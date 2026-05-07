@@ -229,7 +229,7 @@ mkdir -p "$(dirname "$SLACK_HELPER_SOURCE")"
 (cd "$ROOT_DIR/native/helpers/slack-go" && GOWORK=off go build -o "$SLACK_HELPER_SOURCE" .) >/dev/null
 mkdir -p "$(dirname "$WHATSAPP_HELPER_SOURCE")"
 (cd "$ROOT_DIR/native/helpers/whatsapp-go" && GOWORK=off go build -o "$WHATSAPP_HELPER_SOURCE" .) >/dev/null
-npm_config_ignore_scripts=true pnpm --dir "$ROOT_DIR" --filter . deploy --legacy --prod "$DEPLOY_STAGING_DIR" >/dev/null
+npm_config_ignore_scripts=true pnpm --dir "$ROOT_DIR" --filter . deploy --prod "$DEPLOY_STAGING_DIR" >/dev/null
 copy_better_sqlite3_binary
 
 rm -rf "$APP_BUNDLE"
@@ -273,7 +273,7 @@ cp "$BETTER_SQLITE3_BINDING_SOURCE" "$BETTER_SQLITE3_RUNTIME_DIR/build/Release/b
 
 # Remove symlinks that escape the bundled runtime or no longer resolve after deploy.
 "$NODE_PATH" "$RUNTIME_SYMLINK_PRUNER" "$RUNTIME_DIR" >/dev/null
-# `pnpm deploy --legacy --prod` can still leave a handful of dangling package links behind.
+# `pnpm deploy --prod` can still leave a handful of dangling package links behind.
 find -L "$RUNTIME_DIR" -type l -exec rm -f {} +
 rm -rf "$RUNTIME_DIR/node_modules/cued" "$RUNTIME_DIR/node_modules/@cued/app"
 # The bundled CLI only needs compiled JS plus runtime dependencies. Shipping the
