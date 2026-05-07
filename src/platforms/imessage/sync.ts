@@ -18,7 +18,8 @@ import {
 import { DEFAULT_CHAT_DB_PATH, IMessageReader } from "./reader.js";
 import type { ImsSyncBatch } from "./types.js";
 
-export const DEFAULT_IMESSAGE_BATCH_LIMIT = 2_000;
+export const DEFAULT_IMESSAGE_BATCH_LIMIT = 10_000;
+const IMESSAGE_NATIVE_HELPER_MAX_BUFFER_BYTES = 64 * 1024 * 1024;
 
 type IMessageSourceCursor = {
   rowId?: number;
@@ -97,6 +98,7 @@ function loadBatchFromNativeBinary(
   ];
   const stdout = execFileSync(binaryPath, args, {
     encoding: "utf8",
+    maxBuffer: IMESSAGE_NATIVE_HELPER_MAX_BUFFER_BYTES,
   });
   return JSON.parse(stdout) as ImsSyncBatch;
 }
@@ -124,6 +126,7 @@ function loadCallBatchFromNativeBinary(
   ];
   const stdout = execFileSync(binaryPath, args, {
     encoding: "utf8",
+    maxBuffer: IMESSAGE_NATIVE_HELPER_MAX_BUFFER_BYTES,
   });
   return JSON.parse(stdout) as ImsCallSyncBatch;
 }

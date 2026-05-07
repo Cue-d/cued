@@ -157,11 +157,25 @@ const DEFAULT_DISCORD_DM_POLL_MS = 45_000;
 const DEFAULT_SLACK_REALTIME_ENABLED = false;
 const DEFAULT_INGEST_CONCURRENCY = 4;
 const DEFAULT_PROJECTION_BATCH_SIZE = 100;
+const DEFAULT_PROJECTION_BATCH_SIZE_HUGE_BACKLOG = 500;
+const DEFAULT_PROJECTION_BATCH_SIZE_LARGE_BACKLOG = 500;
+const DEFAULT_PROJECTION_BATCH_SIZE_MEDIUM_BACKLOG = 500;
+const DEFAULT_PROJECTION_BATCH_SIZE_SMALL_BACKLOG = 500;
 const DEFAULT_MESSAGE_FTS_INDEX_BATCH_SIZE = 250;
 const DEFAULT_REALTIME_PROJECTION_ENABLED = true;
 const DEFAULT_INLINE_PROJECTION_MAX_RAW_EVENTS = 250;
 const DEFAULT_DEFERRED_PROJECTION_COALESCE_MS = 250;
 const DEFAULT_PROJECTION_CONTINUE_DELAY_MS = 5_000;
+const PROJECTION_CONTINUE_HUGE_BACKLOG_EVENTS = 100_000;
+const PROJECTION_CONTINUE_LARGE_BACKLOG_EVENTS = 25_000;
+const PROJECTION_CONTINUE_MEDIUM_BACKLOG_EVENTS = 5_000;
+const PROJECTION_CONTINUE_SMALL_BACKLOG_EVENTS = 1_000;
+const PROJECTION_CONTINUE_HUGE_BACKLOG_DELAY_MS = 0;
+const PROJECTION_CONTINUE_LARGE_BACKLOG_DELAY_MS = 0;
+const PROJECTION_CONTINUE_MEDIUM_BACKLOG_DELAY_MS = 0;
+const FTS_PROJECTION_THROTTLE_BACKLOG_EVENTS = 0;
+const FTS_PROJECTION_THROTTLE_DELAY_MS = 5_000;
+const FTS_INDEXING_STALE_AFTER_MS = 5 * 60 * 1000;
 const PROJECTION_AUTH_RETRY_DELAY_MS = 2_000;
 const PROJECTION_AUTH_GRACE_MS = 30_000;
 const DEFAULT_CONTINUATION_PROJECTION_INTERVAL_MS = 60_000;
@@ -522,6 +536,23 @@ function getProjectionBatchSize(): number {
   return Number.isFinite(configured) && configured > 0 ? configured : DEFAULT_PROJECTION_BATCH_SIZE;
 }
 
+export function getAdaptiveProjectionBatchSize(pendingRawEvents: number): number {
+  const baseBatchSize = getProjectionBatchSize();
+  if (pendingRawEvents >= PROJECTION_CONTINUE_HUGE_BACKLOG_EVENTS) {
+    return Math.max(baseBatchSize, DEFAULT_PROJECTION_BATCH_SIZE_HUGE_BACKLOG);
+  }
+  if (pendingRawEvents >= PROJECTION_CONTINUE_LARGE_BACKLOG_EVENTS) {
+    return Math.max(baseBatchSize, DEFAULT_PROJECTION_BATCH_SIZE_LARGE_BACKLOG);
+  }
+  if (pendingRawEvents >= PROJECTION_CONTINUE_MEDIUM_BACKLOG_EVENTS) {
+    return Math.max(baseBatchSize, DEFAULT_PROJECTION_BATCH_SIZE_MEDIUM_BACKLOG);
+  }
+  if (pendingRawEvents >= PROJECTION_CONTINUE_SMALL_BACKLOG_EVENTS) {
+    return Math.max(baseBatchSize, DEFAULT_PROJECTION_BATCH_SIZE_SMALL_BACKLOG);
+  }
+  return baseBatchSize;
+}
+
 function getMessageFtsIndexBatchSize(): number {
   const configured = Number(
     process.env.CUED_MESSAGE_FTS_INDEX_BATCH_SIZE ?? DEFAULT_MESSAGE_FTS_INDEX_BATCH_SIZE,
@@ -572,6 +603,13 @@ function getSyncContinueDelayMs(): number {
     : DEFAULT_SYNC_CONTINUE_DELAY_MS;
 }
 
+function getSyncContinueDelayMsForPlatform(platform: Platform): number {
+  if (platform === "imessage") {
+    return 0;
+  }
+  return getSyncContinueDelayMs();
+}
+
 function getSignalReconnectSyncCooldownMs(): number {
   const configured = Number(process.env.CUED_SIGNAL_RECONNECT_SYNC_COOLDOWN_MS);
   return Number.isFinite(configured) && configured >= 0
@@ -593,6 +631,23 @@ function getProjectionContinueDelayMs(): number {
   return Number.isFinite(configured) && configured >= 0
     ? Math.trunc(configured)
     : DEFAULT_PROJECTION_CONTINUE_DELAY_MS;
+}
+
+export function getAdaptiveProjectionContinueDelayMs(pendingRawEvents: number): number {
+  const configured = process.env.CUED_PROJECTION_CONTINUE_DELAY_MS;
+  if (configured != null) {
+    return getProjectionContinueDelayMs();
+  }
+  if (pendingRawEvents >= PROJECTION_CONTINUE_HUGE_BACKLOG_EVENTS) {
+    return PROJECTION_CONTINUE_HUGE_BACKLOG_DELAY_MS;
+  }
+  if (pendingRawEvents >= PROJECTION_CONTINUE_LARGE_BACKLOG_EVENTS) {
+    return PROJECTION_CONTINUE_LARGE_BACKLOG_DELAY_MS;
+  }
+  if (pendingRawEvents >= PROJECTION_CONTINUE_MEDIUM_BACKLOG_EVENTS) {
+    return PROJECTION_CONTINUE_MEDIUM_BACKLOG_DELAY_MS;
+  }
+  return getProjectionContinueDelayMs();
 }
 
 function getContinuationProjectionIntervalMs(): number {
@@ -1613,15 +1668,12 @@ export async function runDaemon(): Promise<void> {
   const db = openedDb;
   const startedAt = now();
   const ingestConcurrency = getIngestConcurrency();
-  const projectionBatchSize = getProjectionBatchSize();
   const messageFtsIndexBatchSize = getMessageFtsIndexBatchSize();
   const realtimeProjectionEnabled = getRealtimeProjectionEnabled();
   const realtimeProjectionBatchSize = getRealtimeProjectionBatchSize();
   const deferredProjectionCoalesceMs = getDeferredProjectionCoalesceMs();
-  const projectionContinueDelayMs = getProjectionContinueDelayMs();
   const continuationProjectionIntervalMs = getContinuationProjectionIntervalMs();
   const continuationProjectionBacklogEvents = getContinuationProjectionBacklogEvents();
-  const syncContinueDelayMs = getSyncContinueDelayMs();
   const signalReconnectSyncCooldownMs = getSignalReconnectSyncCooldownMs();
   const configuredRealtimePlatforms = getConfiguredRealtimePlatforms();
   const shouldRunRealtimePlatform = (platform: AdapterPlatform): boolean =>
@@ -1709,7 +1761,11 @@ export async function runDaemon(): Promise<void> {
       return;
     }
 
-    const batches = buildProjectionMessageHookBatches(range, inboundMessages, projectionBatchSize);
+    const batches = buildProjectionMessageHookBatches(
+      range,
+      inboundMessages,
+      getAdaptiveProjectionBatchSize(db.getProjectionBacklog().pending_raw_events),
+    );
     for (const batch of batches) {
       projectionMessageHooks.enqueue(batch, batch.payloads);
     }
@@ -1806,6 +1862,7 @@ export async function runDaemon(): Promise<void> {
           endRowId: insertResult.lastInsertedRowId,
           batchSize: realtimeProjectionBatchSize,
         });
+        scheduleSearchIndexDrain();
       }
       const projection = db.getProjectionBacklog();
       if (projection.pending_raw_events > 0) {
@@ -1901,6 +1958,7 @@ export async function runDaemon(): Promise<void> {
           endRowId: insertResult.lastInsertedRowId,
           batchSize: realtimeProjectionBatchSize,
         });
+        scheduleSearchIndexDrain();
       }
       const projection = db.getProjectionBacklog();
       if (projection.pending_raw_events > 0) {
@@ -2125,6 +2183,7 @@ export async function runDaemon(): Promise<void> {
           endRowId: insertResult.lastInsertedRowId,
           batchSize: realtimeProjectionBatchSize,
         });
+        scheduleSearchIndexDrain();
       }
       const projection = db.getProjectionBacklog();
       if (projection.pending_raw_events > 0) {
@@ -2246,6 +2305,7 @@ export async function runDaemon(): Promise<void> {
           endRowId: insertResult.lastInsertedRowId,
           batchSize: realtimeProjectionBatchSize,
         });
+        scheduleSearchIndexDrain();
       }
       const projection = db.getProjectionBacklog();
       if (projection.pending_raw_events > 0) {
@@ -2362,6 +2422,7 @@ export async function runDaemon(): Promise<void> {
           endRowId: insertResult.lastInsertedRowId,
           batchSize: realtimeProjectionBatchSize,
         });
+        scheduleSearchIndexDrain();
       }
       const projection = db.getProjectionBacklog();
       if (projection.pending_raw_events > 0) {
@@ -2853,14 +2914,42 @@ export async function runDaemon(): Promise<void> {
       scheduleSearchIndexDrain(QUEUE_DRAIN_RETRY_DELAY_MS);
       return;
     }
+    let projectionBacklog: ReturnType<typeof db.getProjectionBacklog>;
+    try {
+      projectionBacklog = db.withBusyTimeoutSync(DAEMON_STATUS_BUSY_TIMEOUT_MS, () =>
+        db.getProjectionBacklog(),
+      );
+    } catch (error) {
+      if (!isSqliteBusyError(error)) {
+        throw error;
+      }
+      daemonLogger.warn("message FTS index drain skipped because SQLite is busy");
+      scheduleSearchIndexDrain(QUEUE_DRAIN_RETRY_DELAY_MS);
+      return;
+    }
+    if (projectionBacklog.pending_raw_events > FTS_PROJECTION_THROTTLE_BACKLOG_EVENTS) {
+      scheduleSearchIndexDrain(FTS_PROJECTION_THROTTLE_DELAY_MS);
+      return;
+    }
     isProcessingSearchIndex = true;
     try {
-      const result = db.withBusyTimeoutSync(DAEMON_STATUS_BUSY_TIMEOUT_MS, () =>
-        db.drainMessageFtsIndexQueue(messageFtsIndexBatchSize),
+      const result = db.withBusyTimeoutSync(DAEMON_STATUS_BUSY_TIMEOUT_MS, () => {
+        db.requeueStaleMessageFtsIndexing(Date.now() - FTS_INDEXING_STALE_AFTER_MS);
+        return db.drainMessageFtsIndexQueue(messageFtsIndexBatchSize);
+      });
+      const searchIndexBacklog = db.withBusyTimeoutSync(DAEMON_STATUS_BUSY_TIMEOUT_MS, () =>
+        db.getMessageFtsIndexBacklog(),
       );
       if (result.claimed > 0) {
-        daemonLogger.info("message FTS index batch completed", result);
+        daemonLogger.info("message FTS index batch completed", {
+          ...result,
+          queued: searchIndexBacklog.queued,
+          indexing: searchIndexBacklog.indexing,
+          failed: searchIndexBacklog.failed,
+        });
         requestMenuBarStatusWrite("message_fts_index_completed");
+      }
+      if (searchIndexBacklog.queued > 0) {
         scheduleSearchIndexDrain();
       }
     } catch (error) {
@@ -3790,6 +3879,7 @@ export async function runDaemon(): Promise<void> {
           batchSize: realtimeProjectionBatchSize,
           includeOverview: false,
         });
+        scheduleSearchIndexDrain();
       }
       const afterRealtimeProjection = now();
       const inboundMessages = collectInboundMessageHookPayloads(
@@ -3909,12 +3999,13 @@ export async function runDaemon(): Promise<void> {
         requestSignalRealtimeReconcile();
       }
       if (bundleHasMore && !db.hasQueuedOrRunningRun(currentRun.platform, accountKey)) {
+        const continuationDelayMs = getSyncContinueDelayMsForPlatform(currentRun.platform);
         db.queueSyncRun({
           platform: currentRun.platform,
           accountKey,
           runType: "sync_resume",
           trigger: "ingest_continue",
-          delayMs: syncContinueDelayMs,
+          delayMs: continuationDelayMs,
           details: {
             source: currentRun.platform,
             accountKey,
@@ -3922,7 +4013,7 @@ export async function runDaemon(): Promise<void> {
             ...(bundleContinuation ? { continuation: bundleContinuation } : {}),
           },
         });
-        schedulers.wakeIngest(syncContinueDelayMs);
+        schedulers.wakeIngest(continuationDelayMs);
       }
       if (!bundleHasMore) {
         requestMenuBarStatusWrite("ingest_completed");
@@ -3986,13 +4077,22 @@ export async function runDaemon(): Promise<void> {
   const processProjectionRun = async (
     currentRun: NonNullable<ReturnType<typeof db.claimNextQueuedRun>>,
   ) => {
+    const projectionBacklogBeforeRun = db.getProjectionBacklog();
+    const adaptiveProjectionBatchSize = getAdaptiveProjectionBatchSize(
+      projectionBacklogBeforeRun.pending_raw_events,
+    );
     daemonLogger.info("projection run started", {
       runId: currentRun.id,
       trigger: currentRun.trigger,
       runType: currentRun.run_type,
+      pendingRawEvents: projectionBacklogBeforeRun.pending_raw_events,
+      projectionBatchSize: adaptiveProjectionBatchSize,
     });
     try {
-      const workerResult = await runProjectionWorkerProcess(currentRun, projectionBatchSize);
+      const workerResult = await runProjectionWorkerProcess(
+        currentRun,
+        adaptiveProjectionBatchSize,
+      );
       const {
         projected,
         timings,
@@ -4023,6 +4123,12 @@ export async function runDaemon(): Promise<void> {
         );
       }
       if (deferredProjected?.nextStartRowId != null) {
+        const remainingProjectionEvents = Math.max(
+          0,
+          (deferredProjected.rangeEndRowId ??
+            projectionDetails?.endRowId ??
+            deferredProjected.projectionWatermark) - deferredProjected.projectionWatermark,
+        );
         queueProjectionRun(
           `projection_continue:${currentRun.id}`,
           {
@@ -4032,11 +4138,12 @@ export async function runDaemon(): Promise<void> {
               projectionDetails?.endRowId ??
               deferredProjected.projectionWatermark,
           },
-          { delayMs: projectionContinueDelayMs },
+          { delayMs: getAdaptiveProjectionContinueDelayMs(remainingProjectionEvents) },
         );
       }
+      const projectionBacklogAfterRun = db.getProjectionBacklog();
       queueProjectionRun(`projection:${currentRun.run_type}`, undefined, {
-        delayMs: projectionContinueDelayMs,
+        delayMs: getAdaptiveProjectionContinueDelayMs(projectionBacklogAfterRun.pending_raw_events),
       });
       await safeEmitHookEvent("sync.completed", {
         runId: currentRun.id,
@@ -4050,9 +4157,16 @@ export async function runDaemon(): Promise<void> {
         runId: currentRun.id,
         runType: currentRun.run_type,
         totalMs: timings.totalMs,
+        appliedRawEvents: projected.appliedRawEvents,
+        pendingRawEvents: projectionBacklogAfterRun.pending_raw_events,
+        projectionBatchSize: adaptiveProjectionBatchSize,
       });
       requestMenuBarStatusWrite("projection_completed");
-      scheduleSearchIndexDrain();
+      scheduleSearchIndexDrain(
+        projectionBacklogAfterRun.pending_raw_events > FTS_PROJECTION_THROTTLE_BACKLOG_EVENTS
+          ? FTS_PROJECTION_THROTTLE_DELAY_MS
+          : 0,
+      );
     } catch (error) {
       daemonLogger.error("projection run failed", {
         runId: currentRun.id,

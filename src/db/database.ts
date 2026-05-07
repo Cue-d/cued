@@ -3579,6 +3579,23 @@ export class CuedDatabase {
     })();
   }
 
+  requeueStaleMessageFtsIndexing(staleBefore: number): number {
+    return this.db
+      .update(messageFtsIndexQueue)
+      .set({
+        status: "queued",
+        updatedAt: now(),
+        lastError: null,
+      })
+      .where(
+        and(
+          eq(messageFtsIndexQueue.status, "indexing"),
+          sql`${messageFtsIndexQueue.updatedAt} < ${staleBefore}`,
+        ),
+      )
+      .run().changes;
+  }
+
   completeMessageFtsIndex(messageIds: Iterable<string>): number {
     const ids = [...new Set([...messageIds])];
     if (ids.length === 0) {

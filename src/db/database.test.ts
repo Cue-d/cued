@@ -288,6 +288,29 @@ describe("CuedDatabase", () => {
     db.close();
   });
 
+  it("requeues stale message FTS indexing work", () => {
+    const db = createDb();
+    const timestamp = Date.now();
+
+    expect(db.enqueueMessageFtsIndex(["message-a", "message-b"], "projection")).toBe(2);
+    expect(db.claimMessageFtsIndexBatch(2)).toHaveLength(2);
+    sqlite(db)
+      .prepare("UPDATE message_fts_index_queue SET updated_at = ? WHERE message_id = 'message-a'")
+      .run(timestamp - 10_000);
+
+    expect(db.requeueStaleMessageFtsIndexing(timestamp - 5_000)).toBe(1);
+    expect(
+      sqlite(db)
+        .prepare("SELECT message_id, status FROM message_fts_index_queue ORDER BY message_id")
+        .all(),
+    ).toEqual([
+      { message_id: "message-a", status: "queued" },
+      { message_id: "message-b", status: "indexing" },
+    ]);
+
+    db.close();
+  });
+
   it("executes read-only SQL for ad hoc inspection", () => {
     const db = createDb();
 

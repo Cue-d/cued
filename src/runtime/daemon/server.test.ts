@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   buildSyncResumeTargets,
+  getAdaptiveProjectionBatchSize,
+  getAdaptiveProjectionContinueDelayMs,
   isDisconnectedSocketError,
   shouldProjectIngestRunInline,
   shouldSkipConnectedDiscordSchedulerSync,
@@ -115,6 +117,23 @@ describe("daemon socket errors", () => {
     error.code = "EACCES";
     expect(isDisconnectedSocketError(error)).toBe(false);
     expect(isDisconnectedSocketError("EPIPE")).toBe(false);
+  });
+});
+
+describe("adaptive projection scheduling", () => {
+  it("uses larger batches for large backlogs", () => {
+    expect(getAdaptiveProjectionBatchSize(0)).toBe(100);
+    expect(getAdaptiveProjectionBatchSize(1_000)).toBe(500);
+    expect(getAdaptiveProjectionBatchSize(5_000)).toBe(500);
+    expect(getAdaptiveProjectionBatchSize(25_000)).toBe(500);
+    expect(getAdaptiveProjectionBatchSize(100_000)).toBe(500);
+  });
+
+  it("removes continuation delay only while backlog is large", () => {
+    expect(getAdaptiveProjectionContinueDelayMs(999)).toBe(5_000);
+    expect(getAdaptiveProjectionContinueDelayMs(5_000)).toBe(0);
+    expect(getAdaptiveProjectionContinueDelayMs(25_000)).toBe(0);
+    expect(getAdaptiveProjectionContinueDelayMs(100_000)).toBe(0);
   });
 });
 
