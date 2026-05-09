@@ -2020,7 +2020,7 @@ describe("CuedDatabase", () => {
     db.close();
   });
 
-  it("resets platform data and rewinds projection for rebuild", () => {
+  it("resets platform raw state without rebuilding projections inline", () => {
     const db = createDb();
     const timestamp = Date.now();
 
@@ -2069,7 +2069,7 @@ describe("CuedDatabase", () => {
     const removed = db.resetSource("linkedin");
 
     expect(removed).toBe(2);
-    expect(db.getOverview().contacts).toBe(0);
+    expect(db.getOverview().contacts).toBe(1);
     expect(db.getOverview().rawEvents).toBe(1);
     expect(db.getOverview().sourceAccounts).toBe(1);
     expect(db.getCheckpoint("linkedin", "default")).toBeNull();
@@ -2082,9 +2082,9 @@ describe("CuedDatabase", () => {
       sqlite(db).prepare("SELECT count(*) AS count FROM raw_events WHERE platform = 'slack'").get(),
     ).toEqual({ count: 1 });
     expect(db.getProjectionBacklog()).toEqual({
-      projection_watermark: 0,
+      projection_watermark: 2,
       max_raw_event_rowid: 2,
-      pending_raw_events: 2,
+      pending_raw_events: 0,
     });
 
     db.close();

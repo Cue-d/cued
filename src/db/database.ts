@@ -1121,7 +1121,7 @@ export class CuedDatabase {
   }
 
   resetSource(platform: Platform): number {
-    const removed = this.db.transaction((tx) => {
+    return this.db.transaction((tx) => {
       const removedSourceAccounts = tx
         .delete(sourceAccounts)
         .where(eq(sourceAccounts.platform, platform))
@@ -1160,17 +1160,6 @@ export class CuedDatabase {
         Number(removedSlackBackfillProofs)
       );
     });
-
-    // Rebuild canonical state from the remaining raw event log so merged contacts
-    // and other cross-platform projections stay internally consistent.
-    this.clearProjectedState();
-    this.upsertProjectionState({
-      projectionWatermark: 0,
-      lastProjectedAt: null,
-      lastRebuildAt: null,
-    });
-
-    return removed;
   }
 
   listSyncScopes(platform: Platform, accountKey: string): SyncScopeRow[] {

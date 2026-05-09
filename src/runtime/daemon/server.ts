@@ -165,6 +165,7 @@ const DEFAULT_MESSAGE_FTS_INDEX_BATCH_SIZE = 250;
 const DEFAULT_REALTIME_PROJECTION_ENABLED = true;
 const DEFAULT_INLINE_PROJECTION_MAX_RAW_EVENTS = 250;
 const DEFAULT_DEFERRED_PROJECTION_COALESCE_MS = 250;
+const DEFAULT_AUTOSYNC_PROJECTION_BACKLOG_PAUSE_EVENTS = 5_000;
 const DEFAULT_PROJECTION_CONTINUE_DELAY_MS = 5_000;
 const PROJECTION_CONTINUE_HUGE_BACKLOG_EVENTS = 100_000;
 const PROJECTION_CONTINUE_LARGE_BACKLOG_EVENTS = 25_000;
@@ -626,6 +627,13 @@ function getDeferredProjectionCoalesceMs(): number {
     : DEFAULT_DEFERRED_PROJECTION_COALESCE_MS;
 }
 
+function getAutoSyncProjectionBacklogPauseEvents(): number {
+  const configured = Number(process.env.CUED_AUTOSYNC_PROJECTION_BACKLOG_PAUSE_EVENTS);
+  return Number.isFinite(configured) && configured >= 0
+    ? Math.trunc(configured)
+    : DEFAULT_AUTOSYNC_PROJECTION_BACKLOG_PAUSE_EVENTS;
+}
+
 function getProjectionContinueDelayMs(): number {
   const configured = Number(process.env.CUED_PROJECTION_CONTINUE_DELAY_MS);
   return Number.isFinite(configured) && configured >= 0
@@ -889,22 +897,38 @@ function queueNativeTriggeredSync(
   trigger: string,
   wakeIngest: () => void,
 ): void {
-  const integration = db.getIntegrationState(platform, accountKey);
-  if (!integration || integration.enabled !== 1 || integration.sync_capable !== 1) {
-    return;
-  }
-  if (db.hasQueuedOrRunningRun(platform, accountKey)) {
-    return;
-  }
+  try {
+    db.withBusyTimeoutSync(DAEMON_STATUS_BUSY_TIMEOUT_MS, () => {
+      const integration = db.getIntegrationState(platform, accountKey);
+      if (!integration || integration.enabled !== 1 || integration.sync_capable !== 1) {
+        return;
+      }
+      if (db.hasQueuedOrRunningRun(platform, accountKey)) {
+        return;
+      }
 
-  db.queueSyncRun({
-    platform,
-    accountKey,
-    runType: "sync",
-    trigger,
-    details: { source: platform, accountKey, trigger },
-  });
-  wakeIngest();
+      db.queueSyncRun({
+        platform,
+        accountKey,
+        runType: "sync",
+        trigger,
+        details: { source: platform, accountKey, trigger },
+      });
+      wakeIngest();
+    });
+  } catch (error) {
+    if (!isSqliteBusyError(error)) {
+      throw error;
+    }
+    daemonLogger.warn("native-triggered sync queue deferred because SQLite is busy", {
+      platform,
+      accountKey,
+      trigger,
+    });
+    setTimeout(() => {
+      queueNativeTriggeredSync(db, platform, accountKey, trigger, wakeIngest);
+    }, QUEUE_DRAIN_RETRY_DELAY_MS);
+  }
 }
 
 function createDebouncedSyncEnqueuer(
@@ -1672,6 +1696,7 @@ export async function runDaemon(): Promise<void> {
   const realtimeProjectionEnabled = getRealtimeProjectionEnabled();
   const realtimeProjectionBatchSize = getRealtimeProjectionBatchSize();
   const deferredProjectionCoalesceMs = getDeferredProjectionCoalesceMs();
+  const autoSyncProjectionBacklogPauseEvents = getAutoSyncProjectionBacklogPauseEvents();
   const continuationProjectionIntervalMs = getContinuationProjectionIntervalMs();
   const continuationProjectionBacklogEvents = getContinuationProjectionBacklogEvents();
   const signalReconnectSyncCooldownMs = getSignalReconnectSyncCooldownMs();
@@ -1841,6 +1866,16 @@ export async function runDaemon(): Promise<void> {
   ): Promise<void> => {
     try {
       if (rawEvents.length === 0) {
+        return;
+      }
+      if (isProcessingProjection) {
+        queueNativeTriggeredSync(
+          db,
+          "discord",
+          accountKey,
+          `${trigger}:projection_busy`,
+          schedulers.wakeIngest,
+        );
         return;
       }
 
@@ -3385,6 +3420,16 @@ export async function runDaemon(): Promise<void> {
       db.withBusyTimeoutSync(DAEMON_STATUS_BUSY_TIMEOUT_MS, () => {
         if (trigger === "scheduler" && bootstrap.state !== "ready") {
           return;
+        }
+        if (trigger === "scheduler" && autoSyncProjectionBacklogPauseEvents > 0) {
+          const projection = db.getProjectionBacklog();
+          if (projection.pending_raw_events >= autoSyncProjectionBacklogPauseEvents) {
+            daemonLogger.info("autosync queue deferred while projection backlog drains", {
+              pendingRawEvents: projection.pending_raw_events,
+              threshold: autoSyncProjectionBacklogPauseEvents,
+            });
+            return;
+          }
         }
         const autoSyncTargets = getAutoSyncTargets(db);
         let queuedAny = false;
