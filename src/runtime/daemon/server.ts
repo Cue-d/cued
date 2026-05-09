@@ -383,10 +383,18 @@ type PendingSignalEcho = {
 };
 
 function getConfiguredAutoSyncPlatforms(): AdapterPlatform[] | null {
-  const configured = process.env.CUED_AUTOSYNC_PLATFORMS?.split(",")
+  const raw = process.env.CUED_AUTOSYNC_PLATFORMS?.trim();
+  if (raw == null) {
+    return null;
+  }
+  if (raw === "" || ["0", "false", "none", "off"].includes(raw.toLowerCase())) {
+    return [];
+  }
+  const configured = raw
+    .split(",")
     .map((value) => value.trim())
     .filter(isAdapterPlatform);
-  return configured && configured.length > 0 ? configured : null;
+  return [...new Set(configured)];
 }
 
 function getConfiguredRealtimePlatforms(): Set<AdapterPlatform> | null {
@@ -405,7 +413,7 @@ function getConfiguredRealtimePlatforms(): Set<AdapterPlatform> | null {
   );
 }
 
-function getAutoSyncTargets(
+export function getAutoSyncTargets(
   db: Pick<ReturnType<typeof openCuedDatabase>, "listEnabledSyncTargets" | "listIntegrationStates">,
 ): Array<{ platform: AdapterPlatform; accountKey: string }> {
   const configured = getConfiguredAutoSyncPlatforms();

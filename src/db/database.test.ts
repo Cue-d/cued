@@ -2082,9 +2082,9 @@ describe("CuedDatabase", () => {
       sqlite(db).prepare("SELECT count(*) AS count FROM raw_events WHERE platform = 'slack'").get(),
     ).toEqual({ count: 1 });
     expect(db.getProjectionBacklog()).toEqual({
-      projection_watermark: 2,
+      projection_watermark: 0,
       max_raw_event_rowid: 2,
-      pending_raw_events: 0,
+      pending_raw_events: 2,
     });
 
     db.close();

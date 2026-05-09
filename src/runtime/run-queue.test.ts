@@ -181,7 +181,7 @@ describe("RunQueueService", () => {
     db.close();
   });
 
-  it("resets source state and queues the projection rebuild asynchronously", () => {
+  it("resets source state without queueing a projection rebuild on the hot path", () => {
     const db = createDb();
     db.upsertSourceAccounts([
       { platform: "imessage", accountKey: "local", displayName: "Messages" },
@@ -206,16 +206,10 @@ describe("RunQueueService", () => {
     expect(result).toMatchObject({
       source: "imessage",
       rowsRemoved: 2,
-      rebuildQueued: true,
-      rebuildRunId: expect.any(String),
+      rebuildQueued: false,
     });
     expect(db.getOverview().rawEvents).toBe(0);
-    expect(db.listRecentRuns(1)[0]).toMatchObject({
-      id: result.rebuildRunId,
-      run_type: "rebuild",
-      status: "queued",
-      trigger: "reset",
-    });
+    expect(db.listRecentRuns(1)).toEqual([]);
 
     db.close();
   });
