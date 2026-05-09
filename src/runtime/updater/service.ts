@@ -600,6 +600,7 @@ INSTALLED_APP_PATH=${shellEscape(input.installedAppPath)}
 INSTALLED_APP_EXEC=${shellEscape(getAppExecutablePath(input.installedAppPath))}
 STAGED_APP_PATH=${shellEscape(input.stagedAppPath)}
 HELPER_CLI_PATH=${shellEscape(join(input.stagedAppPath, "Contents", "Resources", "cued-cli"))}
+INSTALLED_CLI_PATH=${shellEscape(join(input.installedAppPath, "Contents", "Resources", "cued-cli"))}
 APP_BACKUP_PATH=${shellEscape(input.appBackupPath)}
 DB_PATH=${shellEscape(input.dbPath)}
 DB_BACKUP_PATH=${shellEscape(input.dbBackupPath)}
@@ -666,6 +667,10 @@ wait_for_health() {
   return 1
 }
 
+refresh_global_skill() {
+  "$INSTALLED_CLI_PATH" skill install-global >/dev/null 2>&1 || true
+}
+
 wait_for_old_app_exit
 mkdir -p "$INSTALLED_APP_PATH"
 /usr/bin/rsync -a --delete "$STAGED_APP_PATH/" "$INSTALLED_APP_PATH/"
@@ -681,6 +686,7 @@ if wait_for_health; then
   if [[ "$LOGIN_ITEM_MIGRATED" == "1" ]]; then
     cleanup_legacy_launch_agent
   fi
+  refresh_global_skill
   clear_pending
   clear_last_error
   rm -rf "$STAGING_ROOT"
