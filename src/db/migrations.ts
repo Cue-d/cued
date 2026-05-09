@@ -1404,6 +1404,16 @@ export const MIGRATIONS: Migration[] = [
       CREATE INDEX IF NOT EXISTS idx_conversation_participants_contact
       ON conversation_participants(contact_id);
 
+      CREATE INDEX IF NOT EXISTS idx_conversation_participants_conversation_active_self
+      ON conversation_participants(conversation_id, is_active, is_self);
+
+      CREATE INDEX IF NOT EXISTS idx_conversation_participants_conversation_contact_active_updated
+      ON conversation_participants(conversation_id, contact_id, is_active, updated_at DESC);
+
+      CREATE INDEX IF NOT EXISTS idx_conversation_participants_source_key_lower
+      ON conversation_participants(LOWER(source_participant_key))
+      WHERE source_participant_key IS NOT NULL;
+
       CREATE INDEX IF NOT EXISTS idx_timeline_events_actor_contact
       ON timeline_events(actor_contact_id);
 
@@ -1415,6 +1425,16 @@ export const MIGRATIONS: Migration[] = [
 
       CREATE INDEX IF NOT EXISTS idx_messages_conversation
       ON messages(conversation_id, sent_at);
+
+      CREATE INDEX IF NOT EXISTS idx_messages_conversation_latest
+      ON messages(conversation_id, sent_at DESC, updated_at DESC, id DESC);
+
+      CREATE INDEX IF NOT EXISTS idx_messages_conversation_unread
+      ON messages(conversation_id, is_from_me, is_deleted, read_at);
+
+      CREATE INDEX IF NOT EXISTS idx_messages_sender_source_key_lower
+      ON messages(LOWER(sender_source_key))
+      WHERE sender_source_key IS NOT NULL;
 
       CREATE INDEX IF NOT EXISTS idx_messages_sender
       ON messages(sender_contact_id, sent_at);
@@ -1433,6 +1453,9 @@ export const MIGRATIONS: Migration[] = [
 
       CREATE INDEX IF NOT EXISTS idx_timeline_events_conversation
       ON timeline_events(conversation_id, event_at);
+
+      CREATE INDEX IF NOT EXISTS idx_timeline_events_conversation_latest_system
+      ON timeline_events(conversation_id, event_kind, event_at DESC, updated_at DESC, id DESC);
 
       CREATE INDEX IF NOT EXISTS idx_integration_states_platform
       ON integration_states(platform, enabled);
@@ -2098,6 +2121,43 @@ export const MIGRATIONS: Migration[] = [
     id: "0017_drop_remaining_projection_side_effect_triggers",
     apply: (db) => {
       dropSynchronousMessageFtsTriggers(db);
+    },
+  },
+  {
+    id: "0018_add_projection_hot_path_indexes",
+    apply: (db) => {
+      if (tableExists(db, "conversation_participants")) {
+        db.exec(`
+          CREATE INDEX IF NOT EXISTS idx_conversation_participants_conversation_active_self
+          ON conversation_participants(conversation_id, is_active, is_self);
+
+          CREATE INDEX IF NOT EXISTS idx_conversation_participants_conversation_contact_active_updated
+          ON conversation_participants(conversation_id, contact_id, is_active, updated_at DESC);
+
+          CREATE INDEX IF NOT EXISTS idx_conversation_participants_source_key_lower
+          ON conversation_participants(LOWER(source_participant_key))
+          WHERE source_participant_key IS NOT NULL;
+        `);
+      }
+      if (tableExists(db, "messages")) {
+        db.exec(`
+          CREATE INDEX IF NOT EXISTS idx_messages_conversation_latest
+          ON messages(conversation_id, sent_at DESC, updated_at DESC, id DESC);
+
+          CREATE INDEX IF NOT EXISTS idx_messages_conversation_unread
+          ON messages(conversation_id, is_from_me, is_deleted, read_at);
+
+          CREATE INDEX IF NOT EXISTS idx_messages_sender_source_key_lower
+          ON messages(LOWER(sender_source_key))
+          WHERE sender_source_key IS NOT NULL;
+        `);
+      }
+      if (tableExists(db, "timeline_events")) {
+        db.exec(`
+          CREATE INDEX IF NOT EXISTS idx_timeline_events_conversation_latest_system
+          ON timeline_events(conversation_id, event_kind, event_at DESC, updated_at DESC, id DESC);
+        `);
+      }
     },
   },
 ];

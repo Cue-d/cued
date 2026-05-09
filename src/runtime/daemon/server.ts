@@ -177,8 +177,8 @@ const PROJECTION_CONTINUE_MEDIUM_BACKLOG_DELAY_MS = 0;
 const FTS_PROJECTION_THROTTLE_BACKLOG_EVENTS = 0;
 const FTS_PROJECTION_THROTTLE_DELAY_MS = 5_000;
 const FTS_INDEXING_STALE_AFTER_MS = 5 * 60 * 1000;
-const PROJECTION_AUTH_RETRY_DELAY_MS = 2_000;
-const PROJECTION_AUTH_GRACE_MS = 30_000;
+const PROJECTION_AUTH_RETRY_DELAY_MS = 250;
+const PROJECTION_AUTH_GRACE_MS = 2_000;
 const DEFAULT_CONTINUATION_PROJECTION_INTERVAL_MS = 60_000;
 const DEFAULT_CONTINUATION_PROJECTION_BACKLOG_EVENTS = 10_000;
 const NATIVE_WATCH_DEBOUNCE_MS = 1_500;
@@ -2874,7 +2874,7 @@ export async function runDaemon(): Promise<void> {
       scheduleProjectionDrain(QUEUE_DRAIN_RETRY_DELAY_MS);
       return;
     }
-    if (activeAuthSessions.size > 0 || now() < authProjectionPausedUntil) {
+    if (now() < authProjectionPausedUntil) {
       scheduleProjectionDrain(PROJECTION_AUTH_RETRY_DELAY_MS);
       return;
     }

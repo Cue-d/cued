@@ -14,10 +14,11 @@ describe("macOS native binary resolution", () => {
         rmSync(dir, { recursive: true, force: true });
       }
     }
+    delete process.env.CUED_APP_PATH;
   });
 
-  function createRepoRoot(): string {
-    const dir = mkdtempSync(join(tmpdir(), "cued-native-binary-"));
+  function createRepoRoot(prefix = "cued-native-binary-"): string {
+    const dir = mkdtempSync(join(tmpdir(), prefix));
     tempDirs.push(dir);
     return dir;
   }
@@ -27,16 +28,39 @@ describe("macOS native binary resolution", () => {
     expect(resolveMacOSNativeBinary("/tmp/cued-native", repoRoot)).toBe("/tmp/cued-native");
   });
 
+  it("prefers the helper bundled in CUED_APP_PATH", () => {
+    const dir = createRepoRoot("cued-native-helper-");
+    const appPath = join(dir, "Cued.app");
+    const helperPath = join(appPath, "Contents", "Resources", "helpers", "cued-native-helper");
+    mkdirSync(join(appPath, "Contents", "Resources", "helpers"), { recursive: true });
+    writeFileSync(helperPath, "");
+
+    const env = { CUED_APP_PATH: appPath } as NodeJS.ProcessEnv;
+
+    expect(getMacOSNativeBinaryCandidates(dir, env)[0]).toBe(helperPath);
+    expect(resolveMacOSNativeBinary(undefined, dir)).toBe(null);
+    process.env.CUED_APP_PATH = appPath;
+    expect(resolveMacOSNativeBinary(undefined, dir)).toBe(helperPath);
+  });
+
   it("finds the compiled binary in the default release location", () => {
     const repoRoot = createRepoRoot();
-    const candidates = getMacOSNativeBinaryCandidates(repoRoot);
+    const releasePath = join(
+      repoRoot,
+      "native",
+      "macos",
+      "CuedNative",
+      ".build",
+      "release",
+      "CuedNative",
+    );
     mkdirSync(join(repoRoot, "native", "macos", "CuedNative", ".build", "release"), {
       recursive: true,
     });
-    writeFileSync(candidates[0], "#!/bin/sh\nexit 0\n");
-    chmodSync(candidates[0], 0o755);
+    writeFileSync(releasePath, "#!/bin/sh\nexit 0\n");
+    chmodSync(releasePath, 0o755);
 
-    expect(resolveMacOSNativeBinary(undefined, repoRoot)).toBe(candidates[0]);
+    expect(resolveMacOSNativeBinary(undefined, repoRoot)).toBe(releasePath);
   });
 
   it("returns null when nothing is compiled", () => {
@@ -44,8 +68,10 @@ describe("macOS native binary resolution", () => {
     expect(resolveMacOSNativeBinary(undefined, repoRoot)).toBeNull();
   });
 
-  it("uses the flattened repo root for implicit development candidates", () => {
-    expect(getMacOSNativeBinaryCandidates()[0]).toBe(
+  it("uses packaged and development candidates for implicit resolution", () => {
+    const candidates = getMacOSNativeBinaryCandidates();
+    expect(candidates[0]).toContain(join("helpers", "cued-native-helper"));
+    expect(candidates).toContain(
       join(process.cwd(), "native", "macos", "CuedNative", ".build", "release", "CuedNative"),
     );
   });

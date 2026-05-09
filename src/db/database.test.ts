@@ -1764,6 +1764,11 @@ describe("CuedDatabase", () => {
         .prepare("SELECT 1 FROM schema_migrations WHERE id = ?")
         .get("0017_drop_remaining_projection_side_effect_triggers"),
     ).toBeTruthy();
+    expect(
+      sql
+        .prepare("SELECT 1 FROM schema_migrations WHERE id = ?")
+        .get("0018_add_projection_hot_path_indexes"),
+    ).toBeTruthy();
     const indexNames = (
       sql.prepare("SELECT name FROM sqlite_master WHERE type = 'index'").all() as Array<{
         name: string;
@@ -1772,8 +1777,15 @@ describe("CuedDatabase", () => {
     expect(indexNames).toEqual(
       expect.arrayContaining([
         "idx_conversation_participants_contact",
+        "idx_conversation_participants_conversation_active_self",
+        "idx_conversation_participants_conversation_contact_active_updated",
+        "idx_conversation_participants_source_key_lower",
         "idx_timeline_events_actor_contact",
+        "idx_timeline_events_conversation_latest_system",
         "idx_message_reactions_reactor_contact",
+        "idx_messages_conversation_latest",
+        "idx_messages_conversation_unread",
+        "idx_messages_sender_source_key_lower",
       ]),
     );
     expect(syncRunColumns).toEqual(expect.arrayContaining(["queued_at", "scheduled_at"]));

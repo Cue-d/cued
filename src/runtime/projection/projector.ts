@@ -240,7 +240,8 @@ function findProjectedContactIdBySourceKey(
   const messageRow = conn.get<{ contact_id: string }>(sql`
     SELECT sender_contact_id AS contact_id
     FROM messages
-    WHERE LOWER(sender_source_key) = LOWER(${sourceEntityKey})
+    WHERE sender_source_key IS NOT NULL
+      AND LOWER(sender_source_key) = LOWER(${sourceEntityKey})
       AND sender_contact_id IS NOT NULL
     LIMIT 1
   `);
@@ -251,7 +252,8 @@ function findProjectedContactIdBySourceKey(
   const participantRow = conn.get<{ contact_id: string }>(sql`
     SELECT contact_id
     FROM conversation_participants
-    WHERE LOWER(source_participant_key) = LOWER(${sourceEntityKey})
+    WHERE source_participant_key IS NOT NULL
+      AND LOWER(source_participant_key) = LOWER(${sourceEntityKey})
     LIMIT 1
   `);
   return participantRow?.contact_id ?? null;
