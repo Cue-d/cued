@@ -5,6 +5,7 @@ import {
   getAdaptiveProjectionContinueDelayMs,
   getAutoSyncTargets,
   isDisconnectedSocketError,
+  shouldDeferContinuationProjection,
   shouldProjectIngestRunInline,
   shouldSkipConnectedDiscordSchedulerSync,
 } from "./server.js";
@@ -122,12 +123,65 @@ describe("daemon socket errors", () => {
 });
 
 describe("adaptive projection scheduling", () => {
+  it("coalesces only small continuation projection backlogs inside the interval", () => {
+    expect(
+      shouldDeferContinuationProjection({
+        hasMore: true,
+        pendingRawEvents: 100,
+        lastProjectionQueuedAt: 1_000,
+        nowMs: 2_500,
+        intervalMs: 2_000,
+        backlogEvents: 500,
+      }),
+    ).toBe(true);
+    expect(
+      shouldDeferContinuationProjection({
+        hasMore: true,
+        pendingRawEvents: 500,
+        lastProjectionQueuedAt: 1_000,
+        nowMs: 2_500,
+        intervalMs: 2_000,
+        backlogEvents: 500,
+      }),
+    ).toBe(false);
+    expect(
+      shouldDeferContinuationProjection({
+        hasMore: true,
+        pendingRawEvents: 100,
+        lastProjectionQueuedAt: 1_000,
+        nowMs: 3_001,
+        intervalMs: 2_000,
+        backlogEvents: 500,
+      }),
+    ).toBe(false);
+    expect(
+      shouldDeferContinuationProjection({
+        hasMore: false,
+        pendingRawEvents: 100,
+        lastProjectionQueuedAt: 1_000,
+        nowMs: 2_500,
+        intervalMs: 2_000,
+        backlogEvents: 500,
+      }),
+    ).toBe(false);
+    expect(
+      shouldDeferContinuationProjection({
+        hasMore: true,
+        pendingRawEvents: 0,
+        lastProjectionQueuedAt: 1_000,
+        nowMs: 2_500,
+        intervalMs: 2_000,
+        backlogEvents: 500,
+      }),
+    ).toBe(false);
+  });
+
   it("uses larger batches for large backlogs", () => {
     expect(getAdaptiveProjectionBatchSize(0)).toBe(100);
     expect(getAdaptiveProjectionBatchSize(1_000)).toBe(500);
-    expect(getAdaptiveProjectionBatchSize(5_000)).toBe(500);
-    expect(getAdaptiveProjectionBatchSize(25_000)).toBe(500);
-    expect(getAdaptiveProjectionBatchSize(100_000)).toBe(500);
+    expect(getAdaptiveProjectionBatchSize(5_000)).toBe(1_000);
+    expect(getAdaptiveProjectionBatchSize(25_000)).toBe(1_500);
+    expect(getAdaptiveProjectionBatchSize(100_000)).toBe(2_000);
   });
 
   it("removes continuation delay only while backlog is large", () => {

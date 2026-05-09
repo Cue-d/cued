@@ -157,9 +157,9 @@ const DEFAULT_DISCORD_DM_POLL_MS = 45_000;
 const DEFAULT_SLACK_REALTIME_ENABLED = false;
 const DEFAULT_INGEST_CONCURRENCY = 4;
 const DEFAULT_PROJECTION_BATCH_SIZE = 100;
-const DEFAULT_PROJECTION_BATCH_SIZE_HUGE_BACKLOG = 500;
-const DEFAULT_PROJECTION_BATCH_SIZE_LARGE_BACKLOG = 500;
-const DEFAULT_PROJECTION_BATCH_SIZE_MEDIUM_BACKLOG = 500;
+const DEFAULT_PROJECTION_BATCH_SIZE_HUGE_BACKLOG = 2_000;
+const DEFAULT_PROJECTION_BATCH_SIZE_LARGE_BACKLOG = 1_500;
+const DEFAULT_PROJECTION_BATCH_SIZE_MEDIUM_BACKLOG = 1_000;
 const DEFAULT_PROJECTION_BATCH_SIZE_SMALL_BACKLOG = 500;
 const DEFAULT_MESSAGE_FTS_INDEX_BATCH_SIZE = 250;
 const DEFAULT_REALTIME_PROJECTION_ENABLED = true;
@@ -179,8 +179,8 @@ const FTS_PROJECTION_THROTTLE_DELAY_MS = 5_000;
 const FTS_INDEXING_STALE_AFTER_MS = 5 * 60 * 1000;
 const PROJECTION_AUTH_RETRY_DELAY_MS = 250;
 const PROJECTION_AUTH_GRACE_MS = 2_000;
-const DEFAULT_CONTINUATION_PROJECTION_INTERVAL_MS = 60_000;
-const DEFAULT_CONTINUATION_PROJECTION_BACKLOG_EVENTS = 10_000;
+const DEFAULT_CONTINUATION_PROJECTION_INTERVAL_MS = 2_000;
+const DEFAULT_CONTINUATION_PROJECTION_BACKLOG_EVENTS = 500;
 const NATIVE_WATCH_DEBOUNCE_MS = 1_500;
 const DEFAULT_AUTOSYNC_SCHEDULER_TICK_MS = 15_000;
 const DEFAULT_SYNC_CONTINUE_DELAY_MS = 15_000;
@@ -678,6 +678,24 @@ function getContinuationProjectionBacklogEvents(): number {
   return Number.isFinite(configured) && configured >= 0
     ? Math.trunc(configured)
     : DEFAULT_CONTINUATION_PROJECTION_BACKLOG_EVENTS;
+}
+
+export function shouldDeferContinuationProjection(input: {
+  hasMore: boolean;
+  pendingRawEvents: number;
+  lastProjectionQueuedAt: number;
+  nowMs: number;
+  intervalMs?: number;
+  backlogEvents?: number;
+}): boolean {
+  const intervalMs = input.intervalMs ?? getContinuationProjectionIntervalMs();
+  const backlogEvents = input.backlogEvents ?? getContinuationProjectionBacklogEvents();
+  return (
+    input.hasMore &&
+    input.pendingRawEvents > 0 &&
+    input.pendingRawEvents < backlogEvents &&
+    input.nowMs - input.lastProjectionQueuedAt < intervalMs
+  );
 }
 
 function resolveCliEntrypoint(): string {
@@ -4008,12 +4026,17 @@ export async function runDaemon(): Promise<void> {
         const continuationProjectionKey = `${currentRun.platform}:${accountKey}`;
         const lastContinuationProjectionAt =
           lastContinuationProjectionQueuedAt.get(continuationProjectionKey) ?? 0;
-        const shouldDeferContinuationProjection =
-          bundleHasMore &&
-          projection.pending_raw_events < continuationProjectionBacklogEvents &&
-          now() - lastContinuationProjectionAt < continuationProjectionIntervalMs;
+        const projectionDecisionAt = now();
+        const shouldDeferProjection = shouldDeferContinuationProjection({
+          hasMore: bundleHasMore,
+          pendingRawEvents: projection.pending_raw_events,
+          lastProjectionQueuedAt: lastContinuationProjectionAt,
+          nowMs: projectionDecisionAt,
+          intervalMs: continuationProjectionIntervalMs,
+          backlogEvents: continuationProjectionBacklogEvents,
+        });
 
-        if (shouldDeferContinuationProjection) {
+        if (shouldDeferProjection) {
           daemonLogger.info("projection deferred during continuation sync", {
             runId: currentRun.id,
             platform: currentRun.platform,
@@ -4027,7 +4050,7 @@ export async function runDaemon(): Promise<void> {
             delayMs: deferredProjectionCoalesceMs,
           });
           if (bundleHasMore) {
-            lastContinuationProjectionQueuedAt.set(continuationProjectionKey, now());
+            lastContinuationProjectionQueuedAt.set(continuationProjectionKey, projectionDecisionAt);
           } else {
             lastContinuationProjectionQueuedAt.delete(continuationProjectionKey);
           }
