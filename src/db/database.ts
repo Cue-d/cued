@@ -1161,9 +1161,6 @@ export class CuedDatabase {
       );
     });
 
-    // Rebuild canonical state from the remaining raw event log so merged contacts
-    // and other cross-platform projections stay internally consistent.
-    this.clearProjectedState();
     this.upsertProjectionState({
       projectionWatermark: 0,
       lastProjectedAt: null,
@@ -3579,6 +3576,23 @@ export class CuedDatabase {
     })();
   }
 
+  requeueStaleMessageFtsIndexing(staleBefore: number): number {
+    return this.db
+      .update(messageFtsIndexQueue)
+      .set({
+        status: "queued",
+        updatedAt: now(),
+        lastError: null,
+      })
+      .where(
+        and(
+          eq(messageFtsIndexQueue.status, "indexing"),
+          sql`${messageFtsIndexQueue.updatedAt} < ${staleBefore}`,
+        ),
+      )
+      .run().changes;
+  }
+
   completeMessageFtsIndex(messageIds: Iterable<string>): number {
     const ids = [...new Set([...messageIds])];
     if (ids.length === 0) {
@@ -4435,6 +4449,7 @@ export class CuedDatabase {
           status: syncRuns.status,
           trigger: syncRuns.trigger,
           queued_at: syncRuns.queuedAt,
+          scheduled_at: syncRuns.scheduledAt,
           started_at: syncRuns.startedAt,
           details_json: syncRuns.detailsJson,
         })
@@ -4451,6 +4466,16 @@ export class CuedDatabase {
       .update(syncRuns)
       .set({
         detailsJson: safeStringifyJson(details),
+      })
+      .where(eq(syncRuns.id, runId))
+      .run();
+  }
+
+  rescheduleRun(runId: string, scheduledAt: number): void {
+    this.db
+      .update(syncRuns)
+      .set({
+        scheduledAt: Math.max(0, Math.trunc(scheduledAt)),
       })
       .where(eq(syncRuns.id, runId))
       .run();

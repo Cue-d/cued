@@ -44,16 +44,24 @@ describe("contacts worker loader resolution", () => {
 
   it("finds the compiled native exporter when present", () => {
     const repoRoot = createRepoRoot();
-    const candidates = getNativeContactsBinaryCandidates(repoRoot);
+    const releaseCandidate = join(
+      repoRoot,
+      "native",
+      "macos",
+      "CuedNative",
+      ".build",
+      "release",
+      "CuedNative",
+    );
     mkdirSync(join(repoRoot, "native", "macos", "CuedNative", ".build", "release"), {
       recursive: true,
     });
-    writeFileSync(candidates[0], "#!/bin/sh\nexit 0\n");
-    chmodSync(candidates[0], 0o755);
+    writeFileSync(releaseCandidate, "#!/bin/sh\nexit 0\n");
+    chmodSync(releaseCandidate, 0o755);
 
     expect(resolveContactsLoader({}, repoRoot)).toEqual({
       kind: "native",
-      path: candidates[0],
+      path: releaseCandidate,
     });
   });
 

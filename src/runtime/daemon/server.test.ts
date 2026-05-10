@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
   buildSyncResumeTargets,
+  getAdaptiveProjectionBatchSize,
+  getAdaptiveProjectionContinueDelayMs,
+  getAutoSyncTargets,
   isDisconnectedSocketError,
+  shouldDeferContinuationProjection,
   shouldProjectIngestRunInline,
   shouldSkipConnectedDiscordSchedulerSync,
 } from "./server.js";
@@ -118,7 +122,101 @@ describe("daemon socket errors", () => {
   });
 });
 
+describe("adaptive projection scheduling", () => {
+  it("coalesces only small continuation projection backlogs inside the interval", () => {
+    expect(
+      shouldDeferContinuationProjection({
+        hasMore: true,
+        pendingRawEvents: 100,
+        lastProjectionQueuedAt: 1_000,
+        nowMs: 2_500,
+        intervalMs: 2_000,
+        backlogEvents: 500,
+      }),
+    ).toBe(true);
+    expect(
+      shouldDeferContinuationProjection({
+        hasMore: true,
+        pendingRawEvents: 500,
+        lastProjectionQueuedAt: 1_000,
+        nowMs: 2_500,
+        intervalMs: 2_000,
+        backlogEvents: 500,
+      }),
+    ).toBe(false);
+    expect(
+      shouldDeferContinuationProjection({
+        hasMore: true,
+        pendingRawEvents: 100,
+        lastProjectionQueuedAt: 1_000,
+        nowMs: 3_001,
+        intervalMs: 2_000,
+        backlogEvents: 500,
+      }),
+    ).toBe(false);
+    expect(
+      shouldDeferContinuationProjection({
+        hasMore: false,
+        pendingRawEvents: 100,
+        lastProjectionQueuedAt: 1_000,
+        nowMs: 2_500,
+        intervalMs: 2_000,
+        backlogEvents: 500,
+      }),
+    ).toBe(false);
+    expect(
+      shouldDeferContinuationProjection({
+        hasMore: true,
+        pendingRawEvents: 0,
+        lastProjectionQueuedAt: 1_000,
+        nowMs: 2_500,
+        intervalMs: 2_000,
+        backlogEvents: 500,
+      }),
+    ).toBe(false);
+  });
+
+  it("uses larger batches for large backlogs", () => {
+    expect(getAdaptiveProjectionBatchSize(0)).toBe(100);
+    expect(getAdaptiveProjectionBatchSize(1_000)).toBe(500);
+    expect(getAdaptiveProjectionBatchSize(5_000)).toBe(1_000);
+    expect(getAdaptiveProjectionBatchSize(25_000)).toBe(1_500);
+    expect(getAdaptiveProjectionBatchSize(100_000)).toBe(2_000);
+  });
+
+  it("removes continuation delay only while backlog is large", () => {
+    expect(getAdaptiveProjectionContinueDelayMs(999)).toBe(5_000);
+    expect(getAdaptiveProjectionContinueDelayMs(5_000)).toBe(0);
+    expect(getAdaptiveProjectionContinueDelayMs(25_000)).toBe(0);
+    expect(getAdaptiveProjectionContinueDelayMs(100_000)).toBe(0);
+  });
+});
+
 describe("sync resume targets", () => {
+  it("allows autosync to be explicitly disabled", () => {
+    const previous = process.env.CUED_AUTOSYNC_PLATFORMS;
+    process.env.CUED_AUTOSYNC_PLATFORMS = "none";
+    try {
+      expect(
+        getAutoSyncTargets({
+          listEnabledSyncTargets: () => [
+            {
+              platform: "imessage",
+              account_key: "local",
+            },
+          ],
+          listIntegrationStates: () => [],
+        }),
+      ).toEqual([]);
+    } finally {
+      if (previous == null) {
+        delete process.env.CUED_AUTOSYNC_PLATFORMS;
+      } else {
+        process.env.CUED_AUTOSYNC_PLATFORMS = previous;
+      }
+    }
+  });
+
   it("preserves account keys that contain colons", () => {
     expect(
       buildSyncResumeTargets({

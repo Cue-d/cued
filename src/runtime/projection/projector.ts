@@ -62,8 +62,8 @@ type ProjectionCache = {
 type ProjectionChangeSet = {
   dirtyContactIds: Set<string>;
   dirtyConversationIds: Set<string>;
+  dirtyConversationSummaryIds: Set<string>;
   dirtyMessageIds: Set<string>;
-  dirtyReplyMessageIds: Set<string>;
   touchedAttachments: boolean;
   touchedReactions: boolean;
 };
@@ -239,7 +239,8 @@ function findProjectedContactIdBySourceKey(
   const messageRow = conn.get<{ contact_id: string }>(sql`
     SELECT sender_contact_id AS contact_id
     FROM messages
-    WHERE LOWER(sender_source_key) = LOWER(${sourceEntityKey})
+    WHERE sender_source_key IS NOT NULL
+      AND LOWER(sender_source_key) = LOWER(${sourceEntityKey})
       AND sender_contact_id IS NOT NULL
     LIMIT 1
   `);
@@ -250,7 +251,8 @@ function findProjectedContactIdBySourceKey(
   const participantRow = conn.get<{ contact_id: string }>(sql`
     SELECT contact_id
     FROM conversation_participants
-    WHERE LOWER(source_participant_key) = LOWER(${sourceEntityKey})
+    WHERE source_participant_key IS NOT NULL
+      AND LOWER(source_participant_key) = LOWER(${sourceEntityKey})
     LIMIT 1
   `);
   return participantRow?.contact_id ?? null;
@@ -712,8 +714,8 @@ function createProjectionChangeSet(): ProjectionChangeSet {
   return {
     dirtyContactIds: new Set<string>(),
     dirtyConversationIds: new Set<string>(),
+    dirtyConversationSummaryIds: new Set<string>(),
     dirtyMessageIds: new Set<string>(),
-    dirtyReplyMessageIds: new Set<string>(),
     touchedAttachments: false,
     touchedReactions: false,
   };
@@ -976,6 +978,38 @@ function ensureMessageStub(
     .run();
 
   return { messageId, conversationId };
+}
+
+function resolveProjectedSenderName(
+  conn: LocalDbExecutor,
+  cache: ProjectionCache,
+  conversationId: string,
+  senderContactId: string | null,
+): string | null {
+  if (!senderContactId) {
+    return null;
+  }
+
+  const contactName = cache.contactNameMap.get(senderContactId) ?? null;
+  if (contactName != null && !isRawIdentifierDisplayName(contactName)) {
+    return contactName;
+  }
+
+  const participant = conn.get<{ participant_name: string | null }>(sql`
+    SELECT participant_name
+    FROM conversation_participants
+    WHERE conversation_id = ${conversationId}
+      AND contact_id = ${senderContactId}
+      AND is_active = 1
+    ORDER BY updated_at DESC
+    LIMIT 1
+  `);
+  const participantName = participant?.participant_name ?? null;
+  if (participantName != null && !isRawIdentifierDisplayName(participantName)) {
+    return participantName;
+  }
+
+  return contactName ?? participantName;
 }
 
 function clearProjectedState(conn: LocalDbExecutor): void {
@@ -1324,6 +1358,18 @@ function projectMessageEvent(
     payload.senderSourceKey,
     event.observed_at,
   );
+  const senderName = resolveProjectedSenderName(conn, cache, conversationId, senderContactId);
+  const replyToMessageId = hasStringValue(payload.replyToSourceMessageKey)
+    ? ensureMessageStub(
+        conn,
+        cache,
+        event.platform,
+        event.account_key,
+        payload.sourceConversationKey,
+        payload.replyToSourceMessageKey,
+        event.observed_at,
+      ).messageId
+    : null;
 
   conn
     .update(messages)
@@ -1334,7 +1380,7 @@ function projectMessageEvent(
       conversationId,
       senderContactId: senderContactId ?? null,
       senderSourceKey: payload.senderSourceKey,
-      senderName: senderContactId ? (cache.contactNameMap.get(senderContactId) ?? null) : null,
+      senderName,
       conversationName: cache.conversationNameMap.get(conversationId) ?? null,
       sentAt: payload.sentAt,
       service: normalizeText(payload.service ?? null),
@@ -1345,6 +1391,7 @@ function projectMessageEvent(
       readAt: payload.readAt ?? null,
       editedAt: payload.editedAt ?? null,
       deletedAt: payload.deletedAt ?? null,
+      replyToMessageId,
       isDeleted: boolToInt(payload.isDeleted),
       isEdited: boolToInt(payload.isEdited),
       updatedAt: event.observed_at,
@@ -1352,11 +1399,8 @@ function projectMessageEvent(
     .where(eq(messages.id, messageId))
     .run();
 
-  changes.dirtyConversationIds.add(conversationId);
+  changes.dirtyConversationSummaryIds.add(conversationId);
   changes.dirtyMessageIds.add(messageId);
-  if (hasStringValue(payload.replyToSourceMessageKey)) {
-    changes.dirtyReplyMessageIds.add(messageId);
-  }
 
   projectMessageAttachments(conn, changes, event, payload, messageId);
 }
@@ -1475,7 +1519,7 @@ function projectReactionEvent(
   event: ProjectableRawEvent,
 ): void {
   const payload = JSON.parse(event.payload_json) as ReactionPayload;
-  const { messageId, conversationId } = ensureMessageStub(
+  const { messageId } = ensureMessageStub(
     conn,
     cache,
     event.platform,
@@ -1527,7 +1571,6 @@ function projectReactionEvent(
     .run();
 
   changes.touchedReactions = true;
-  changes.dirtyConversationIds.add(conversationId);
   changes.dirtyMessageIds.add(messageId);
 }
 
@@ -1594,6 +1637,7 @@ function projectParticipantEvent(
     .run();
 
   changes.dirtyConversationIds.add(conversationId);
+  changes.dirtyConversationSummaryIds.add(conversationId);
 }
 
 function projectTimelineEvent(
@@ -1686,6 +1730,7 @@ function projectTimelineEvent(
     .run();
 
   changes.dirtyConversationIds.add(conversationId);
+  changes.dirtyConversationSummaryIds.add(conversationId);
 }
 
 function projectCallEvent(
@@ -1788,6 +1833,7 @@ function projectCallEvent(
     .run();
 
   changes.dirtyConversationIds.add(conversationId);
+  changes.dirtyConversationSummaryIds.add(conversationId);
 }
 
 function refreshConversationSummariesForIds(
@@ -2121,29 +2167,6 @@ function refreshReactionCountsForIds(conn: LocalDbExecutor, messageIds: Set<stri
   }
 }
 
-function refreshReplyLinksForIds(conn: LocalDbExecutor, messageIds: Set<string>): void {
-  for (const chunk of chunkArray([...messageIds], SQL_CHUNK_SIZE)) {
-    conn.run(sql`
-      UPDATE messages
-      SET reply_to_message_id = (
-        SELECT parent.id
-        FROM raw_events child_re
-        JOIN messages parent
-          ON parent.platform = child_re.platform
-         AND parent.account_key = child_re.account_key
-         AND parent.platform_message_id = json_extract(child_re.payload_json, '$.replyToSourceMessageKey')
-        WHERE child_re.entity_kind = 'message'
-          AND child_re.platform = messages.platform
-          AND child_re.account_key = messages.account_key
-          AND json_extract(child_re.payload_json, '$.sourceMessageKey') = messages.platform_message_id
-        ORDER BY child_re.observed_at DESC, child_re.id DESC
-        LIMIT 1
-      )
-      WHERE id IN (${sqlValueList(chunk)})
-    `);
-  }
-}
-
 function finalizeDeferredProjection(
   conn: LocalDbExecutor,
   cache: ProjectionCache,
@@ -2157,16 +2180,20 @@ function finalizeDeferredProjection(
     syncContactNameCache(conn, cache, changes.dirtyContactIds);
   }
 
-  if (!options?.initialProjection) {
-    expandDirtyConversationIds(conn, changes);
-  }
+  expandDirtyConversationIds(conn, changes);
   if (changes.dirtyConversationIds.size > 0) {
     refreshParticipantNamesForIds(conn, changes.dirtyConversationIds);
     refreshConversationNamesForIds(conn, changes.dirtyConversationIds);
     syncConversationNameCache(conn, cache, changes.dirtyConversationIds);
     refreshMessageSenderNamesForIds(conn, changes.dirtyConversationIds);
     refreshMessageConversationNamesForIds(conn, changes.dirtyConversationIds);
-    refreshConversationSummariesForIds(conn, changes.dirtyConversationIds);
+    for (const conversationId of changes.dirtyConversationIds) {
+      changes.dirtyConversationSummaryIds.add(conversationId);
+    }
+  }
+
+  if (changes.dirtyConversationSummaryIds.size > 0) {
+    refreshConversationSummariesForIds(conn, changes.dirtyConversationSummaryIds);
   }
 
   if (!options?.initialProjection) {
@@ -2179,10 +2206,6 @@ function finalizeDeferredProjection(
     if (changes.touchedReactions) {
       refreshReactionCountsForIds(conn, changes.dirtyMessageIds);
     }
-  }
-
-  if (changes.dirtyReplyMessageIds.size > 0) {
-    refreshReplyLinksForIds(conn, changes.dirtyReplyMessageIds);
   }
 }
 

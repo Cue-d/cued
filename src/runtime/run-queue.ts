@@ -233,14 +233,17 @@ export class RunQueueService {
   resetSource(source: string): {
     source: string;
     rowsRemoved: number;
+    rebuildQueued: false;
   } {
     if (!isPlatform(source)) {
       throw new Error(`Unsupported reset source: ${source}`);
     }
 
+    const rowsRemoved = this.db.resetSource(source);
     const result = {
       source,
-      rowsRemoved: this.db.resetSource(source),
+      rowsRemoved,
+      rebuildQueued: false as const,
     };
     this.schedulers.wakeProjection?.();
     return result;

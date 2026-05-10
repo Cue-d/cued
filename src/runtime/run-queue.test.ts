@@ -181,6 +181,39 @@ describe("RunQueueService", () => {
     db.close();
   });
 
+  it("resets source state without queueing a projection rebuild on the hot path", () => {
+    const db = createDb();
+    db.upsertSourceAccounts([
+      { platform: "imessage", accountKey: "local", displayName: "Messages" },
+    ]);
+    db.insertRawEvent({
+      id: "imessage-reset-raw",
+      platform: "imessage",
+      accountKey: "local",
+      entityKind: "message",
+      eventKind: "created",
+      observedAt: Date.now(),
+      dedupeKey: "imessage-reset-raw",
+      payload: {
+        sourceMessageKey: "imessage:m1",
+        sourceConversationKey: "imessage:c1",
+      },
+    });
+
+    const queue = new RunQueueService(db);
+    const result = queue.resetSource("imessage");
+
+    expect(result).toMatchObject({
+      source: "imessage",
+      rowsRemoved: 2,
+      rebuildQueued: false,
+    });
+    expect(db.getOverview().rawEvents).toBe(0);
+    expect(db.listRecentRuns(1)).toEqual([]);
+
+    db.close();
+  });
+
   it("records a manual contact merge and rebuilds projected state immediately", () => {
     const db = createDb();
     db.insertRawEvent({

@@ -288,6 +288,29 @@ describe("CuedDatabase", () => {
     db.close();
   });
 
+  it("requeues stale message FTS indexing work", () => {
+    const db = createDb();
+    const timestamp = Date.now();
+
+    expect(db.enqueueMessageFtsIndex(["message-a", "message-b"], "projection")).toBe(2);
+    expect(db.claimMessageFtsIndexBatch(2)).toHaveLength(2);
+    sqlite(db)
+      .prepare("UPDATE message_fts_index_queue SET updated_at = ? WHERE message_id = 'message-a'")
+      .run(timestamp - 10_000);
+
+    expect(db.requeueStaleMessageFtsIndexing(timestamp - 5_000)).toBe(1);
+    expect(
+      sqlite(db)
+        .prepare("SELECT message_id, status FROM message_fts_index_queue ORDER BY message_id")
+        .all(),
+    ).toEqual([
+      { message_id: "message-a", status: "queued" },
+      { message_id: "message-b", status: "indexing" },
+    ]);
+
+    db.close();
+  });
+
   it("executes read-only SQL for ad hoc inspection", () => {
     const db = createDb();
 
@@ -1258,6 +1281,22 @@ describe("CuedDatabase", () => {
     db.close();
   });
 
+  it("reschedules queued sync runs", () => {
+    const db = createDb();
+    const runId = db.queueSyncRun({
+      runType: "project",
+      trigger: "projection_continue",
+      delayMs: 60_000,
+    });
+
+    expect(db.claimNextQueuedRun(["project"])).toBeNull();
+
+    db.rescheduleRun(runId, Date.now() - 1);
+    expect(db.claimNextQueuedRun(["project"])?.id).toBe(runId);
+
+    db.close();
+  });
+
   it("stores checkpoints and raw events", () => {
     const db = createDb();
 
@@ -1675,11 +1714,31 @@ describe("CuedDatabase", () => {
         name: string;
       }>
     ).map((row) => row.name);
-    const triggerSql = sql
+    const synchronousProjectionTriggerRows = sql
       .prepare(
-        "SELECT sql FROM sqlite_master WHERE type = 'trigger' AND name = 'trg_messages_inserted_fts'",
+        `
+        SELECT name
+        FROM sqlite_master
+        WHERE type = 'trigger'
+          AND name IN (
+            'trg_messages_inserted_fts',
+            'trg_messages_updated_fts',
+            'trg_messages_deleted_fts',
+            'trg_message_attachments_inserted',
+            'trg_message_attachments_updated',
+            'trg_message_attachments_deleted',
+            'trg_message_reactions_inserted',
+            'trg_message_reactions_updated',
+            'trg_message_reactions_deleted',
+            'trg_contacts_name_updated',
+            'trg_conversations_name_updated',
+            'trg_conversation_participants_inserted',
+            'trg_conversation_participants_updated',
+            'trg_conversation_participants_deleted'
+          )
+      `,
       )
-      .get() as { sql: string } | undefined;
+      .all() as Array<{ name: string }>;
 
     expect(
       sql
@@ -1716,6 +1775,16 @@ describe("CuedDatabase", () => {
         .prepare("SELECT 1 FROM schema_migrations WHERE id = ?")
         .get("0016_drop_synchronous_message_fts_triggers"),
     ).toBeTruthy();
+    expect(
+      sql
+        .prepare("SELECT 1 FROM schema_migrations WHERE id = ?")
+        .get("0017_drop_remaining_projection_side_effect_triggers"),
+    ).toBeTruthy();
+    expect(
+      sql
+        .prepare("SELECT 1 FROM schema_migrations WHERE id = ?")
+        .get("0018_add_projection_hot_path_indexes"),
+    ).toBeTruthy();
     const indexNames = (
       sql.prepare("SELECT name FROM sqlite_master WHERE type = 'index'").all() as Array<{
         name: string;
@@ -1724,8 +1793,15 @@ describe("CuedDatabase", () => {
     expect(indexNames).toEqual(
       expect.arrayContaining([
         "idx_conversation_participants_contact",
+        "idx_conversation_participants_conversation_active_self",
+        "idx_conversation_participants_conversation_contact_active_updated",
+        "idx_conversation_participants_source_key_lower",
         "idx_timeline_events_actor_contact",
+        "idx_timeline_events_conversation_latest_system",
         "idx_message_reactions_reactor_contact",
+        "idx_messages_conversation_latest",
+        "idx_messages_conversation_unread",
+        "idx_messages_sender_source_key_lower",
       ]),
     );
     expect(syncRunColumns).toEqual(expect.arrayContaining(["queued_at", "scheduled_at"]));
@@ -1756,7 +1832,7 @@ describe("CuedDatabase", () => {
         "messages_fts",
       ]),
     );
-    expect(triggerSql).toBeUndefined();
+    expect(synchronousProjectionTriggerRows).toEqual([]);
 
     db.close();
   });
@@ -1972,7 +2048,7 @@ describe("CuedDatabase", () => {
     db.close();
   });
 
-  it("resets platform data and rewinds projection for rebuild", () => {
+  it("resets platform raw state without rebuilding projections inline", () => {
     const db = createDb();
     const timestamp = Date.now();
 
@@ -2021,7 +2097,7 @@ describe("CuedDatabase", () => {
     const removed = db.resetSource("linkedin");
 
     expect(removed).toBe(2);
-    expect(db.getOverview().contacts).toBe(0);
+    expect(db.getOverview().contacts).toBe(1);
     expect(db.getOverview().rawEvents).toBe(1);
     expect(db.getOverview().sourceAccounts).toBe(1);
     expect(db.getCheckpoint("linkedin", "default")).toBeNull();
