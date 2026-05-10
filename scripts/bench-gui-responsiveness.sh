@@ -6,9 +6,12 @@ DURATION_SECONDS="${CUED_BENCH_DURATION_SECONDS:-60}"
 INTERVAL_SECONDS="${CUED_BENCH_INTERVAL_SECONDS:-1}"
 TRIGGER_SYNC="${CUED_BENCH_TRIGGER_SYNC:-0}"
 OUT="${CUED_BENCH_OUT:-/tmp/cued-gui-responsiveness-$(date +%Y%m%d-%H%M%S).jsonl}"
+SYNC_OUT="$(mktemp -t cued-bench-sync-resume.out.XXXXXX)"
+SYNC_ERR="$(mktemp -t cued-bench-sync-resume.err.XXXXXX)"
+trap 'rm -f "$SYNC_OUT" "$SYNC_ERR"' EXIT
 
 if [[ "$TRIGGER_SYNC" == "1" ]]; then
-  ("$CLI" sync resume >/tmp/cued-bench-sync-resume.out 2>/tmp/cued-bench-sync-resume.err || true) &
+  ("$CLI" sync resume >"$SYNC_OUT" 2>"$SYNC_ERR" || true) &
 fi
 
 CUED_CLI="$CLI" \
@@ -26,6 +29,14 @@ cli = os.environ["CUED_CLI"]
 duration_seconds = float(os.environ["CUED_BENCH_DURATION_SECONDS"])
 interval_seconds = float(os.environ["CUED_BENCH_INTERVAL_SECONDS"])
 out = os.environ["CUED_BENCH_OUT"]
+METRIC_KEYS = [
+    "messages",
+    "rawEvents",
+    "pendingProjectionEvents",
+    "pendingSearchIndexMessages",
+    "watermark",
+    "maxRaw",
+]
 
 end = time.time() + duration_seconds
 samples = []
@@ -40,20 +51,31 @@ while time.time() < end:
         "ok": proc.returncode == 0,
     }
     if proc.returncode == 0:
-        data = json.loads(proc.stdout)
-        overview = data.get("overview") or {}
-        data_status = data.get("dataStatus") or {}
-        projection = data.get("projection") or {}
-        record.update(
-            {
-                "messages": overview.get("messages"),
-                "rawEvents": overview.get("rawEvents"),
-                "pendingProjectionEvents": data_status.get("pendingProjectionEvents"),
-                "pendingSearchIndexMessages": data_status.get("pendingSearchIndexMessages"),
-                "watermark": projection.get("projection_watermark"),
-                "maxRaw": projection.get("max_raw_event_rowid"),
-            }
-        )
+        try:
+            data = json.loads(proc.stdout)
+        except json.JSONDecodeError as error:
+            record.update(
+                {
+                    "ok": False,
+                    "parse_error": str(error),
+                    "stdout": proc.stdout[-300:],
+                    "stderr": proc.stderr[-300:],
+                }
+            )
+        else:
+            overview = data.get("overview") or {}
+            data_status = data.get("dataStatus") or {}
+            projection = data.get("projection") or {}
+            record.update(
+                {
+                    "messages": overview.get("messages"),
+                    "rawEvents": overview.get("rawEvents"),
+                    "pendingProjectionEvents": data_status.get("pendingProjectionEvents"),
+                    "pendingSearchIndexMessages": data_status.get("pendingSearchIndexMessages"),
+                    "watermark": projection.get("projection_watermark"),
+                    "maxRaw": projection.get("max_raw_event_rowid"),
+                }
+            )
     else:
         record["stderr"] = proc.stderr[-300:]
 
@@ -61,7 +83,7 @@ while time.time() < end:
     with open(out, "a", encoding="utf-8") as handle:
         handle.write(json.dumps(record) + "\n")
 
-    elapsed = time.time() - sample_finished_at
+    elapsed = time.time() - sample_started_at
     time.sleep(max(0, interval_seconds - elapsed))
 
 latencies = [sample["latency_ms"] for sample in samples if sample.get("ok")]
@@ -103,53 +125,14 @@ if latencies:
         "max",
         round(max(latencies), 1),
     )
-print(
-    "start",
-    {
-        key: first.get(key)
-        for key in [
-            "messages",
-            "rawEvents",
-            "pendingProjectionEvents",
-            "pendingSearchIndexMessages",
-            "watermark",
-            "maxRaw",
-        ]
-    },
-)
-print(
-    "end",
-    {
-        key: last.get(key)
-        for key in [
-            "messages",
-            "rawEvents",
-            "pendingProjectionEvents",
-            "pendingSearchIndexMessages",
-            "watermark",
-            "maxRaw",
-        ]
-    },
-)
-print(
-    "delta",
-    {
-        key: value_delta(key)
-        for key in [
-            "messages",
-            "rawEvents",
-            "pendingProjectionEvents",
-            "pendingSearchIndexMessages",
-            "watermark",
-            "maxRaw",
-        ]
-    },
-)
+print("start", {key: first.get(key) for key in METRIC_KEYS})
+print("end", {key: last.get(key) for key in METRIC_KEYS})
+print("delta", {key: value_delta(key) for key in METRIC_KEYS})
 print("projected_events_per_minute", projected_per_minute)
 print("max_contiguous_pending_projection_samples", max_pending_samples)
 PY
 
 if [[ "$TRIGGER_SYNC" == "1" ]]; then
-  cat /tmp/cued-bench-sync-resume.out 2>/dev/null || true
-  cat /tmp/cued-bench-sync-resume.err 2>/dev/null || true
+  cat "$SYNC_OUT" 2>/dev/null || true
+  cat "$SYNC_ERR" 2>/dev/null || true
 fi

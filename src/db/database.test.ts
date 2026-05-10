@@ -1281,6 +1281,22 @@ describe("CuedDatabase", () => {
     db.close();
   });
 
+  it("reschedules queued sync runs", () => {
+    const db = createDb();
+    const runId = db.queueSyncRun({
+      runType: "project",
+      trigger: "projection_continue",
+      delayMs: 60_000,
+    });
+
+    expect(db.claimNextQueuedRun(["project"])).toBeNull();
+
+    db.rescheduleRun(runId, Date.now() - 1);
+    expect(db.claimNextQueuedRun(["project"])?.id).toBe(runId);
+
+    db.close();
+  });
+
   it("stores checkpoints and raw events", () => {
     const db = createDb();
 

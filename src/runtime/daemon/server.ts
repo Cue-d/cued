@@ -157,23 +157,18 @@ const DEFAULT_DISCORD_DM_POLL_MS = 45_000;
 const DEFAULT_SLACK_REALTIME_ENABLED = false;
 const DEFAULT_INGEST_CONCURRENCY = 4;
 const DEFAULT_PROJECTION_BATCH_SIZE = 100;
-const DEFAULT_PROJECTION_BATCH_SIZE_HUGE_BACKLOG = 2_000;
-const DEFAULT_PROJECTION_BATCH_SIZE_LARGE_BACKLOG = 1_500;
-const DEFAULT_PROJECTION_BATCH_SIZE_MEDIUM_BACKLOG = 1_000;
-const DEFAULT_PROJECTION_BATCH_SIZE_SMALL_BACKLOG = 500;
 const DEFAULT_MESSAGE_FTS_INDEX_BATCH_SIZE = 250;
 const DEFAULT_REALTIME_PROJECTION_ENABLED = true;
 const DEFAULT_INLINE_PROJECTION_MAX_RAW_EVENTS = 250;
 const DEFAULT_DEFERRED_PROJECTION_COALESCE_MS = 250;
 const DEFAULT_AUTOSYNC_PROJECTION_BACKLOG_PAUSE_EVENTS = 5_000;
 const DEFAULT_PROJECTION_CONTINUE_DELAY_MS = 5_000;
-const PROJECTION_CONTINUE_HUGE_BACKLOG_EVENTS = 100_000;
-const PROJECTION_CONTINUE_LARGE_BACKLOG_EVENTS = 25_000;
-const PROJECTION_CONTINUE_MEDIUM_BACKLOG_EVENTS = 5_000;
-const PROJECTION_CONTINUE_SMALL_BACKLOG_EVENTS = 1_000;
-const PROJECTION_CONTINUE_HUGE_BACKLOG_DELAY_MS = 0;
-const PROJECTION_CONTINUE_LARGE_BACKLOG_DELAY_MS = 0;
-const PROJECTION_CONTINUE_MEDIUM_BACKLOG_DELAY_MS = 0;
+const PROJECTION_BACKLOG_TIERS = [
+  { minEvents: 100_000, batchSize: 2_000, continueDelayMs: 0 },
+  { minEvents: 25_000, batchSize: 1_500, continueDelayMs: 0 },
+  { minEvents: 5_000, batchSize: 1_000, continueDelayMs: 0 },
+  { minEvents: 1_000, batchSize: 500, continueDelayMs: null },
+] as const;
 const FTS_PROJECTION_THROTTLE_BACKLOG_EVENTS = 0;
 const FTS_PROJECTION_THROTTLE_DELAY_MS = 5_000;
 const FTS_INDEXING_STALE_AFTER_MS = 5 * 60 * 1000;
@@ -547,19 +542,10 @@ function getProjectionBatchSize(): number {
 
 export function getAdaptiveProjectionBatchSize(pendingRawEvents: number): number {
   const baseBatchSize = getProjectionBatchSize();
-  if (pendingRawEvents >= PROJECTION_CONTINUE_HUGE_BACKLOG_EVENTS) {
-    return Math.max(baseBatchSize, DEFAULT_PROJECTION_BATCH_SIZE_HUGE_BACKLOG);
-  }
-  if (pendingRawEvents >= PROJECTION_CONTINUE_LARGE_BACKLOG_EVENTS) {
-    return Math.max(baseBatchSize, DEFAULT_PROJECTION_BATCH_SIZE_LARGE_BACKLOG);
-  }
-  if (pendingRawEvents >= PROJECTION_CONTINUE_MEDIUM_BACKLOG_EVENTS) {
-    return Math.max(baseBatchSize, DEFAULT_PROJECTION_BATCH_SIZE_MEDIUM_BACKLOG);
-  }
-  if (pendingRawEvents >= PROJECTION_CONTINUE_SMALL_BACKLOG_EVENTS) {
-    return Math.max(baseBatchSize, DEFAULT_PROJECTION_BATCH_SIZE_SMALL_BACKLOG);
-  }
-  return baseBatchSize;
+  const tier = PROJECTION_BACKLOG_TIERS.find(
+    (candidate) => pendingRawEvents >= candidate.minEvents,
+  );
+  return Math.max(baseBatchSize, tier?.batchSize ?? baseBatchSize);
 }
 
 function getMessageFtsIndexBatchSize(): number {
@@ -654,16 +640,10 @@ export function getAdaptiveProjectionContinueDelayMs(pendingRawEvents: number): 
   if (configured != null) {
     return getProjectionContinueDelayMs();
   }
-  if (pendingRawEvents >= PROJECTION_CONTINUE_HUGE_BACKLOG_EVENTS) {
-    return PROJECTION_CONTINUE_HUGE_BACKLOG_DELAY_MS;
-  }
-  if (pendingRawEvents >= PROJECTION_CONTINUE_LARGE_BACKLOG_EVENTS) {
-    return PROJECTION_CONTINUE_LARGE_BACKLOG_DELAY_MS;
-  }
-  if (pendingRawEvents >= PROJECTION_CONTINUE_MEDIUM_BACKLOG_EVENTS) {
-    return PROJECTION_CONTINUE_MEDIUM_BACKLOG_DELAY_MS;
-  }
-  return getProjectionContinueDelayMs();
+  const tier = PROJECTION_BACKLOG_TIERS.find(
+    (candidate) => pendingRawEvents >= candidate.minEvents && candidate.continueDelayMs != null,
+  );
+  return tier?.continueDelayMs ?? getProjectionContinueDelayMs();
 }
 
 function getContinuationProjectionIntervalMs(): number {
@@ -3532,6 +3512,8 @@ export async function runDaemon(): Promise<void> {
 
         const queuedProjectionRun = db.getQueuedProjectionRun();
         if (queuedProjectionRun) {
+          const projectionDelayMs = options?.delayMs ?? deferredProjectionCoalesceMs;
+          const projectionScheduledAt = now() + Math.max(0, Math.trunc(projectionDelayMs));
           const existingDetails = parseProjectionRunDetails(queuedProjectionRun.details_json);
           const mergedDetails =
             incomingDetails == null
@@ -3555,7 +3537,10 @@ export async function runDaemon(): Promise<void> {
               mergedDetails satisfies ProjectionRunDetails,
             );
           }
-          scheduleProjectionDrain(options?.delayMs ?? deferredProjectionCoalesceMs);
+          if (projectionScheduledAt < queuedProjectionRun.scheduled_at) {
+            db.rescheduleRun(queuedProjectionRun.id, projectionScheduledAt);
+          }
+          scheduleProjectionDrain(projectionDelayMs);
           return queuedProjectionRun.id;
         }
 
@@ -4157,18 +4142,20 @@ export async function runDaemon(): Promise<void> {
   const processProjectionRun = async (
     currentRun: NonNullable<ReturnType<typeof db.claimNextQueuedRun>>,
   ) => {
-    const projectionBacklogBeforeRun = db.getProjectionBacklog();
-    const adaptiveProjectionBatchSize = getAdaptiveProjectionBatchSize(
-      projectionBacklogBeforeRun.pending_raw_events,
-    );
-    daemonLogger.info("projection run started", {
-      runId: currentRun.id,
-      trigger: currentRun.trigger,
-      runType: currentRun.run_type,
-      pendingRawEvents: projectionBacklogBeforeRun.pending_raw_events,
-      projectionBatchSize: adaptiveProjectionBatchSize,
-    });
     try {
+      const projectionBacklogBeforeRun = db.withBusyTimeoutSync(DAEMON_STATUS_BUSY_TIMEOUT_MS, () =>
+        db.getProjectionBacklog(),
+      );
+      const adaptiveProjectionBatchSize = getAdaptiveProjectionBatchSize(
+        projectionBacklogBeforeRun.pending_raw_events,
+      );
+      daemonLogger.info("projection run started", {
+        runId: currentRun.id,
+        trigger: currentRun.trigger,
+        runType: currentRun.run_type,
+        pendingRawEvents: projectionBacklogBeforeRun.pending_raw_events,
+        projectionBatchSize: adaptiveProjectionBatchSize,
+      });
       const workerResult = await runProjectionWorkerProcess(
         currentRun,
         adaptiveProjectionBatchSize,
