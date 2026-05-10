@@ -64,7 +64,6 @@ type ProjectionChangeSet = {
   dirtyConversationIds: Set<string>;
   dirtyConversationSummaryIds: Set<string>;
   dirtyMessageIds: Set<string>;
-  dirtyReplyMessageIds: Set<string>;
   touchedAttachments: boolean;
   touchedReactions: boolean;
 };
@@ -717,7 +716,6 @@ function createProjectionChangeSet(): ProjectionChangeSet {
     dirtyConversationIds: new Set<string>(),
     dirtyConversationSummaryIds: new Set<string>(),
     dirtyMessageIds: new Set<string>(),
-    dirtyReplyMessageIds: new Set<string>(),
     touchedAttachments: false,
     touchedReactions: false,
   };
@@ -1361,6 +1359,17 @@ function projectMessageEvent(
     event.observed_at,
   );
   const senderName = resolveProjectedSenderName(conn, cache, conversationId, senderContactId);
+  const replyToMessageId = hasStringValue(payload.replyToSourceMessageKey)
+    ? ensureMessageStub(
+        conn,
+        cache,
+        event.platform,
+        event.account_key,
+        payload.sourceConversationKey,
+        payload.replyToSourceMessageKey,
+        event.observed_at,
+      ).messageId
+    : null;
 
   conn
     .update(messages)
@@ -1382,6 +1391,7 @@ function projectMessageEvent(
       readAt: payload.readAt ?? null,
       editedAt: payload.editedAt ?? null,
       deletedAt: payload.deletedAt ?? null,
+      replyToMessageId,
       isDeleted: boolToInt(payload.isDeleted),
       isEdited: boolToInt(payload.isEdited),
       updatedAt: event.observed_at,
@@ -1391,9 +1401,6 @@ function projectMessageEvent(
 
   changes.dirtyConversationSummaryIds.add(conversationId);
   changes.dirtyMessageIds.add(messageId);
-  if (hasStringValue(payload.replyToSourceMessageKey)) {
-    changes.dirtyReplyMessageIds.add(messageId);
-  }
 
   projectMessageAttachments(conn, changes, event, payload, messageId);
 }
@@ -2160,29 +2167,6 @@ function refreshReactionCountsForIds(conn: LocalDbExecutor, messageIds: Set<stri
   }
 }
 
-function refreshReplyLinksForIds(conn: LocalDbExecutor, messageIds: Set<string>): void {
-  for (const chunk of chunkArray([...messageIds], SQL_CHUNK_SIZE)) {
-    conn.run(sql`
-      UPDATE messages
-      SET reply_to_message_id = (
-        SELECT parent.id
-        FROM raw_events child_re
-        JOIN messages parent
-          ON parent.platform = child_re.platform
-         AND parent.account_key = child_re.account_key
-         AND parent.platform_message_id = json_extract(child_re.payload_json, '$.replyToSourceMessageKey')
-        WHERE child_re.entity_kind = 'message'
-          AND child_re.platform = messages.platform
-          AND child_re.account_key = messages.account_key
-          AND json_extract(child_re.payload_json, '$.sourceMessageKey') = messages.platform_message_id
-        ORDER BY child_re.observed_at DESC, child_re.id DESC
-        LIMIT 1
-      )
-      WHERE id IN (${sqlValueList(chunk)})
-    `);
-  }
-}
-
 function finalizeDeferredProjection(
   conn: LocalDbExecutor,
   cache: ProjectionCache,
@@ -2222,10 +2206,6 @@ function finalizeDeferredProjection(
     if (changes.touchedReactions) {
       refreshReactionCountsForIds(conn, changes.dirtyMessageIds);
     }
-  }
-
-  if (changes.dirtyReplyMessageIds.size > 0) {
-    refreshReplyLinksForIds(conn, changes.dirtyReplyMessageIds);
   }
 }
 
