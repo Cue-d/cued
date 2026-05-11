@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
   buildSyncResumeTargets,
+  effectiveIngestConcurrency,
   isDisconnectedSocketError,
   shouldProjectIngestRunInline,
   shouldSkipConnectedDiscordSchedulerSync,
+  shouldThrottleIngestForInteractivity,
 } from "./server.js";
 
 describe("discord scheduler pacing", () => {
@@ -72,6 +74,69 @@ describe("ingest projection strategy", () => {
         lastInsertedRowId: 10,
       }),
     ).toBe(false);
+  });
+});
+
+describe("ingest interactivity throttling", () => {
+  it("limits ingest concurrency while auth or recent GUI requests need priority", () => {
+    expect(
+      shouldThrottleIngestForInteractivity({
+        activeAuthSessionCount: 1,
+        activeIngestTargets: [],
+        lastInteractiveRequestAt: 0,
+        interactiveWindowMs: 30_000,
+        backfillPressureUntil: 0,
+        nowMs: 100_000,
+      }),
+    ).toBe(true);
+    expect(
+      shouldThrottleIngestForInteractivity({
+        activeAuthSessionCount: 0,
+        activeIngestTargets: [],
+        lastInteractiveRequestAt: 90_000,
+        interactiveWindowMs: 30_000,
+        backfillPressureUntil: 0,
+        nowMs: 100_000,
+      }),
+    ).toBe(true);
+  });
+
+  it("limits ingest concurrency during iMessage backfill pressure", () => {
+    expect(
+      shouldThrottleIngestForInteractivity({
+        activeAuthSessionCount: 0,
+        activeIngestTargets: [{ platform: "imessage" }],
+        lastInteractiveRequestAt: 0,
+        interactiveWindowMs: 30_000,
+        backfillPressureUntil: 0,
+        nowMs: 100_000,
+      }),
+    ).toBe(true);
+    expect(
+      shouldThrottleIngestForInteractivity({
+        activeAuthSessionCount: 0,
+        activeIngestTargets: [],
+        lastInteractiveRequestAt: 0,
+        interactiveWindowMs: 30_000,
+        backfillPressureUntil: 120_000,
+        nowMs: 100_000,
+      }),
+    ).toBe(true);
+  });
+
+  it("restores configured concurrency after pressure clears", () => {
+    expect(
+      shouldThrottleIngestForInteractivity({
+        activeAuthSessionCount: 0,
+        activeIngestTargets: [{ platform: "slack" }],
+        lastInteractiveRequestAt: 0,
+        interactiveWindowMs: 30_000,
+        backfillPressureUntil: 0,
+        nowMs: 100_000,
+      }),
+    ).toBe(false);
+    expect(effectiveIngestConcurrency(4, true)).toBe(1);
+    expect(effectiveIngestConcurrency(4, false)).toBe(4);
   });
 });
 

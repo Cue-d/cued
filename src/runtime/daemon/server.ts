@@ -472,6 +472,38 @@ export function shouldProjectIngestRunInline(input: {
   );
 }
 
+export function shouldThrottleIngestForInteractivity(input: {
+  activeAuthSessionCount: number;
+  activeIngestTargets: Iterable<{ platform: Platform | null }>;
+  lastInteractiveRequestAt: number;
+  interactiveWindowMs: number;
+  backfillPressureUntil: number;
+  nowMs: number;
+}): boolean {
+  if (input.activeAuthSessionCount > 0) {
+    return true;
+  }
+  if (input.nowMs - input.lastInteractiveRequestAt <= input.interactiveWindowMs) {
+    return true;
+  }
+  if (input.nowMs < input.backfillPressureUntil) {
+    return true;
+  }
+  for (const target of input.activeIngestTargets) {
+    if (target.platform === "imessage") {
+      return true;
+    }
+  }
+  return false;
+}
+
+export function effectiveIngestConcurrency(
+  configuredConcurrency: number,
+  throttled: boolean,
+): number {
+  return throttled ? 1 : configuredConcurrency;
+}
+
 function getAutoSyncSchedulerTickMs(): number {
   const configured = Number(process.env.CUED_AUTOSYNC_SCHEDULER_TICK_MS);
   return Number.isFinite(configured) && configured > 0
@@ -1625,8 +1657,17 @@ export async function runDaemon(): Promise<void> {
   const isBackfillPressureActive = () =>
     now() < backfillPressureUntil ||
     [...activeIngestRunTargets.values()].some((target) => target.platform === "imessage");
+  const isIngestThrottled = () =>
+    shouldThrottleIngestForInteractivity({
+      activeAuthSessionCount: activeAuthSessions.size,
+      activeIngestTargets: activeIngestRunTargets.values(),
+      lastInteractiveRequestAt,
+      interactiveWindowMs,
+      backfillPressureUntil,
+      nowMs: now(),
+    });
   const currentIngestConcurrency = () =>
-    isInteractiveActive() || isBackfillPressureActive() ? 1 : ingestConcurrency;
+    effectiveIngestConcurrency(ingestConcurrency, isIngestThrottled());
   let activeOutboundSend: Promise<void> | null = null;
   let isProcessingProjection = false;
   let ingestDrainScheduled = false;
@@ -3212,7 +3253,7 @@ export async function runDaemon(): Promise<void> {
     if (isUpdateShutdownRequested) {
       return;
     }
-    if (trigger === "scheduler" && (isInteractiveActive() || isBackfillPressureActive())) {
+    if (trigger === "scheduler" && isIngestThrottled()) {
       daemonLogger.info("autosync scheduler skipped during interactive backfill pressure", {
         interactive: isInteractiveActive(),
         backfillPressure: isBackfillPressureActive(),
