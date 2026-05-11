@@ -27,7 +27,7 @@ describe("DiscordApiClient", () => {
         ),
       )
       .mockResolvedValueOnce(
-        new Response(JSON.stringify({ id: "u-self", username: "theo" }), {
+        new Response(JSON.stringify({ id: "u-self", username: "avery" }), {
           status: 200,
           headers: { "Content-Type": "application/json" },
         }),
@@ -41,7 +41,7 @@ describe("DiscordApiClient", () => {
 
     await expect(promise).resolves.toEqual({
       id: "u-self",
-      username: "theo",
+      username: "avery",
     });
     expect(fetchImpl).toHaveBeenCalledTimes(2);
   });

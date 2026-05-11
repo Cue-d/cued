@@ -26,8 +26,8 @@ describe("discord realtime", () => {
         async getCurrentUser() {
           return {
             id: "u-self",
-            username: "theo",
-            global_name: "Theo",
+            username: "avery",
+            global_name: "Avery",
           };
         },
         async listPrivateChannels() {
@@ -112,8 +112,8 @@ describe("discord realtime", () => {
         async getCurrentUser() {
           return {
             id: "u-self",
-            username: "theo",
-            global_name: "Theo",
+            username: "avery",
+            global_name: "Avery",
           };
         },
         async listPrivateChannels() {
@@ -205,8 +205,8 @@ describe("discord realtime", () => {
         async getCurrentUser() {
           return {
             id: "u-self",
-            username: "theo",
-            global_name: "Theo",
+            username: "avery",
+            global_name: "Avery",
           };
         },
         async listPrivateChannels() {
@@ -257,8 +257,8 @@ describe("discord realtime", () => {
         async getCurrentUser() {
           return {
             id: "u-self",
-            username: "theo",
-            global_name: "Theo",
+            username: "avery",
+            global_name: "Avery",
           };
         },
         async listPrivateChannels() {

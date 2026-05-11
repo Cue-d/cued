@@ -213,21 +213,21 @@ export const imessageReplayFixtures: ProjectionReplayFixture[] = [
     name: "imessage-reaction-name-catchup",
     assert(snapshot) {
       expect(snapshot.contacts.map((contact) => contact.name).sort()).toEqual([
-        "Maya Tarr",
-        "Theo Tarr",
+        "Avery Example",
+        "Jordan Example",
       ]);
       expect(snapshot.conversations[0]).toMatchObject({
         name: "Family",
-        participantNames: "Theo Tarr | Maya Tarr",
+        participantNames: "Avery Example | Jordan Example",
       });
       expect(snapshot.messages[0]).toMatchObject({
-        senderName: "Theo Tarr",
+        senderName: "Avery Example",
         conversationName: "Family",
         reactionCount: 1,
       });
       expect(snapshot.messageReactions[0]).toMatchObject({
         emoji: "❤️",
-        reactorName: "Maya Tarr",
+        reactorName: "Jordan Example",
         isActive: 1,
       });
     },
@@ -312,7 +312,7 @@ export const imessageReplayFixtures: ProjectionReplayFixture[] = [
         payload: {
           sourceEntityKey: "imessage:+15550000001",
           fields: {
-            display_name: "Theo Tarr",
+            display_name: "Avery Example",
           },
           handles: [
             { type: "phone", value: "+15550000001", deterministic: true },
@@ -333,7 +333,7 @@ export const imessageReplayFixtures: ProjectionReplayFixture[] = [
         payload: {
           sourceEntityKey: "imessage:+15550000002",
           fields: {
-            display_name: "Maya Tarr",
+            display_name: "Jordan Example",
           },
           handles: [
             { type: "phone", value: "+15550000002", deterministic: true },

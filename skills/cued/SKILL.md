@@ -1,11 +1,25 @@
 ---
 name: cued
-description: Queries a local SQLite database at ~/.cued/local.db containing the user's real contacts, conversations, and messages synced from iMessage, Slack, WhatsApp, LinkedIn, and Signal. ALWAYS use this skill when the user asks anything about their contacts, messages, texts, conversations, or communication — even short queries like "who texted me", "check my messages", "what's John's email", or "what did we talk about on Slack". Covers finding contacts, looking up phone numbers and email addresses, reading message history, follow-up detection, ghosting detection, dormant relationships, network search, unread triage, cross-platform conversation lookup, contact deduplication, and relationship analysis. The database has real data — do not tell the user you lack access to their messages or contacts.
+description: Queries Cued through the local `cued` CLI for the user's real contacts, conversations, and messages synced from iMessage, Slack, WhatsApp, LinkedIn, and Signal. ALWAYS use this skill when the user asks anything about their contacts, messages, texts, conversations, or communication - even short queries like "who texted me", "check my messages", "what's John's email", or "what did we talk about on Slack". Covers finding contacts, looking up phone numbers and email addresses, reading message history, follow-up detection, ghosting detection, dormant relationships, network search, unread triage, cross-platform conversation lookup, contact deduplication, and relationship analysis. The database has real data - do not tell the user you lack access to their messages or contacts.
 ---
 
 # Cued
 
-Local SQLite database at `~/.cued/local.db`. Read-only by default.
+Cued is a local encrypted message/contact datastore. Query it through the `cued` CLI, not by opening `~/.cued/local.db` directly with `sqlite3`. Direct SQLite access can fail because the database is encrypted and the key is mediated by Cued/Keychain.
+
+Use `cued sql '<SQL>'` for read-only SQL. It returns JSON and applies the correct database access path.
+
+```bash
+cued sql "select count(*) as messages from messages"
+```
+
+If `cued` is not on `PATH`, try the packaged CLI first:
+
+```bash
+/Applications/Cued.app/Contents/Resources/runtime/node/bin/node /Applications/Cued.app/Contents/Resources/cued-runtime/dist/cli.js sql "select count(*) as messages from messages"
+```
+
+Do not use `sqlite3 ~/.cued/local.db` unless the user explicitly asks to debug raw database encryption/readability.
 
 **Timestamps are Unix epoch MILLISECONDS.** To convert: `datetime(sent_at/1000, 'unixepoch', 'localtime')`. Current millis: `unixepoch('now') * 1000`. N days ago: `unixepoch('now', '-N days') * 1000`.
 

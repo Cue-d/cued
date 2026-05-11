@@ -109,9 +109,18 @@ exit 1
     return helperPath;
   }
 
-  function createWhatsAppHelper(input: { authenticated?: boolean } = {}): string {
+  function createWhatsAppHelper(
+    input: { authenticated?: boolean; accountJid?: string | null } = {},
+  ): string {
     const helperPath = join(createTempDir("cued-whatsapp-helper-bin-"), "cued-whatsapp-helper");
     const authenticated = input.authenticated === true;
+    const accountJid =
+      input.accountJid === undefined
+        ? authenticated
+          ? "15551234567@s.whatsapp.net"
+          : null
+        : input.accountJid;
+    const pushName = authenticated && accountJid ? "Avery" : null;
     writeFileSync(
       helperPath,
       `#!/bin/sh
@@ -120,7 +129,7 @@ if [ "$1" = "version" ]; then
   exit 0
 fi
 if [ "$1" = "status" ]; then
-  echo '{"authenticated":${authenticated ? "true" : "false"},"accountJid":${authenticated ? '"15551234567@s.whatsapp.net"' : "null"},"pushName":${authenticated ? '"Theo"' : "null"},"helperVersion":"0.1.0"}'
+  echo '{"authenticated":${authenticated ? "true" : "false"},"accountJid":${JSON.stringify(accountJid)},"pushName":${JSON.stringify(pushName)},"helperVersion":"0.1.0"}'
   exit 0
 fi
 exit 1
@@ -254,21 +263,11 @@ process.exit(44);
     expect(requestedDiscord.integration.launchTarget).toBe("https://discord.com/login");
     expect(listRequestableIntegrationPlatforms()).toEqual([
       "slack",
-      "gmail",
       "discord",
       "linkedin",
       "whatsapp",
       "signal",
     ]);
-    const gmailRequested = requestIntegrationAccess(db, "gmail");
-    expect(gmailRequested.integration.platform).toBe("gmail");
-    expect(gmailRequested.integration.accountKey).toBe("default");
-    expect(gmailRequested.integration.runtimeKind).toBe("oauth");
-    expect(gmailRequested.integration.metadata).toEqual(
-      expect.objectContaining({
-        authManagedBy: "oauth-loopback-runtime",
-      }),
-    );
     const expectedContactsAvailability = resolveHostOS() === "macos" ? "available" : "unsupported";
     expect(buildIntegrationStatus(db).setupIntegrations).toEqual(
       expect.arrayContaining([
@@ -294,16 +293,7 @@ process.exit(44);
     );
     expect(
       buildIntegrationStatus(db).setupIntegrations.map((integration) => integration.platform),
-    ).toEqual([
-      "contacts",
-      "imessage",
-      "slack",
-      "discord",
-      "gmail",
-      "linkedin",
-      "whatsapp",
-      "signal",
-    ]);
+    ).toEqual(["contacts", "imessage", "slack", "discord", "linkedin", "whatsapp", "signal"]);
     db.close();
   });
 
@@ -314,16 +304,7 @@ process.exit(44);
 
     expect(
       buildIntegrationStatus(db).setupIntegrations.map((integration) => integration.platform),
-    ).toEqual([
-      "contacts",
-      "imessage",
-      "slack",
-      "discord",
-      "gmail",
-      "linkedin",
-      "whatsapp",
-      "signal",
-    ]);
+    ).toEqual(["contacts", "imessage", "slack", "discord", "linkedin", "whatsapp", "signal"]);
 
     db.close();
   });
@@ -343,7 +324,6 @@ process.exit(44);
       { platform: "imessage", authState: "unknown" },
       { platform: "slack", authState: "missing" },
       { platform: "discord", authState: "missing" },
-      { platform: "gmail", authState: "missing" },
       { platform: "linkedin", authState: "missing" },
       { platform: "whatsapp", authState: "missing" },
       { platform: "signal", authState: "missing" },
@@ -384,7 +364,7 @@ process.exit(44);
         provider: "discord",
         userId: "123",
         username: "the0t",
-        displayName: "theo",
+        displayName: "avery",
       },
     });
 
@@ -405,8 +385,8 @@ process.exit(44);
     const requested = requestIntegrationAccess(db, "discord");
     const currentUser = {
       id: "u-self",
-      username: "theo",
-      global_name: "Theo",
+      username: "avery",
+      global_name: "Avery",
     };
 
     db.insertRawEvents([
@@ -660,7 +640,7 @@ process.exit(44);
     db.upsertSourceAccount({
       platform: "linkedin",
       accountKey: "default",
-      displayName: "Theo Tarr",
+      displayName: "Avery Example",
     });
 
     expect(listIntegrationStates(db)).toEqual(
@@ -668,7 +648,7 @@ process.exit(44);
         expect.objectContaining({
           platform: "linkedin",
           accountKey: "default",
-          displayName: "Theo Tarr",
+          displayName: "Avery Example",
         }),
       ]),
     );
@@ -915,6 +895,52 @@ process.exit(44);
     db.close();
   });
 
+  it("does not trust WhatsApp helper authentication without a durable account jid", async () => {
+    installSecurityTool({});
+    process.env.CUED_APP_PATH = createPackagedSignalHelper("0.14.1");
+    process.env.CUED_WHATSAPP_HELPER_BINARY = createWhatsAppHelper({
+      authenticated: true,
+      accountJid: null,
+    });
+    process.env.CUED_SLACK_APP_BINARY = join(createTempDir("cued-no-slack-app-"), "Slack");
+
+    const db = createDb();
+    db.upsertIntegrationState({
+      platform: "whatsapp",
+      accountKey: "default",
+      displayName: "WhatsApp",
+      authState: "authenticated",
+      enabled: true,
+      connectionKind: "qr-link",
+      syncCapable: true,
+      launchStrategy: "qr-native",
+      launchTarget: null,
+      importedFrom: "bundled-helper",
+      metadata: {
+        authResult: {
+          accountJid: "15551234567:27@s.whatsapp.net",
+        },
+      },
+    });
+
+    await refreshManagedIntegrationStates(db);
+
+    expect(listIntegrationStates(db)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          platform: "whatsapp",
+          accountKey: "default",
+          authState: "needs_auth",
+          syncCapable: false,
+          metadata: expect.objectContaining({
+            whatsappAccountJid: null,
+          }),
+        }),
+      ]),
+    );
+    db.close();
+  });
+
   it("uses the linked Signal account as the display label after auth", () => {
     const db = createDb();
     const requested = requestIntegrationAccess(db, "signal");
@@ -937,42 +963,12 @@ process.exit(44);
       state: "authenticated",
       resultSummary: {
         accountJid: "15551234567@s.whatsapp.net",
-        pushName: "Theo",
+        pushName: "Avery",
       },
     });
 
     expect(completed.integration?.platform).toBe("whatsapp");
-    expect(completed.integration?.displayName).toBe("Theo");
-    db.close();
-  });
-
-  it("uses the signed-in Gmail address as the account key after auth", () => {
-    const db = createDb();
-    const requested = requestIntegrationAccess(db, "gmail");
-
-    const completed = completeAuthSession(db, requested.authSession.id, {
-      state: "authenticated",
-      keychainService: "so.cued.desktop.auth.gmail",
-      keychainAccount: "theo@cued.so",
-      resultSummary: {
-        emailAddress: "theo@cued.so",
-        messagesTotal: 61,
-        threadsTotal: 60,
-      },
-    });
-
-    expect(completed.integration?.platform).toBe("gmail");
-    expect(completed.integration?.accountKey).toBe("theo@cued.so");
-    expect(completed.integration?.displayName).toBe("theo@cued.so");
-    expect(completed.integration?.syncCapable).toBe(true);
-    expect(completed.integration?.metadata).toEqual(
-      expect.objectContaining({
-        keychainService: "so.cued.desktop.auth.gmail",
-        keychainAccount: "theo@cued.so",
-      }),
-    );
-    expect(db.getIntegrationState("gmail", "default")).toBeNull();
-    expect(requestIntegrationAccess(db, "gmail").integration.accountKey).toBe("default");
+    expect(completed.integration?.displayName).toBe("Avery");
     db.close();
   });
 

@@ -43,9 +43,9 @@ describe("buildLinkedInSyncBundle", () => {
                     entityURN: "urn:li:fsd_profile:SELF123",
                     participantType: {
                       member: {
-                        firstName: "Theo",
-                        lastName: "Tarr",
-                        profileUrl: "https://www.linkedin.com/in/theotarr",
+                        firstName: "Avery",
+                        lastName: "Example",
+                        profileUrl: "https://www.linkedin.com/in/avery-example",
                       },
                     },
                   },
@@ -120,7 +120,7 @@ describe("buildLinkedInSyncBundle", () => {
     });
 
     expect(bundle.sourceAccounts).toEqual([
-      { platform: "linkedin", accountKey: "default", displayName: "Theo Tarr" },
+      { platform: "linkedin", accountKey: "default", displayName: "Avery Example" },
     ]);
     expect(bundle.sourceCursor).toEqual(
       expect.objectContaining({
@@ -161,7 +161,7 @@ describe("buildLinkedInSyncBundle", () => {
             {
               entityURN: "urn:li:fsd_profile:SELF123",
               participantType: {
-                member: { firstName: "Theo", lastName: "Tarr", profileUrl: "" },
+                member: { firstName: "Avery", lastName: "Example", profileUrl: "" },
               },
             },
             {
@@ -206,7 +206,7 @@ describe("buildLinkedInSyncBundle", () => {
                   {
                     entityURN: "urn:li:fsd_profile:SELF123",
                     participantType: {
-                      member: { firstName: "Theo", lastName: "Tarr", profileUrl: "" },
+                      member: { firstName: "Avery", lastName: "Example", profileUrl: "" },
                     },
                   },
                   {
@@ -277,7 +277,7 @@ describe("buildLinkedInSyncBundle", () => {
               {
                 entityURN: "urn:li:fsd_profile:SELF123",
                 participantType: {
-                  member: { firstName: "Theo", lastName: "Tarr", profileUrl: "" },
+                  member: { firstName: "Avery", lastName: "Example", profileUrl: "" },
                 },
               },
               {
@@ -326,7 +326,7 @@ describe("buildLinkedInSyncBundle", () => {
                   {
                     entityURN: "urn:li:fsd_profile:SELF123",
                     participantType: {
-                      member: { firstName: "Theo", lastName: "Tarr", profileUrl: "" },
+                      member: { firstName: "Avery", lastName: "Example", profileUrl: "" },
                     },
                   },
                   {
@@ -361,7 +361,7 @@ describe("buildLinkedInSyncBundle", () => {
                   {
                     entityURN: "urn:li:fsd_profile:SELF123",
                     participantType: {
-                      member: { firstName: "Theo", lastName: "Tarr", profileUrl: "" },
+                      member: { firstName: "Avery", lastName: "Example", profileUrl: "" },
                     },
                   },
                   {
@@ -434,7 +434,7 @@ describe("buildLinkedInSyncBundle", () => {
                   {
                     entityURN: "urn:li:fsd_profile:SELF123",
                     participantType: {
-                      member: { firstName: "Theo", lastName: "Tarr", profileUrl: "" },
+                      member: { firstName: "Avery", lastName: "Example", profileUrl: "" },
                     },
                   },
                   {
@@ -657,9 +657,9 @@ describe("buildLinkedInSyncBundle", () => {
                     entityURN: "urn:li:fsd_profile:SELF123",
                     participantType: {
                       member: {
-                        firstName: "Theo",
-                        lastName: "Tarr",
-                        profileUrl: "https://www.linkedin.com/in/theotarr",
+                        firstName: "Avery",
+                        lastName: "Example",
+                        profileUrl: "https://www.linkedin.com/in/avery-example",
                       },
                     },
                   },
@@ -728,7 +728,7 @@ describe("buildLinkedInSyncBundle", () => {
                   {
                     entityURN: "urn:li:msg_messagingParticipant:urn:li:fsd_profile:SELF123",
                     participantType: {
-                      member: { firstName: "Theo", lastName: "Tarr", profileUrl: "" },
+                      member: { firstName: "Avery", lastName: "Example", profileUrl: "" },
                     },
                   },
                   {
@@ -840,7 +840,7 @@ describe("buildLinkedInSyncBundle", () => {
                   {
                     entityURN: "urn:li:msg_messagingParticipant:urn:li:fsd_profile:SELF123",
                     participantType: {
-                      member: { firstName: "Theo", lastName: "Tarr", profileUrl: "" },
+                      member: { firstName: "Avery", lastName: "Example", profileUrl: "" },
                     },
                   },
                   {
@@ -921,7 +921,7 @@ describe("buildLinkedInSyncBundle", () => {
         {
           entityURN: "urn:li:fsd_profile:SELF123",
           participantType: {
-            member: { firstName: "Theo", lastName: "Tarr", profileUrl: "" },
+            member: { firstName: "Avery", lastName: "Example", profileUrl: "" },
           },
         },
         {

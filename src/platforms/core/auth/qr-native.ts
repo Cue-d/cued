@@ -15,6 +15,7 @@ import {
   inspectWhatsAppHelper,
   readWhatsAppHelperStatus,
   startWhatsAppPairSession,
+  type WhatsAppHelperStatus,
 } from "../../whatsapp/helper/pair.js";
 import type { AuthSessionSummary, IntegrationStateSummary } from "../state/types.js";
 
@@ -42,6 +43,68 @@ function resolveNativeQrBinary(): string {
     throw new Error("CuedNative binary not found; build native/macos/CuedNative first");
   }
   return binary;
+}
+
+function isDurableWhatsAppAuthStatus(
+  status: WhatsAppHelperStatus | null,
+): status is WhatsAppHelperStatus & { accountJid: string } {
+  return status?.authenticated === true && Boolean(status.accountJid?.trim());
+}
+
+async function waitForDurableWhatsAppAuthStatus(
+  storeDir: string,
+  timeoutMs = 15_000,
+): Promise<WhatsAppHelperStatus & { accountJid: string }> {
+  const startedAt = Date.now();
+  let lastStatus: WhatsAppHelperStatus | null = null;
+  let lastError: unknown = null;
+
+  while (Date.now() - startedAt <= timeoutMs) {
+    try {
+      lastStatus = await readWhatsAppHelperStatus(storeDir);
+      if (isDurableWhatsAppAuthStatus(lastStatus)) {
+        return lastStatus;
+      }
+    } catch (error) {
+      lastError = error;
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+
+  const statusDetail = lastStatus
+    ? `authenticated=${lastStatus.authenticated}, accountJid=${lastStatus.accountJid ?? ""}`
+    : lastError instanceof Error
+      ? lastError.message
+      : String(lastError ?? "no helper status");
+  throw new Error(`WhatsApp linking did not produce durable helper status (${statusDetail})`);
+}
+
+function buildWhatsAppAuthenticatedResult(input: {
+  session: AuthSessionSummary;
+  inspected: ReturnType<typeof inspectWhatsAppHelper>;
+  storeDir: string;
+  status: WhatsAppHelperStatus & { accountJid: string };
+}): QrNativeAuthResult {
+  return {
+    sessionId: input.session.id,
+    platform: input.session.platform,
+    accountKey: input.session.accountKey,
+    state: "authenticated",
+    keychainService: null,
+    keychainAccount: null,
+    resultSummary: {
+      runtime: "qr_native",
+      helper: "cued-whatsapp-helper",
+      helperPath: input.inspected.helperPath,
+      helperVersion: input.status.helperVersion ?? input.inspected.version,
+      storeDir: input.storeDir,
+      accountJid: input.status.accountJid,
+      pushName: input.status.pushName ?? null,
+      durableStatusVerified: true,
+    },
+    errorSummary: null,
+  };
 }
 
 function parseFakeResult(
@@ -251,25 +314,13 @@ export function startQrNativeAuthSession(
       }
 
       const existingStatus = await readWhatsAppHelperStatus(storeDir).catch(() => null);
-      if (existingStatus?.authenticated && existingStatus.accountJid) {
-        return {
-          sessionId: session.id,
-          platform: session.platform,
-          accountKey: session.accountKey,
-          state: "authenticated",
-          keychainService: null,
-          keychainAccount: null,
-          resultSummary: {
-            runtime: "qr_native",
-            helper: "cued-whatsapp-helper",
-            helperPath: inspected.helperPath,
-            helperVersion: existingStatus.helperVersion ?? inspected.version,
-            storeDir,
-            accountJid: existingStatus.accountJid,
-            pushName: existingStatus.pushName ?? null,
-          },
-          errorSummary: null,
-        };
+      if (isDurableWhatsAppAuthStatus(existingStatus)) {
+        return buildWhatsAppAuthenticatedResult({
+          session,
+          inspected,
+          storeDir,
+          status: existingStatus,
+        });
       }
 
       const pair = startWhatsAppPairSession({
@@ -283,24 +334,8 @@ export function startQrNativeAuthSession(
       ]);
 
       if (initial.type === "authenticated") {
-        return {
-          sessionId: session.id,
-          platform: session.platform,
-          accountKey: session.accountKey,
-          state: "authenticated",
-          keychainService: null,
-          keychainAccount: null,
-          resultSummary: {
-            runtime: "qr_native",
-            helper: "cued-whatsapp-helper",
-            helperPath: inspected.helperPath,
-            helperVersion: initial.value.helperVersion ?? inspected.version,
-            storeDir,
-            accountJid: initial.value.accountJid,
-            pushName: initial.value.pushName ?? null,
-          },
-          errorSummary: null,
-        };
+        const status = await waitForDurableWhatsAppAuthStatus(storeDir);
+        return buildWhatsAppAuthenticatedResult({ session, inspected, storeDir, status });
       }
 
       const qrCode = initial.value;
@@ -340,24 +375,8 @@ export function startQrNativeAuthSession(
           qrWindow.kill("SIGTERM");
         }
 
-        return {
-          sessionId: session.id,
-          platform: session.platform,
-          accountKey: session.accountKey,
-          state: "authenticated",
-          keychainService: null,
-          keychainAccount: null,
-          resultSummary: {
-            runtime: "qr_native",
-            helper: "cued-whatsapp-helper",
-            helperPath: inspected.helperPath,
-            helperVersion: result.value.helperVersion ?? inspected.version,
-            storeDir,
-            accountJid: result.value.accountJid,
-            pushName: result.value.pushName ?? null,
-          },
-          errorSummary: null,
-        };
+        const status = await waitForDurableWhatsAppAuthStatus(storeDir);
+        return buildWhatsAppAuthenticatedResult({ session, inspected, storeDir, status });
       } catch (error) {
         if (!qrWindow.killed) {
           qrWindow.kill("SIGTERM");

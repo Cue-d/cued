@@ -5,9 +5,9 @@ const selfParticipant = {
   entityURN: "urn:li:fsd_profile:SELF123",
   participantType: {
     member: {
-      firstName: "Theo",
-      lastName: "Tarr",
-      profileUrl: "https://www.linkedin.com/in/theotarr",
+      firstName: "Avery",
+      lastName: "Example",
+      profileUrl: "https://www.linkedin.com/in/avery-example",
     },
   },
 };
