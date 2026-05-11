@@ -231,25 +231,6 @@ export async function runIMessageIngestWorker(
       );
     }
 
-    if (bundleHasMore && !db.hasQueuedOrRunningRun(platform, accountKey)) {
-      db.withBusyTimeoutSync(10_000, () => {
-        db.queueSyncRun({
-          platform,
-          accountKey,
-          runType: "sync_resume",
-          trigger: "ingest_continue",
-          delayMs: options.syncContinueDelayMs,
-          details: {
-            source: platform,
-            accountKey,
-            trigger: "ingest_continue",
-            ...(bundleContinuation ? { continuation: bundleContinuation } : {}),
-            priorSourceCursor: sourceCursor,
-          },
-        });
-      });
-    }
-
     const timings: IngestTiming = {
       adapterFetchMs,
       rawEventInsertMs,
@@ -286,6 +267,25 @@ export async function runIMessageIngestWorker(
       ...(result.continuation ? { continuation: result.continuation } : {}),
       ...(result.diagnostics ? { diagnostics: result.diagnostics } : {}),
     });
+
+    if (bundleHasMore && !db.hasQueuedOrRunningRun(platform, accountKey)) {
+      db.withBusyTimeoutSync(10_000, () => {
+        db.queueSyncRun({
+          platform,
+          accountKey,
+          runType: "sync_resume",
+          trigger: "ingest_continue",
+          delayMs: options.syncContinueDelayMs,
+          details: {
+            source: platform,
+            accountKey,
+            trigger: "ingest_continue",
+            ...(bundleContinuation ? { continuation: bundleContinuation } : {}),
+            priorSourceCursor: sourceCursor,
+          },
+        });
+      });
+    }
 
     return result;
   } catch (error) {
