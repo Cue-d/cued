@@ -3297,9 +3297,6 @@ export async function runDaemon(): Promise<void> {
   }, SINGLETON_LOCK_HEARTBEAT_MS);
 
   const writeMenuBarStatus = () => {
-    if (isProcessingProjection || activeIngestRuns.size > 0 || isBackfillPressureActive()) {
-      return;
-    }
     try {
       db.withBusyTimeoutSync(DAEMON_STATUS_BUSY_TIMEOUT_MS, () => {
         writeMenuBarStatusSnapshot(db, {
@@ -4506,6 +4503,29 @@ async function dispatchRequest(
       case "status":
         markInteractive();
         if (isBackgroundWorkActive()) {
+          try {
+            return {
+              id: request.id,
+              ok: true,
+              result: await db.withBusyTimeout(DAEMON_STATUS_BUSY_TIMEOUT_MS, () =>
+                buildDaemonStatusSnapshot(db, {
+                  app: getAppStatusMetadata(db),
+                  discordRealtime,
+                  slackRealtime,
+                  linkedInRealtime,
+                  signalRealtime,
+                  whatsAppRealtime,
+                  socketPath: CUED_SOCKET_PATH,
+                  bootstrap,
+                }),
+              ),
+            };
+          } catch (error) {
+            if (!isSqliteBusyError(error)) {
+              throw error;
+            }
+          }
+
           const cached = readCachedDaemonStatusSnapshot();
           if (cached) {
             return {
