@@ -4100,7 +4100,12 @@ export async function runDaemon(): Promise<void> {
       reconcileLocalWatchers,
       requestUpdateShutdown,
       markInteractive,
-      () => isProcessingProjection || activeIngestRuns.size > 0 || activeOutboundSend !== null,
+      () =>
+        isProcessingProjection ||
+        activeIngestRuns.size > 0 ||
+        activeOutboundSend !== null ||
+        activeAuthSessions.size > 0 ||
+        isBackfillPressureActive(),
     );
   });
 
