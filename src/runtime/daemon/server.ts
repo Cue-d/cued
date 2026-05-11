@@ -119,6 +119,10 @@ import type {
 import { fetchAttachment, listAttachments, searchAttachments } from "../attachments.js";
 import { buildPermissionStatus } from "../doctor.js";
 import { emitHookEvent } from "../hooks.js";
+import type {
+  IMessageIngestWorkerMessage,
+  IMessageIngestWorkerSuccess,
+} from "../ingest/imessage-worker.js";
 import type { DaemonRequest, DaemonResponse } from "../ipc.js";
 import { collectInboundMessageHookPayloads } from "../message-hooks.js";
 import { resolveMacOSNativeBinary } from "../native-binary.js";
@@ -680,6 +684,71 @@ function runProjectionWorkerProcess(
         message && !message.ok
           ? message.error
           : `Projection worker exited with code ${code ?? "null"} signal ${signal ?? "null"}`;
+      reject(
+        new Error(stderr.trim().length > 0 ? `${workerError}\n${stderr.trim()}` : workerError),
+      );
+    });
+  });
+}
+
+function runIMessageIngestWorkerProcess(
+  run: NonNullable<ReturnType<CuedDatabase["claimNextQueuedRun"]>>,
+  options: {
+    syncContinueDelayMs: number;
+    deferredProjectionCoalesceMs: number;
+  },
+): Promise<IMessageIngestWorkerSuccess> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, [resolveCliEntrypoint(), "__imessage-ingest-worker"], {
+      stdio: ["ignore", "pipe", "pipe"],
+      env: {
+        ...process.env,
+        CUED_IMESSAGE_INGEST_WORKER_RUN: JSON.stringify(run),
+        CUED_SYNC_CONTINUE_DELAY_MS: String(options.syncContinueDelayMs),
+        CUED_DEFERRED_PROJECTION_COALESCE_MS: String(options.deferredProjectionCoalesceMs),
+      },
+      detached: false,
+    });
+
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk.toString("utf8");
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk.toString("utf8");
+    });
+    child.on("error", reject);
+    child.on("exit", (code, signal) => {
+      const lines = stdout
+        .split("\n")
+        .map((line) => line.trim())
+        .filter(Boolean);
+      const lastLine = lines[lines.length - 1];
+      let message: IMessageIngestWorkerMessage | null = null;
+      if (lastLine) {
+        try {
+          message = JSON.parse(lastLine) as IMessageIngestWorkerMessage;
+        } catch {
+          message = null;
+        }
+      }
+
+      if (message?.ok) {
+        if (stderr.trim().length > 0) {
+          daemonLogger.warn("iMessage ingest worker stderr", {
+            runId: run.id,
+            stderr: stderr.trim(),
+          });
+        }
+        resolve(message.result);
+        return;
+      }
+
+      const workerError =
+        message && !message.ok
+          ? message.error
+          : `iMessage ingest worker exited with code ${code ?? "null"} signal ${signal ?? "null"}`;
       reject(
         new Error(stderr.trim().length > 0 ? `${workerError}\n${stderr.trim()}` : workerError),
       );
@@ -3517,6 +3586,36 @@ export async function runDaemon(): Promise<void> {
         return;
       }
 
+      if (currentRun.platform === "imessage") {
+        const workerResult = await runIMessageIngestWorkerProcess(currentRun, {
+          syncContinueDelayMs,
+          deferredProjectionCoalesceMs,
+        });
+        if (workerResult.hasMore) {
+          backfillPressureUntil = now() + backfillPressureWindowMs;
+        }
+        await safeEmitHookEvent("sync.completed", {
+          runId: currentRun.id,
+          platform: workerResult.platform,
+          accountKey: workerResult.accountKey,
+          runType: workerResult.runType,
+          stage: "ingest",
+          ingested: workerResult.ingested,
+          insertedRawEvents: workerResult.insertedRawEvents,
+          timings: workerResult.timings,
+        });
+        daemonLogger.info("ingest run completed", {
+          runId: currentRun.id,
+          platform: workerResult.platform,
+          accountKey: workerResult.accountKey,
+          insertedRawEvents: workerResult.insertedRawEvents,
+          insertedRawEventSchemas: workerResult.insertedRawEventSchemas,
+          totalMs: workerResult.timings.totalMs,
+          ...(workerResult.diagnostics ? { diagnostics: workerResult.diagnostics } : {}),
+        });
+        return;
+      }
+
       const platform = currentRun.platform;
       const accountKey = currentRun.account_key ?? getDefaultAccountKeyForPlatform(platform);
       const checkpoint = db.getCheckpoint(currentRun.platform, accountKey);
@@ -3882,9 +3981,6 @@ export async function runDaemon(): Promise<void> {
       });
       if (platform === "signal") {
         requestSignalRealtimeReconcile();
-      }
-      if (bundleHasMore && platform === "imessage") {
-        backfillPressureUntil = now() + backfillPressureWindowMs;
       }
       if (bundleHasMore && !db.hasQueuedOrRunningRun(currentRun.platform, accountKey)) {
         db.queueSyncRun({

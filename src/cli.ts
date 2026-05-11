@@ -47,6 +47,7 @@ import {
   initHooksConfig,
   testHookEvent,
 } from "./runtime/hooks.js";
+import { runIMessageIngestWorkerFromEnv } from "./runtime/ingest/imessage-worker.js";
 import {
   followLogs,
   getDaemonLogPath,
@@ -413,6 +414,11 @@ async function main(): Promise<void> {
 
   if (command === "__projection-worker") {
     await runProjectionWorkerFromEnv();
+    return;
+  }
+
+  if (command === "__imessage-ingest-worker") {
+    await runIMessageIngestWorkerFromEnv();
     return;
   }
 
