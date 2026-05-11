@@ -3228,6 +3228,9 @@ export async function runDaemon(): Promise<void> {
   }, SINGLETON_LOCK_HEARTBEAT_MS);
 
   const writeMenuBarStatus = () => {
+    if (isProcessingProjection || activeIngestRuns.size > 0 || isBackfillPressureActive()) {
+      return;
+    }
     try {
       db.withBusyTimeoutSync(DAEMON_STATUS_BUSY_TIMEOUT_MS, () => {
         writeMenuBarStatusSnapshot(db, {
