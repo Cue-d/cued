@@ -1100,6 +1100,27 @@ describe("CuedDatabase", () => {
     db.close();
   });
 
+  it("returns queued projection scheduled time for coalescing", () => {
+    const db = createDb();
+    const runId = db.queueSyncRun({
+      runType: "project",
+      trigger: "deferred",
+      delayMs: 60_000,
+    });
+
+    const queued = db.getQueuedProjectionRun();
+    expect(queued).toEqual(
+      expect.objectContaining({
+        id: runId,
+        run_type: "project",
+        scheduled_at: expect.any(Number),
+      }),
+    );
+    expect(queued?.scheduled_at).toBeGreaterThan(Date.now());
+
+    db.close();
+  });
+
   it("stores checkpoints and raw events", () => {
     const db = createDb();
 

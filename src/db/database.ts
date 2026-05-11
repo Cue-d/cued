@@ -4004,6 +4004,7 @@ export class CuedDatabase {
           status: syncRuns.status,
           trigger: syncRuns.trigger,
           queued_at: syncRuns.queuedAt,
+          scheduled_at: syncRuns.scheduledAt,
           started_at: syncRuns.startedAt,
           details_json: syncRuns.detailsJson,
         })

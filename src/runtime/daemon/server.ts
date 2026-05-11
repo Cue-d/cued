@@ -3429,6 +3429,7 @@ export async function runDaemon(): Promise<void> {
 
         const queuedProjectionRun = db.getQueuedProjectionRun();
         if (queuedProjectionRun) {
+          const requestedDelayMs = options?.delayMs ?? deferredProjectionCoalesceMs;
           const existingDetails = parseProjectionRunDetails(queuedProjectionRun.details_json);
           const mergedDetails =
             incomingDetails == null
@@ -3452,7 +3453,10 @@ export async function runDaemon(): Promise<void> {
               mergedDetails satisfies ProjectionRunDetails,
             );
           }
-          scheduleProjectionDrain(options?.delayMs ?? deferredProjectionCoalesceMs);
+          if (queuedProjectionRun.scheduled_at > now() + requestedDelayMs) {
+            db.rescheduleRun(queuedProjectionRun.id, requestedDelayMs);
+          }
+          scheduleProjectionDrain(requestedDelayMs);
           return queuedProjectionRun.id;
         }
 
