@@ -241,7 +241,9 @@ function writeMenuBarStatusSnapshot(
     bootstrap: options.bootstrap,
   });
   const tmpPath = `${CUED_MENU_BAR_STATUS_PATH}.${process.pid}.tmp`;
-  writeFileSync(tmpPath, `${JSON.stringify(snapshot)}\n`, { mode: 0o600 });
+  writeFileSync(tmpPath, `${JSON.stringify({ ...snapshot, snapshotCachedAt: now() })}\n`, {
+    mode: 0o600,
+  });
   renameSync(tmpPath, CUED_MENU_BAR_STATUS_PATH);
 }
 
@@ -257,6 +259,22 @@ function readCachedDaemonStatusSnapshot(): Record<string, unknown> | null {
   } catch {
     return null;
   }
+}
+
+function readFreshCachedDaemonStatusSnapshot(maxAgeMs: number): Record<string, unknown> | null {
+  const cached = readCachedDaemonStatusSnapshot();
+  if (!cached) {
+    return null;
+  }
+  const snapshotCachedAt = cached.snapshotCachedAt;
+  if (
+    typeof snapshotCachedAt !== "number" ||
+    !Number.isFinite(snapshotCachedAt) ||
+    now() - snapshotCachedAt > maxAgeMs
+  ) {
+    return null;
+  }
+  return cached;
 }
 
 function now(): number {
@@ -4503,6 +4521,21 @@ async function dispatchRequest(
       case "status":
         markInteractive();
         if (isBackgroundWorkActive()) {
+          const freshCached = readFreshCachedDaemonStatusSnapshot(
+            MENU_BAR_STATUS_WRITE_INTERVAL_MS * 2,
+          );
+          if (freshCached) {
+            return {
+              id: request.id,
+              ok: true,
+              result: {
+                ...freshCached,
+                daemonDbBusy: true,
+                daemonDbBusyError: "Cued daemon is running background sync/projection work",
+              },
+            };
+          }
+
           try {
             return {
               id: request.id,
