@@ -53,6 +53,20 @@ export interface GmailMessagePayload {
   parts?: GmailMessagePayload[];
 }
 
+export class GmailApiError extends Error {
+  constructor(
+    public readonly status: number,
+    public readonly payload: Record<string, unknown>,
+  ) {
+    super(`Gmail API request failed (${status}): ${JSON.stringify(payload)}`);
+    this.name = "GmailApiError";
+  }
+}
+
+export function isGmailApiError(error: unknown, status?: number): error is GmailApiError {
+  return error instanceof GmailApiError && (status == null || error.status === status);
+}
+
 export function readGmailSecret(accountKey: string): StoredGmailCredentials {
   const stdout = execFileSync(
     "security",
@@ -142,7 +156,7 @@ export class GmailClient {
     });
     const parsed = (await response.json()) as Record<string, unknown>;
     if (!response.ok) {
-      throw new Error(`Gmail API request failed (${response.status}): ${JSON.stringify(parsed)}`);
+      throw new GmailApiError(response.status, parsed);
     }
     return parsed as T;
   }

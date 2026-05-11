@@ -9,8 +9,8 @@ describe("competing daemon cleanup", () => {
   it("ignores the current process and selects different bundle owners", () => {
     const processes = parseRunningCuedProcesses(`
       101 /Applications/Cued.app/Contents/MacOS/CuedDaemon --menu-bar
-      202 /Users/theo/.Trash/cued-reset/Cued.app/Contents/Resources/runtime/node/bin/node /Users/theo/.Trash/cued-reset/Cued.app/Contents/Resources/cued-runtime/dist/cli.js daemon
-      303 /Users/theo/Applications/Cued.app/Contents/MacOS/CuedDaemon --menu-bar
+      202 /Users/avery/.Trash/cued-reset/Cued.app/Contents/Resources/runtime/node/bin/node /Users/avery/.Trash/cued-reset/Cued.app/Contents/Resources/cued-runtime/dist/cli.js daemon
+      303 /Users/avery/Applications/Cued.app/Contents/MacOS/CuedDaemon --menu-bar
     `);
 
     expect(
@@ -34,7 +34,8 @@ describe("competing daemon cleanup", () => {
 
     const result = terminateCompetingDaemons({
       expectedExecutablePath: "/Applications/Cued.app/Contents/MacOS/CuedDaemon",
-      psOutput: "202 /Users/theo/.Trash/cued-reset/Cued.app/Contents/MacOS/CuedDaemon --menu-bar\n",
+      psOutput:
+        "202 /Users/avery/.Trash/cued-reset/Cued.app/Contents/MacOS/CuedDaemon --menu-bar\n",
       currentPid: 999,
       waitMs: 1_000,
       pollMs: 100,

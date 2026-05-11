@@ -31,6 +31,7 @@ SIGNAL_HELPER_SOURCE_DIR="$ROOT_DIR/native/helpers/signal-cli/.build/cued-signal
 SLACK_HELPER_SOURCE="$ROOT_DIR/native/helpers/slack-go/.build/cued-slack-helper"
 WHATSAPP_HELPER_SOURCE="$ROOT_DIR/native/helpers/whatsapp-go/.build/cued-whatsapp-helper"
 PERMISSIONS_SCRIPT_SOURCE="$ROOT_DIR/scripts/request-macos-access.sh"
+APP_ICON_SOURCE="$ROOT_DIR/native/macos/CuedNative/Resources/AppIcon.icns"
 TRAY_ICON_SOURCE="$ROOT_DIR/native/macos/CuedNative/Resources/trayIconTemplate.png"
 CUED_MARK_SOURCE="$ROOT_DIR/native/macos/CuedNative/Resources/cued-mark.png"
 NODE_PATH="${CUED_NODE_PATH:-$(command -v node)}"
@@ -331,6 +332,8 @@ cat > "$CONTENTS_DIR/Info.plist" <<EOF
   <string>$APP_EXECUTABLE_NAME</string>
   <key>CFBundleIdentifier</key>
   <string>so.cued.desktop</string>
+  <key>CFBundleIconFile</key>
+  <string>AppIcon</string>
   <key>CFBundleInfoDictionaryVersion</key>
   <string>6.0</string>
   <key>CFBundleName</key>
@@ -394,6 +397,7 @@ exec "\$NODE_BIN" "\$RUNTIME_ROOT/dist/cli.js" "\$@"
 EOF
 chmod +x "$RESOURCES_DIR/cued-cli"
 
+cp "$APP_ICON_SOURCE" "$RESOURCES_DIR/AppIcon.icns"
 cp "$TRAY_ICON_SOURCE" "$RESOURCES_DIR/trayIconTemplate.png"
 cp "$CUED_MARK_SOURCE" "$RESOURCES_DIR/cued-mark.png"
 

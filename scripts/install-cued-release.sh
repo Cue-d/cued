@@ -40,6 +40,30 @@ pick_destination() {
   fi
 }
 
+validate_app_bundle() {
+  local app_path="$1"
+
+  if [[ ! -d "$app_path" ]]; then
+    echo "Release archive did not contain ${APP_NAME}" >&2
+    exit 1
+  fi
+
+  if [[ ! -x "$app_path/Contents/Resources/cued-cli" ]]; then
+    echo "Release archive did not contain an executable bundled Cued CLI" >&2
+    exit 1
+  fi
+
+  local bundle_version
+  bundle_version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app_path/Contents/Info.plist" 2>/dev/null || true)"
+  if [[ "$bundle_version" != "$VERSION" ]]; then
+    echo "Bundle version mismatch: expected ${VERSION}, found ${bundle_version:-unknown}" >&2
+    exit 1
+  fi
+
+  codesign --verify --deep --strict "$app_path" >/dev/null
+  spctl --assess --type execute "$app_path" >/dev/null
+}
+
 release_json="$(curl -fsSL -H 'Accept: application/vnd.github+json' "${API_BASE}/repos/${REPO}/releases")"
 
 readarray -t release_info < <(RELEASE_JSON="$release_json" RELEASE_CHANNEL="$CHANNEL" python3 - <<'PY'
@@ -80,10 +104,7 @@ mkdir -p "$STAGING_DIR"
 tar -xzf "$ARCHIVE_PATH" -C "$STAGING_DIR"
 
 SOURCE_APP="$STAGING_DIR/$APP_NAME"
-if [[ ! -d "$SOURCE_APP" ]]; then
-  echo "Release archive did not contain ${APP_NAME}" >&2
-  exit 1
-fi
+validate_app_bundle "$SOURCE_APP"
 
 mkdir -p "$(dirname "$TARGET_APP")"
 mkdir -p "$TARGET_APP"

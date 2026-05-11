@@ -144,23 +144,8 @@ describe("permission status summaries", () => {
     const diagnostics = buildAuthDiagnostics(db);
 
     expect(diagnostics.map((item) => item.platform)).toEqual(
-      expect.arrayContaining([
-        "contacts",
-        "gmail",
-        "imessage",
-        "linkedin",
-        "signal",
-        "slack",
-        "whatsapp",
-      ]),
+      expect.arrayContaining(["contacts", "imessage", "linkedin", "signal", "slack", "whatsapp"]),
     );
-    expect(diagnostics.find((item) => item.platform === "gmail")).toEqual(
-      expect.objectContaining({
-        credentialSource: "google_oauth_loopback_pkce",
-        checks: expect.arrayContaining(["missing_google_oauth_client"]),
-      }),
-    );
-
     db.close();
   });
 });

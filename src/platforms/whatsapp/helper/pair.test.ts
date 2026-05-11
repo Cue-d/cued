@@ -87,7 +87,7 @@ describe("whatsapp helper", () => {
       helperPath,
       `#!/bin/sh
 if [ "$1" = "status" ]; then
-  echo '{"authenticated":true,"accountJid":"15551234567:18@s.whatsapp.net","pushName":"Theo","helperVersion":"0.1.0","lastHistorySyncAt":123,"lastHistorySyncType":"FULL","lastHistoryChunkOrder":4,"lastHistoryProgress":80,"queuedHistorySyncCount":2,"lastHistorySyncError":"download failed","lastHistoryNotificationAt":456}'
+  echo '{"authenticated":true,"accountJid":"15551234567:18@s.whatsapp.net","pushName":"Avery","helperVersion":"0.1.0","lastHistorySyncAt":123,"lastHistorySyncType":"FULL","lastHistoryChunkOrder":4,"lastHistoryProgress":80,"queuedHistorySyncCount":2,"lastHistorySyncError":"download failed","lastHistoryNotificationAt":456}'
   exit 0
 fi
 exit 1
@@ -98,7 +98,7 @@ exit 1
     await expect(readWhatsAppHelperStatus("/tmp/cued-whatsapp/default")).resolves.toEqual({
       authenticated: true,
       accountJid: "15551234567:18@s.whatsapp.net",
-      pushName: "Theo",
+      pushName: "Avery",
       helperVersion: "0.1.0",
       lastHistorySyncAt: 123,
       lastHistorySyncType: "FULL",
@@ -125,7 +125,7 @@ exit 1
         event: "connected",
         data: {
           accountJid: "15551234567:18@s.whatsapp.net",
-          pushName: "Theo",
+          pushName: "Avery",
           helperVersion: "0.1.0",
         },
       })}\n`,
@@ -136,13 +136,13 @@ exit 1
     await Promise.resolve();
     expect(settled).toHaveBeenCalledWith({
       accountJid: "15551234567:18@s.whatsapp.net",
-      pushName: "Theo",
+      pushName: "Avery",
       helperVersion: "0.1.0",
     });
 
     await expect(handle.completion).resolves.toEqual({
       accountJid: "15551234567:18@s.whatsapp.net",
-      pushName: "Theo",
+      pushName: "Avery",
       helperVersion: "0.1.0",
     });
   });

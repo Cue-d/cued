@@ -947,7 +947,7 @@ public struct CuedOnboardingView: View {
           .padding(.top, 3)
       }
       if let removeAction {
-        removalButton(label: removeAction.label, action: removeAction.handler)
+        actionButton(title: removeAction.title, action: removeAction.handler)
       }
       if let action {
         actionButton(title: action.title, action: action.handler)
@@ -980,21 +980,6 @@ public struct CuedOnboardingView: View {
           )
       }
     }
-  }
-
-  private func removalButton(
-    label: String,
-    action: @escaping () -> Void
-  ) -> some View {
-    Button(action: action) {
-      Image(systemName: "xmark")
-        .font(.headline.weight(.semibold))
-        .foregroundStyle(.secondary)
-        .frame(width: 18, height: 18, alignment: .center)
-    }
-    .frame(width: 24, height: 24, alignment: .center)
-    .buttonStyle(.plain)
-    .accessibilityLabel(label)
   }
 
   private func pendingIntegrationIndicator() -> some View {
@@ -1084,7 +1069,7 @@ public struct CuedOnboardingView: View {
   private func removeAction(
     for configuration: InstallerPlatformConfiguration,
     integration: InstallerIntegrationStatus
-  ) -> (label: String, handler: () -> Void)? {
+  ) -> (title: String, handler: () -> Void)? {
     guard configuration.accounts.contains(where: {
       $0.platform == integration.platform && $0.accountKey == integration.accountKey
     }) else {
@@ -1098,7 +1083,7 @@ public struct CuedOnboardingView: View {
     }
 
     return (
-      "Remove \(accountTitle(for: configuration, integration: integration))",
+      "Remove",
       {
         removalPrompt = InstallerRemovalPrompt(
           platform: configuration.platform,
@@ -1645,23 +1630,23 @@ private func installerDefaultAccountKey(for platform: String) -> String {
 private func platformWalkthrough(for configuration: InstallerPlatformConfiguration) -> String {
   switch configuration.platform {
   case "contacts":
-    return "Uses the Contacts permission from the previous step to resolve people across local data."
+    return "Adds your local contacts so Cued can recognize people across conversations."
   case "phone_calls":
-    return "Local Mac call history is always available once Cued can read this device's databases."
+    return "Adds your recent phone calls from this Mac."
   case "imessage":
     return "Syncs your Messages conversations from this Mac."
   case "slack":
-    return "Authenticate each workspace in a browser sign-in flow. You can add more workspaces at any time."
+    return "Syncs messages from each Slack workspace you connect."
   case "discord":
-    return "Authenticate in a browser sign-in flow on this Mac. Discord v1 syncs newly observed messages after connection."
+    return "Syncs new Discord messages after you connect your account."
   case "linkedin":
-    return "Authenticate in a browser window and Cued will save the session on this Mac."
+    return "Syncs your LinkedIn messages on this Mac."
   case "whatsapp":
-    return "Authenticate by linking your phone in a QR flow with the local WhatsApp helper."
+    return "Syncs WhatsApp messages after you link your phone."
   case "signal":
-    return "Authenticate by linking Signal with a QR flow using the local signal-cli helper."
+    return "Syncs Signal messages after you link your device."
   default:
-    return "Authenticate this source on this Mac."
+    return "Syncs this source on this Mac."
   }
 }
 
@@ -1676,7 +1661,7 @@ private func authFlowDetail(for platform: String) -> String {
   case "whatsapp":
     return "Starts a QR linking flow for your phone."
   case "signal":
-    return "Starts a QR linking flow with the local Signal helper."
+    return "Starts a QR linking flow for Signal."
   default:
     return "Starts the authentication flow for this source."
   }

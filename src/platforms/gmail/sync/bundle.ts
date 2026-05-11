@@ -1,7 +1,12 @@
 import type { ProviderRawEventInput } from "../../../core/types/provider.js";
 import { mapWithConcurrency } from "../../../core/utils/async.js";
 import type { SyncBundle } from "../../core/sync.js";
-import { GmailClient, type GmailHistoryMessageRef, type GmailMessage } from "../api/client.js";
+import {
+  GmailClient,
+  type GmailHistoryMessageRef,
+  type GmailMessage,
+  isGmailApiError,
+} from "../api/client.js";
 import { buildGmailRawEvents } from "./events.js";
 
 const DEFAULT_PAGE_SIZE = Number(process.env.CUED_GMAIL_PAGE_SIZE ?? "50");
@@ -69,6 +74,24 @@ function dedupeRawEvents(rawEvents: ProviderRawEventInput[]): ProviderRawEventIn
   return [...new Map(rawEvents.map((event) => [event.id, event])).values()];
 }
 
+async function fetchExistingMessages(
+  client: GmailClient,
+  ids: Array<{ id: string }>,
+  concurrency: number,
+): Promise<GmailMessage[]> {
+  const fetched = await mapWithConcurrency(ids, concurrency, async (entry) => {
+    try {
+      return await client.getMessage(entry.id);
+    } catch (error) {
+      if (isGmailApiError(error, 404)) {
+        return null;
+      }
+      throw error;
+    }
+  });
+  return fetched.filter((message): message is GmailMessage => message != null);
+}
+
 export async function buildGmailSyncBundle(
   input: {
     accountKey?: string;
@@ -91,115 +114,127 @@ export async function buildGmailSyncBundle(
   const hasCompletedHistoricalSync =
     cursor.historicalSyncComplete === true && cursor.phase === "incremental";
   if (hasCompletedHistoricalSync) {
-    const startHistoryId = cursor.historyId ?? profile.historyId;
-    if (!startHistoryId) {
-      throw new Error("Gmail incremental sync is missing a start historyId");
-    }
-    let pageToken = cursor.pageToken ?? null;
-    let hasMore = false;
-    let listedMessageCount = cursor.listedMessageCount ?? 0;
-    let fetchedMessageCount = cursor.fetchedMessageCount ?? 0;
-    let pageCount = cursor.pageCount ?? 0;
-    let oldestMessageInternalDate = cursor.oldestMessageInternalDate ?? null;
-    let newestMessageInternalDate = cursor.newestMessageInternalDate ?? null;
-    let latestHistoryId = profile.historyId ?? startHistoryId;
-    const messages: GmailMessage[] = [];
+    try {
+      const startHistoryId = cursor.historyId ?? profile.historyId;
+      if (!startHistoryId) {
+        throw new Error("Gmail incremental sync is missing a start historyId");
+      }
+      let pageToken = cursor.pageToken ?? null;
+      let hasMore = false;
+      let listedMessageCount = cursor.listedMessageCount ?? 0;
+      let fetchedMessageCount = cursor.fetchedMessageCount ?? 0;
+      let pageCount = cursor.pageCount ?? 0;
+      let oldestMessageInternalDate = cursor.oldestMessageInternalDate ?? null;
+      let newestMessageInternalDate = cursor.newestMessageInternalDate ?? null;
+      let latestHistoryId = profile.historyId ?? startHistoryId;
+      const messages: GmailMessage[] = [];
 
-    for (let pageIndex = 0; pageIndex < pageBudget; pageIndex += 1) {
-      const page = await client.listHistory({
-        startHistoryId,
-        pageToken,
-        maxResults: pageSize,
-      });
-      latestHistoryId = page.historyId ?? latestHistoryId;
-      const ids = extractAddedMessageRefs(page);
-      listedMessageCount += ids.length;
-      pageCount += 1;
-      const fetched = await mapWithConcurrency(ids, fetchConcurrency, async (entry) =>
-        client.getMessage(entry.id),
+      for (let pageIndex = 0; pageIndex < pageBudget; pageIndex += 1) {
+        const page = await client.listHistory({
+          startHistoryId,
+          pageToken,
+          maxResults: pageSize,
+        });
+        latestHistoryId = page.historyId ?? latestHistoryId;
+        const ids = extractAddedMessageRefs(page);
+        listedMessageCount += ids.length;
+        pageCount += 1;
+        const fetched = await fetchExistingMessages(client, ids, fetchConcurrency);
+        fetchedMessageCount += fetched.length;
+        messages.push(...fetched);
+        const bounds = collectMessageDateBounds(fetched, {
+          oldestMessageInternalDate,
+          newestMessageInternalDate,
+        });
+        oldestMessageInternalDate = bounds.oldestMessageInternalDate;
+        newestMessageInternalDate = bounds.newestMessageInternalDate;
+        pageToken = page.nextPageToken ?? null;
+        hasMore = Boolean(pageToken);
+        if (!hasMore) break;
+      }
+
+      const rawEvents = dedupeRawEvents(
+        buildGmailRawEvents({
+          accountKey,
+          emailAddress,
+          messages,
+          observedAt,
+        }),
       );
-      fetchedMessageCount += fetched.length;
-      messages.push(...fetched);
-      const bounds = collectMessageDateBounds(fetched, {
+      const sourceCursor: GmailSourceCursor = {
+        ...cursor,
+        emailAddress,
+        historyId: hasMore ? startHistoryId : latestHistoryId,
+        pageToken,
+        phase: "incremental",
+        historicalSyncComplete: true,
+        listedMessageCount,
+        fetchedMessageCount,
+        pageCount,
+        lastSyncAt: hasMore ? cursor.lastSyncAt : observedAt,
         oldestMessageInternalDate,
         newestMessageInternalDate,
-      });
-      oldestMessageInternalDate = bounds.oldestMessageInternalDate;
-      newestMessageInternalDate = bounds.newestMessageInternalDate;
-      pageToken = page.nextPageToken ?? null;
-      hasMore = Boolean(pageToken);
-      if (!hasMore) break;
-    }
-
-    const rawEvents = dedupeRawEvents(
-      buildGmailRawEvents({
-        accountKey,
-        emailAddress,
-        messages,
-        observedAt,
-      }),
-    );
-    const sourceCursor: GmailSourceCursor = {
-      ...cursor,
-      emailAddress,
-      historyId: hasMore ? startHistoryId : latestHistoryId,
-      pageToken,
-      phase: "incremental",
-      historicalSyncComplete: true,
-      listedMessageCount,
-      fetchedMessageCount,
-      pageCount,
-      lastSyncAt: hasMore ? cursor.lastSyncAt : observedAt,
-      oldestMessageInternalDate,
-      newestMessageInternalDate,
-    };
-    return {
-      sourceAccounts: [{ platform: "gmail", accountKey, displayName: emailAddress }],
-      rawEvents,
-      sourceCursor,
-      syncMode: "incremental",
-      hasMore,
-      continuation: hasMore
-        ? {
-            reason: "account_pagination",
-            detail: "Gmail incremental history page token remains",
-          }
-        : undefined,
-      proofs: [
-        {
-          scope: {
-            kind: "account",
-            key: "all_mail_except_spam_trash",
-            displayName: "All Gmail mail except spam and trash",
-            metadata: { emailAddress },
+      };
+      return {
+        sourceAccounts: [{ platform: "gmail", accountKey, displayName: emailAddress }],
+        rawEvents,
+        sourceCursor,
+        syncMode: "incremental",
+        hasMore,
+        continuation: hasMore
+          ? {
+              reason: "account_pagination",
+              detail: "Gmail incremental history page token remains",
+            }
+          : undefined,
+        proofs: [
+          {
+            scope: {
+              kind: "account",
+              key: "all_mail_except_spam_trash",
+              displayName: "All Gmail mail except spam and trash",
+              metadata: { emailAddress },
+            },
+            proofKind: "messages",
+            status: hasMore ? "running" : "complete",
+            syncMode: "incremental",
+            observedAt,
+            runStartedAt: cursor.startedAt ?? observedAt,
+            completedAt: hasMore ? null : observedAt,
+            resumeCursor: hasMore ? sourceCursor : null,
+            coverage: {
+              emailAddress,
+              historyId: hasMore ? startHistoryId : latestHistoryId,
+              historicalSyncComplete: true,
+              oldestMessageInternalDate,
+              newestMessageInternalDate,
+            },
+            stats: {
+              listedMessageCount,
+              fetchedMessageCount,
+              rawEventCount: rawEvents.length,
+              pageCount,
+              pageSize,
+              fetchConcurrency,
+              messagesTotal: profile.messagesTotal ?? null,
+              threadsTotal: profile.threadsTotal ?? null,
+            },
           },
-          proofKind: "messages",
-          status: hasMore ? "running" : "complete",
-          syncMode: "incremental",
-          observedAt,
-          runStartedAt: cursor.startedAt ?? observedAt,
-          completedAt: hasMore ? null : observedAt,
-          resumeCursor: hasMore ? sourceCursor : null,
-          coverage: {
-            emailAddress,
-            historyId: hasMore ? startHistoryId : latestHistoryId,
-            historicalSyncComplete: true,
-            oldestMessageInternalDate,
-            newestMessageInternalDate,
-          },
-          stats: {
-            listedMessageCount,
-            fetchedMessageCount,
-            rawEventCount: rawEvents.length,
-            pageCount,
-            pageSize,
-            fetchConcurrency,
-            messagesTotal: profile.messagesTotal ?? null,
-            threadsTotal: profile.threadsTotal ?? null,
-          },
+        ],
+      };
+    } catch (error) {
+      if (!isGmailApiError(error, 404)) {
+        throw error;
+      }
+      return buildGmailSyncBundle({
+        ...input,
+        sourceCursor: {
+          emailAddress,
+          historyId: profile.historyId ?? null,
+          startedAt: observedAt,
         },
-      ],
-    };
+      });
+    }
   }
 
   let pageToken = cursor.pageToken ?? null;
@@ -216,9 +251,7 @@ export async function buildGmailSyncBundle(
     const ids = page.messages ?? [];
     listedMessageCount += ids.length;
     pageCount += 1;
-    const fetched = await mapWithConcurrency(ids, fetchConcurrency, async (entry) =>
-      client.getMessage(entry.id),
-    );
+    const fetched = await fetchExistingMessages(client, ids, fetchConcurrency);
     fetchedMessageCount += fetched.length;
     messages.push(...fetched);
     const bounds = collectMessageDateBounds(fetched, {

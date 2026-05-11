@@ -10,7 +10,22 @@ const gmailClientMock = vi.hoisted(() => ({
   getMessage: vi.fn(),
 }));
 
+const GmailApiErrorMock = vi.hoisted(
+  () =>
+    class GmailApiError extends Error {
+      constructor(
+        public readonly status: number,
+        public readonly payload: Record<string, unknown>,
+      ) {
+        super(`Gmail API request failed (${status}): ${JSON.stringify(payload)}`);
+      }
+    },
+);
+
 vi.mock("../api/client.js", () => ({
+  GmailApiError: GmailApiErrorMock,
+  isGmailApiError: (error: unknown, status?: number) =>
+    error instanceof GmailApiErrorMock && (status == null || error.status === status),
   GmailClient: {
     fromKeychain: vi.fn(() => gmailClientMock),
   },
@@ -92,6 +107,95 @@ describe("Gmail sync bundle", () => {
         historyId: "history-2",
         phase: "incremental",
         historicalSyncComplete: true,
+      }),
+    );
+  });
+
+  it("falls back to a full scan when the Gmail history cursor expires", async () => {
+    gmailClientMock.listHistory.mockRejectedValueOnce(
+      new GmailApiErrorMock(404, {
+        error: { code: 404, message: "Requested entity was not found." },
+      }),
+    );
+    gmailClientMock.listMessages.mockResolvedValue({
+      messages: [{ id: "m-1", threadId: "t-1" }],
+    });
+    gmailClientMock.getMessage.mockResolvedValue(
+      gmailMessage({
+        id: "m-1",
+        threadId: "t-1",
+        from: "Friend <friend@example.com>",
+      }),
+    );
+
+    const bundle = await buildGmailSyncBundle({
+      accountKey: "me@example.com",
+      sourceCursor: {
+        phase: "incremental",
+        historicalSyncComplete: true,
+        historyId: "expired-history",
+      },
+    });
+
+    expect(gmailClientMock.listHistory).toHaveBeenCalledWith({
+      startHistoryId: "expired-history",
+      pageToken: null,
+      maxResults: 50,
+    });
+    expect(gmailClientMock.listMessages).toHaveBeenCalledWith({
+      pageToken: null,
+      maxResults: 50,
+    });
+    expect(bundle.syncMode).toBe("full");
+    expect(bundle.sourceCursor).toEqual(
+      expect.objectContaining({
+        phase: "incremental",
+        historicalSyncComplete: true,
+        historyId: "history-2",
+      }),
+    );
+  });
+
+  it("skips missing Gmail messages while hydrating incremental history", async () => {
+    gmailClientMock.listHistory.mockResolvedValue({
+      historyId: "history-2",
+      history: [
+        {
+          messagesAdded: [
+            { message: { id: "m-missing", threadId: "t-1" } },
+            { message: { id: "m-present", threadId: "t-1" } },
+          ],
+        },
+      ],
+    });
+    gmailClientMock.getMessage.mockImplementation(async (id: string) => {
+      if (id === "m-missing") {
+        throw new GmailApiErrorMock(404, {
+          error: { code: 404, message: "Requested entity was not found." },
+        });
+      }
+      return gmailMessage({
+        id,
+        threadId: "t-1",
+        from: "Friend <friend@example.com>",
+      });
+    });
+
+    const bundle = await buildGmailSyncBundle({
+      accountKey: "me@example.com",
+      sourceCursor: {
+        phase: "incremental",
+        historicalSyncComplete: true,
+        historyId: "history-1",
+      },
+    });
+
+    expect(bundle.syncMode).toBe("incremental");
+    expect(bundle.rawEvents.filter((event) => event.entityKind === "message")).toHaveLength(1);
+    expect(bundle.proofs?.[0]?.stats).toEqual(
+      expect.objectContaining({
+        listedMessageCount: 2,
+        fetchedMessageCount: 1,
       }),
     );
   });

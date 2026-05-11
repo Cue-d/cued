@@ -184,13 +184,13 @@ func TestHistorySyncBatchFromEventUsesHistoryPayload(t *testing.T) {
 			Pushnames: []*waHistorySync.Pushname{
 				{
 					ID:       proto.String("15551234567@s.whatsapp.net"),
-					Pushname: proto.String("Theo"),
+					Pushname: proto.String("Avery"),
 				},
 			},
 			Conversations: []*waHistorySync.Conversation{
 				{
 					ID:   proto.String("15551234567@s.whatsapp.net"),
-					Name: proto.String("Theo"),
+					Name: proto.String("Avery"),
 					Messages: []*waHistorySync.HistorySyncMsg{
 						{
 							Message: &waWeb.WebMessageInfo{
@@ -200,7 +200,7 @@ func TestHistorySyncBatchFromEventUsesHistoryPayload(t *testing.T) {
 									FromMe:    proto.Bool(false),
 								},
 								MessageTimestamp: proto.Uint64(1_710_000_000),
-								PushName:         proto.String("Theo"),
+								PushName:         proto.String("Avery"),
 								Message: &waProto.Message{
 									Conversation: proto.String("from history"),
 								},
@@ -216,7 +216,7 @@ func TestHistorySyncBatchFromEventUsesHistoryPayload(t *testing.T) {
 	if len(snapshot.Messages) != 1 || snapshot.Messages[0].MessageID != "wamid-history" {
 		t.Fatalf("expected history message in snapshot, got %+v", snapshot.Messages)
 	}
-	if len(snapshot.Contacts) == 0 || snapshot.Contacts[0].PushName == nil || *snapshot.Contacts[0].PushName != "Theo" {
+	if len(snapshot.Contacts) == 0 || snapshot.Contacts[0].PushName == nil || *snapshot.Contacts[0].PushName != "Avery" {
 		t.Fatalf("expected pushname contact in snapshot, got %+v", snapshot.Contacts)
 	}
 	if len(snapshot.Chats) != 1 || snapshot.Chats[0].JID != "15551234567@s.whatsapp.net" {
@@ -233,7 +233,7 @@ func TestHistoryMessageSnapshotFallbackRetainsMediaMetadata(t *testing.T) {
 				FromMe:    proto.Bool(false),
 			},
 			MessageTimestamp: proto.Uint64(1_710_000_000),
-			PushName:         proto.String("Theo"),
+			PushName:         proto.String("Avery"),
 			Message: &waProto.Message{
 				ImageMessage: &waProto.ImageMessage{
 					Mimetype:   proto.String("image/jpeg"),
@@ -483,9 +483,9 @@ func TestConnectedEventPreservesHistorySyncMetadata(t *testing.T) {
 	})
 
 	client := whatsmeow.NewClient(&store.Device{
-		PushName: "Theo Tarr",
+		PushName: "Avery Example",
 		ID: &types.JID{
-			User:   "13474468966",
+			User:   "15550101000",
 			Server: types.DefaultUserServer,
 		},
 	}, nil)
@@ -493,7 +493,7 @@ func TestConnectedEventPreservesHistorySyncMetadata(t *testing.T) {
 	runtime.handleEvent(&events.Connected{})
 
 	metadata := state.getMetadata()
-	if metadata.AccountJID != "13474468966@s.whatsapp.net" {
+	if metadata.AccountJID != "15550101000@s.whatsapp.net" {
 		t.Fatalf("unexpected account jid: %q", metadata.AccountJID)
 	}
 	if metadata.LastHistorySyncAt != 123 || metadata.LastHistorySyncType != "FULL" {

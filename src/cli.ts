@@ -40,6 +40,7 @@ import {
   platformSupportsMultipleAccounts,
 } from "./platforms/core/types.js";
 import { runDaemon } from "./runtime/daemon/server.js";
+import { buildDoctorReport, buildPermissionStatus } from "./runtime/doctor.js";
 import {
   doctorHooksConfig,
   emitHookEvent,

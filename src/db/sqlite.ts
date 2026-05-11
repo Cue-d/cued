@@ -59,15 +59,20 @@ export function loadOrCreateDatabaseKey(): string {
 }
 
 export function loadExistingDatabaseKey(): string | null {
+  return loadExistingDatabaseKeyCandidates()[0] ?? null;
+}
+
+function loadExistingDatabaseKeyCandidates(): string[] {
   const configuredKey = process.env.CUED_DB_KEY?.trim();
   if (configuredKey) {
-    return configuredKey;
+    return [configuredKey];
   }
   const vitestWorkerKey = process.env.VITEST_WORKER_ID?.trim();
   if (vitestWorkerKey) {
-    return `vitest-worker-${vitestWorkerKey}`;
+    return [`vitest-worker-${vitestWorkerKey}`];
   }
 
+  const keys: string[] = [];
   const services = [CUED_DB_KEYCHAIN_SERVICE, ...CUED_LEGACY_DB_KEYCHAIN_SERVICES];
   for (const service of services) {
     try {
@@ -77,13 +82,13 @@ export function loadExistingDatabaseKey(): string | null {
         { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
       ).trim();
       if (key.length > 0) {
-        return key;
+        keys.push(key);
       }
     } catch {
       // Try the next known service name.
     }
   }
-  return null;
+  return keys;
 }
 
 function shouldUseKeychainBackedDatabaseKey(): boolean {
@@ -180,16 +185,28 @@ export function openSqliteDatabase(
   }
 
   sqlite.close();
-  const key = loadExistingDatabaseKey();
-  if (!key) {
+  const keys = loadExistingDatabaseKeyCandidates();
+  if (keys.length === 0) {
     throw new Error("Failed to load the Cued database encryption key for an existing encrypted DB");
   }
-  if (!options.readonly && shouldUseKeychainBackedDatabaseKey()) {
-    migrateDatabaseKeyToCurrentService();
+
+  for (const key of keys) {
+    sqlite = new Database(dbPath, openOptions);
+    try {
+      applyKey(sqlite, key);
+      verifyReadable(sqlite);
+      if (!options.readonly && shouldUseKeychainBackedDatabaseKey()) {
+        storeDatabaseKey(key);
+      }
+      hardenDbPaths(dbPath);
+      return sqlite;
+    } catch (error) {
+      sqlite.close();
+      if (key === keys[keys.length - 1]) {
+        throw error;
+      }
+    }
   }
-  sqlite = new Database(dbPath, openOptions);
-  applyKey(sqlite, key);
-  verifyReadable(sqlite);
-  hardenDbPaths(dbPath);
-  return sqlite;
+
+  throw new Error("Failed to load the Cued database encryption key for an existing encrypted DB");
 }

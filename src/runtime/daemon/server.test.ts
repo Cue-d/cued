@@ -14,7 +14,7 @@ describe("discord scheduler pacing", () => {
     accountKey: "default",
     state: "connected" as const,
     userId: "u-self",
-    username: "theo",
+    username: "avery",
     connectedAt: 1,
     lastEventAt: 1,
     lastReconnectAt: null,
@@ -170,7 +170,7 @@ describe("sync resume targets", () => {
         listCheckpointTargets: () => [
           {
             platform: "gmail",
-            account_key: "theo@example.com",
+            account_key: "avery@example.com",
           },
         ],
       }),
@@ -181,7 +181,7 @@ describe("sync resume targets", () => {
       },
       {
         platform: "gmail",
-        accountKey: "theo@example.com",
+        accountKey: "avery@example.com",
       },
     ]);
   });
