@@ -117,6 +117,7 @@ import type {
   WhatsAppSnapshot,
 } from "../../platforms/whatsapp/types.js";
 import { fetchAttachment, listAttachments, searchAttachments } from "../attachments.js";
+import { buildPermissionStatus } from "../doctor.js";
 import { emitHookEvent } from "../hooks.js";
 import type { DaemonRequest, DaemonResponse } from "../ipc.js";
 import { collectInboundMessageHookPayloads } from "../message-hooks.js";
@@ -4571,6 +4572,13 @@ async function dispatchRequest(
             },
           };
         }
+      case "permissions-status":
+        markInteractive();
+        return {
+          id: request.id,
+          ok: true,
+          result: await buildPermissionStatus(),
+        };
       case "integrations-list": {
         markInteractive();
         const integrationAuthService = await getIntegrationAuthService();

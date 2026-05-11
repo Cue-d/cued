@@ -717,6 +717,14 @@ async function main(): Promise<void> {
           }
           return;
         case "status":
+          if (existsSync(CUED_SOCKET_PATH)) {
+            const permissionResponse = await sendDaemonRequest({ command: "permissions-status" });
+            if (!permissionResponse.ok) {
+              throw new Error(permissionResponse.error ?? "Daemon request failed");
+            }
+            printJson(permissionResponse.result ?? null);
+            return;
+          }
           printJson(await buildPermissionStatus());
           return;
         case "request": {
