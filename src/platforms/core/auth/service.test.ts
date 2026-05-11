@@ -109,6 +109,28 @@ describe("IntegrationAuthService", () => {
     db.close();
   });
 
+  it("reuses an active managed browser auth session for the same platform account", async () => {
+    const db = createDb();
+    importSlackDesktopAuthMock.mockResolvedValue([]);
+
+    const service = new IntegrationAuthService(db);
+    const activeAuthSessions = new Map<
+      string,
+      { child: ChildProcess; platform: "slack"; accountKey: string }
+    >();
+
+    const first = await service.connectManaged("slack", "pending-slack-new", activeAuthSessions);
+    const second = await service.connectManaged("slack", "pending-slack-new", activeAuthSessions);
+
+    expect(first.integration.accountKey).toBe("pending-slack-new");
+    expect(second.integration.accountKey).toBe("pending-slack-new");
+    expect(second.authSession?.state).toBe("in_progress");
+    expect(activeAuthSessions.size).toBe(1);
+    expect(startAuthSessionMock).toHaveBeenCalledTimes(1);
+
+    db.close();
+  });
+
   it("reuses slack pending discovery only when desktop import authenticates a new workspace", async () => {
     const db = createDb();
     upsertAuthenticatedSlack(db, "T_EXISTING", "Existing");

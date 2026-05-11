@@ -1031,6 +1031,28 @@ describe("CuedDatabase", () => {
       }),
     );
 
+    db.rescheduleRun(runId, 60_000, { retry: "busy" });
+    expect(db.listRecentRuns(1)[0]).toEqual(
+      expect.objectContaining({
+        id: runId,
+        status: "queued",
+        started_at: null,
+        finished_at: null,
+      }),
+    );
+    expect(db.claimNextQueuedRun()).toBeNull();
+
+    db.rescheduleRun(runId);
+    const retriedRun = db.claimNextQueuedRun();
+    expect(retriedRun).toEqual(
+      expect.objectContaining({
+        id: runId,
+        status: "ingesting",
+        details_json: JSON.stringify({ retry: "busy" }),
+      }),
+    );
+    db.finishRun(runId);
+
     const failedId = db.queueSyncRun({
       platform: "linkedin",
       accountKey: "default",

@@ -153,21 +153,25 @@ const DEFAULT_DISCORD_REALTIME_ENABLED = true;
 const DEFAULT_DISCORD_DM_POLL_MS = 45_000;
 const DEFAULT_SLACK_REALTIME_ENABLED = false;
 const DEFAULT_INGEST_CONCURRENCY = 4;
-const DEFAULT_PROJECTION_BATCH_SIZE = 1_000;
+const DEFAULT_PROJECTION_BATCH_SIZE = 250;
 const DEFAULT_REALTIME_PROJECTION_ENABLED = true;
 const DEFAULT_DEFERRED_PROJECTION_COALESCE_MS = 250;
-const DEFAULT_PROJECTION_CONTINUE_DELAY_MS = 5_000;
+const DEFAULT_PROJECTION_CONTINUE_DELAY_MS = 0;
 const DEFAULT_CONTINUATION_PROJECTION_INTERVAL_MS = 60_000;
 const DEFAULT_CONTINUATION_PROJECTION_BACKLOG_EVENTS = 10_000;
 const NATIVE_WATCH_DEBOUNCE_MS = 1_500;
 const DEFAULT_AUTOSYNC_SCHEDULER_TICK_MS = 15_000;
 const DEFAULT_SYNC_CONTINUE_DELAY_MS = 15_000;
 const DEFAULT_SIGNAL_RECONNECT_SYNC_COOLDOWN_MS = 5 * 60_000;
+const DEFAULT_INTERACTIVE_WINDOW_MS = 30_000;
+const DEFAULT_BACKFILL_PRESSURE_WINDOW_MS = 2 * 60_000;
 const DAEMON_STATUS_BUSY_TIMEOUT_MS = 100;
 const MENU_BAR_STATUS_WRITE_INTERVAL_MS = 1_000;
 const UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
 const UPDATE_SHUTDOWN_GRACE_MS = 30_000;
 const QUEUE_DRAIN_RETRY_DELAY_MS = 1_000;
+const SQLITE_BUSY_RUN_RETRY_DELAY_MS = 2_000;
+const SQLITE_BUSY_RUN_RESCHEDULE_TIMEOUT_MS = 10_000;
 const SIGNAL_SEND_SESSION_WAIT_MS = 3_000;
 const SIGNAL_SEND_ECHO_TIMEOUT_MS = 5_000;
 const WHATSAPP_SEND_SESSION_WAIT_MS = 3_000;
@@ -538,6 +542,20 @@ function getSignalReconnectSyncCooldownMs(): number {
   return Number.isFinite(configured) && configured >= 0
     ? Math.trunc(configured)
     : DEFAULT_SIGNAL_RECONNECT_SYNC_COOLDOWN_MS;
+}
+
+function getInteractiveWindowMs(): number {
+  const configured = Number(process.env.CUED_INTERACTIVE_WINDOW_MS);
+  return Number.isFinite(configured) && configured >= 0
+    ? Math.trunc(configured)
+    : DEFAULT_INTERACTIVE_WINDOW_MS;
+}
+
+function getBackfillPressureWindowMs(): number {
+  const configured = Number(process.env.CUED_BACKFILL_PRESSURE_WINDOW_MS);
+  return Number.isFinite(configured) && configured >= 0
+    ? Math.trunc(configured)
+    : DEFAULT_BACKFILL_PRESSURE_WINDOW_MS;
 }
 
 function getDeferredProjectionCoalesceMs(): number {
@@ -1583,6 +1601,8 @@ export async function runDaemon(): Promise<void> {
   const continuationProjectionBacklogEvents = getContinuationProjectionBacklogEvents();
   const syncContinueDelayMs = getSyncContinueDelayMs();
   const signalReconnectSyncCooldownMs = getSignalReconnectSyncCooldownMs();
+  const interactiveWindowMs = getInteractiveWindowMs();
+  const backfillPressureWindowMs = getBackfillPressureWindowMs();
   const configuredRealtimePlatforms = getConfiguredRealtimePlatforms();
   const shouldRunRealtimePlatform = (platform: AdapterPlatform): boolean =>
     configuredRealtimePlatforms == null || configuredRealtimePlatforms.has(platform);
@@ -1591,6 +1611,22 @@ export async function runDaemon(): Promise<void> {
     { child: ChildProcess; platform: Platform; accountKey: string }
   >();
   const activeIngestRuns = new Map<string, Promise<void>>();
+  const activeIngestRunTargets = new Map<
+    string,
+    { platform: Platform | null; accountKey: string | null }
+  >();
+  let lastInteractiveRequestAt = 0;
+  let backfillPressureUntil = 0;
+  const markInteractive = () => {
+    lastInteractiveRequestAt = now();
+  };
+  const isInteractiveActive = () =>
+    activeAuthSessions.size > 0 || now() - lastInteractiveRequestAt <= interactiveWindowMs;
+  const isBackfillPressureActive = () =>
+    now() < backfillPressureUntil ||
+    [...activeIngestRunTargets.values()].some((target) => target.platform === "imessage");
+  const currentIngestConcurrency = () =>
+    isInteractiveActive() || isBackfillPressureActive() ? 1 : ingestConcurrency;
   let activeOutboundSend: Promise<void> | null = null;
   let isProcessingProjection = false;
   let ingestDrainScheduled = false;
@@ -2521,18 +2557,47 @@ export async function runDaemon(): Promise<void> {
       scheduleIngestDrain(QUEUE_DRAIN_RETRY_DELAY_MS);
       return;
     }
-    while (activeIngestRuns.size < ingestConcurrency) {
-      const currentRun = db.claimNextQueuedRun(["sync", "sync_resume"], "ingesting");
+    while (activeIngestRuns.size < currentIngestConcurrency()) {
+      let currentRun: ReturnType<typeof db.claimNextQueuedRun>;
+      try {
+        currentRun = db.withBusyTimeoutSync(DAEMON_STATUS_BUSY_TIMEOUT_MS, () =>
+          db.claimNextQueuedRun(["sync", "sync_resume"], "ingesting"),
+        );
+      } catch (error) {
+        if (!isSqliteBusyError(error)) {
+          throw error;
+        }
+        daemonLogger.warn("ingest drain skipped because SQLite is busy");
+        scheduleIngestDrain(QUEUE_DRAIN_RETRY_DELAY_MS);
+        return;
+      }
       if (!currentRun) {
-        const nextScheduledAt = db.getNextQueuedRunScheduledAt(["sync", "sync_resume"]);
+        let nextScheduledAt: number | null = null;
+        try {
+          nextScheduledAt = db.withBusyTimeoutSync(DAEMON_STATUS_BUSY_TIMEOUT_MS, () =>
+            db.getNextQueuedRunScheduledAt(["sync", "sync_resume"]),
+          );
+        } catch (error) {
+          if (!isSqliteBusyError(error)) {
+            throw error;
+          }
+          daemonLogger.warn("ingest drain skipped because SQLite is busy");
+          scheduleIngestDrain(QUEUE_DRAIN_RETRY_DELAY_MS);
+          return;
+        }
         if (nextScheduledAt != null) {
           scheduleIngestDrain(Math.max(QUEUE_DRAIN_RETRY_DELAY_MS, nextScheduledAt - now()));
         }
         break;
       }
 
+      activeIngestRunTargets.set(currentRun.id, {
+        platform: currentRun.platform,
+        accountKey: currentRun.account_key,
+      });
       const promise = processIngestRun(currentRun).finally(() => {
         activeIngestRuns.delete(currentRun.id);
+        activeIngestRunTargets.delete(currentRun.id);
         scheduleIngestDrain();
         scheduleProjectionDrain();
         maybeFinishUpdateShutdown();
@@ -3145,6 +3210,14 @@ export async function runDaemon(): Promise<void> {
 
   const queueAutoSyncRuns = (trigger: string) => {
     if (isUpdateShutdownRequested) {
+      return;
+    }
+    if (trigger === "scheduler" && (isInteractiveActive() || isBackfillPressureActive())) {
+      daemonLogger.info("autosync scheduler skipped during interactive backfill pressure", {
+        interactive: isInteractiveActive(),
+        backfillPressure: isBackfillPressureActive(),
+        activeIngestRuns: activeIngestRuns.size,
+      });
       return;
     }
     try {
@@ -3765,6 +3838,9 @@ export async function runDaemon(): Promise<void> {
       if (platform === "signal") {
         requestSignalRealtimeReconcile();
       }
+      if (bundleHasMore && platform === "imessage") {
+        backfillPressureUntil = now() + backfillPressureWindowMs;
+      }
       if (bundleHasMore && !db.hasQueuedOrRunningRun(currentRun.platform, accountKey)) {
         db.queueSyncRun({
           platform: currentRun.platform,
@@ -3802,6 +3878,19 @@ export async function runDaemon(): Promise<void> {
       });
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
+      if (isSqliteBusyError(error)) {
+        daemonLogger.warn("ingest run deferred because SQLite is busy", {
+          runId: currentRun.id,
+          platform: currentRun.platform,
+          accountKey: currentRun.account_key,
+          retryDelayMs: SQLITE_BUSY_RUN_RETRY_DELAY_MS,
+          error: errorMessage,
+        });
+        db.withBusyTimeoutSync(SQLITE_BUSY_RUN_RESCHEDULE_TIMEOUT_MS, () => {
+          db.rescheduleRun(currentRun.id, SQLITE_BUSY_RUN_RETRY_DELAY_MS);
+        });
+        return;
+      }
       daemonLogger.error("ingest run failed", {
         runId: currentRun.id,
         platform: currentRun.platform,
@@ -3906,18 +3995,31 @@ export async function runDaemon(): Promise<void> {
         totalMs: timings.totalMs,
       });
     } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      if (isSqliteBusyError(error)) {
+        daemonLogger.warn("projection run deferred because SQLite is busy", {
+          runId: currentRun.id,
+          runType: currentRun.run_type,
+          retryDelayMs: SQLITE_BUSY_RUN_RETRY_DELAY_MS,
+          error: errorMessage,
+        });
+        db.withBusyTimeoutSync(SQLITE_BUSY_RUN_RESCHEDULE_TIMEOUT_MS, () => {
+          db.rescheduleRun(currentRun.id, SQLITE_BUSY_RUN_RETRY_DELAY_MS);
+        });
+        return;
+      }
       daemonLogger.error("projection run failed", {
         runId: currentRun.id,
         runType: currentRun.run_type,
-        error: error instanceof Error ? error.message : String(error),
+        error: errorMessage,
       });
-      db.failRun(currentRun.id, error instanceof Error ? error.message : String(error));
+      db.failRun(currentRun.id, errorMessage);
       await safeEmitHookEvent("sync.failed", {
         runId: currentRun.id,
         platform: currentRun.platform,
         runType: currentRun.run_type,
         stage: "projection",
-        error: error instanceof Error ? error.message : String(error),
+        error: errorMessage,
       });
     } finally {
       isProcessingProjection = false;
@@ -3955,6 +4057,7 @@ export async function runDaemon(): Promise<void> {
       },
       reconcileLocalWatchers,
       requestUpdateShutdown,
+      markInteractive,
       () => isProcessingProjection || activeIngestRuns.size > 0 || activeOutboundSend !== null,
     );
   });
@@ -4158,6 +4261,7 @@ function handleSocket(
   requestRealtimeReconcile: () => void,
   reconcileLocalWatchers: () => void,
   requestUpdateShutdown: () => { shuttingDown: boolean; requestedAt: number | null },
+  markInteractive: () => void,
   isBackgroundWorkActive: () => boolean,
 ): void {
   let buffer = "";
@@ -4200,6 +4304,7 @@ function handleSocket(
           requestRealtimeReconcile,
           reconcileLocalWatchers,
           requestUpdateShutdown,
+          markInteractive,
           isBackgroundWorkActive,
         )
           .then((response) => writeResponse(socket, response))
@@ -4231,6 +4336,7 @@ async function dispatchRequest(
   requestRealtimeReconcile: () => void,
   reconcileLocalWatchers: () => void,
   requestUpdateShutdown: () => { shuttingDown: boolean; requestedAt: number | null },
+  markInteractive: () => void,
   isBackgroundWorkActive: () => boolean,
 ): Promise<DaemonResponse> {
   try {
@@ -4252,6 +4358,7 @@ async function dispatchRequest(
           },
         };
       case "status":
+        markInteractive();
         if (isBackgroundWorkActive()) {
           const cached = readCachedDaemonStatusSnapshot();
           if (cached) {
@@ -4331,6 +4438,7 @@ async function dispatchRequest(
           };
         }
       case "doctor":
+        markInteractive();
         if (isBackgroundWorkActive()) {
           return {
             id: request.id,
@@ -4423,6 +4531,7 @@ async function dispatchRequest(
           };
         }
       case "integrations-list": {
+        markInteractive();
         const integrationAuthService = await getIntegrationAuthService();
         return {
           id: request.id,
@@ -4431,6 +4540,7 @@ async function dispatchRequest(
         };
       }
       case "integrations-refresh": {
+        markInteractive();
         const integrationAuthService = await getIntegrationAuthService();
         await integrationAuthService.refresh();
         requestRealtimeReconcile();
@@ -4442,6 +4552,7 @@ async function dispatchRequest(
         };
       }
       case "integrations-connect": {
+        markInteractive();
         const integrationAuthService = await getIntegrationAuthService();
         const started = await integrationAuthService.connectManaged(
           request.platform,

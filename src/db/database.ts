@@ -3437,6 +3437,33 @@ export class CuedDatabase {
     this.db.update(syncRuns).set(values).where(eq(syncRuns.id, runId)).run();
   }
 
+  rescheduleRun(runId: string, delayMs = 0, details?: unknown): void {
+    const scheduledAt = now() + Math.max(0, Math.trunc(delayMs));
+    const values: {
+      status: SyncRunStatus;
+      scheduledAt: number;
+      startedAt: null;
+      finishedAt: null;
+      detailsJson?: string | null;
+    } =
+      details === undefined
+        ? {
+            status: "queued",
+            scheduledAt,
+            startedAt: null,
+            finishedAt: null,
+          }
+        : {
+            status: "queued",
+            scheduledAt,
+            startedAt: null,
+            finishedAt: null,
+            detailsJson: safeStringifyJson(details),
+          };
+
+    this.db.update(syncRuns).set(values).where(eq(syncRuns.id, runId)).run();
+  }
+
   getLatestFinishedSyncRun(
     platform: Platform,
     accountKey: string,

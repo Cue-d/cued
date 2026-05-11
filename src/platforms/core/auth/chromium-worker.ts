@@ -1,5 +1,7 @@
 import { execFileSync } from "node:child_process";
-import { mkdirSync } from "node:fs";
+import { lstatSync, mkdirSync, readlinkSync, rmSync, unlinkSync } from "node:fs";
+import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { type BrowserContext, type Cookie, chromium, type Page, type Request } from "playwright";
 import { cuedAuthKeychainService } from "../../../core/identity.js";
 
@@ -89,6 +91,62 @@ function bringAuthBrowserToFront(): void {
     );
   } catch {
     // Best-effort only: auth can still proceed if macOS refuses activation.
+  }
+}
+
+function parseSingletonPid(linkTarget: string): number | null {
+  const match = /-(\d+)$/.exec(linkTarget);
+  if (!match) {
+    return null;
+  }
+  const pid = Number(match[1]);
+  return Number.isInteger(pid) && pid > 0 ? pid : null;
+}
+
+function isProcessAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function cleanupStaleChromiumSingleton(profileDir: string): void {
+  const lockPath = join(profileDir, "SingletonLock");
+  try {
+    lstatSync(lockPath);
+  } catch {
+    return;
+  }
+
+  let ownerPid: number | null = null;
+  try {
+    ownerPid = parseSingletonPid(readlinkSync(lockPath));
+  } catch {
+    ownerPid = null;
+  }
+  if (ownerPid != null && isProcessAlive(ownerPid)) {
+    return;
+  }
+
+  for (const name of [
+    "SingletonLock",
+    "SingletonSocket",
+    "SingletonCookie",
+    "RunningChromeVersion",
+  ]) {
+    const path = join(profileDir, name);
+    try {
+      const stat = lstatSync(path);
+      if (stat.isDirectory()) {
+        rmSync(path, { force: true, recursive: true });
+      } else {
+        unlinkSync(path);
+      }
+    } catch {
+      // Already gone.
+    }
   }
 }
 
@@ -472,6 +530,7 @@ async function run(): Promise<void> {
   }
 
   mkdirSync(args.profileDir, { recursive: true });
+  cleanupStaleChromiumSingleton(args.profileDir);
   let context: BrowserContext | null = null;
   try {
     context = await chromium.launchPersistentContext(args.profileDir, {
@@ -566,7 +625,9 @@ async function run(): Promise<void> {
   }
 }
 
-void run().catch((error) => {
-  process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
-  process.exit(1);
-});
+if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) {
+  void run().catch((error) => {
+    process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
+    process.exit(1);
+  });
+}

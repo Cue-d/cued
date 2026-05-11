@@ -232,6 +232,7 @@ final class OnboardingWindowController: NSWindowController {
     if key == "full_disk_access" {
       markPermissionRelaunchSetupIntent()
     }
+    markPendingLivePermission(key: key)
     PermissionGuideAssistant.shared.present(panel: panel)
   }
 
@@ -416,8 +417,17 @@ final class OnboardingWindowController: NSWindowController {
       onboardingPermissionKeys(for: flags).filter(isRetryablePermissionKey)
     )
     if !pendingLivePermissionKeys.isEmpty {
-      pendingLivePermissionDeadline = Date().addingTimeInterval(30)
+      pendingLivePermissionDeadline = Date().addingTimeInterval(60)
     }
+  }
+
+  private func markPendingLivePermission(key: String) {
+    guard isRetryablePermissionKey(key) else {
+      return
+    }
+    pendingLivePermissionKeys.insert(key)
+    pendingLivePermissionDeadline = Date().addingTimeInterval(60)
+    schedulePermissionRefreshRetry()
   }
 
   private func resolvePendingLivePermissions(using permissions: [InstallerPermissionStatus]) {
@@ -481,9 +491,9 @@ func onboardingShouldRetryPermissionRefresh(for flags: [String]) -> Bool {
 
 func onboardingShouldRefreshPermissionsActively(for flags: [String]) -> Bool {
   let keys = onboardingPermissionKeys(for: flags)
-  return keys.contains("full_disk_access")
+  return keys.contains(where: isRetryablePermissionKey)
 }
 
 func isRetryablePermissionKey(_ key: String) -> Bool {
-  key == "full_disk_access"
+  key == "contacts" || key == "full_disk_access"
 }

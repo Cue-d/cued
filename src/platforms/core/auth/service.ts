@@ -127,6 +127,34 @@ export class IntegrationAuthService {
     integration: ReturnType<typeof getIntegrationSummary>;
     authSession: ReturnType<typeof getAuthSessionSummary>;
   }> {
+    const normalized = parsePlatform(platform.trim().toLowerCase());
+    const existingRuntimeSession = [...activeAuthSessions.values()].find(
+      (session) =>
+        session.platform === normalized &&
+        (accountKey == null || session.accountKey === accountKey),
+    );
+    if (existingRuntimeSession) {
+      const integration = getIntegrationSummary(
+        this.db,
+        existingRuntimeSession.platform,
+        existingRuntimeSession.accountKey,
+      );
+      const authSession = this.db
+        .listAuthSessions(10)
+        .find(
+          (session) =>
+            session.platform === existingRuntimeSession.platform &&
+            session.account_key === existingRuntimeSession.accountKey &&
+            session.state === "in_progress",
+        );
+      if (integration && authSession) {
+        return {
+          integration,
+          authSession: getAuthSessionSummary(this.db, authSession.id),
+        };
+      }
+    }
+
     const reusable = await this.connectReusableAuth(platform, accountKey, lifecycle);
     if (reusable?.integration) {
       return {
