@@ -34,6 +34,8 @@ final class OnboardingWindowController: NSWindowController {
   private var cachedAllIntegrations: [InstallerIntegrationStatus] = []
   private var cachedSetupIntegrations: [InstallerIntegrationStatus] = []
   private var isRefreshing = false
+  private var pendingRefreshAfterCurrent = false
+  private var pendingRefreshAfterCurrentRequiresPermissionProbe = false
   private var prerequisitesEnsured = false
   private var pendingAuthKickoffRefreshTask: Task<Void, Never>?
   private var pendingStatusRefreshTask: Task<Void, Never>?
@@ -101,9 +103,14 @@ final class OnboardingWindowController: NSWindowController {
 
   func refresh(forceActivePermissionRefresh: Bool = false) {
     guard !isRefreshing else {
+      pendingRefreshAfterCurrent = true
+      pendingRefreshAfterCurrentRequiresPermissionProbe =
+        pendingRefreshAfterCurrentRequiresPermissionProbe || forceActivePermissionRefresh
       return
     }
     isRefreshing = true
+    pendingRefreshAfterCurrent = false
+    pendingRefreshAfterCurrentRequiresPermissionProbe = false
     viewModel.beginRefresh()
 
     let daemonSupervisor = self.daemonSupervisor
@@ -146,6 +153,12 @@ final class OnboardingWindowController: NSWindowController {
         )
         self.schedulePermissionRefreshRetry()
         self.schedulePendingStatusRefreshIfNeeded()
+        if self.pendingRefreshAfterCurrent {
+          let requiresPermissionProbe = self.pendingRefreshAfterCurrentRequiresPermissionProbe
+          self.pendingRefreshAfterCurrent = false
+          self.pendingRefreshAfterCurrentRequiresPermissionProbe = false
+          self.refresh(forceActivePermissionRefresh: requiresPermissionProbe)
+        }
       }
     }
   }

@@ -179,14 +179,17 @@ function isSlackWorkspaceUrl(url: string): boolean {
   );
 }
 
+export const SLACK_CONTINUE_IN_BROWSER_LABEL_PATTERN =
+  /(continue in browser|use slack in (?:your )?browser)/i;
+
 async function continueSlackInBrowser(page: Page): Promise<void> {
   if (!page.url().includes("slack.com")) {
     return;
   }
 
   const continueControl = page
-    .getByRole("button", { name: /continue in browser/i })
-    .or(page.getByRole("link", { name: /continue in browser/i }))
+    .getByRole("button", { name: SLACK_CONTINUE_IN_BROWSER_LABEL_PATTERN })
+    .or(page.getByRole("link", { name: SLACK_CONTINUE_IN_BROWSER_LABEL_PATTERN }))
     .first();
   if ((await continueControl.count().catch(() => 0)) === 0) {
     return;

@@ -2,7 +2,10 @@ import { lstatSync, mkdtempSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { cleanupStaleChromiumSingleton } from "./chromium-worker.js";
+import {
+  cleanupStaleChromiumSingleton,
+  SLACK_CONTINUE_IN_BROWSER_LABEL_PATTERN,
+} from "./chromium-worker.js";
 
 function fileExists(path: string): boolean {
   try {
@@ -51,5 +54,13 @@ describe("cleanupStaleChromiumSingleton", () => {
     cleanupStaleChromiumSingleton(profileDir);
 
     expect(fileExists(join(profileDir, "SingletonLock"))).toBe(true);
+  });
+});
+
+describe("SLACK_CONTINUE_IN_BROWSER_LABEL_PATTERN", () => {
+  it("matches Slack redirect browser links", () => {
+    expect(SLACK_CONTINUE_IN_BROWSER_LABEL_PATTERN.test("Continue in browser")).toBe(true);
+    expect(SLACK_CONTINUE_IN_BROWSER_LABEL_PATTERN.test("use Slack in your browser")).toBe(true);
+    expect(SLACK_CONTINUE_IN_BROWSER_LABEL_PATTERN.test("use Slack in browser")).toBe(true);
   });
 });

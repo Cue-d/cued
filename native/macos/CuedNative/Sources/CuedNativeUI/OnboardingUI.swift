@@ -638,7 +638,7 @@ public struct CuedOnboardingView: View {
       Text("Platforms")
         .font(.largeTitle.weight(.semibold))
 
-      Text("Connect the sources Cued should sync on this Mac. Slack supports multiple workspaces, and local sources will unlock as soon as the required permissions are ready.")
+      Text("Connect sources to sync. Large message histories can take some time.")
         .font(.body)
         .foregroundStyle(.secondary)
         .multilineTextAlignment(.center)
@@ -1020,7 +1020,7 @@ public struct CuedOnboardingView: View {
       if integration.authState == "requested" || integration.authState == "in_progress" {
         return "Authentication is in progress."
       }
-      if integration.authState == "blocked" || integration.authState == "check_failed" {
+      if installerShouldShowAuthAttention(configuration.platform, authState: integration.authState) {
         return "Authentication needs attention. Try again."
       }
       return installerIsConnectedIntegrationState(integration.authState)
@@ -1068,8 +1068,8 @@ public struct CuedOnboardingView: View {
     }
 
     let title =
-      integration.authState == "failed" || integration.authState == "blocked"
-        || integration.authState == "check_failed"
+      integration.authState == "failed"
+        || installerShouldShowAuthAttention(configuration.platform, authState: integration.authState)
         ? "Connect again"
         : "Connect"
     return (
@@ -1200,7 +1200,7 @@ public struct CuedOnboardingView: View {
     for configuration: InstallerPlatformConfiguration,
     integration: InstallerIntegrationStatus
   ) -> String {
-    var parts = [installerReadableIntegrationState(integration.authState)]
+    var parts = [installerReadableIntegrationState(configuration.platform, integration.authState)]
     if !integration.enabled && installerIsConnectedIntegrationState(integration.authState) {
       parts.append("turned off")
     }
@@ -1224,7 +1224,7 @@ public struct CuedOnboardingView: View {
   }
 
   private func connectorDetail(_ integration: InstallerIntegrationStatus) -> String {
-    var parts = [installerReadableIntegrationState(integration.authState)]
+    var parts = [installerReadableIntegrationState(integration.platform, integration.authState)]
     if let reason = integration.capability.reason?.trimmingCharacters(in: .whitespacesAndNewlines),
        !reason.isEmpty {
       parts.append(reason)
@@ -1715,7 +1715,7 @@ private func installerIsConnectedIntegrationState(_ value: String) -> Bool {
   value == "authorized" || value == "authenticated"
 }
 
-private func installerReadableIntegrationState(_ value: String) -> String {
+private func installerReadableIntegrationState(_ platform: String, _ value: String) -> String {
   switch value {
   case "authorized", "authenticated":
     return "Authenticated"
@@ -1728,12 +1728,18 @@ private func installerReadableIntegrationState(_ value: String) -> String {
   case "native_helper_missing":
     return "Needs helper"
   case "check_failed":
+    if installerIsQrLinkPlatform(platform) {
+      return "Not authenticated"
+    }
     return "Needs attention"
   case "missing":
     return "Not authenticated"
   case "needs_auth":
     return "Not authenticated"
   case "blocked":
+    if installerIsQrLinkPlatform(platform) {
+      return "Not authenticated"
+    }
     return "Blocked"
   case "not_determined":
     return "Needs permission"
@@ -1742,6 +1748,17 @@ private func installerReadableIntegrationState(_ value: String) -> String {
   default:
     return value.replacingOccurrences(of: "_", with: " ").capitalized
   }
+}
+
+private func installerIsQrLinkPlatform(_ platform: String) -> Bool {
+  platform == "signal" || platform == "whatsapp"
+}
+
+private func installerShouldShowAuthAttention(_ platform: String, authState: String) -> Bool {
+  if installerIsQrLinkPlatform(platform) {
+    return false
+  }
+  return authState == "blocked" || authState == "check_failed"
 }
 
 private func installerPlatformTitle(_ platform: String, fallback: String?) -> String {
