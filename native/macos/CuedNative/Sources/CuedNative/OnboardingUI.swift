@@ -409,7 +409,7 @@ final class OnboardingWindowController: NSWindowController {
       pendingLivePermissionDeadline = nil
       return false
     }
-    return pendingLivePermissionKeys.contains("full_disk_access")
+    return pendingLivePermissionKeys.contains(where: isRetryablePermissionKey)
   }
 
   private func markPendingLivePermissions(flags: [String]) {
