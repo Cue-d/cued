@@ -2,11 +2,7 @@ import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:f
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import {
-  buildContactsSyncBundle,
-  getNativeContactsBinaryCandidates,
-  resolveContactsLoader,
-} from "./sync.js";
+import { buildContactsSyncBundle, resolveContactsLoader } from "./sync.js";
 
 describe("contacts worker loader resolution", () => {
   const tempDirs: string[] = [];

@@ -8,8 +8,8 @@ import {
 describe("discord sync events", () => {
   const currentUser = {
     id: "u-self",
-    username: "theo",
-    global_name: "Theo",
+    username: "avery",
+    global_name: "Avery",
   };
 
   it("builds DM conversation names from recipients", () => {

@@ -1,7 +1,7 @@
 interface:
   display_name: "Cued"
-  short_description: "Inspect Cued's local SQLite store and manage contact memories."
-  default_prompt: "Use $cued to inspect ~/.cued/local.db with sqlite3 -json for reads. Use cued contacts memory add/list/stale for successful useful contact memories."
+  short_description: "Inspect Cued through the local CLI and manage contact memories."
+  default_prompt: "Use $cued to query Cued through `cued sql` for reads; do not open ~/.cued/local.db directly with sqlite3 because the DB may be encrypted. Use cued contacts memory add/list/stale for successful useful contact memories."
 
 policy:
   allow_implicit_invocation: true

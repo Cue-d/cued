@@ -457,7 +457,7 @@ describe("projector", () => {
       payload: {
         sourceEntityKey: "slack:T0A9C9RHZ9T:U123",
         fields: {
-          display_name: "Theo Tarr",
+          display_name: "Avery Example",
         },
         handles: [{ type: "slack_user_id", value: "T0A9C9RHZ9T:U123", deterministic: true }],
       },
@@ -477,13 +477,13 @@ describe("projector", () => {
       SELECT participant_name
       FROM conversation_participants
     `);
-    expect(participantRows).toEqual([{ participant_name: "Theo Tarr" }]);
+    expect(participantRows).toEqual([{ participant_name: "Avery Example" }]);
 
     const messageRows = db.orm().all<{ sender_name: string | null; reaction_count: number }>(sql`
       SELECT sender_name, reaction_count
       FROM messages
     `);
-    expect(messageRows).toEqual([{ sender_name: "Theo Tarr", reaction_count: 1 }]);
+    expect(messageRows).toEqual([{ sender_name: "Avery Example", reaction_count: 1 }]);
 
     db.close();
   });

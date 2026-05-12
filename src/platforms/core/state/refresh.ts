@@ -99,7 +99,7 @@ async function buildWhatsAppManagedState(
       accountJid = helperStatus.accountJid;
       pushName = helperStatus.pushName;
       helperVersion = helperStatus.helperVersion ?? helperVersion;
-      if (helperStatus.authenticated) {
+      if (helperStatus.authenticated && accountJid) {
         authState = "authenticated";
       } else if (existing?.auth_state === "requested" || existing?.auth_state === "in_progress") {
         authState = existing.auth_state;
