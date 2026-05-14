@@ -14,6 +14,7 @@ import {
   resolveSignalCliPath,
 } from "../platforms/signal/cli/binary.js";
 import { inspectSlackHelper } from "../platforms/slack/helper/binary.js";
+import { inspectWhatsAppDesktopSource } from "../platforms/whatsapp/desktop.js";
 import { buildWhatsAppDiagnostics } from "../platforms/whatsapp/diagnostics.js";
 import { getWhatsAppStoreDir, inspectWhatsAppHelper } from "../platforms/whatsapp/helper/binary.js";
 import { readWhatsAppHelperStatus } from "../platforms/whatsapp/helper/status.js";
@@ -583,6 +584,44 @@ async function getWhatsAppLinkCheck(): Promise<DoctorCheck> {
   }
 }
 
+async function getWhatsAppDesktopDatabaseCheck(): Promise<DoctorCheck> {
+  try {
+    const inspected = inspectWhatsAppDesktopSource();
+    if (!inspected.available) {
+      return {
+        name: "whatsapp_desktop_database",
+        status: "unknown",
+        summary: "WhatsApp Desktop database was not found",
+        details: inspected,
+        remediation: "Install or open WhatsApp Desktop, then grant Full Disk Access to Cued.",
+      };
+    }
+    return {
+      name: "whatsapp_desktop_database",
+      status: inspected.messageRows > 0 ? "ok" : "warning",
+      summary:
+        inspected.messageRows > 0
+          ? `WhatsApp Desktop database is readable with ${inspected.messageRows} messages`
+          : "WhatsApp Desktop database is readable but contains no messages",
+      details: inspected,
+      remediation:
+        inspected.messageRows > 0
+          ? undefined
+          : "Open WhatsApp Desktop and wait for recent chats to load before importing history.",
+    };
+  } catch (error) {
+    return {
+      name: "whatsapp_desktop_database",
+      status: "warning",
+      summary: "WhatsApp Desktop database is not readable",
+      details: {
+        error: error instanceof Error ? error.message : String(error),
+      },
+      remediation: "Grant Full Disk Access to Cued or the current terminal and rerun doctor.",
+    };
+  }
+}
+
 function getKeychainItemStatus(
   service: string | null,
   account: string | null,
@@ -748,6 +787,7 @@ export async function buildDoctorReport(
   checks.push(getSlackHelperCheck());
   checks.push(await getWhatsAppHelperCheck());
   checks.push(await getWhatsAppLinkCheck());
+  checks.push(await getWhatsAppDesktopDatabaseCheck());
 
   return {
     daemon: db.getDaemonState(),
