@@ -3401,6 +3401,14 @@ export async function runDaemon(): Promise<void> {
       daemonLogger.warn("menu bar status cache write skipped because SQLite is busy", { reason });
     }
   };
+  const refreshMenuBarStatusNow = (reason: string) => {
+    try {
+      rmSync(CUED_MENU_BAR_STATUS_PATH, { force: true });
+    } catch (error) {
+      daemonLogger.warn("menu bar status cache invalidation failed", { reason, error });
+    }
+    writeMenuBarStatus(reason);
+  };
   const requestMenuBarStatusWrite = (reason: string) => {
     if (menuBarStatusWriteTimer) {
       return;
@@ -4296,8 +4304,9 @@ export async function runDaemon(): Promise<void> {
         requestSignalRealtimeReconcile();
         requestWhatsAppRealtimeReconcile();
         schedulers.wakeProjection();
-        requestMenuBarStatusWrite("auth_state_changed");
+        refreshMenuBarStatusNow("auth_state_changed");
       },
+      refreshMenuBarStatusNow,
     );
   });
 
@@ -4512,6 +4521,7 @@ function handleSocket(
   isBackgroundWorkActive: () => boolean,
   pauseProjectionForAuth: () => void,
   onAuthRuntimeStateChanged: () => void,
+  refreshStatusCacheNow: (reason: string) => void,
 ): void {
   let buffer = "";
 
@@ -4556,6 +4566,7 @@ function handleSocket(
           isBackgroundWorkActive,
           pauseProjectionForAuth,
           onAuthRuntimeStateChanged,
+          refreshStatusCacheNow,
         )
           .then((response) => writeResponse(socket, response))
           .catch((error) => {
@@ -4614,6 +4625,7 @@ async function dispatchRequest(
   isBackgroundWorkActive: () => boolean,
   pauseProjectionForAuth: () => void,
   onAuthRuntimeStateChanged: () => void,
+  refreshStatusCacheNow: (reason: string) => void,
 ): Promise<DaemonResponse> {
   try {
     const runQueueService = new RunQueueService(db, schedulers);
@@ -4851,6 +4863,7 @@ async function dispatchRequest(
         await integrationAuthService.refresh();
         requestRealtimeReconcile();
         reconcileLocalWatchers();
+        refreshStatusCacheNow("integrations_refresh");
         return {
           id: request.id,
           ok: true,
@@ -4872,6 +4885,7 @@ async function dispatchRequest(
             },
           },
         );
+        refreshStatusCacheNow("integrations_connect");
         return {
           id: request.id,
           ok: true,
@@ -4883,6 +4897,7 @@ async function dispatchRequest(
         const result = integrationAuthService.disconnect(request.platform, request.accountKey);
         requestRealtimeReconcile();
         reconcileLocalWatchers();
+        refreshStatusCacheNow("integrations_disconnect");
         return {
           id: request.id,
           ok: true,
@@ -4907,6 +4922,7 @@ async function dispatchRequest(
         );
         requestRealtimeReconcile();
         reconcileLocalWatchers();
+        refreshStatusCacheNow("integrations_remove");
         return {
           id: request.id,
           ok: true,
@@ -4918,6 +4934,7 @@ async function dispatchRequest(
         const result = integrationAuthService.enable(request.platform, request.accountKey);
         requestRealtimeReconcile();
         reconcileLocalWatchers();
+        refreshStatusCacheNow("integrations_enable");
         return {
           id: request.id,
           ok: true,
@@ -4929,6 +4946,7 @@ async function dispatchRequest(
         const result = integrationAuthService.disable(request.platform, request.accountKey);
         requestRealtimeReconcile();
         reconcileLocalWatchers();
+        refreshStatusCacheNow("integrations_disable");
         return {
           id: request.id,
           ok: true,
