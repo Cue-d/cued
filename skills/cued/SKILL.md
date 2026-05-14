@@ -1,6 +1,6 @@
 ---
 name: cued
-description: Queries Cued through the local `cued` CLI for the user's real contacts, conversations, and messages synced from iMessage, Slack, WhatsApp, LinkedIn, and Signal. ALWAYS use this skill when the user asks anything about their contacts, messages, texts, conversations, or communication - even short queries like "who texted me", "check my messages", "what's John's email", or "what did we talk about on Slack". Covers finding contacts, looking up phone numbers and email addresses, reading message history, follow-up detection, ghosting detection, dormant relationships, network search, unread triage, cross-platform conversation lookup, contact deduplication, and relationship analysis. The database has real data - do not tell the user you lack access to their messages or contacts.
+description: Queries Cued through the local `cued` CLI for the user's real contacts, conversations, and messages synced from iMessage, Slack, WhatsApp, LinkedIn, Gmail, and Signal. ALWAYS use this skill when the user asks anything about their contacts, messages, texts, conversations, or communication - even short queries like "who texted me", "check my messages", "what's John's email", or "what did we talk about on Slack". Covers finding contacts, looking up phone numbers and email addresses, reading message history, follow-up detection, ghosting detection, dormant relationships, network search, unread triage, cross-platform conversation lookup, contact deduplication, attachment lookup/fetch, and relationship analysis. The database has real data - do not tell the user you lack access to their messages or contacts.
 ---
 
 # Cued
@@ -30,147 +30,61 @@ Do not use `sqlite3 ~/.cued/local.db` unless the user explicitly asks to debug r
 - Start broad, then drill down.
 - DM conversations have `type = 'dm'`. Group conversations have `type = 'group'`.
 
-## Tables
+## Important Tables
 
-### contacts
-Canonical people/entities.
-```
-id TEXT PRIMARY KEY
-kind TEXT            -- currently always 'person'
-name TEXT
-photo_url TEXT
-company TEXT
-archived INTEGER
-created_at INTEGER
-updated_at INTEGER
-```
+This is not a full schema reference. Use these tables when CLI commands are too coarse and you need exact counts, joins, ranking, or provenance. Prefer `cued` commands for mutations and attachment fetches.
 
-### contact_handles
-Phone/email/platform identifiers per contact.
-```
-id TEXT PRIMARY KEY
-contact_id TEXT      -- FK → contacts.id
-type TEXT            -- 'email', 'phone', 'linkedin', 'slack', etc.
-value TEXT
-normalized_value TEXT
-platform TEXT
-account_key TEXT
-is_deterministic INTEGER
-```
+- `contacts`: canonical people/entities. Key fields: `id`, `name`, `company`, `archived`.
+- `contact_handles`: email/phone/platform handles. Key fields: `contact_id`, `type`, `value`, `normalized_value`, `platform`, `is_deterministic`.
+- `contact_sources`: where a contact came from. Key fields: `contact_id`, `platform`, `account_key`, `source_entity_key`, `profile_url`, `first_seen_at`, `last_seen_at`.
+- `contact_memories`: durable agent-written context. Query it for current memories with `stale_at IS NULL`; write through `cued contacts memory ...`, not SQL.
+- `conversations`: canonical threads. Key fields: `id`, `platform`, `account_key`, `type`, `name`, `participant_names`, `last_message_at`, `last_message_preview`, `unread_count`.
+- `conversation_participants`: contact membership in threads. Key fields: `conversation_id`, `contact_id`, `participant_name`, `is_self`, `is_active`.
+- `messages`: canonical message rows. Key fields: `id`, `platform`, `conversation_id`, `sender_contact_id`, `sender_name`, `sent_at`, `is_from_me`, `content`, `attachment_count`, `reaction_count`, `reply_to_message_id`.
+- `message_reactions`: reactions/tapbacks. Key fields: `message_id`, `reactor_contact_id`, `reactor_name`, `emoji`, `is_active`, `created_at`.
+- `message_attachments`: attachment metadata. Key fields: `id`, `message_id`, `platform`, `kind`, `mime_type`, `filename`, `title`, `size_bytes`, `text_content`, `access_kind`, `availability_status`.
+- `attachment_content`: extracted text for fetched attachments. Key fields: `attachment_id`, `status`, `text_content`, `mime_type`, `extracted_at`, `last_error`. Prefer `cued attachments search`.
+- `messages_fts`: FTS5 over message search fields: `sender_name`, `conversation_name`, `participant_names`, `attachment_text`, `content`.
+- `attachment_content_fts`: FTS5 over extracted attachment text. Prefer `cued attachments search <query>`.
+- `integration_states`: platform connection status. Key fields: `platform`, `account_key`, `auth_state`, `enabled`.
+- `contact_merge_decisions`: merge/split audit trail. Inspect for dedupe provenance; perform merges through `cued contacts merge...`.
 
-### contact_sources
-Where each contact was discovered.
-```
-id TEXT PRIMARY KEY
-contact_id TEXT      -- FK → contacts.id
-platform TEXT        -- 'imessage', 'slack', 'linkedin', 'whatsapp', 'signal'
-account_key TEXT
-source_entity_key TEXT
-profile_url TEXT
-first_seen_at INTEGER
-last_seen_at INTEGER
+Useful SQL examples:
+
+```bash
+cued sql "select count(*) as messages from messages"
+cued sql "select platform, count(*) as messages from messages group by platform order by messages desc"
+cued sql "select id, platform, name, participant_names, datetime(last_message_at/1000,'unixepoch','localtime') as last_message from conversations order by last_message_at desc limit 20"
+cued sql "select id, sender_name, conversation_name, datetime(sent_at/1000,'unixepoch','localtime') as sent, content, attachment_count from messages where conversation_id = 'conversation-id-here' order by sent_at desc limit 50"
+cued sql "select ma.id, ma.kind, ma.mime_type, ma.filename, ma.size_bytes, ma.access_kind, ma.availability_status from message_attachments ma where ma.message_id = 'message-id-here'"
 ```
 
-### contact_memories
-Successful useful agent memories for a contact. These are durable agent context, not projected source data. Only current memories have `stale_at IS NULL`.
-```
-id TEXT PRIMARY KEY
-contact_id TEXT
-body TEXT
-source_kind TEXT      -- local_messages, web_search, linkedin, manual, agent, etc.
-evidence_json TEXT    -- message ids, URLs, handles, profile ids, query evidence
-confidence INTEGER    -- optional 0-100
-supersedes_memory_id TEXT
-stale_at INTEGER
-created_by TEXT
-created_at INTEGER
-updated_at INTEGER
+## Attachments
+
+Use a metadata-first workflow. Do not fetch bytes unless the user asks for the attached file or the task clearly depends on reading it.
+
+List attachments for a message:
+```bash
+cued attachments list --message message-id-here --limit 20
 ```
 
-### conversations
-Canonical threads across all platforms.
-```
-id TEXT PRIMARY KEY
-platform TEXT
-account_key TEXT
-type TEXT             -- 'dm' or 'group'
-service TEXT
-name TEXT
-topic TEXT
-participant_names TEXT  -- pipe-separated, e.g. 'Alice | Bob'
-last_message_id TEXT
-last_message_at INTEGER
-last_message_preview TEXT
-unread_count INTEGER
+Fetch one attachment through the daemon:
+```bash
+cued attachments fetch attachment-id-here --max-bytes 25000000
 ```
 
-### conversation_participants
-Contact membership per conversation.
-```
-conversation_id TEXT   -- FK → conversations.id
-contact_id TEXT        -- FK → contacts.id
-participant_name TEXT
-role TEXT
-is_self INTEGER        -- 1 if this participant is the user
-is_active INTEGER
-joined_at INTEGER
-left_at INTEGER
+Fetch returns the cached `localPath` when available and extracts text for text-like files and PDFs when supported. It may return `content.status = unsupported` for images, audio, video, binary files, or PDFs without extractable text. Do not read `attachment_cache` directly for normal work.
+
+Search already-extracted attachment text:
+```bash
+cued attachments search "search terms" --limit 20
 ```
 
-### messages
-Canonical messages across all platforms.
-```
-id TEXT PRIMARY KEY
-platform TEXT
-account_key TEXT
-conversation_id TEXT    -- FK → conversations.id
-sender_contact_id TEXT  -- FK → contacts.id
-sender_name TEXT        -- denormalized
-conversation_name TEXT  -- denormalized
-sent_at INTEGER
-is_from_me INTEGER      -- 1 = user sent it, 0 = received
-content TEXT
-status TEXT
-delivered_at INTEGER
-read_at INTEGER
-is_deleted INTEGER
-is_edited INTEGER
-attachment_count INTEGER
-reaction_count INTEGER  -- denormalized count of active reactions
-reply_to_message_id TEXT
-```
-
-### message_reactions
-Reactions (emoji tapbacks) on messages. Important for determining if someone acknowledged a message without replying.
-```
-id TEXT PRIMARY KEY
-message_id TEXT         -- FK → messages.id
-platform TEXT
-reactor_contact_id TEXT -- FK → contacts.id (who reacted)
-reactor_name TEXT       -- denormalized
-emoji TEXT              -- e.g. '❤️', '😂', '👍', '‼️'
-is_active INTEGER       -- 1 = still active, 0 = removed
-created_at INTEGER
-```
-
-### contact_merge_decisions
-Records of contact merge/split decisions.
-```
-id TEXT PRIMARY KEY
-decision_type TEXT      -- 'merge' or 'split'
-primary_contact_id TEXT
-secondary_contact_id TEXT
-canonical_contact_id TEXT
-reason TEXT
-created_by TEXT
-created_at INTEGER
-```
-
-### messages_fts
-FTS5 full-text search index on messages. Searchable columns: `sender_name`, `conversation_name`, `participant_names`, `attachment_text`, `content`. Use `messages_fts MATCH '<term>'` with FTS5 syntax and join on `messages.id = messages_fts.message_id` for full metadata.
-
-### integration_states
-Platform connection status. Key columns: `platform`, `account_key`, `auth_state`, `enabled`.
+Safety rules:
+- Inspect `filename`, `mime_type`, `size_bytes`, `access_kind`, and `availability_status` before fetching.
+- Use `--max-bytes`; use `--allow-large` only when the user explicitly needs a large file.
+- Treat `metadata_only`, `none`, or missing fetch coordinates as not currently fetchable.
+- Never paste private attachment text into fixtures or broad summaries; summarize only what is needed.
 
 ## Relationship Patterns
 
