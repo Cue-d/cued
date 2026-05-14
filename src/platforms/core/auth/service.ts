@@ -31,6 +31,7 @@ type RuntimeAuthSessionMap = Map<
 
 type ConnectLifecycle = {
   emitAuthenticatedHook?: (platform: string, accountKey: string) => Promise<void> | void;
+  shouldQueueAuthenticatedSync?: (platform: Platform, accountKey: string) => boolean;
   wakeIngest?: () => void;
   onRuntimeStateChanged?: () => void;
 };
@@ -256,7 +257,12 @@ export class IntegrationAuthService {
       integration = getIntegrationSummary(this.db, integration.platform, integration.accountKey);
     }
 
-    if (integration?.authState === "authenticated" && integration.syncCapable) {
+    if (
+      integration?.authState === "authenticated" &&
+      integration.syncCapable &&
+      (lifecycle.shouldQueueAuthenticatedSync?.(integration.platform, integration.accountKey) ??
+        true)
+    ) {
       if (!this.db.hasQueuedOrRunningRun(integration.platform, integration.accountKey)) {
         this.db.queueSyncRun({
           platform: integration.platform,

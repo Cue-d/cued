@@ -4318,6 +4318,7 @@ export async function runDaemon(): Promise<void> {
         refreshMenuBarStatusNow("auth_state_changed");
       },
       refreshMenuBarStatusNow,
+      shouldRunRealtimePlatform,
     );
   });
 
@@ -4533,6 +4534,7 @@ function handleSocket(
   pauseProjectionForAuth: () => void,
   onAuthRuntimeStateChanged: () => void,
   refreshStatusCacheNow: (reason: string) => void,
+  shouldRunRealtimePlatform: (platform: AdapterPlatform) => boolean,
 ): void {
   let buffer = "";
 
@@ -4578,6 +4580,7 @@ function handleSocket(
           pauseProjectionForAuth,
           onAuthRuntimeStateChanged,
           refreshStatusCacheNow,
+          shouldRunRealtimePlatform,
         )
           .then((response) => writeResponse(socket, response))
           .catch((error) => {
@@ -4637,6 +4640,7 @@ async function dispatchRequest(
   pauseProjectionForAuth: () => void,
   onAuthRuntimeStateChanged: () => void,
   refreshStatusCacheNow: (reason: string) => void,
+  shouldRunRealtimePlatform: (platform: AdapterPlatform) => boolean,
 ): Promise<DaemonResponse> {
   try {
     const runQueueService = new RunQueueService(db, schedulers);
@@ -4891,6 +4895,8 @@ async function dispatchRequest(
           {
             wakeIngest: schedulers.wakeIngest,
             onRuntimeStateChanged: onAuthRuntimeStateChanged,
+            shouldQueueAuthenticatedSync: (platform) =>
+              platform !== "whatsapp" || shouldRunRealtimePlatform("whatsapp"),
             emitAuthenticatedHook: async (platform, accountKey) => {
               await emitAuthenticatedHook(db, platform, accountKey);
             },

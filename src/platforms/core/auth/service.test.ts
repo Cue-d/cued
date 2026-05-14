@@ -16,6 +16,7 @@ const inspectSlackHelperMock = vi.hoisted(() =>
     versionSupported: true,
   })),
 );
+const runAuthSessionSyncMock = vi.hoisted(() => vi.fn());
 const startAuthSessionMock = vi.hoisted(() =>
   vi.fn(() => ({
     child: { pid: 12345 } as ChildProcess,
@@ -36,7 +37,7 @@ vi.mock("../../linkedin/auth/keychain-import.js", () => ({
 }));
 
 vi.mock("./runtime.js", () => ({
-  runAuthSessionSync: vi.fn(),
+  runAuthSessionSync: runAuthSessionSyncMock,
   startAuthSession: startAuthSessionMock,
 }));
 
@@ -218,6 +219,38 @@ describe("IntegrationAuthService", () => {
     expect(result.integration.accountKey).toBe("T_EXISTING");
     expect(result.integration.authState).toBe("authenticated");
     expect(result.integration.syncCapable).toBe(false);
+    expect(db.listRecentRuns(1)).toEqual([]);
+    expect(wakeIngest).not.toHaveBeenCalled();
+
+    db.close();
+  });
+
+  it("does not queue post-auth sync when the lifecycle gate rejects it", async () => {
+    const db = createDb();
+    runAuthSessionSyncMock.mockResolvedValue({
+      state: "authenticated",
+      keychainService: null,
+      keychainAccount: null,
+      resultSummary: {
+        runtime: "qr_native",
+        helper: "cued-whatsapp-helper",
+        durableStatusVerified: true,
+      },
+      errorSummary: null,
+    });
+    const shouldQueueAuthenticatedSync = vi.fn(() => false);
+    const wakeIngest = vi.fn();
+
+    const service = new IntegrationAuthService(db);
+    const result = await service.connectLocally("whatsapp", undefined, {
+      shouldQueueAuthenticatedSync,
+      wakeIngest,
+    });
+
+    expect(result.integration?.platform).toBe("whatsapp");
+    expect(result.integration?.authState).toBe("authenticated");
+    expect(result.integration?.syncCapable).toBe(true);
+    expect(shouldQueueAuthenticatedSync).toHaveBeenCalledWith("whatsapp", "default");
     expect(db.listRecentRuns(1)).toEqual([]);
     expect(wakeIngest).not.toHaveBeenCalled();
 
