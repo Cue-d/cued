@@ -14,6 +14,16 @@ export type WhatsAppResyncCoverage = {
   newestMessageAt: number | null;
 };
 
+export type WhatsAppDesktopCursor = {
+  importedAt?: number;
+  sourcePath?: string;
+  chatRows?: number;
+  contactRows?: number;
+  messageRows?: number;
+  oldestMessageAt?: number | null;
+  newestMessageAt?: number | null;
+};
+
 export type WhatsAppSourceCursor = {
   lastSyncAt?: number;
   resyncCursor?: string | null;
@@ -22,6 +32,7 @@ export type WhatsAppSourceCursor = {
   resyncSyncMode?: SyncMode;
   resyncStats?: WhatsAppResyncStats;
   resyncCoverage?: WhatsAppResyncCoverage;
+  desktopDb?: WhatsAppDesktopCursor;
 };
 
 function numberOrZero(value: unknown): number {
@@ -57,6 +68,27 @@ function parseCoverage(value: unknown): WhatsAppResyncCoverage | undefined {
   };
 }
 
+function optionalPositiveNumber(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : undefined;
+}
+
+function parseDesktopCursor(value: unknown): WhatsAppDesktopCursor | undefined {
+  if (!value || typeof value !== "object") {
+    return undefined;
+  }
+  const raw = value as Record<string, unknown>;
+  const parsed: WhatsAppDesktopCursor = {
+    importedAt: optionalPositiveNumber(raw.importedAt),
+    sourcePath: typeof raw.sourcePath === "string" ? raw.sourcePath : undefined,
+    chatRows: optionalPositiveNumber(raw.chatRows),
+    contactRows: optionalPositiveNumber(raw.contactRows),
+    messageRows: optionalPositiveNumber(raw.messageRows),
+    oldestMessageAt: nullableNumber(raw.oldestMessageAt),
+    newestMessageAt: nullableNumber(raw.newestMessageAt),
+  };
+  return Object.values(parsed).some((entry) => entry !== undefined) ? parsed : undefined;
+}
+
 export function parseWhatsAppSourceCursor(
   raw: Record<string, unknown> | null,
 ): WhatsAppSourceCursor {
@@ -76,7 +108,34 @@ export function parseWhatsAppSourceCursor(
         : undefined,
     resyncStats: parseStats(raw?.resyncStats),
     resyncCoverage: parseCoverage(raw?.resyncCoverage),
+    desktopDb: parseDesktopCursor(raw?.desktopDb),
   };
+}
+
+export const DEFAULT_WHATSAPP_DESKTOP_HELPER_OVERLAP_MS = 7 * 24 * 60 * 60 * 1000;
+
+export function selectWhatsAppHelperSinceMs(input: {
+  cursor: string | null;
+  sourceCursor: WhatsAppSourceCursor;
+  syncMode: SyncMode;
+  checkpointLastSuccessAt?: number | null;
+  desktopOverlapMs?: number;
+}): number | null {
+  if (input.cursor != null) {
+    return input.sourceCursor.resyncSinceMs ?? null;
+  }
+  if (input.syncMode !== "incremental") {
+    return null;
+  }
+  if (input.sourceCursor.lastSyncAt != null) {
+    return input.sourceCursor.lastSyncAt;
+  }
+  const desktopNewestMessageAt = input.sourceCursor.desktopDb?.newestMessageAt;
+  if (typeof desktopNewestMessageAt === "number" && Number.isFinite(desktopNewestMessageAt)) {
+    const overlapMs = input.desktopOverlapMs ?? DEFAULT_WHATSAPP_DESKTOP_HELPER_OVERLAP_MS;
+    return Math.max(0, desktopNewestMessageAt - Math.max(0, overlapMs));
+  }
+  return input.checkpointLastSuccessAt ?? null;
 }
 
 export function emptyWhatsAppResyncStats(): WhatsAppResyncStats {

@@ -104,6 +104,32 @@ export class RunQueueService {
     runIds: string[];
     targets: string[];
   } {
+    if (source === "whatsapp-desktop") {
+      const accountKey = getDefaultAccountKeyForPlatform("whatsapp");
+      if (this.db.hasQueuedOrRunningRun("whatsapp", accountKey)) {
+        return {
+          queued: false,
+          runId: null,
+          runIds: [],
+          targets: ["whatsapp-desktop"],
+        };
+      }
+      const runId = this.db.queueSyncRun({
+        platform: "whatsapp",
+        accountKey,
+        runType: "sync",
+        trigger: "cli",
+        details: { source: "whatsapp_desktop", accountKey },
+      });
+      this.schedulers.wakeIngest?.();
+      return {
+        queued: true,
+        runId,
+        runIds: [runId],
+        targets: ["whatsapp-desktop"],
+      };
+    }
+
     if (source && !isAdapterPlatform(source)) {
       throw new Error(`Unsupported sync source: ${source}`);
     }
