@@ -35,6 +35,7 @@ describe("integration state management", () => {
     process.env.PATH = originalPath;
     delete process.env.CUED_CONTACTS_NATIVE_BINARY;
     delete process.env.CUED_IMESSAGE_DB_PATH;
+    delete process.env.CUED_SIGNAL_DIR;
     delete process.env.CUED_SIGNAL_CLI_PATH;
     delete process.env.CUED_SLACK_APP_BINARY;
     delete process.env.CUED_SLACK_HELPER_BINARY;
@@ -74,6 +75,7 @@ describe("integration state management", () => {
   }
 
   function createPackagedSignalHelper(version = "0.12.9"): string {
+    process.env.CUED_SIGNAL_DIR = createTempDir("cued-signal-config-");
     const appPath = join(createTempDir("cued-app-"), "Cued.app");
     const helperPath = join(
       appPath,
