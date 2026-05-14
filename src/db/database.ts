@@ -1783,6 +1783,7 @@ export class CuedDatabase {
       .onConflictDoUpdate({
         target: [integrationStates.platform, integrationStates.accountKey],
         set: {
+          id: values.id,
           displayName: values.displayName,
           authState: values.authState,
           enabled: values.enabled,
