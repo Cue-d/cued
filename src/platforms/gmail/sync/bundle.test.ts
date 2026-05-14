@@ -24,12 +24,13 @@ function gmailMessage(input: {
   cc?: string;
   subject?: string;
   internalDate?: string;
+  payload?: GmailMessage["payload"];
 }): GmailMessage {
   return {
     id: input.id,
     threadId: input.threadId,
     internalDate: input.internalDate ?? "1700000000000",
-    payload: {
+    payload: input.payload ?? {
       headers: [
         { name: "From", value: input.from },
         { name: "To", value: input.to ?? "Me <me@example.com>" },
@@ -158,6 +159,58 @@ describe("Gmail sync bundle", () => {
           { sourceEntityKey: "gmail:bob@example.com", isSelf: false },
           { sourceEntityKey: "gmail:me@example.com", isSelf: true },
         ]),
+      }),
+    );
+  });
+
+  it("projects Gmail attachment metadata with provider fetch coordinates", () => {
+    const rawEvents = buildGmailRawEvents({
+      accountKey: "me@example.com",
+      emailAddress: "me@example.com",
+      observedAt: 1700000000000,
+      messages: [
+        gmailMessage({
+          id: "m-attachment",
+          threadId: "t-1",
+          from: "Alice <alice@example.com>",
+          payload: {
+            mimeType: "multipart/mixed",
+            headers: [
+              { name: "From", value: "Alice <alice@example.com>" },
+              { name: "To", value: "Me <me@example.com>" },
+              { name: "Subject", value: "Spec" },
+            ],
+            parts: [
+              {
+                partId: "0",
+                mimeType: "text/plain",
+                body: { data: Buffer.from("see attached").toString("base64url") },
+              },
+              {
+                partId: "1",
+                mimeType: "application/pdf",
+                filename: "spec.pdf",
+                body: { attachmentId: "att-1", size: 1234 },
+              },
+            ],
+          },
+        }),
+      ],
+    });
+
+    const message = rawEvents.find((event) => event.entityKind === "message");
+    expect(message?.payload).toEqual(
+      expect.objectContaining({
+        attachments: [
+          expect.objectContaining({
+            sourceAttachmentKey: "gmail:m-attachment:attachment:att-1",
+            filename: "spec.pdf",
+            mime_type: "application/pdf",
+            access_kind: "provider_fetch",
+            access_ref: { messageId: "m-attachment", attachmentId: "att-1" },
+            availability_status: "available",
+          }),
+        ],
       }),
     );
   });

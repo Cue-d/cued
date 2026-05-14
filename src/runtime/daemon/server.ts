@@ -64,6 +64,7 @@ import {
   buildDiscordMessageEvent,
 } from "../../platforms/discord/sync/events.js";
 import { isDiscordDmChannel } from "../../platforms/discord/types.js";
+import { GmailClient } from "../../platforms/gmail/api/client.js";
 import { DEFAULT_CALL_HISTORY_DB_PATH } from "../../platforms/imessage/call-history.js";
 import { DEFAULT_CHAT_DB_PATH } from "../../platforms/imessage/reader.js";
 import { loadLinkedInSessionSecret } from "../../platforms/linkedin/auth/session-store.js";
@@ -4958,6 +4959,24 @@ async function dispatchRequest(
             allowLarge: request.allowLarge,
             extractText: request.extractText,
             providerFetchers: {
+              gmail: async (attachment) => {
+                const accessRef = parseJsonRecord(attachment.access_ref_json);
+                const messageId =
+                  typeof accessRef?.messageId === "string" ? accessRef.messageId : null;
+                const attachmentId =
+                  typeof accessRef?.attachmentId === "string" ? accessRef.attachmentId : null;
+                if (!messageId || !attachmentId) {
+                  throw new Error("Gmail attachment is missing provider fetch coordinates");
+                }
+
+                const client = GmailClient.fromKeychain(attachment.account_key);
+                const result = await client.getAttachment(messageId, attachmentId);
+                return {
+                  buffer: Buffer.from(result.data.replace(/-/g, "+").replace(/_/g, "/"), "base64"),
+                  mimeType: attachment.mime_type,
+                  filename: attachment.filename,
+                };
+              },
               whatsapp: async (attachment) => {
                 const accessRef = parseJsonRecord(attachment.access_ref_json);
                 const chatJID = typeof accessRef?.chatJID === "string" ? accessRef.chatJID : null;

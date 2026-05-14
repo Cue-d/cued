@@ -46,11 +46,18 @@ export interface GmailMessage {
 }
 
 export interface GmailMessagePayload {
+  partId?: string;
   mimeType?: string;
   filename?: string;
   headers?: Array<{ name: string; value: string }>;
-  body?: { data?: string; size?: number };
+  body?: { data?: string; size?: number; attachmentId?: string };
   parts?: GmailMessagePayload[];
+}
+
+export interface GmailAttachment {
+  attachmentId?: string;
+  data: string;
+  size?: number;
 }
 
 export function readGmailSecret(accountKey: string): StoredGmailCredentials {
@@ -132,6 +139,14 @@ export class GmailClient {
     const params = new URLSearchParams({ format: "full" });
     return this.request<GmailMessage>(
       `/gmail/v1/users/me/messages/${encodeURIComponent(id)}?${params}`,
+    );
+  }
+
+  async getAttachment(messageId: string, attachmentId: string): Promise<GmailAttachment> {
+    return this.request<GmailAttachment>(
+      `/gmail/v1/users/me/messages/${encodeURIComponent(messageId)}/attachments/${encodeURIComponent(
+        attachmentId,
+      )}`,
     );
   }
 
