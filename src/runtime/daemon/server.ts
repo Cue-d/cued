@@ -111,6 +111,7 @@ import {
   emptyWhatsAppResyncStats,
   mergeWhatsAppResyncCoverage,
   parseWhatsAppSourceCursor,
+  selectWhatsAppHelperSinceMs,
   summarizeWhatsAppMessageCoverage,
 } from "../../platforms/whatsapp/sync/proof.js";
 import type {
@@ -3699,20 +3700,29 @@ export async function runDaemon(): Promise<void> {
 
       const platform = currentRun.platform;
       const accountKey = currentRun.account_key ?? getDefaultAccountKeyForPlatform(platform);
+      const runDetails = safeParseJsonRecord(
+        currentRun.details_json ?? null,
+        "sync_runs.details_json",
+      );
       const checkpoint = db.getCheckpoint(currentRun.platform, accountKey);
       const sourceCursor = safeParseJsonRecord(
         checkpoint?.source_cursor_json ?? null,
         "sync_checkpoints.source_cursor_json",
       );
-      const envOverrides = buildAdapterInvocationEnv({
-        platform,
-        checkpointSourceCursorJson: checkpoint?.source_cursor_json ?? null,
-        proofs: selectAdapterInvocationProofs({
+      const envOverrides = {
+        ...buildAdapterInvocationEnv({
           platform,
-          proofs: db.listSyncProofs(platform, accountKey),
-          sourceCursor,
+          checkpointSourceCursorJson: checkpoint?.source_cursor_json ?? null,
+          proofs: selectAdapterInvocationProofs({
+            platform,
+            proofs: db.listSyncProofs(platform, accountKey),
+            sourceCursor,
+          }),
         }),
-      });
+        ...(platform === "whatsapp" && runDetails?.source === "whatsapp_desktop"
+          ? { CUED_WHATSAPP_SYNC_SOURCE: "desktop_db" }
+          : {}),
+      };
 
       const adapterStartedAt = now();
       let adapterFetchMs = 0;
@@ -3739,7 +3749,7 @@ export async function runDaemon(): Promise<void> {
         lastInsertedRowId: null,
       };
 
-      if (platform === "whatsapp") {
+      if (platform === "whatsapp" && runDetails?.source !== "whatsapp_desktop") {
         const session =
           whatsAppRealtime.getSession(accountKey) ??
           (await whatsAppRealtime.waitForConnected(accountKey, 10_000));
@@ -3763,12 +3773,12 @@ export async function runDaemon(): Promise<void> {
           : checkpoint?.source_cursor_json
             ? "incremental"
             : "full";
-        const sinceMs =
-          cursor != null
-            ? (whatsappCursor.resyncSinceMs ?? null)
-            : bundleSyncMode === "incremental"
-              ? (checkpoint?.last_success_at ?? whatsappCursor.lastSyncAt ?? null)
-              : null;
+        const sinceMs = selectWhatsAppHelperSinceMs({
+          cursor,
+          sourceCursor: whatsappCursor,
+          syncMode: bundleSyncMode,
+          checkpointLastSuccessAt: checkpoint?.last_success_at ?? null,
+        });
         const resyncStartedAt = whatsappCursor.resyncStartedAt ?? ingestStartedAt;
         const pageBudget = getWhatsAppResyncPageBudget();
         let pageCount = 0;
@@ -3845,6 +3855,7 @@ export async function runDaemon(): Promise<void> {
             }
           : null;
         bundleSourceCursor = {
+          ...(whatsappCursor.desktopDb ? { desktopDb: whatsappCursor.desktopDb } : {}),
           lastSyncAt: hasMore
             ? (whatsappCursor.lastSyncAt ?? checkpoint?.last_success_at)
             : lastCompletedAt,
@@ -4307,6 +4318,7 @@ export async function runDaemon(): Promise<void> {
         refreshMenuBarStatusNow("auth_state_changed");
       },
       refreshMenuBarStatusNow,
+      shouldRunRealtimePlatform,
     );
   });
 
@@ -4522,6 +4534,7 @@ function handleSocket(
   pauseProjectionForAuth: () => void,
   onAuthRuntimeStateChanged: () => void,
   refreshStatusCacheNow: (reason: string) => void,
+  shouldRunRealtimePlatform: (platform: AdapterPlatform) => boolean,
 ): void {
   let buffer = "";
 
@@ -4567,6 +4580,7 @@ function handleSocket(
           pauseProjectionForAuth,
           onAuthRuntimeStateChanged,
           refreshStatusCacheNow,
+          shouldRunRealtimePlatform,
         )
           .then((response) => writeResponse(socket, response))
           .catch((error) => {
@@ -4626,6 +4640,7 @@ async function dispatchRequest(
   pauseProjectionForAuth: () => void,
   onAuthRuntimeStateChanged: () => void,
   refreshStatusCacheNow: (reason: string) => void,
+  shouldRunRealtimePlatform: (platform: AdapterPlatform) => boolean,
 ): Promise<DaemonResponse> {
   try {
     const runQueueService = new RunQueueService(db, schedulers);
@@ -4880,6 +4895,8 @@ async function dispatchRequest(
           {
             wakeIngest: schedulers.wakeIngest,
             onRuntimeStateChanged: onAuthRuntimeStateChanged,
+            shouldQueueAuthenticatedSync: (platform) =>
+              platform !== "whatsapp" || shouldRunRealtimePlatform("whatsapp"),
             emitAuthenticatedHook: async (platform, accountKey) => {
               await emitAuthenticatedHook(db, platform, accountKey);
             },

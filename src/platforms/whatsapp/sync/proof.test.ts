@@ -2,8 +2,10 @@ import { describe, expect, it } from "vitest";
 import {
   addWhatsAppResyncStats,
   buildWhatsAppMessagesProof,
+  DEFAULT_WHATSAPP_DESKTOP_HELPER_OVERLAP_MS,
   mergeWhatsAppResyncCoverage,
   parseWhatsAppSourceCursor,
+  selectWhatsAppHelperSinceMs,
   summarizeWhatsAppMessageCoverage,
 } from "./proof.js";
 
@@ -26,9 +28,26 @@ describe("WhatsApp sync proof helpers", () => {
         oldestMessageAt: 10,
         newestMessageAt: 20,
       },
+      desktopDb: {
+        importedAt: 300,
+        sourcePath: "/Users/example/Library/Group Containers/group.net.whatsapp.WhatsApp.shared",
+        chatRows: 4,
+        contactRows: 5,
+        messageRows: 6,
+        oldestMessageAt: 10,
+        newestMessageAt: 20,
+      },
     });
 
     expect(parsed.resyncSyncMode).toBe("full");
+    expect(parsed.desktopDb).toMatchObject({
+      importedAt: 300,
+      chatRows: 4,
+      contactRows: 5,
+      messageRows: 6,
+      oldestMessageAt: 10,
+      newestMessageAt: 20,
+    });
     expect(
       addWhatsAppResyncStats(parsed.resyncStats!, {
         pageCount: 1,
@@ -46,11 +65,66 @@ describe("WhatsApp sync proof helpers", () => {
     });
   });
 
+  it("starts helper sync from desktop coverage with overlap when no helper cursor exists", () => {
+    const desktopNewest = 1_800_000_000_000;
+    const parsed = parseWhatsAppSourceCursor({
+      desktopDb: {
+        newestMessageAt: desktopNewest,
+      },
+    });
+
+    expect(
+      selectWhatsAppHelperSinceMs({
+        cursor: null,
+        sourceCursor: parsed,
+        syncMode: "incremental",
+        checkpointLastSuccessAt: desktopNewest + 60_000,
+      }),
+    ).toBe(desktopNewest - DEFAULT_WHATSAPP_DESKTOP_HELPER_OVERLAP_MS);
+  });
+
+  it("prefers helper progress over desktop coverage after realtime sync has run", () => {
+    const parsed = parseWhatsAppSourceCursor({
+      lastSyncAt: 1_800_000_000_000,
+      desktopDb: {
+        newestMessageAt: 1_700_000_000_000,
+      },
+    });
+
+    expect(
+      selectWhatsAppHelperSinceMs({
+        cursor: null,
+        sourceCursor: parsed,
+        syncMode: "incremental",
+        checkpointLastSuccessAt: 1_900_000_000_000,
+      }),
+    ).toBe(1_800_000_000_000);
+  });
+
+  it("keeps the original since timestamp while a paginated helper resync is running", () => {
+    const parsed = parseWhatsAppSourceCursor({
+      resyncCursor: "cursor-2",
+      resyncSinceMs: 1_600_000_000_000,
+      desktopDb: {
+        newestMessageAt: 1_700_000_000_000,
+      },
+    });
+
+    expect(
+      selectWhatsAppHelperSinceMs({
+        cursor: parsed.resyncCursor ?? null,
+        sourceCursor: parsed,
+        syncMode: "incremental",
+        checkpointLastSuccessAt: 1_900_000_000_000,
+      }),
+    ).toBe(1_600_000_000_000);
+  });
+
   it("builds complete proof coverage from all resumed pages", () => {
     const firstCoverage = summarizeWhatsAppMessageCoverage([
       {
         messageID: "m1",
-        chatJID: "15551234567@s.whatsapp.net",
+        chatJID: "15550100002@s.whatsapp.net",
         fromMe: false,
         timestamp: 30,
         text: "later",
@@ -59,7 +133,7 @@ describe("WhatsApp sync proof helpers", () => {
     const resumedCoverage = summarizeWhatsAppMessageCoverage([
       {
         messageID: "m2",
-        chatJID: "15551234567@s.whatsapp.net",
+        chatJID: "15550100002@s.whatsapp.net",
         fromMe: false,
         timestamp: 10,
         text: "earlier",

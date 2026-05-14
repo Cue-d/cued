@@ -1252,8 +1252,10 @@ public struct CuedOnboardingView: View {
   }
 
   private func integrationDataSummary(_ integration: InstallerIntegrationStatus) -> String? {
-    guard installerIsConnectedIntegrationState(integration.authState),
-          let stats = integration.projectionStats else {
+    guard let stats = integration.projectionStats else {
+      return nil
+    }
+    if !installerIsConnectedIntegrationState(integration.authState) && integration.platform != "whatsapp" {
       return nil
     }
 
