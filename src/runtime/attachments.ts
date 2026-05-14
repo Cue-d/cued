@@ -673,7 +673,7 @@ async function downloadOnceWithPolicy(
           if (bytesRead >= nextDiskCheckBytes) {
             nextDiskCheckBytes = bytesRead + 8 * 1024 * 1024;
             try {
-              assertAttachmentDiskHeadroom(bytesRead);
+              assertAttachmentDiskHeadroom(chunk.byteLength);
             } catch (error) {
               request.destroy(error instanceof Error ? error : new Error(String(error)));
               return;
