@@ -813,6 +813,70 @@ describe("CuedDatabase", () => {
     db.close();
   });
 
+  it("repairs canonical integration ids when upserting existing platform accounts", () => {
+    const db = createDb();
+    const timestamp = Date.now();
+    sqlite(db)
+      .prepare(
+        `
+        INSERT INTO integration_states (
+          id, platform, account_key, display_name, auth_state, enabled, connection_kind,
+          sync_capable, launch_strategy, launch_target, imported_from, artifact_paths_json,
+          metadata_json, last_seen_at, created_at, updated_at
+        ) VALUES (?, 'signal', 'default', 'Signal', 'cancelled', 0, 'local-cli', 0,
+          'qr-native', NULL, 'legacy', '[]', '{}', ?, ?, ?)
+      `,
+      )
+      .run("legacy-signal-id", timestamp, timestamp, timestamp);
+
+    const legacySessionId = db.createAuthSession({
+      platform: "signal",
+      accountKey: "default",
+      integrationStateId: "legacy-signal-id",
+      state: "cancelled",
+    });
+
+    db.upsertIntegrationState({
+      platform: "signal",
+      accountKey: "default",
+      displayName: "Signal",
+      authState: "requested",
+      enabled: true,
+      connectionKind: "local-cli",
+      syncCapable: false,
+      launchStrategy: "qr-native",
+      importedFrom: "bundled-helper",
+    });
+
+    expect(db.getIntegrationState("signal", "default")).toEqual(
+      expect.objectContaining({
+        id: "signal:default",
+        auth_state: "requested",
+        enabled: 1,
+      }),
+    );
+
+    expect(db.getAuthSession(legacySessionId)).toEqual(
+      expect.objectContaining({
+        integration_state_id: "signal:default",
+      }),
+    );
+
+    const sessionId = db.createAuthSession({
+      platform: "signal",
+      accountKey: "default",
+      integrationStateId: "signal:default",
+      state: "requested",
+    });
+    expect(db.getAuthSession(sessionId)).toEqual(
+      expect.objectContaining({
+        integration_state_id: "signal:default",
+      }),
+    );
+
+    db.close();
+  });
+
   it("tracks auth sessions independently from integration state", () => {
     const db = createDb();
 

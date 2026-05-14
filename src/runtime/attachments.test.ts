@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CuedDatabase } from "../db/database.js";
 import {
+  buildPinnedLookup,
   fetchAttachment,
   listAttachments,
   resolveRemoteAttachmentFetchPolicy,
@@ -73,11 +74,42 @@ describe("attachment service", () => {
     );
   });
 
+  it("returns pinned DNS results in single-address and all-address lookup forms", () => {
+    const pinnedLookup = buildPinnedLookup({ address: "93.184.216.34", family: 4 });
+
+    const singleResults: unknown[] = [];
+    pinnedLookup("attachments.example.test", {}, (error, address, family) => {
+      singleResults.push({ error, address, family });
+    });
+    expect(singleResults).toEqual([
+      {
+        error: null,
+        address: "93.184.216.34",
+        family: 4,
+      },
+    ]);
+
+    const allResults: unknown[] = [];
+    pinnedLookup("attachments.example.test", { all: true }, (error, addresses) => {
+      allResults.push({ error, addresses });
+    });
+    expect(allResults).toEqual([
+      {
+        error: null,
+        addresses: [{ address: "93.184.216.34", family: 4 }],
+      },
+    ]);
+  });
+
   it("fetches a local attachment into cache, extracts text, and makes it searchable", async () => {
     const db = createDb();
-    const fileDir = mkdtempSync(join(tmpdir(), "cued-attachments-src-"));
-    tempDirs.push(fileDir);
-    const sourcePath = join(fileDir, "note.txt");
+    const homeDir = mkdtempSync(join(tmpdir(), "cued-attachments-src-"));
+    tempDirs.push(homeDir);
+    process.env.HOME = homeDir;
+
+    const attachmentDir = join(homeDir, "Library", "Messages", "Attachments");
+    mkdirSync(attachmentDir, { recursive: true });
+    const sourcePath = join(attachmentDir, "note.txt");
     writeFileSync(sourcePath, "attachment alpha beta gamma\n");
 
     const timestamp = Date.now();
@@ -161,11 +193,102 @@ describe("attachment service", () => {
     db.close();
   });
 
+  it("extracts text using provider-fetched MIME metadata", async () => {
+    const db = createDb();
+    const timestamp = Date.now();
+    const sql = sqlite(db);
+    sql
+      .prepare(
+        `
+        INSERT INTO conversations (
+          id, platform, account_key, source_conversation_key, native_conversation_key, type, is_active,
+          service, name, topic, participant_names, last_message_id, last_message_at, last_message_preview,
+          unread_count, created_at, updated_at
+        ) VALUES (?, 'gmail', 'default', ?, NULL, 'dm', 1, 'Gmail', ?, NULL, '', NULL, NULL, NULL, 0, ?, ?)
+      `,
+      )
+      .run(
+        "conversation-provider-text",
+        "source-conversation-provider-text",
+        "Thread",
+        timestamp,
+        timestamp,
+      );
+    sql
+      .prepare(
+        `
+        INSERT INTO messages (
+          id, platform, account_key, platform_message_id, conversation_id, sender_contact_id,
+          sender_source_key, sender_name, conversation_name, sent_at, service, status, is_from_me,
+          content, delivered_at, read_at, edited_at, deleted_at, reply_to_message_id, is_deleted,
+          is_edited, attachment_count, reaction_count, created_at, updated_at
+        ) VALUES (?, 'gmail', 'default', ?, ?, NULL, NULL, 'Ben', 'Thread', ?, 'Gmail', NULL, 0, 'hello', NULL, NULL, NULL, NULL, NULL, 0, 0, 1, 0, ?, ?)
+      `,
+      )
+      .run(
+        "message-provider-text",
+        "platform-message-provider-text",
+        "conversation-provider-text",
+        timestamp,
+        timestamp,
+        timestamp,
+      );
+    sql
+      .prepare(
+        `
+        INSERT INTO message_attachments (
+          id, message_id, platform, account_key, source_attachment_key, kind, mime_type, filename,
+          title, local_path, remote_url, size_bytes, text_content, access_kind, access_ref_json,
+          preview_ref_json, availability_status, provider_metadata_json, metadata_json, created_at, updated_at
+        ) VALUES (?, ?, 'gmail', 'default', ?, 'file', 'application/vnd.google-apps.document', 'remote-doc.gdoc', 'Remote Doc', NULL, NULL, ?, NULL, 'provider_fetch', ?, NULL, 'available', '{}', '{}', ?, ?)
+      `,
+      )
+      .run(
+        "attachment-provider-text",
+        "message-provider-text",
+        "source-attachment-provider-text",
+        43,
+        JSON.stringify({ messageId: "message-provider-text", attachmentId: "provider-attachment" }),
+        timestamp,
+        timestamp,
+      );
+
+    const fetched = await fetchAttachment(db, {
+      attachmentId: "attachment-provider-text",
+      providerFetchers: {
+        gmail: async () => ({
+          buffer: Buffer.from("<html><body>provider text alpha</body></html>", "utf8"),
+          mimeType: "text/html",
+          filename: "remote-doc.html",
+        }),
+      },
+    });
+    if (fetched.localPath) {
+      cleanupPaths.push(fetched.localPath);
+    }
+
+    expect(fetched.content).toEqual(
+      expect.objectContaining({
+        status: "ready",
+        hasText: true,
+      }),
+    );
+    expect(searchAttachments(db, { query: "alpha" })).toEqual([
+      expect.objectContaining({ attachmentId: "attachment-provider-text" }),
+    ]);
+
+    db.close();
+  });
+
   it("returns cache metadata for the requested non-default variant", async () => {
     const db = createDb();
-    const fileDir = mkdtempSync(join(tmpdir(), "cued-attachments-variant-"));
-    tempDirs.push(fileDir);
-    const sourcePath = join(fileDir, "variant.txt");
+    const homeDir = mkdtempSync(join(tmpdir(), "cued-attachments-variant-"));
+    tempDirs.push(homeDir);
+    process.env.HOME = homeDir;
+
+    const attachmentDir = join(homeDir, "Library", "Messages", "Attachments");
+    mkdirSync(attachmentDir, { recursive: true });
+    const sourcePath = join(attachmentDir, "variant.txt");
     writeFileSync(sourcePath, "variant attachment\n");
 
     const timestamp = Date.now();
@@ -507,6 +630,73 @@ describe("attachment service", () => {
     db.close();
   });
 
+  it("rejects IPv4-mapped IPv6 remote attachment URLs before fetching", async () => {
+    const db = createDb();
+    const timestamp = Date.now();
+    const sql = sqlite(db);
+    sql
+      .prepare(
+        `
+        INSERT INTO conversations (
+          id, platform, account_key, source_conversation_key, native_conversation_key, type, is_active,
+          service, name, topic, participant_names, last_message_id, last_message_at, last_message_preview,
+          unread_count, created_at, updated_at
+        ) VALUES (?, 'discord', 'default', ?, NULL, 'dm', 1, 'Discord', ?, NULL, '', NULL, NULL, NULL, 0, ?, ?)
+      `,
+      )
+      .run(
+        "conversation-mapped-ip",
+        "source-conversation-mapped-ip",
+        "Thread",
+        timestamp,
+        timestamp,
+      );
+    sql
+      .prepare(
+        `
+        INSERT INTO messages (
+          id, platform, account_key, platform_message_id, conversation_id, sender_contact_id,
+          sender_source_key, sender_name, conversation_name, sent_at, service, status, is_from_me,
+          content, delivered_at, read_at, edited_at, deleted_at, reply_to_message_id, is_deleted,
+          is_edited, attachment_count, reaction_count, created_at, updated_at
+        ) VALUES (?, 'discord', 'default', ?, ?, NULL, NULL, 'Ben', 'Thread', ?, 'Discord', NULL, 0, 'hello', NULL, NULL, NULL, NULL, NULL, 0, 0, 1, 0, ?, ?)
+      `,
+      )
+      .run(
+        "message-mapped-ip",
+        "platform-message-mapped-ip",
+        "conversation-mapped-ip",
+        timestamp,
+        timestamp,
+        timestamp,
+      );
+    sql
+      .prepare(
+        `
+        INSERT INTO message_attachments (
+          id, message_id, platform, account_key, source_attachment_key, kind, mime_type, filename,
+          title, local_path, remote_url, size_bytes, text_content, access_kind, access_ref_json,
+          preview_ref_json, availability_status, provider_metadata_json, metadata_json, created_at, updated_at
+        ) VALUES (?, ?, 'discord', 'default', ?, 'file', 'text/plain', 'note.txt', 'Note', NULL, ?, NULL, NULL, 'remote_url', ?, NULL, 'available', '{}', '{}', ?, ?)
+      `,
+      )
+      .run(
+        "attachment-mapped-ip",
+        "message-mapped-ip",
+        "source-attachment-mapped-ip",
+        "http://[::ffff:7f00:1]/note.txt",
+        JSON.stringify({ url: "http://[::ffff:7f00:1]/note.txt" }),
+        timestamp,
+        timestamp,
+      );
+
+    await expect(fetchAttachment(db, { attachmentId: "attachment-mapped-ip" })).rejects.toThrow(
+      "Attachment URL host is not allowed",
+    );
+
+    db.close();
+  });
+
   it("rejects remote attachment hosts that resolve to private IPs before fetching", async () => {
     const db = createDb();
     const timestamp = Date.now();
@@ -581,9 +771,13 @@ describe("attachment service", () => {
 
   it("keeps a shared cached object on disk while another ready entry still references it", async () => {
     const db = createDb();
-    const fileDir = mkdtempSync(join(tmpdir(), "cued-attachments-shared-"));
-    tempDirs.push(fileDir);
-    const sourcePath = join(fileDir, "shared.txt");
+    const homeDir = mkdtempSync(join(tmpdir(), "cued-attachments-shared-"));
+    tempDirs.push(homeDir);
+    process.env.HOME = homeDir;
+
+    const attachmentDir = join(homeDir, "Library", "Messages", "Attachments");
+    mkdirSync(attachmentDir, { recursive: true });
+    const sourcePath = join(attachmentDir, "shared.txt");
     writeFileSync(sourcePath, "shared cache payload\n");
 
     const timestamp = Date.now();
@@ -666,6 +860,96 @@ describe("attachment service", () => {
       cleanupPaths.push(secondCache.cache_path);
       expect(existsSync(secondCache.cache_path)).toBe(true);
     }
+
+    db.close();
+  });
+
+  it("keeps an explicitly allowed large fetch even when it exceeds the soft cache budget", async () => {
+    const db = createDb();
+    const homeDir = mkdtempSync(join(tmpdir(), "cued-attachments-allow-large-"));
+    tempDirs.push(homeDir);
+    process.env.HOME = homeDir;
+
+    const attachmentDir = join(homeDir, "Library", "Messages", "Attachments");
+    mkdirSync(attachmentDir, { recursive: true });
+    const sourcePath = join(attachmentDir, "large.txt");
+    writeFileSync(sourcePath, "explicitly requested large payload\n");
+
+    const timestamp = Date.now();
+    const sql = sqlite(db);
+    sql
+      .prepare(
+        `
+        INSERT INTO conversations (
+          id, platform, account_key, source_conversation_key, native_conversation_key, type, is_active,
+          service, name, topic, participant_names, last_message_id, last_message_at, last_message_preview,
+          unread_count, created_at, updated_at
+        ) VALUES (?, 'imessage', 'local', ?, NULL, 'dm', 1, 'iMessage', ?, NULL, '', NULL, NULL, NULL, 0, ?, ?)
+      `,
+      )
+      .run(
+        "conversation-allow-large",
+        "source-conversation-allow-large",
+        "Thread",
+        timestamp,
+        timestamp,
+      );
+    sql
+      .prepare(
+        `
+        INSERT INTO messages (
+          id, platform, account_key, platform_message_id, conversation_id, sender_contact_id,
+          sender_source_key, sender_name, conversation_name, sent_at, service, status, is_from_me,
+          content, delivered_at, read_at, edited_at, deleted_at, reply_to_message_id, is_deleted,
+          is_edited, attachment_count, reaction_count, created_at, updated_at
+        ) VALUES (?, 'imessage', 'local', ?, ?, NULL, NULL, 'Ben', 'Thread', ?, 'iMessage', 'delivered', 0, 'hello', NULL, NULL, NULL, NULL, NULL, 0, 0, 1, 0, ?, ?)
+      `,
+      )
+      .run(
+        "message-allow-large",
+        "platform-message-allow-large",
+        "conversation-allow-large",
+        timestamp,
+        timestamp,
+        timestamp,
+      );
+    sql
+      .prepare(
+        `
+        INSERT INTO message_attachments (
+          id, message_id, platform, account_key, source_attachment_key, kind, mime_type, filename,
+          title, local_path, remote_url, size_bytes, text_content, access_kind, access_ref_json,
+          preview_ref_json, availability_status, provider_metadata_json, metadata_json, created_at, updated_at
+        ) VALUES (?, ?, 'imessage', 'local', ?, 'file', 'text/plain', 'large.txt', 'Large', ?, NULL, ?, NULL, 'local_path', ?, NULL, 'available', '{}', '{}', ?, ?)
+      `,
+      )
+      .run(
+        "attachment-allow-large",
+        "message-allow-large",
+        "source-attachment-allow-large",
+        sourcePath,
+        35,
+        JSON.stringify({ path: sourcePath }),
+        timestamp,
+        timestamp,
+      );
+
+    const fetched = await fetchAttachment(db, {
+      attachmentId: "attachment-allow-large",
+      allowLarge: true,
+      cacheLimitBytes: 1,
+    });
+    if (fetched.localPath) {
+      cleanupPaths.push(fetched.localPath);
+    }
+
+    expect(fetched.localPath).toBeTruthy();
+    expect(existsSync(fetched.localPath ?? "")).toBe(true);
+    expect(db.getAttachmentCacheEntry("attachment-allow-large", "original")).toEqual(
+      expect.objectContaining({
+        status: "ready",
+      }),
+    );
 
     db.close();
   });

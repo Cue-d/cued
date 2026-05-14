@@ -115,7 +115,8 @@ function resolveRepoRoot(): string {
 }
 
 function makeSignalConfigDir(accountKey: string): string {
-  return join(CUED_SIGNAL_DIR, accountKey);
+  const configuredRoot = process.env.CUED_SIGNAL_DIR?.trim();
+  return join(configuredRoot || CUED_SIGNAL_DIR, accountKey);
 }
 
 export function getSignalConfigDir(accountKey: string): string {

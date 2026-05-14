@@ -1777,27 +1777,43 @@ export class CuedDatabase {
       updatedAt: timestamp,
     };
 
-    this.db
-      .insert(integrationStates)
-      .values(values)
-      .onConflictDoUpdate({
-        target: [integrationStates.platform, integrationStates.accountKey],
-        set: {
-          displayName: values.displayName,
-          authState: values.authState,
-          enabled: values.enabled,
-          connectionKind: values.connectionKind,
-          syncCapable: values.syncCapable,
-          launchStrategy: values.launchStrategy,
-          launchTarget: values.launchTarget,
-          importedFrom: values.importedFrom,
-          artifactPathsJson: values.artifactPathsJson,
-          metadataJson: values.metadataJson,
-          lastSeenAt: values.lastSeenAt,
-          updatedAt: values.updatedAt,
-        },
-      })
-      .run();
+    this.sqlite.transaction(() => {
+      const existing = this.getIntegrationState(input.platform, input.accountKey);
+      this.sqlite.exec("PRAGMA defer_foreign_keys = ON");
+      this.db
+        .insert(integrationStates)
+        .values(values)
+        .onConflictDoUpdate({
+          target: [integrationStates.platform, integrationStates.accountKey],
+          set: {
+            id: values.id,
+            displayName: values.displayName,
+            authState: values.authState,
+            enabled: values.enabled,
+            connectionKind: values.connectionKind,
+            syncCapable: values.syncCapable,
+            launchStrategy: values.launchStrategy,
+            launchTarget: values.launchTarget,
+            importedFrom: values.importedFrom,
+            artifactPathsJson: values.artifactPathsJson,
+            metadataJson: values.metadataJson,
+            lastSeenAt: values.lastSeenAt,
+            updatedAt: values.updatedAt,
+          },
+        })
+        .run();
+
+      if (existing && existing.id !== values.id) {
+        this.db
+          .update(authSessions)
+          .set({
+            integrationStateId: values.id,
+            updatedAt: timestamp,
+          })
+          .where(eq(authSessions.integrationStateId, existing.id))
+          .run();
+      }
+    })();
   }
 
   setIntegrationEnabled(platform: Platform, accountKey: string, enabled: boolean): void {

@@ -29,6 +29,41 @@ function collectBodyParts(payload: GmailMessagePayload | undefined, mimeType: st
   return [...current, ...(payload.parts ?? []).flatMap((part) => collectBodyParts(part, mimeType))];
 }
 
+function collectAttachmentParts(
+  payload: GmailMessagePayload | undefined,
+  messageId: string,
+): Array<Record<string, unknown>> {
+  if (!payload) return [];
+
+  const attachments: Array<Record<string, unknown>> = [];
+  const filename = payload.filename?.trim() || null;
+  const attachmentId = payload.body?.attachmentId?.trim() || null;
+  if (filename || attachmentId) {
+    const sourceAttachmentKey = attachmentId
+      ? `gmail:${messageId}:attachment:${attachmentId}`
+      : `gmail:${messageId}:part:${payload.partId ?? filename}`;
+    attachments.push({
+      sourceAttachmentKey,
+      id: attachmentId ?? payload.partId ?? filename,
+      kind: "file",
+      filename,
+      mime_type: payload.mimeType ?? null,
+      size_bytes: payload.body?.size ?? null,
+      access_kind: attachmentId ? "provider_fetch" : "none",
+      access_ref: attachmentId ? { messageId, attachmentId } : null,
+      availability_status: attachmentId ? "available" : "metadata_only",
+      provider_metadata: {
+        partId: payload.partId ?? null,
+      },
+    });
+  }
+
+  return [
+    ...attachments,
+    ...(payload.parts ?? []).flatMap((part) => collectAttachmentParts(part, messageId)),
+  ];
+}
+
 function stripHtml(input: string): string {
   return input
     .replace(/<style[\s\S]*?<\/style>/gi, " ")
@@ -166,6 +201,7 @@ export function buildGmailRawEvents(input: {
 
     const sender = from[0]?.email ?? selfEmail;
     const content = extractGmailMessageText(message);
+    const attachments = collectAttachmentParts(message.payload, message.id);
     const sentAt = messageSentAt(message);
     const rawMessageId = gmailStableId(`gmail:message:${input.accountKey}:${message.id}`);
     rawEvents.push({
@@ -188,6 +224,7 @@ export function buildGmailRawEvents(input: {
         content: subject ? `Subject: ${subject}\n\n${content}` : content,
         service: "gmail",
         isFromMe: sender === selfEmail,
+        attachments,
       } satisfies MessagePayload,
       sourceVersion: "gmail-v1",
     });
