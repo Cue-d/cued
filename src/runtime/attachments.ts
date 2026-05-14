@@ -570,9 +570,19 @@ async function downloadOnceWithPolicy(
 
   return await new Promise<DownloadedResponse>((resolvePromise, rejectPromise) => {
     let settled = false;
+    let activeTempPath: string | null = null;
+    let activeOutput: ReturnType<typeof createWriteStream> | null = null;
+    const cleanupActiveTempPath = () => {
+      if (activeTempPath) {
+        rmSync(activeTempPath, { force: true });
+        activeTempPath = null;
+      }
+    };
     const settleError = (error: Error) => {
       if (!settled) {
         settled = true;
+        activeOutput?.destroy();
+        cleanupActiveTempPath();
         rejectPromise(error);
       }
     };
@@ -633,16 +643,16 @@ async function downloadOnceWithPolicy(
         ensureCuedDirs();
         const tempPath = join(CUED_ATTACHMENTS_TMP_DIR, `${randomUUID()}.part`);
         const output = createWriteStream(tempPath, { flags: "wx" });
+        activeTempPath = tempPath;
+        activeOutput = output;
         let bytesRead = 0;
         let nextDiskCheckBytes = 8 * 1024 * 1024;
-        const cleanupTempPath = () => {
-          rmSync(tempPath, { force: true });
-        };
         output.on("error", (error) => {
-          cleanupTempPath();
           request.destroy(error);
         });
         output.on("finish", () => {
+          activeTempPath = null;
+          activeOutput = null;
           settleSuccess({
             ok: status >= 200 && status < 300,
             status,
@@ -655,7 +665,6 @@ async function downloadOnceWithPolicy(
         response.on("data", (chunk: Buffer) => {
           bytesRead += chunk.byteLength;
           if (maxBytes !== null && bytesRead > maxBytes) {
-            cleanupTempPath();
             request.destroy(
               new Error(`Attachment exceeds fetch limit (${bytesRead} bytes > ${maxBytes} bytes)`),
             );
@@ -666,7 +675,6 @@ async function downloadOnceWithPolicy(
             try {
               assertAttachmentDiskHeadroom(bytesRead);
             } catch (error) {
-              cleanupTempPath();
               request.destroy(error instanceof Error ? error : new Error(String(error)));
               return;
             }
@@ -679,6 +687,7 @@ async function downloadOnceWithPolicy(
         response.on("end", () => {
           output.end();
         });
+        response.on("error", settleError);
       },
     );
     request.on("error", settleError);

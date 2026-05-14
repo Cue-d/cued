@@ -829,6 +829,13 @@ describe("CuedDatabase", () => {
       )
       .run("legacy-signal-id", timestamp, timestamp, timestamp);
 
+    const legacySessionId = db.createAuthSession({
+      platform: "signal",
+      accountKey: "default",
+      integrationStateId: "legacy-signal-id",
+      state: "cancelled",
+    });
+
     db.upsertIntegrationState({
       platform: "signal",
       accountKey: "default",
@@ -846,6 +853,12 @@ describe("CuedDatabase", () => {
         id: "signal:default",
         auth_state: "requested",
         enabled: 1,
+      }),
+    );
+
+    expect(db.getAuthSession(legacySessionId)).toEqual(
+      expect.objectContaining({
+        integration_state_id: "signal:default",
       }),
     );
 
