@@ -639,6 +639,18 @@ async function downloadOnceWithPolicy(
           });
           return;
         }
+        if (status < 200 || status >= 300) {
+          response.resume();
+          settleSuccess({
+            ok: false,
+            status,
+            statusText: response.statusMessage ?? "",
+            headers,
+            tempPath: null,
+            sizeBytes: 0,
+          });
+          return;
+        }
 
         ensureCuedDirs();
         const tempPath = join(CUED_ATTACHMENTS_TMP_DIR, `${randomUUID()}.part`);
