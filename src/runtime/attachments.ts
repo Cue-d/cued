@@ -3,12 +3,15 @@ import { createHash, randomUUID } from "node:crypto";
 import { lookup } from "node:dns/promises";
 import {
   copyFileSync,
+  createReadStream,
+  createWriteStream,
   existsSync,
   mkdirSync,
   readFileSync,
   realpathSync,
   renameSync,
   rmSync,
+  statfsSync,
   statSync,
   writeFileSync,
 } from "node:fs";
@@ -30,6 +33,9 @@ import { loadIntegrationSecret } from "../platforms/core/secrets/keychain.js";
 const execFileAsync = promisify(execFile);
 const DEFAULT_ATTACHMENT_CACHE_LIMIT_BYTES = 10 * 1024 * 1024 * 1024;
 const DEFAULT_ATTACHMENT_FETCH_MAX_BYTES = 100 * 1024 * 1024;
+const DEFAULT_ATTACHMENT_DISK_RESERVE_BYTES = 512 * 1024 * 1024;
+const DEFAULT_ATTACHMENT_TEXT_EXTRACT_MAX_BYTES = 25 * 1024 * 1024;
+const DEFAULT_ATTACHMENT_TEXT_CONTENT_MAX_CHARS = 5 * 1024 * 1024;
 const MAX_ATTACHMENT_REDIRECTS = 5;
 const TEXT_MIME_TYPES = new Set([
   "application/json",
@@ -117,7 +123,8 @@ interface DownloadedResponse {
   status: number;
   statusText: string;
   headers: Headers;
-  buffer: Buffer;
+  tempPath: string | null;
+  sizeBytes: number;
 }
 
 function now(): number {
@@ -195,11 +202,22 @@ function writeTempBuffer(buffer: Buffer): string {
   return tempPath;
 }
 
-function hashFile(path: string): { sha256: string; sizeBytes: number } {
-  const buffer = readFileSync(path);
+async function hashFile(path: string): Promise<{ sha256: string; sizeBytes: number }> {
+  const hash = createHash("sha256");
+  let sizeBytes = 0;
+  await new Promise<void>((resolvePromise, rejectPromise) => {
+    const stream = createReadStream(path);
+    stream.on("data", (chunk) => {
+      const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      sizeBytes += buffer.byteLength;
+      hash.update(buffer);
+    });
+    stream.on("error", rejectPromise);
+    stream.on("end", resolvePromise);
+  });
   return {
-    sha256: createHash("sha256").update(buffer).digest("hex"),
-    sizeBytes: buffer.byteLength,
+    sha256: hash.digest("hex"),
+    sizeBytes,
   };
 }
 
@@ -207,6 +225,59 @@ function materializeObjectPath(sha256: string, extension: string): string {
   ensureCuedDirs();
   const normalizedExtension = extension && !extension.startsWith(".") ? `.${extension}` : extension;
   return join(CUED_ATTACHMENTS_OBJECTS_DIR, `${sha256}${normalizedExtension}`);
+}
+
+function parsePositiveInteger(value: string | undefined): number | null {
+  if (!value) {
+    return null;
+  }
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
+function attachmentDiskReserveBytes(): number {
+  return (
+    parsePositiveInteger(process.env.CUED_ATTACHMENT_DISK_RESERVE_BYTES) ??
+    DEFAULT_ATTACHMENT_DISK_RESERVE_BYTES
+  );
+}
+
+function availableBytesForPath(path: string): number | null {
+  try {
+    const stats = statfsSync(path);
+    return stats.bavail * stats.bsize;
+  } catch {
+    return null;
+  }
+}
+
+function assertAttachmentDiskHeadroom(requiredBytes: number): void {
+  ensureCuedDirs();
+  const availableBytes = availableBytesForPath(CUED_ATTACHMENTS_TMP_DIR);
+  if (availableBytes === null) {
+    return;
+  }
+  const reserveBytes = attachmentDiskReserveBytes();
+  if (availableBytes - reserveBytes < requiredBytes) {
+    throw new Error(
+      `Not enough free disk space to cache attachment (${requiredBytes} bytes required, ${availableBytes} bytes available, ${reserveBytes} bytes reserved)`,
+    );
+  }
+}
+
+function enforceAttachmentByteCeiling(sizeBytes: number, maxBytes: number | null): void {
+  if (maxBytes !== null && sizeBytes > maxBytes) {
+    throw new Error(`Attachment exceeds fetch limit (${sizeBytes} bytes > ${maxBytes} bytes)`);
+  }
+}
+
+function parseContentLength(headers: Headers): number | null {
+  const value = headers.get("content-length");
+  if (!value) {
+    return null;
+  }
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
 }
 
 function pathIsInside(candidate: string, root: string): boolean {
@@ -416,7 +487,7 @@ async function fetchWithPolicy(
   url: string,
   policy: RemoteFetchPolicy,
   init: RequestInit = {},
-  maxBytes = DEFAULT_ATTACHMENT_FETCH_MAX_BYTES,
+  maxBytes: number | null = DEFAULT_ATTACHMENT_FETCH_MAX_BYTES,
 ): Promise<DownloadedResponse> {
   let currentUrl = url;
   for (let redirectCount = 0; redirectCount <= MAX_ATTACHMENT_REDIRECTS; redirectCount += 1) {
@@ -489,7 +560,7 @@ async function downloadOnceWithPolicy(
   url: string,
   policy: RemoteFetchPolicy,
   init: RequestInit,
-  maxBytes: number,
+  maxBytes: number | null,
 ): Promise<DownloadedResponse> {
   const parsed = await assertFetchPolicy(url, policy);
   const pinnedAddress =
@@ -525,8 +596,8 @@ async function downloadOnceWithPolicy(
       },
       (response) => {
         const headers = responseHeaders(response.headers);
-        const contentLength = Number(headers.get("content-length"));
-        if (Number.isFinite(contentLength) && contentLength > maxBytes) {
+        const contentLength = parseContentLength(headers);
+        if (contentLength !== null && maxBytes !== null && contentLength > maxBytes) {
           response.resume();
           settleError(
             new Error(
@@ -534,6 +605,15 @@ async function downloadOnceWithPolicy(
             ),
           );
           return;
+        }
+        if (contentLength !== null) {
+          try {
+            assertAttachmentDiskHeadroom(contentLength);
+          } catch (error) {
+            response.resume();
+            settleError(error instanceof Error ? error : new Error(String(error)));
+            return;
+          }
         }
 
         const status = response.statusCode ?? 0;
@@ -544,31 +624,60 @@ async function downloadOnceWithPolicy(
             status,
             statusText: response.statusMessage ?? "",
             headers,
-            buffer: Buffer.alloc(0),
+            tempPath: null,
+            sizeBytes: 0,
           });
           return;
         }
 
-        const chunks: Buffer[] = [];
+        ensureCuedDirs();
+        const tempPath = join(CUED_ATTACHMENTS_TMP_DIR, `${randomUUID()}.part`);
+        const output = createWriteStream(tempPath, { flags: "wx" });
         let bytesRead = 0;
-        response.on("data", (chunk: Buffer) => {
-          bytesRead += chunk.byteLength;
-          if (bytesRead > maxBytes) {
-            request.destroy(
-              new Error(`Attachment exceeds fetch limit (${bytesRead} bytes > ${maxBytes} bytes)`),
-            );
-            return;
-          }
-          chunks.push(chunk);
+        let nextDiskCheckBytes = 8 * 1024 * 1024;
+        const cleanupTempPath = () => {
+          rmSync(tempPath, { force: true });
+        };
+        output.on("error", (error) => {
+          cleanupTempPath();
+          request.destroy(error);
         });
-        response.on("end", () => {
+        output.on("finish", () => {
           settleSuccess({
             ok: status >= 200 && status < 300,
             status,
             statusText: response.statusMessage ?? "",
             headers,
-            buffer: Buffer.concat(chunks),
+            tempPath,
+            sizeBytes: bytesRead,
           });
+        });
+        response.on("data", (chunk: Buffer) => {
+          bytesRead += chunk.byteLength;
+          if (maxBytes !== null && bytesRead > maxBytes) {
+            cleanupTempPath();
+            request.destroy(
+              new Error(`Attachment exceeds fetch limit (${bytesRead} bytes > ${maxBytes} bytes)`),
+            );
+            return;
+          }
+          if (bytesRead >= nextDiskCheckBytes) {
+            nextDiskCheckBytes = bytesRead + 8 * 1024 * 1024;
+            try {
+              assertAttachmentDiskHeadroom(bytesRead);
+            } catch (error) {
+              cleanupTempPath();
+              request.destroy(error instanceof Error ? error : new Error(String(error)));
+              return;
+            }
+          }
+          if (!output.write(chunk)) {
+            response.pause();
+          }
+        });
+        output.on("drain", () => response.resume());
+        response.on("end", () => {
+          output.end();
         });
       },
     );
@@ -580,6 +689,7 @@ async function downloadOnceWithPolicy(
 function ensureWithinLimit(
   db: CuedDatabase,
   limitBytes = DEFAULT_ATTACHMENT_CACHE_LIMIT_BYTES,
+  protectedEntry?: { attachmentId: string; variant: string },
 ): void {
   const entries = db.listReadyAttachmentCacheEntries();
   const remainingRefsByPath = new Map<string, number>();
@@ -597,6 +707,13 @@ function ensureWithinLimit(
   for (const entry of entries) {
     if (totalBytes <= limitBytes) {
       break;
+    }
+    if (
+      protectedEntry &&
+      entry.attachment_id === protectedEntry.attachmentId &&
+      entry.variant === protectedEntry.variant
+    ) {
+      continue;
     }
     if (entry.cache_path && existsSync(entry.cache_path)) {
       const remainingRefs = (remainingRefsByPath.get(entry.cache_path) ?? 0) - 1;
@@ -624,10 +741,16 @@ function ensureWithinLimit(
   }
 }
 
+function discardDownloadedResponse(response: DownloadedResponse): void {
+  if (response.tempPath) {
+    rmSync(response.tempPath, { force: true });
+  }
+}
+
 async function fetchSlackRemote(
   url: string,
   accountKey: string,
-  maxBytes: number,
+  maxBytes: number | null,
 ): Promise<DownloadedResponse> {
   const policy = resolveRemoteAttachmentFetchPolicy("slack", url);
   if (policy === "external") {
@@ -658,6 +781,7 @@ async function fetchSlackRemote(
   if (!cookie || policy !== "slack-authenticated") {
     return authResponse;
   }
+  discardDownloadedResponse(authResponse);
   return await fetchWithPolicy(
     url,
     "slack-authenticated",
@@ -673,7 +797,7 @@ async function fetchSlackRemote(
 async function fetchLinkedInRemote(
   url: string,
   accountKey: string,
-  maxBytes: number,
+  maxBytes: number | null,
 ): Promise<DownloadedResponse> {
   const policy = resolveRemoteAttachmentFetchPolicy("linkedin", url);
   if (policy === "external") {
@@ -705,7 +829,7 @@ async function fetchLinkedInRemote(
 async function downloadRemoteAttachment(
   attachment: MessageAttachmentRow,
   url: string,
-  maxBytes: number,
+  maxBytes: number | null,
 ): Promise<{ tempPath: string; mimeType: string | null; filename: string | null }> {
   const response =
     attachment.platform === "slack"
@@ -719,9 +843,12 @@ async function downloadRemoteAttachment(
             maxBytes,
           );
   if (!response.ok) {
+    discardDownloadedResponse(response);
     throw new Error(`Attachment download failed: ${response.status} ${response.statusText}`);
   }
-  const tempPath = writeTempBuffer(response.buffer);
+  if (!response.tempPath) {
+    throw new Error("Attachment download did not produce a cached payload");
+  }
   let remoteFilename: string | null = null;
   try {
     remoteFilename = basename(new URL(url).pathname) || null;
@@ -729,7 +856,7 @@ async function downloadRemoteAttachment(
     remoteFilename = null;
   }
   return {
-    tempPath,
+    tempPath: response.tempPath,
     mimeType: response.headers.get("content-type") ?? attachment.mime_type ?? null,
     filename: attachment.filename ?? remoteFilename,
   };
@@ -738,7 +865,7 @@ async function downloadRemoteAttachment(
 async function acquireAttachmentPayload(
   attachment: MessageAttachmentRow,
   providerFetchers: ProviderFetchHandlers,
-  maxBytes: number,
+  maxBytes: number | null,
 ): Promise<{ tempPath: string; mimeType: string | null; filename: string | null }> {
   const accessRef = parseJsonRecord(attachment.access_ref_json);
   const localPath =
@@ -751,9 +878,8 @@ async function acquireAttachmentPayload(
     }
     const sourcePath = assertLocalAttachmentPathAllowed(attachment, localPath);
     const sourceSize = statSync(sourcePath).size;
-    if (sourceSize > maxBytes) {
-      throw new Error(`Attachment exceeds fetch limit (${sourceSize} bytes > ${maxBytes} bytes)`);
-    }
+    enforceAttachmentByteCeiling(sourceSize, maxBytes);
+    assertAttachmentDiskHeadroom(sourceSize);
     const tempPath = join(CUED_ATTACHMENTS_TMP_DIR, `${randomUUID()}${extname(sourcePath)}`);
     mkdirSync(CUED_ATTACHMENTS_TMP_DIR, { recursive: true, mode: 0o700 });
     copyFileSync(sourcePath, tempPath);
@@ -775,11 +901,8 @@ async function acquireAttachmentPayload(
       throw new Error(`Attachment fetch is not supported yet for ${attachment.platform}`);
     }
     const result = await handler(attachment);
-    if (result.buffer.byteLength > maxBytes) {
-      throw new Error(
-        `Attachment exceeds fetch limit (${result.buffer.byteLength} bytes > ${maxBytes} bytes)`,
-      );
-    }
+    enforceAttachmentByteCeiling(result.buffer.byteLength, maxBytes);
+    assertAttachmentDiskHeadroom(result.buffer.byteLength);
     return {
       tempPath: writeTempBuffer(result.buffer),
       mimeType: result.mimeType ?? attachment.mime_type ?? null,
@@ -794,14 +917,34 @@ async function extractTextContent(
   localPath: string,
   attachment: MessageAttachmentRow,
   effective: { mimeType?: string | null; filename?: string | null } = {},
-): Promise<{ extractor: string; text: string } | null> {
+): Promise<{
+  extractor: string | null;
+  status: string;
+  text: string | null;
+  lastError: string | null;
+}> {
   const mimeType = effective.mimeType ?? attachment.mime_type;
   const filename = effective.filename ?? attachment.filename;
+  const sourceSize = statSync(localPath).size;
+  if (sourceSize > DEFAULT_ATTACHMENT_TEXT_EXTRACT_MAX_BYTES) {
+    return {
+      extractor: null,
+      status: "skipped_large",
+      text: null,
+      lastError: `Attachment text extraction skipped because file is too large (${sourceSize} bytes > ${DEFAULT_ATTACHMENT_TEXT_EXTRACT_MAX_BYTES} bytes)`,
+    };
+  }
   if (normalizeTextExtractorMimeType(mimeType, filename)) {
-    const content = readFileSync(localPath, "utf8");
+    const rawContent = readFileSync(localPath, "utf8");
+    const content = rawContent.slice(0, DEFAULT_ATTACHMENT_TEXT_CONTENT_MAX_CHARS);
     return {
       extractor: "utf8",
+      status: "ready",
       text: content,
+      lastError:
+        rawContent.length > DEFAULT_ATTACHMENT_TEXT_CONTENT_MAX_CHARS
+          ? `Attachment text was truncated to ${DEFAULT_ATTACHMENT_TEXT_CONTENT_MAX_CHARS} characters`
+          : null,
     };
   }
 
@@ -815,18 +958,38 @@ async function extractTextContent(
       ]);
       const normalized = stdout.trim();
       if (!normalized || normalized === "(null)") {
-        return null;
+        return {
+          extractor: null,
+          status: "unsupported",
+          text: null,
+          lastError: null,
+        };
       }
       return {
         extractor: "mdls",
-        text: normalized,
+        status: "ready",
+        text: normalized.slice(0, DEFAULT_ATTACHMENT_TEXT_CONTENT_MAX_CHARS),
+        lastError:
+          normalized.length > DEFAULT_ATTACHMENT_TEXT_CONTENT_MAX_CHARS
+            ? `Attachment text was truncated to ${DEFAULT_ATTACHMENT_TEXT_CONTENT_MAX_CHARS} characters`
+            : null,
       };
     } catch {
-      return null;
+      return {
+        extractor: null,
+        status: "unsupported",
+        text: null,
+        lastError: null,
+      };
     }
   }
 
-  return null;
+  return {
+    extractor: null,
+    status: "unsupported",
+    text: null,
+    lastError: null,
+  };
 }
 
 function buildListedAttachment(
@@ -899,12 +1062,12 @@ export async function fetchAttachment(
       });
       db.upsertAttachmentContent({
         attachmentId: attachment.id,
-        extractor: extracted?.extractor ?? null,
-        status: extracted ? "ready" : "unsupported",
-        textContent: extracted?.text ?? null,
+        extractor: extracted.extractor,
+        status: extracted.status,
+        textContent: extracted.text,
         mimeType: existing.mime_type ?? attachment.mime_type,
-        extractedAt: extracted ? now() : null,
-        lastError: null,
+        extractedAt: extracted.status === "ready" ? now() : null,
+        lastError: extracted.lastError,
         filename: attachment.filename,
         title: attachment.title,
       });
@@ -932,9 +1095,7 @@ export async function fetchAttachment(
   let tempPath: string | null = null;
   let mimeType: string | null = existing?.mime_type ?? attachment.mime_type;
   let filename: string | null = attachment.filename;
-  const maxBytes = input.allowLarge
-    ? Number.MAX_SAFE_INTEGER
-    : (input.maxBytes ?? DEFAULT_ATTACHMENT_FETCH_MAX_BYTES);
+  const maxBytes = input.maxBytes ?? (input.allowLarge ? null : DEFAULT_ATTACHMENT_FETCH_MAX_BYTES);
 
   try {
     const payload = await acquireAttachmentPayload(
@@ -946,10 +1107,8 @@ export async function fetchAttachment(
     mimeType = payload.mimeType ?? mimeType;
     filename = payload.filename ?? filename;
 
-    const { sizeBytes, sha256 } = hashFile(tempPath);
-    if (sizeBytes > maxBytes) {
-      throw new Error(`Attachment exceeds fetch limit (${sizeBytes} bytes > ${maxBytes} bytes)`);
-    }
+    const { sizeBytes, sha256 } = await hashFile(tempPath);
+    enforceAttachmentByteCeiling(sizeBytes, maxBytes);
 
     const objectPath = materializeObjectPath(sha256, preferredExtension(attachment, mimeType));
     if (!existsSync(objectPath)) {
@@ -976,18 +1135,18 @@ export async function fetchAttachment(
       const extracted = await extractTextContent(objectPath, attachment, { mimeType, filename });
       db.upsertAttachmentContent({
         attachmentId: attachment.id,
-        extractor: extracted?.extractor ?? null,
-        status: extracted ? "ready" : "unsupported",
-        textContent: extracted?.text ?? null,
+        extractor: extracted.extractor,
+        status: extracted.status,
+        textContent: extracted.text,
         mimeType: mimeType ?? attachment.mime_type,
-        extractedAt: extracted ? now() : null,
-        lastError: null,
+        extractedAt: extracted.status === "ready" ? now() : null,
+        lastError: extracted.lastError,
         filename,
         title: attachment.title,
       });
     }
 
-    ensureWithinLimit(db, input.cacheLimitBytes);
+    ensureWithinLimit(db, input.cacheLimitBytes, { attachmentId: attachment.id, variant });
     const cache = db.getAttachmentCacheEntry(attachment.id, variant);
     return {
       ...buildListedAttachment(db, attachment, variant),

@@ -70,10 +70,10 @@ cued attachments list --message message-id-here --limit 20
 
 Fetch one attachment through the daemon:
 ```bash
-cued attachments fetch attachment-id-here --max-bytes 25000000
+cued attachments fetch attachment-id-here
 ```
 
-Fetch returns the cached `localPath` when available and extracts text for text-like files and PDFs when supported. It may return `content.status = unsupported` for images, audio, video, binary files, or PDFs without extractable text. Do not read `attachment_cache` directly for normal work.
+Fetch returns the cached `localPath` when available and extracts text for text-like files and PDFs when supported. It may return `content.status = unsupported` for images, audio, video, binary files, or PDFs without extractable text. It may return `content.status = skipped_large` when the file was cached but too large to index safely. Do not read `attachment_cache` directly for normal work.
 
 Search already-extracted attachment text:
 ```bash
@@ -82,7 +82,10 @@ cued attachments search "search terms" --limit 20
 
 Safety rules:
 - Inspect `filename`, `mime_type`, `size_bytes`, `access_kind`, and `availability_status` before fetching.
-- Use `--max-bytes`; use `--allow-large` only when the user explicitly needs a large file.
+- The default fetch path has a conservative byte ceiling to prevent accidental large downloads.
+- Use `--allow-large` only when the user explicitly asks for the file or the task clearly depends on the bytes.
+- Avoid fetching video, audio, archives, disk images, and opaque binary files unless the user asks for the file itself; agents usually cannot inspect them usefully.
+- Use `--max-bytes` when you intentionally want a stricter ceiling for a one-off fetch.
 - Treat `metadata_only`, `none`, or missing fetch coordinates as not currently fetchable.
 - Never paste private attachment text into fixtures or broad summaries; summarize only what is needed.
 

@@ -863,4 +863,94 @@ describe("attachment service", () => {
 
     db.close();
   });
+
+  it("keeps an explicitly allowed large fetch even when it exceeds the soft cache budget", async () => {
+    const db = createDb();
+    const homeDir = mkdtempSync(join(tmpdir(), "cued-attachments-allow-large-"));
+    tempDirs.push(homeDir);
+    process.env.HOME = homeDir;
+
+    const attachmentDir = join(homeDir, "Library", "Messages", "Attachments");
+    mkdirSync(attachmentDir, { recursive: true });
+    const sourcePath = join(attachmentDir, "large.txt");
+    writeFileSync(sourcePath, "explicitly requested large payload\n");
+
+    const timestamp = Date.now();
+    const sql = sqlite(db);
+    sql
+      .prepare(
+        `
+        INSERT INTO conversations (
+          id, platform, account_key, source_conversation_key, native_conversation_key, type, is_active,
+          service, name, topic, participant_names, last_message_id, last_message_at, last_message_preview,
+          unread_count, created_at, updated_at
+        ) VALUES (?, 'imessage', 'local', ?, NULL, 'dm', 1, 'iMessage', ?, NULL, '', NULL, NULL, NULL, 0, ?, ?)
+      `,
+      )
+      .run(
+        "conversation-allow-large",
+        "source-conversation-allow-large",
+        "Thread",
+        timestamp,
+        timestamp,
+      );
+    sql
+      .prepare(
+        `
+        INSERT INTO messages (
+          id, platform, account_key, platform_message_id, conversation_id, sender_contact_id,
+          sender_source_key, sender_name, conversation_name, sent_at, service, status, is_from_me,
+          content, delivered_at, read_at, edited_at, deleted_at, reply_to_message_id, is_deleted,
+          is_edited, attachment_count, reaction_count, created_at, updated_at
+        ) VALUES (?, 'imessage', 'local', ?, ?, NULL, NULL, 'Ben', 'Thread', ?, 'iMessage', 'delivered', 0, 'hello', NULL, NULL, NULL, NULL, NULL, 0, 0, 1, 0, ?, ?)
+      `,
+      )
+      .run(
+        "message-allow-large",
+        "platform-message-allow-large",
+        "conversation-allow-large",
+        timestamp,
+        timestamp,
+        timestamp,
+      );
+    sql
+      .prepare(
+        `
+        INSERT INTO message_attachments (
+          id, message_id, platform, account_key, source_attachment_key, kind, mime_type, filename,
+          title, local_path, remote_url, size_bytes, text_content, access_kind, access_ref_json,
+          preview_ref_json, availability_status, provider_metadata_json, metadata_json, created_at, updated_at
+        ) VALUES (?, ?, 'imessage', 'local', ?, 'file', 'text/plain', 'large.txt', 'Large', ?, NULL, ?, NULL, 'local_path', ?, NULL, 'available', '{}', '{}', ?, ?)
+      `,
+      )
+      .run(
+        "attachment-allow-large",
+        "message-allow-large",
+        "source-attachment-allow-large",
+        sourcePath,
+        35,
+        JSON.stringify({ path: sourcePath }),
+        timestamp,
+        timestamp,
+      );
+
+    const fetched = await fetchAttachment(db, {
+      attachmentId: "attachment-allow-large",
+      allowLarge: true,
+      cacheLimitBytes: 1,
+    });
+    if (fetched.localPath) {
+      cleanupPaths.push(fetched.localPath);
+    }
+
+    expect(fetched.localPath).toBeTruthy();
+    expect(existsSync(fetched.localPath ?? "")).toBe(true);
+    expect(db.getAttachmentCacheEntry("attachment-allow-large", "original")).toEqual(
+      expect.objectContaining({
+        status: "ready",
+      }),
+    );
+
+    db.close();
+  });
 });
