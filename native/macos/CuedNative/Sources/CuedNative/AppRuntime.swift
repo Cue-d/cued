@@ -1517,7 +1517,11 @@ private struct UpdateInstallResponse: Decodable {
 
 @MainActor
 final class MenuBarAppController: NSObject, NSApplicationDelegate {
-  private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+  private static let statusItemImageHeight: CGFloat = 18
+  private static let statusItemHorizontalPadding: CGFloat = 0
+  private static let fallbackStatusItemLength: CGFloat = 18
+
+  private let statusItem = NSStatusBar.system.statusItem(withLength: fallbackStatusItemLength)
   private let dbPath: String
   private let menuBarLease: SingletonLockLease
   private let statusStore: AppStatusStore
@@ -1673,10 +1677,12 @@ final class MenuBarAppController: NSObject, NSApplicationDelegate {
         button.title = ""
         button.image = statusItemImage
         button.imagePosition = .imageOnly
+        statusItem.length = statusItemImage.size.width + Self.statusItemHorizontalPadding
       } else {
         button.image = nil
         button.title = snapshot.daemonRunning || daemonStarting ? "Cued" : "Cued!"
         button.imagePosition = .noImage
+        statusItem.length = NSStatusItem.variableLength
       }
       button.toolTip = snapshot.daemonRunning
         ? "Cued"
@@ -1920,11 +1926,21 @@ final class MenuBarAppController: NSObject, NSApplicationDelegate {
         continue
       }
       image.isTemplate = true
-      image.size = NSSize(width: 18, height: 18)
+      image.size = statusItemImageSize(for: image)
       return image
     }
 
     return nil
+  }
+
+  private static func statusItemImageSize(for image: NSImage) -> NSSize {
+    let imageSize = image.size
+    guard imageSize.width > 0, imageSize.height > 0 else {
+      return NSSize(width: statusItemImageHeight, height: statusItemImageHeight)
+    }
+
+    let aspectRatio = imageSize.width / imageSize.height
+    return NSSize(width: statusItemImageHeight * aspectRatio, height: statusItemImageHeight)
   }
 
   private static func executableRelativeIconPath() -> String? {
