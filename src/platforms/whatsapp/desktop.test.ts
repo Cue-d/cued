@@ -126,6 +126,26 @@ describe("whatsapp desktop import", () => {
         "",
         "Blake",
       );
+    chat
+      .prepare("INSERT INTO ZWAMESSAGE VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+      .run(
+        102,
+        1,
+        null,
+        null,
+        "",
+        1,
+        1_700_000_040 - appleBase,
+        "local desktop-only row",
+        0,
+        0,
+        "",
+        "15550100001@s.whatsapp.net",
+        "",
+      );
+    chat
+      .prepare("INSERT INTO ZWAMESSAGE VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+      .run(103, 1, null, null, "wamid-invalid-date", 0, null, "missing date", 0, 0, "", "", "");
     chat.close();
 
     const contacts = new Database(join(dir, "ContactsV2.sqlite"));
@@ -158,9 +178,9 @@ describe("whatsapp desktop import", () => {
         available: true,
         chatRows: 2,
         contactRows: 2,
-        messageRows: 2,
+        messageRows: 4,
         oldestMessageAt: 1_700_000_000_000,
-        newestMessageAt: 1_700_000_030_000,
+        newestMessageAt: 1_700_000_040_000,
       }),
     );
   });
@@ -184,6 +204,7 @@ describe("whatsapp desktop import", () => {
       "conversation",
       "message",
       "message",
+      "message",
     ]);
     expect(bundle.rawEvents.find((event) => event.entityKind === "message")).toMatchObject({
       platform: "whatsapp",
@@ -197,12 +218,39 @@ describe("whatsapp desktop import", () => {
       expect.objectContaining({
         proofKind: "messages",
         status: "complete",
+        scope: expect.objectContaining({
+          metadata: { source: "desktop_db" },
+        }),
         coverage: expect.objectContaining({
           source: "desktop_db",
-          newestMessageAt: 1_700_000_030_000,
+          newestMessageAt: 1_700_000_040_000,
         }),
       }),
     );
+    const sourceCursor = bundle.sourceCursor as { desktopDb?: Record<string, unknown> };
+    expect(sourceCursor.desktopDb).toEqual(
+      expect.objectContaining({
+        source: "desktop_db",
+        messageRows: 4,
+      }),
+    );
+    expect(JSON.stringify(bundle.proofs)).not.toContain(source);
+    expect(JSON.stringify(bundle.sourceCursor)).not.toContain(source);
+    expect(JSON.stringify(bundle.diagnostics)).not.toContain(source);
+    expect(
+      bundle.rawEvents.some(
+        (event) =>
+          event.entityKind === "message" &&
+          JSON.stringify(event.payload).includes("desktop-local:102"),
+      ),
+    ).toBe(true);
+    expect(
+      bundle.rawEvents.some(
+        (event) =>
+          event.entityKind === "message" &&
+          JSON.stringify(event.payload).includes("wamid-invalid-date"),
+      ),
+    ).toBe(false);
     expect(
       bundle.rawEvents.some(
         (event) =>

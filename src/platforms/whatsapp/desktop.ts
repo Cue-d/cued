@@ -1,4 +1,4 @@
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import Database from "better-sqlite3-multiple-ciphers";
@@ -175,7 +175,6 @@ export function buildWhatsAppDesktopSyncBundle(
         displayName: "WhatsApp Desktop",
         metadata: {
           source: "desktop_db",
-          sourcePath,
         },
       },
       proofKind: "messages",
@@ -198,7 +197,7 @@ export function buildWhatsAppDesktopSyncBundle(
       rawEvents,
       sourceCursor: {
         desktopDb: {
-          sourcePath,
+          source: "desktop_db",
           importedAt: completedAt,
           chatRows: inspected.chatRows,
           contactRows: inspected.contactRows,
@@ -212,7 +211,6 @@ export function buildWhatsAppDesktopSyncBundle(
       proofs: [proof],
       diagnostics: {
         source: "desktop_db",
-        sourcePath,
         stats,
       },
     };
@@ -378,8 +376,10 @@ function readMessages(
     .all() as DesktopMessageRow[];
   return rows.flatMap((row) => {
     const chatJID = normalizeWhatsAppJid(row.chat_jid);
-    const messageID = row.message_id.trim();
-    if (!chatJID || !messageID) {
+    const messageID =
+      row.message_id.trim() || `desktop-local:${row.source_pk}:${row.message_date ?? "unknown"}`;
+    const timestamp = appleSecondsToUnixMs(row.message_date);
+    if (!chatJID || timestamp == null) {
       return [];
     }
     const fromMe = row.from_me !== 0;
@@ -398,7 +398,7 @@ function readMessages(
         senderJID,
         participantJID: row.member_jid ? normalizeWhatsAppJid(row.member_jid) : null,
         fromMe,
-        timestamp: appleSecondsToUnixMs(row.message_date) ?? 0,
+        timestamp,
         text,
         pushName:
           firstNonEmpty(
@@ -435,8 +435,8 @@ function readMessages(
 function snapshotWhatsAppDesktopDatabases(sourcePath: string): string {
   const snapshotDir = mkdtempSync(join(tmpdir(), "cued-whatsapp-desktop-"));
   try {
-    copySqliteTriad(sourcePath, snapshotDir, CHAT_DB_NAME, true);
-    copySqliteTriad(sourcePath, snapshotDir, CONTACTS_DB_NAME, false);
+    copySqliteSnapshot(sourcePath, snapshotDir, CHAT_DB_NAME, true);
+    copySqliteSnapshot(sourcePath, snapshotDir, CONTACTS_DB_NAME, false);
     return snapshotDir;
   } catch (error) {
     rmSync(snapshotDir, { recursive: true, force: true });
@@ -444,7 +444,12 @@ function snapshotWhatsAppDesktopDatabases(sourcePath: string): string {
   }
 }
 
-function copySqliteTriad(sourceDir: string, destDir: string, filename: string, required: boolean) {
+function copySqliteSnapshot(
+  sourceDir: string,
+  destDir: string,
+  filename: string,
+  required: boolean,
+) {
   const source = join(sourceDir, filename);
   if (!existsSync(source)) {
     if (required) {
@@ -453,14 +458,17 @@ function copySqliteTriad(sourceDir: string, destDir: string, filename: string, r
     return;
   }
   mkdirSync(destDir, { recursive: true, mode: 0o700 });
-  for (const suffix of ["", "-wal", "-shm"]) {
-    const from = `${source}${suffix}`;
-    if (!existsSync(from)) {
-      continue;
-    }
-    const to = join(destDir, `${filename}${suffix}`);
-    copyFileSync(from, to);
+  const destination = join(destDir, filename);
+  const db = openReadonlyDatabase(source);
+  try {
+    db.exec(`VACUUM INTO '${escapeSqlString(destination)}'`);
+  } finally {
+    db.close();
   }
+}
+
+function escapeSqlString(value: string): string {
+  return value.replaceAll("'", "''");
 }
 
 function openReadonlyDatabase(path: string): Database.Database {
