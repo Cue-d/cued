@@ -1307,10 +1307,7 @@ public struct InstallerPlatformIcon: View {
       RoundedRectangle(cornerRadius: 12, style: .continuous)
         .fill(
           LinearGradient(
-            colors: [
-              accentColor.opacity(0.98),
-              accentColor.opacity(0.78),
-            ],
+            colors: backgroundColors,
             startPoint: .topLeading,
             endPoint: .bottomTrailing
           )
@@ -1343,10 +1340,25 @@ public struct InstallerPlatformIcon: View {
     installerPlatformAccentColor(for: platform)
   }
 
+  private var backgroundColors: [Color] {
+    if platform == "gmail" {
+      return [
+        Color.white.opacity(0.98),
+        Color(red: 0.94, green: 0.95, blue: 0.97),
+      ]
+    }
+    return [
+      accentColor.opacity(0.98),
+      accentColor.opacity(0.78),
+    ]
+  }
+
   private var brandLogoPadding: CGFloat {
     switch platform {
     case "slack":
       9
+    case "gmail":
+      6
     case "linkedin":
       5
     case "discord", "signal", "whatsapp":
@@ -1371,6 +1383,10 @@ public struct InstallerPlatformIcon: View {
       Image(systemName: "message.fill")
         .font(.system(size: 15, weight: .semibold))
         .foregroundStyle(.white)
+    case "gmail":
+      Image(systemName: "envelope.fill")
+        .font(.system(size: 15, weight: .semibold))
+        .foregroundStyle(Color(red: 0.26, green: 0.52, blue: 0.96))
     case "slack":
       Image(systemName: "number")
         .font(.system(size: 15, weight: .bold))
@@ -1482,6 +1498,7 @@ private let installerPlatformOrder = [
   "phone_calls",
   "imessage",
   "slack",
+  "gmail",
   "discord",
   "linkedin",
   "whatsapp",
@@ -1532,6 +1549,8 @@ private func installerPlatformIconAssetName(for platform: String) -> String? {
   switch platform {
   case "contacts", "phone_calls", "imessage":
     return nil  // Use SF Symbol fallback icons
+  case "gmail":
+    return "google-logo"
   case "discord":
     return "discord-logo-white"
   case "slack":
@@ -1555,6 +1574,8 @@ private func installerPlatformAccentColor(for platform: String) -> Color {
     return Color(red: 0.13, green: 0.74, blue: 0.38)
   case "imessage":
     return Color(red: 0.24, green: 0.81, blue: 0.39)
+  case "gmail":
+    return Color(red: 0.83, green: 0.2, blue: 0.16)
   case "discord":
     return Color(red: 0.345, green: 0.396, blue: 0.949)
   case "slack":
@@ -1701,6 +1722,8 @@ private func platformWalkthrough(for configuration: InstallerPlatformConfigurati
     return "Adds your recent phone calls from this Mac."
   case "imessage":
     return "Syncs your Messages conversations from this Mac."
+  case "gmail":
+    return "Syncs Gmail messages after you grant readonly access with Google OAuth."
   case "slack":
     return "Syncs messages from each Slack workspace you connect."
   case "discord":
@@ -1718,6 +1741,8 @@ private func platformWalkthrough(for configuration: InstallerPlatformConfigurati
 
 private func authFlowDetail(for platform: String) -> String {
   switch platform {
+  case "gmail":
+    return "Opens Google OAuth and requests readonly Gmail message access."
   case "slack":
     return "Opens Slack sign-in in a browser tab for this workspace."
   case "discord":
@@ -1826,6 +1851,8 @@ private func installerPlatformTitle(_ platform: String, fallback: String?) -> St
     return "Phone calls"
   case "imessage":
     return "Messages"
+  case "gmail":
+    return "Gmail"
   case "linkedin":
     return "LinkedIn"
   case "signal":
@@ -1849,11 +1876,12 @@ private func installerAccountNoun(for platform: String) -> String {
 }
 
 private func installerSupportsAutomaticAccountDiscovery(_ platform: String) -> Bool {
-  platform == "slack"
+  platform == "gmail" || platform == "slack"
 }
 
 private func installerShouldHideAccountKey(platform: String, accountKey: String) -> Bool {
-  if installerSupportsAutomaticAccountDiscovery(platform) && accountKey.hasPrefix("pending-slack-") {
+  if installerSupportsAutomaticAccountDiscovery(platform)
+    && (accountKey.hasPrefix("pending-slack-") || accountKey.hasPrefix("pending-gmail-")) {
     return true
   }
   if !installerSupportsMultipleAccounts(platform) && accountKey == "default" {
@@ -1896,7 +1924,7 @@ private func installerGeneratedPendingAccountKey(
   for platform: String,
   existing: Set<String>
 ) -> String {
-  let prefix = platform == "slack" ? "pending-slack-" : "pending-"
+  let prefix = platform == "slack" ? "pending-slack-" : platform == "gmail" ? "pending-gmail-" : "pending-"
   var candidate = "\(prefix)\(UUID().uuidString.prefix(8).lowercased())"
   while existing.contains(candidate) {
     candidate = "\(prefix)\(UUID().uuidString.prefix(8).lowercased())"
@@ -1905,12 +1933,12 @@ private func installerGeneratedPendingAccountKey(
 }
 
 private func installerSupportsMultipleAccounts(_ platform: String) -> Bool {
-  platform == "slack"
+  platform == "gmail" || platform == "slack"
 }
 
 private func installerIsRequestablePlatform(_ platform: String) -> Bool {
   switch platform {
-  case "discord", "linkedin", "signal", "slack", "whatsapp":
+  case "discord", "gmail", "linkedin", "signal", "slack", "whatsapp":
     return true
   default:
     return false

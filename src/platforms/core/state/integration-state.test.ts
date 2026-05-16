@@ -265,6 +265,7 @@ process.exit(44);
     expect(requestedDiscord.integration.launchTarget).toBe("https://discord.com/login");
     expect(listRequestableIntegrationPlatforms()).toEqual([
       "slack",
+      "gmail",
       "discord",
       "linkedin",
       "whatsapp",
@@ -295,7 +296,16 @@ process.exit(44);
     );
     expect(
       buildIntegrationStatus(db).setupIntegrations.map((integration) => integration.platform),
-    ).toEqual(["contacts", "imessage", "slack", "discord", "linkedin", "whatsapp", "signal"]);
+    ).toEqual([
+      "contacts",
+      "imessage",
+      "slack",
+      "discord",
+      "gmail",
+      "linkedin",
+      "whatsapp",
+      "signal",
+    ]);
     db.close();
   });
 
@@ -306,7 +316,16 @@ process.exit(44);
 
     expect(
       buildIntegrationStatus(db).setupIntegrations.map((integration) => integration.platform),
-    ).toEqual(["contacts", "imessage", "slack", "discord", "linkedin", "whatsapp", "signal"]);
+    ).toEqual([
+      "contacts",
+      "imessage",
+      "slack",
+      "discord",
+      "gmail",
+      "linkedin",
+      "whatsapp",
+      "signal",
+    ]);
 
     db.close();
   });
@@ -326,6 +345,7 @@ process.exit(44);
       { platform: "imessage", authState: "unknown" },
       { platform: "slack", authState: "missing" },
       { platform: "discord", authState: "missing" },
+      { platform: "gmail", authState: "missing" },
       { platform: "linkedin", authState: "missing" },
       { platform: "whatsapp", authState: "missing" },
       { platform: "signal", authState: "missing" },
