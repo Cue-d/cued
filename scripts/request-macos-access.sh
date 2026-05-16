@@ -47,7 +47,7 @@ Usage:
   bash scripts/request-macos-access.sh [options]
 
 Options:
-  --all                 Request Contacts + Messages automation and open the Full Disk Access pane
+  --all                 Request Contacts and open the Full Disk Access pane
   --contacts            Trigger the macOS Contacts permission prompt using the native exporter
   --messages            Trigger Apple Events automation permission for Messages via AppleScript
   --full-disk-access    Open the Full Disk Access pane and print manual instructions
@@ -149,7 +149,6 @@ EOF
 
 if [[ $# -eq 0 ]]; then
   REQUEST_CONTACTS=1
-  REQUEST_MESSAGES=1
   REQUEST_FULL_DISK=1
 fi
 
@@ -159,7 +158,6 @@ while [[ $# -gt 0 ]]; do
       ;;
     --all)
       REQUEST_CONTACTS=1
-      REQUEST_MESSAGES=1
       REQUEST_FULL_DISK=1
       ;;
     --contacts)

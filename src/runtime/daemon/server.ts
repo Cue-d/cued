@@ -150,6 +150,7 @@ import {
 } from "./local-watchers.js";
 
 const DAEMON_VERSION = getCurrentAppVersion();
+const OUTBOUND_SEND_ENV = "CUED_ENABLE_OUTBOUND_SEND";
 const DEFAULT_AUTOSYNC_INTERVAL_MS = 60_000;
 const DEFAULT_DISCORD_AUTOSYNC_INTERVAL_MS = 10 * 60_000;
 const DEFAULT_SIGNAL_CATCHUP_INTERVAL_MS = 300_000;
@@ -230,6 +231,10 @@ function getFallbackAppStatusMetadata(): {
     releaseChannel: getCurrentReleaseChannel(),
     install: null,
   };
+}
+
+function isOutboundSendEnabled(): boolean {
+  return process.env[OUTBOUND_SEND_ENV] === "1" || process.env[OUTBOUND_SEND_ENV] === "true";
 }
 
 function writeMenuBarStatusSnapshot(
@@ -497,6 +502,14 @@ export function shouldSkipConnectedDiscordSchedulerSync(
   status: DiscordRealtimeStatus | null,
 ): boolean {
   return targetPlatform === "discord" && trigger === "scheduler" && status?.state === "connected";
+}
+
+export function shouldDrainOutboundQueue(input: {
+  outboundSendEnabled: boolean;
+  isUpdateShutdownRequested: boolean;
+  activeOutboundSend: unknown;
+}): boolean {
+  return input.outboundSendEnabled && !input.isUpdateShutdownRequested && !input.activeOutboundSend;
 }
 
 export function shouldProjectIngestRunInline(input: {
@@ -2726,10 +2739,13 @@ export async function runDaemon(): Promise<void> {
 
   const drainOutboundQueue = () => {
     outboundDrainScheduled = false;
-    if (isUpdateShutdownRequested) {
-      return;
-    }
-    if (activeOutboundSend) {
+    if (
+      !shouldDrainOutboundQueue({
+        outboundSendEnabled: isOutboundSendEnabled(),
+        isUpdateShutdownRequested,
+        activeOutboundSend,
+      })
+    ) {
       return;
     }
 
@@ -2854,6 +2870,9 @@ export async function runDaemon(): Promise<void> {
   };
 
   const scheduleOutboundDrain = () => {
+    if (!isOutboundSendEnabled()) {
+      return;
+    }
     if (outboundDrainScheduled) {
       return;
     }
@@ -5058,6 +5077,11 @@ async function dispatchRequest(
           }),
         };
       case "message-send":
+        if (!isOutboundSendEnabled()) {
+          throw new Error(
+            `Outbound send is not enabled in v1. Set ${OUTBOUND_SEND_ENV}=1 for internal development.`,
+          );
+        }
         return {
           id: request.id,
           ok: true,

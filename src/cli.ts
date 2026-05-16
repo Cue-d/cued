@@ -37,6 +37,7 @@ import {
 } from "./platforms/core/state/status.js";
 import {
   getPlatformFeatureMatrixRow,
+  getPlatformFutureFeatureNotes,
   getPlatformHelperRequirements,
   getPlatformPermissionRequirements,
   getSupportedHostOsForPlatform,
@@ -79,6 +80,11 @@ import { getGlobalCuedSkillStatus, installGlobalCuedSkill } from "./skills/insta
 
 const DIST_ROOT = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(DIST_ROOT, "..");
+const OUTBOUND_SEND_ENV = "CUED_ENABLE_OUTBOUND_SEND";
+
+function isOutboundSendEnabled(): boolean {
+  return process.env[OUTBOUND_SEND_ENV] === "1" || process.env[OUTBOUND_SEND_ENV] === "true";
+}
 
 export function resolveBundledScriptPath(scriptName: string): string | null {
   const candidates = [
@@ -161,7 +167,7 @@ Usage:
   cued hooks init
   cued hooks doctor
   cued hooks test <event>
-  cued send <platform> <target> <text> [account]
+${isOutboundSendEnabled() ? "  cued send <platform> <target> <text> [account]\n" : ""}
   cued sync run [source]
   cued sync resume
   cued rebuild
@@ -377,6 +383,7 @@ async function handleLocalIntegrationCommand(
       permissionRequirements: getPlatformPermissionRequirements(platform),
       helperRequirements: getPlatformHelperRequirements(platform),
       features: getPlatformFeatureMatrixRow(platform),
+      futureFeatures: getPlatformFutureFeatureNotes(platform),
     }));
   }
 
@@ -791,7 +798,7 @@ async function main(): Promise<void> {
             command: ["bash", scriptPath, ...flags],
           });
           execFileSync("bash", [scriptPath, ...flags], { stdio: "inherit" });
-          if (flags.includes("--all") || flags.includes("--messages")) {
+          if (flags.includes("--messages")) {
             const db = openCuedDatabase();
             try {
               refreshMessagesAutomationVerification(db);
@@ -1013,6 +1020,11 @@ async function main(): Promise<void> {
       }
       throw new Error("Usage: cued sync run [source] | cued sync resume");
     case "send":
+      if (!isOutboundSendEnabled()) {
+        throw new Error(
+          `Outbound send is not enabled in v1. Set ${OUTBOUND_SEND_ENV}=1 for internal development.`,
+        );
+      }
       if (!subcommand || !rest[0]) {
         throw new Error("Usage: cued send <platform> <target> <text> [account]");
       }

@@ -6,6 +6,7 @@ import {
   getAutoSyncTargets,
   isDisconnectedSocketError,
   shouldDeferContinuationProjection,
+  shouldDrainOutboundQueue,
   shouldProjectIngestRunInline,
   shouldSkipConnectedDiscordSchedulerSync,
 } from "./server.js";
@@ -44,6 +45,44 @@ describe("discord scheduler pacing", () => {
     expect(shouldSkipConnectedDiscordSchedulerSync("slack", "scheduler", connectedStatus)).toBe(
       false,
     );
+  });
+});
+
+describe("outbound send gate", () => {
+  it("does not drain queued outbound rows unless outbound send is enabled", () => {
+    expect(
+      shouldDrainOutboundQueue({
+        outboundSendEnabled: false,
+        isUpdateShutdownRequested: false,
+        activeOutboundSend: null,
+      }),
+    ).toBe(false);
+
+    expect(
+      shouldDrainOutboundQueue({
+        outboundSendEnabled: true,
+        isUpdateShutdownRequested: false,
+        activeOutboundSend: null,
+      }),
+    ).toBe(true);
+  });
+
+  it("does not drain while shutdown or another outbound send is active", () => {
+    expect(
+      shouldDrainOutboundQueue({
+        outboundSendEnabled: true,
+        isUpdateShutdownRequested: true,
+        activeOutboundSend: null,
+      }),
+    ).toBe(false);
+
+    expect(
+      shouldDrainOutboundQueue({
+        outboundSendEnabled: true,
+        isUpdateShutdownRequested: false,
+        activeOutboundSend: Promise.resolve(),
+      }),
+    ).toBe(false);
   });
 });
 
