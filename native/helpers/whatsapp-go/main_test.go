@@ -14,6 +14,7 @@ import (
 	waProto "go.mau.fi/whatsmeow/binary/proto"
 	"go.mau.fi/whatsmeow/proto/waCommon"
 	"go.mau.fi/whatsmeow/proto/waCompanionReg"
+	"go.mau.fi/whatsmeow/proto/waE2E"
 	"go.mau.fi/whatsmeow/proto/waHistorySync"
 	waWeb "go.mau.fi/whatsmeow/proto/waWeb"
 	"go.mau.fi/whatsmeow/store"
@@ -256,6 +257,108 @@ func TestHistoryMessageSnapshotFallbackRetainsMediaMetadata(t *testing.T) {
 	}
 	if snapshot.Attachments[0].Kind != "image" {
 		t.Fatalf("expected image attachment, got %+v", snapshot.Attachments[0])
+	}
+}
+
+func TestHistoryMessageSnapshotFallbackUnwrapsEditedMessageText(t *testing.T) {
+	historyMsg := &waHistorySync.HistorySyncMsg{
+		Message: &waWeb.WebMessageInfo{
+			Key: &waCommon.MessageKey{
+				ID:        proto.String("wamid-edited"),
+				RemoteJID: proto.String("15551234567@s.whatsapp.net"),
+				FromMe:    proto.Bool(false),
+			},
+			MessageTimestamp: proto.Uint64(123),
+			Message: &waProto.Message{
+				ProtocolMessage: &waProto.ProtocolMessage{
+					Type: waProto.ProtocolMessage_MESSAGE_EDIT.Enum(),
+					EditedMessage: &waProto.Message{
+						Conversation: proto.String("edited body"),
+					},
+				},
+			},
+		},
+	}
+
+	snapshot, ok := historyMessageSnapshot(nil, types.NewJID("15551234567", types.DefaultUserServer), historyMsg)
+	if !ok {
+		t.Fatal("expected edited history snapshot")
+	}
+	if snapshot.Text != "edited body" {
+		t.Fatalf("expected edited text, got %q", snapshot.Text)
+	}
+}
+
+func TestHistoryMessageSnapshotFallbackSkipsEncryptedWrappersWithoutClient(t *testing.T) {
+	historyMsg := &waHistorySync.HistorySyncMsg{
+		Message: &waWeb.WebMessageInfo{
+			Key: &waCommon.MessageKey{
+				ID:        proto.String("wamid-secret-edit"),
+				RemoteJID: proto.String("15551234567@s.whatsapp.net"),
+				FromMe:    proto.Bool(false),
+			},
+			MessageTimestamp: proto.Uint64(123),
+			Message: &waProto.Message{
+				SecretEncryptedMessage: &waProto.SecretEncryptedMessage{
+					SecretEncType: waE2E.SecretEncryptedMessage_MESSAGE_EDIT.Enum(),
+					TargetMessageKey: &waCommon.MessageKey{
+						ID:        proto.String("wamid-original"),
+						RemoteJID: proto.String("15551234567@s.whatsapp.net"),
+						FromMe:    proto.Bool(false),
+					},
+					EncPayload: []byte("ciphertext"),
+					EncIV:      []byte("nonce"),
+				},
+			},
+		},
+	}
+
+	if snapshot, ok := historyMessageSnapshot(nil, types.NewJID("15551234567", types.DefaultUserServer), historyMsg); ok {
+		t.Fatalf("expected encrypted wrapper to be skipped without a decrypting client, got %+v", snapshot)
+	}
+}
+
+func TestPrepareMessageEventForReadSkipsEncryptedWrappersWithoutClient(t *testing.T) {
+	event := &events.Message{
+		Info: types.MessageInfo{
+			ID: "wamid-secret-edit",
+			MessageSource: types.MessageSource{
+				Chat:   types.NewJID("15551234567", types.DefaultUserServer),
+				Sender: types.NewJID("15551234567", types.DefaultUserServer),
+			},
+		},
+		Message: &waProto.Message{
+			SecretEncryptedMessage: &waProto.SecretEncryptedMessage{
+				SecretEncType: waE2E.SecretEncryptedMessage_MESSAGE_EDIT.Enum(),
+				TargetMessageKey: &waCommon.MessageKey{
+					ID:        proto.String("wamid-original"),
+					RemoteJID: proto.String("15551234567@s.whatsapp.net"),
+					FromMe:    proto.Bool(false),
+				},
+				EncPayload: []byte("ciphertext"),
+				EncIV:      []byte("nonce"),
+			},
+		},
+	}
+
+	if prepareMessageEventForRead(context.Background(), nil, event) {
+		t.Fatal("expected encrypted wrapper without a client to be skipped")
+	}
+}
+
+func TestExtractTextUnwrapsFutureProofEditedMessage(t *testing.T) {
+	message := &waProto.Message{
+		EditedMessage: &waProto.FutureProofMessage{
+			Message: &waProto.Message{
+				ExtendedTextMessage: &waProto.ExtendedTextMessage{
+					Text: proto.String("future proof edit"),
+				},
+			},
+		},
+	}
+
+	if got := extractText(message); got != "future proof edit" {
+		t.Fatalf("expected future-proof edited text, got %q", got)
 	}
 }
 
@@ -533,6 +636,9 @@ func TestHelperStateRetainsDownloadableMediaAcrossReload(t *testing.T) {
 		t.Fatal("downloadable media metadata was not retained")
 	} else if message.MessageProto == nil || *message.MessageProto != protoValue {
 		t.Fatalf("unexpected proto for retained media message: %#v", message.MessageProto)
+	}
+	if message := state.findMessage(" 12015550123@S.WHATSAPP.NET ", "message-0"); message == nil {
+		t.Fatal("downloadable media lookup did not normalize chat JID")
 	}
 
 	reloaded, err := newHelperState(state.storeDir)
