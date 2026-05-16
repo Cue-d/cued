@@ -36,7 +36,9 @@ export async function buildOnboardingSnapshot(
   const integrations = buildIntegrationStatus(db, { includeDiagnostics: true });
 
   return {
-    permissions: permissions.permissions,
+    permissions: permissions.permissions.filter(
+      (permission) => permission.key !== "messages_automation",
+    ),
     globalSkill,
     ...integrations,
   };

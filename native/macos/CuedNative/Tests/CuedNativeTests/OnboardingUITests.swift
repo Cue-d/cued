@@ -9,7 +9,7 @@ final class OnboardingUITests: XCTestCase {
     XCTAssertEqual(onboardingPermissionKeys(for: ["--messages"]), ["messages_automation"])
     XCTAssertEqual(
       onboardingPermissionKeys(for: ["--all"]),
-      ["contacts", "full_disk_access", "messages_automation"]
+      ["contacts", "full_disk_access"]
     )
   }
 

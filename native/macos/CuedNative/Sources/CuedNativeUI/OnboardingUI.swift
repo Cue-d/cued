@@ -317,10 +317,17 @@ public final class OnboardingViewModel: ObservableObject {
   private func buildPermissionStatuses(
     _ permissions: [InstallerPermissionStatus]
   ) -> [InstallerPermissionStatus] {
-    let byKey = Dictionary(uniqueKeysWithValues: permissions.map { ($0.key, $0) })
-    return installerPermissionOrder.compactMap { key in
-      byKey[key] ?? installerDefaultPermissionStatus(for: key)
+    if permissions.isEmpty {
+      return installerDefaultPermissionStatuses()
     }
+
+    let byKey = Dictionary(uniqueKeysWithValues: permissions.map { ($0.key, $0) })
+    let orderedKnownPermissions = installerPermissionOrder.compactMap { key in
+      byKey[key] ?? installerDefaultPermissionStatus(for: key, includeFuturePermissions: false)
+    }
+    let orderedKeys = Set(installerPermissionOrder)
+    let extraPermissions = permissions.filter { !orderedKeys.contains($0.key) }
+    return orderedKnownPermissions + extraPermissions
   }
 
   private func buildPlatformConfigurations(
@@ -1477,6 +1484,11 @@ private let installerPermissionOrder = [
   "messages_automation",
 ]
 
+private let installerDefaultPermissionOrder = [
+  "contacts",
+  "full_disk_access",
+]
+
 private let installerPlatformOrder = [
   "contacts",
   "phone_calls",
@@ -1489,7 +1501,7 @@ private let installerPlatformOrder = [
 ]
 
 private func installerDefaultPermissionStatuses() -> [InstallerPermissionStatus] {
-  installerPermissionOrder.compactMap { installerDefaultPermissionStatus(for: $0) }
+  installerDefaultPermissionOrder.compactMap { installerDefaultPermissionStatus(for: $0) }
 }
 
 private func installerDefaultGlobalSkillStatus() -> InstallerGlobalSkillStatus {
@@ -1500,7 +1512,10 @@ private func installerDefaultGlobalSkillStatus() -> InstallerGlobalSkillStatus {
   )
 }
 
-private func installerDefaultPermissionStatus(for key: String) -> InstallerPermissionStatus? {
+private func installerDefaultPermissionStatus(
+  for key: String,
+  includeFuturePermissions: Bool = true
+) -> InstallerPermissionStatus? {
   switch key {
   case "contacts":
     return InstallerPermissionStatus(
@@ -1517,6 +1532,9 @@ private func installerDefaultPermissionStatus(for key: String) -> InstallerPermi
       requestFlags: ["--full-disk-access"]
     )
   case "messages_automation":
+    guard includeFuturePermissions else {
+      return nil
+    }
     return InstallerPermissionStatus(
       key: key,
       status: "unknown",
@@ -2037,12 +2055,6 @@ private struct InstallerPreviewContainer: View {
         status: "needs_action",
         summary: "Messages database is not readable from the current process",
         requestFlags: ["--full-disk-access"]
-      ),
-      InstallerPermissionStatus(
-        key: "messages_automation",
-        status: "needs_action",
-        summary: "Apple Events automation for Messages is not verified",
-        requestFlags: ["--messages"]
       ),
     ],
     globalSkill: installerDefaultGlobalSkillStatus(),

@@ -1,5 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { getPlatformFeatureSupport } from "../platforms/core/types.js";
+import {
+  getPlatformFeatureSupport,
+  getPlatformFutureFeatureNotes,
+} from "../platforms/core/types.js";
 import { summarizePlatformCapability } from "./platform-capabilities.js";
 
 const inspectSlackHelperMock = vi.fn();
@@ -151,13 +154,21 @@ describe("platform capability resolver", () => {
   });
 
   it("exposes a shipped feature matrix for README-facing capabilities", () => {
-    expect(getPlatformFeatureSupport("signal", "send")).toBe("yes");
     expect(getPlatformFeatureSupport("signal", "full_history_sync")).toBe("no");
-    expect(getPlatformFeatureSupport("discord", "send")).toBe("yes");
     expect(getPlatformFeatureSupport("discord", "full_history_sync")).toBe("no");
-    expect(getPlatformFeatureSupport("contacts", "send")).toBe("no");
     expect(getPlatformFeatureSupport("linkedin", "full_history_sync")).toBe("partial");
     expect(getPlatformFeatureSupport("linkedin", "read_receipts")).toBe("partial");
     expect(getPlatformFeatureSupport("imessage", "realtime_ingest")).toBe("yes");
+  });
+
+  it("limits future send notes to planned outbound messaging platforms", () => {
+    expect(getPlatformFutureFeatureNotes("contacts")).toEqual({});
+    expect(getPlatformFutureFeatureNotes("gmail")).toEqual({});
+    expect(getPlatformFutureFeatureNotes("imessage")).toEqual({
+      send: "Outbound send is planned for a future release.",
+    });
+    expect(getPlatformFutureFeatureNotes("signal")).toEqual({
+      send: "Outbound send is planned for a future release.",
+    });
   });
 });

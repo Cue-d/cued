@@ -481,7 +481,7 @@ final class OnboardingWindowController: NSWindowController {
 
 func onboardingPermissionKeys(for flags: [String]) -> Set<String> {
   if flags.contains("--all") {
-    return ["contacts", "full_disk_access", "messages_automation"]
+    return ["contacts", "full_disk_access"]
   }
 
   var keys = Set<String>()

@@ -24,7 +24,6 @@ export const PLATFORM_HELPER_REQUIREMENT_VALUES = [
 export type PlatformHelperRequirement = (typeof PLATFORM_HELPER_REQUIREMENT_VALUES)[number];
 
 export const PLATFORM_FEATURE_VALUES = [
-  "send",
   "receive",
   "realtime_ingest",
   "full_history_sync",
@@ -40,6 +39,14 @@ export type PlatformFeature = (typeof PLATFORM_FEATURE_VALUES)[number];
 
 export const PLATFORM_FEATURE_SUPPORT_VALUES = ["yes", "partial", "no"] as const;
 export type PlatformFeatureSupport = (typeof PLATFORM_FEATURE_SUPPORT_VALUES)[number];
+
+export const PLATFORM_FUTURE_FEATURE_NOTES = {
+  send: "Outbound send is planned for a future release.",
+} as const;
+export type PlatformFutureFeatureNotes = Partial<typeof PLATFORM_FUTURE_FEATURE_NOTES>;
+
+const PLATFORM_FUTURE_SEND_VALUES = ["discord", "imessage", "signal", "whatsapp"] as const;
+const platformFutureSendSet = new Set<Platform>(PLATFORM_FUTURE_SEND_VALUES);
 
 type PlatformDefinition = {
   adapter: boolean;
@@ -144,7 +151,6 @@ export const PLATFORM_DEFINITIONS = {
 
 export const PLATFORM_FEATURE_MATRIX = {
   contacts: {
-    send: "no",
     receive: "no",
     realtime_ingest: "yes",
     full_history_sync: "yes",
@@ -157,7 +163,6 @@ export const PLATFORM_FEATURE_MATRIX = {
     contact_sync: "yes",
   },
   gmail: {
-    send: "no",
     receive: "yes",
     realtime_ingest: "partial",
     full_history_sync: "yes",
@@ -170,7 +175,6 @@ export const PLATFORM_FEATURE_MATRIX = {
     contact_sync: "partial",
   },
   imessage: {
-    send: "no",
     receive: "yes",
     realtime_ingest: "yes",
     full_history_sync: "yes",
@@ -183,7 +187,6 @@ export const PLATFORM_FEATURE_MATRIX = {
     contact_sync: "partial",
   },
   discord: {
-    send: "yes",
     receive: "yes",
     realtime_ingest: "yes",
     full_history_sync: "no",
@@ -196,7 +199,6 @@ export const PLATFORM_FEATURE_MATRIX = {
     contact_sync: "partial",
   },
   linkedin: {
-    send: "no",
     receive: "yes",
     realtime_ingest: "yes",
     full_history_sync: "partial",
@@ -209,7 +211,6 @@ export const PLATFORM_FEATURE_MATRIX = {
     contact_sync: "yes",
   },
   signal: {
-    send: "yes",
     receive: "yes",
     realtime_ingest: "yes",
     full_history_sync: "no",
@@ -222,7 +223,6 @@ export const PLATFORM_FEATURE_MATRIX = {
     contact_sync: "partial",
   },
   slack: {
-    send: "no",
     receive: "yes",
     realtime_ingest: "yes",
     full_history_sync: "yes",
@@ -235,7 +235,6 @@ export const PLATFORM_FEATURE_MATRIX = {
     contact_sync: "yes",
   },
   whatsapp: {
-    send: "yes",
     receive: "yes",
     realtime_ingest: "yes",
     full_history_sync: "yes",
@@ -443,6 +442,10 @@ export function getPlatformFeatureMatrixRow(
   platform: Platform,
 ): Readonly<Record<PlatformFeature, PlatformFeatureSupport>> {
   return PLATFORM_FEATURE_MATRIX[platform];
+}
+
+export function getPlatformFutureFeatureNotes(platform: Platform): PlatformFutureFeatureNotes {
+  return platformFutureSendSet.has(platform) ? PLATFORM_FUTURE_FEATURE_NOTES : {};
 }
 
 export function isIntegrationAuthState(value: string): value is IntegrationAuthState {
