@@ -1,12 +1,15 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, renameSync, rmSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { CUED_BROWSER_DIR } from "../../../core/config.js";
 import { resolveHostOS, summarizePlatformCapability } from "../../../core/platform-capabilities.js";
 import { safeParseJsonRecord, safeParseJsonStringArray } from "../../../db/codecs.js";
 import type { AuthSessionRow, CuedDatabase, IntegrationStateRow } from "../../../db/database.js";
 import { inspectSlackHelper } from "../../slack/helper/binary.js";
+import { resolveIntegrationAccountKey } from "../account-keys.js";
 import { listAdapterPlatforms } from "../registry.js";
+import {
+  getChromiumProfileRoot,
+  moveRuntimeDirectoryInsideRoot,
+  getChromiumProfileDir as resolveChromiumProfileDir,
+} from "../runtime-paths.js";
 import {
   getDefaultAccountKeyForPlatform,
   type IntegrationRuntimeKind,
@@ -130,7 +133,7 @@ export function deriveRuntimeKind(row: IntegrationRowLike): IntegrationRuntimeKi
 }
 
 export function getChromiumProfileDir(platform: Platform, accountKey: string): string {
-  return join(CUED_BROWSER_DIR, platform, accountKey);
+  return resolveChromiumProfileDir(platform, accountKey);
 }
 
 function isGeneratedPendingSlackAccountKey(accountKey: string): boolean {
@@ -160,8 +163,8 @@ export function resolveAccountKey(
   platform: Platform,
   accountKey?: string,
 ): string {
-  if (accountKey) {
-    return accountKey;
+  if (accountKey !== undefined) {
+    return resolveIntegrationAccountKey(accountKey, getDefaultAccountKeyForPlatform(platform));
   }
   const matches = db
     .listIntegrationStates()
@@ -684,14 +687,12 @@ export function resolveCompletedMetadata(
   const targetProfileDir = getChromiumProfileDir(platform, toAccountKey);
   if (currentProfileDir && currentProfileDir !== targetProfileDir) {
     try {
-      if (existsSync(currentProfileDir)) {
-        mkdirSync(dirname(targetProfileDir), { recursive: true });
-        if (!existsSync(targetProfileDir)) {
-          renameSync(currentProfileDir, targetProfileDir);
-        } else {
-          rmSync(currentProfileDir, { recursive: true, force: true });
-        }
-      }
+      moveRuntimeDirectoryInsideRoot(
+        currentProfileDir,
+        targetProfileDir,
+        getChromiumProfileRoot(platform),
+        "browser profile directory",
+      );
     } catch {
       // Best-effort move. If the rename fails, still point future auth to the target path.
     }

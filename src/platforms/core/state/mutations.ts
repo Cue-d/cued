@@ -1,9 +1,15 @@
-import { rmSync } from "node:fs";
 import { safeParseJsonRecord, safeParseJsonStringArray } from "../../../db/codecs.js";
 import type { AuthSessionRow, CuedDatabase } from "../../../db/database.js";
 import { getSignalConfigDir } from "../../signal/cli/binary.js";
 import { getWhatsAppStoreDir } from "../../whatsapp/helper/binary.js";
+import { resolveIntegrationAccountKey, validateIntegrationAccountKey } from "../account-keys.js";
 import { listAdapterPlatforms } from "../registry.js";
+import {
+  getChromiumProfileRoot,
+  getSignalConfigRoot,
+  getWhatsAppStoreRoot,
+  removeRuntimeDirectoryInsideRoot,
+} from "../runtime-paths.js";
 import { getDefaultAccountKeyForPlatform, type Platform } from "../types.js";
 import {
   deleteKeychainSecret,
@@ -46,7 +52,10 @@ function ensureRequestableIntegrationState(
 ): IntegrationStateSummary {
   const requested = getRequestableIntegration(platform);
   const normalized = normalizeIntegrationPlatform(platform);
-  const resolvedAccountKey = accountKey ?? getDefaultAccountKeyForPlatform(normalized);
+  const resolvedAccountKey = resolveIntegrationAccountKey(
+    accountKey,
+    getDefaultAccountKeyForPlatform(normalized),
+  );
   const existing = db.getIntegrationState(normalized, resolvedAccountKey);
   const existingMetadata = existing?.metadata_json
     ? safeParseJsonRecord(existing.metadata_json, "integration_states.metadata_json")
@@ -66,8 +75,9 @@ function ensureRequestableIntegrationState(
     platform: normalized,
     accountKey: resolvedAccountKey,
     displayName:
-      accountKey && shouldAppendAccountKeyToDisplayName(normalized, accountKey)
-        ? `${requested.displayName} ${accountKey}`
+      accountKey !== undefined &&
+      shouldAppendAccountKeyToDisplayName(normalized, resolvedAccountKey)
+        ? `${requested.displayName} ${resolvedAccountKey}`
         : requested.displayName,
     authState: wasUserRemoved ? "requested" : (existing?.auth_state ?? "requested"),
     enabled: wasUserRemoved ? true : existing ? existing.enabled === 1 : true,
@@ -284,7 +294,9 @@ export function completeAuthSession(
 
   const metadata =
     safeParseJsonRecord(integration.metadata_json, "integration_states.metadata_json") ?? {};
-  const targetAccountKey = resolveCompletedAccountKey(session, input);
+  const targetAccountKey = validateIntegrationAccountKey(
+    resolveCompletedAccountKey(session, input),
+  );
   const targetDisplayName = resolveCompletedDisplayName(
     integration.display_name,
     input.resultSummary,
@@ -403,7 +415,7 @@ export function disconnectIntegration(
       typeof integration.metadata?.storeDir === "string"
         ? integration.metadata.storeDir
         : getWhatsAppStoreDir(integration.accountKey);
-    rmSync(storeDir, { recursive: true, force: true });
+    removeRuntimeDirectoryInsideRoot(storeDir, getWhatsAppStoreRoot(), "WhatsApp store directory");
   }
 
   return getIntegrationSummary(db, integration.platform, integration.accountKey);
@@ -434,7 +446,11 @@ export function removeIntegration(
       ? integration.metadata.browserProfileDir
       : null;
   if (browserProfileDir) {
-    rmSync(browserProfileDir, { recursive: true, force: true });
+    removeRuntimeDirectoryInsideRoot(
+      browserProfileDir,
+      getChromiumProfileRoot(integration.platform),
+      "browser profile directory",
+    );
   }
 
   if (integration.platform === "whatsapp") {
@@ -442,7 +458,7 @@ export function removeIntegration(
       typeof integration.metadata?.storeDir === "string"
         ? integration.metadata.storeDir
         : getWhatsAppStoreDir(integration.accountKey);
-    rmSync(storeDir, { recursive: true, force: true });
+    removeRuntimeDirectoryInsideRoot(storeDir, getWhatsAppStoreRoot(), "WhatsApp store directory");
   }
 
   if (integration.platform === "signal") {
@@ -450,7 +466,7 @@ export function removeIntegration(
       typeof integration.metadata?.configDir === "string"
         ? integration.metadata.configDir
         : getSignalConfigDir(integration.accountKey);
-    rmSync(configDir, { recursive: true, force: true });
+    removeRuntimeDirectoryInsideRoot(configDir, getSignalConfigRoot(), "Signal config directory");
   }
 
   const removedAt = now();
