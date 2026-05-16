@@ -1,7 +1,7 @@
 import { type ChildProcess, spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { createServer } from "node:http";
-import type { AddressInfo } from "node:net";
+import type { AddressInfo, Socket } from "node:net";
 import { pathToFileURL } from "node:url";
 import type { AuthSessionState, Platform } from "../../../core/types/provider.js";
 import type { CuedDatabase } from "../../../db/database.js";
@@ -78,6 +78,7 @@ async function runGmailOAuthSession(
   const timeoutMs = Number(process.env.CUED_OAUTH_TIMEOUT_MS ?? DEFAULT_OAUTH_TIMEOUT_MS);
 
   const codePromise = new Promise<{ code: string; redirectUri: string }>((resolve, reject) => {
+    const sockets = new Set<Socket>();
     const server = createServer((request, response) => {
       const host = request.headers.host ?? "localhost";
       const url = new URL(request.url ?? "/", `http://${host}`);
@@ -85,22 +86,39 @@ async function runGmailOAuthSession(
       const returnedState = url.searchParams.get("state");
       const error = url.searchParams.get("error");
       response.setHeader("content-type", "text/html; charset=utf-8");
-      if (error) {
-        response.end("<h1>Cued Gmail sign-in failed</h1><p>You can close this window.</p>");
+      response.setHeader("connection", "close");
+      const closeLoopback = () => {
         server.close();
+        for (const socket of sockets) {
+          socket.destroy();
+        }
+      };
+      if (error) {
+        response.end(
+          "<h1>Cued Gmail sign-in failed</h1><p>You can close this window.</p>",
+          closeLoopback,
+        );
         reject(new Error(`Google OAuth failed: ${error}`));
         return;
       }
       if (!code || returnedState !== state) {
-        response.end("<h1>Cued Gmail sign-in failed</h1><p>Invalid OAuth response.</p>");
-        server.close();
+        response.end(
+          "<h1>Cued Gmail sign-in failed</h1><p>Invalid OAuth response.</p>",
+          closeLoopback,
+        );
         reject(new Error("Google OAuth response was missing code or state"));
         return;
       }
-      response.end("<h1>Cued Gmail sign-in complete</h1><p>You can close this window.</p>");
       const address = server.address() as AddressInfo;
-      server.close();
+      response.end(
+        "<h1>Cued Gmail sign-in complete</h1><p>You can close this window.</p>",
+        closeLoopback,
+      );
       resolve({ code, redirectUri: `http://localhost:${address.port}` });
+    });
+    server.on("connection", (socket) => {
+      sockets.add(socket);
+      socket.once("close", () => sockets.delete(socket));
     });
     const timeout = setTimeout(() => {
       server.close();
@@ -212,12 +230,25 @@ async function main(): Promise<void> {
     integration: IntegrationStateSummary;
   };
   const result = await runGmailOAuthSession(parsed.session, parsed.integration);
-  process.stdout.write(JSON.stringify(result));
+  await new Promise<void>((resolve, reject) => {
+    process.stdout.write(JSON.stringify(result), (error) => {
+      if (error) {
+        reject(error);
+      } else {
+        resolve();
+      }
+    });
+  });
 }
 
 if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) {
-  void main().catch((error) => {
-    process.stderr.write(error instanceof Error ? (error.stack ?? error.message) : String(error));
-    process.exitCode = 1;
-  });
+  void main().then(
+    () => {
+      process.exit(0);
+    },
+    (error) => {
+      process.stderr.write(error instanceof Error ? (error.stack ?? error.message) : String(error));
+      process.exit(1);
+    },
+  );
 }
