@@ -3,7 +3,8 @@ import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-import { CUED_SIGNAL_DIR } from "../../../core/config.js";
+import { validateIntegrationAccountKey } from "../../core/account-keys.js";
+import { getSignalConfigRoot } from "../../core/runtime-paths.js";
 
 const execFileAsync = promisify(execFile);
 const MIN_SIGNAL_CLI_VERSION = { major: 0, minor: 13, patch: 0 } as const;
@@ -115,8 +116,7 @@ function resolveRepoRoot(): string {
 }
 
 function makeSignalConfigDir(accountKey: string): string {
-  const configuredRoot = process.env.CUED_SIGNAL_DIR?.trim();
-  return join(configuredRoot || CUED_SIGNAL_DIR, accountKey);
+  return join(getSignalConfigRoot(), validateIntegrationAccountKey(accountKey));
 }
 
 export function getSignalConfigDir(accountKey: string): string {

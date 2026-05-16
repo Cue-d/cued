@@ -1,6 +1,6 @@
-import { join } from "node:path";
-import { CUED_BROWSER_DIR } from "../../../core/config.js";
 import type { CuedDatabase } from "../../../db/database.js";
+import { validateIntegrationAccountKey } from "../../core/account-keys.js";
+import { getChromiumProfileDir } from "../../core/runtime-paths.js";
 import {
   authKeychainService,
   loadKeychainSecret,
@@ -34,10 +34,6 @@ export interface StoreSlackSessionOptions {
   reviveUserRemoved?: boolean;
 }
 
-function getChromiumProfileDir(accountKey: string): string {
-  return join(CUED_BROWSER_DIR, "slack", accountKey);
-}
-
 function storeSecretInKeychain(
   service: string,
   account: string,
@@ -55,7 +51,7 @@ export function storeSlackSession(
   payload: StoredSlackSessionPayload,
   options: StoreSlackSessionOptions = {},
 ): StoredSlackSessionResult {
-  const accountKey = payload.accountKey;
+  const accountKey = validateIntegrationAccountKey(payload.accountKey);
   const existing = db.getIntegrationState("slack", accountKey);
   const existingMetadata = existing?.metadata_json
     ? (JSON.parse(existing.metadata_json) as Record<string, unknown>)
@@ -120,7 +116,7 @@ export function storeSlackSession(
       authManagedBy: "chromium-runtime",
       runtimeKind: "chromium",
       supportedByDaemon: true,
-      browserProfileDir: getChromiumProfileDir(accountKey),
+      browserProfileDir: getChromiumProfileDir("slack", accountKey),
       importedSavedAt: payload.savedAt,
       importSourcePath: payload.sourcePath,
       importMethod: payload.importMethod,

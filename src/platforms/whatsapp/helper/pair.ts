@@ -3,7 +3,9 @@ import { existsSync, mkdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-import { CUED_WHATSAPP_DIR, ensureCuedDirs } from "../../../core/config.js";
+import { ensureCuedDirs } from "../../../core/config.js";
+import { validateIntegrationAccountKey } from "../../core/account-keys.js";
+import { getWhatsAppStoreRoot } from "../../core/runtime-paths.js";
 import type { WhatsAppHelperEventEnvelope } from "../types.js";
 
 const execFileAsync = promisify(execFile);
@@ -14,7 +16,7 @@ function resolveRepoRoot(): string {
 
 export function getWhatsAppStoreDir(accountKey: string): string {
   ensureCuedDirs();
-  const dir = join(CUED_WHATSAPP_DIR, accountKey);
+  const dir = join(getWhatsAppStoreRoot(), validateIntegrationAccountKey(accountKey));
   mkdirSync(dir, { recursive: true, mode: 0o700 });
   return dir;
 }

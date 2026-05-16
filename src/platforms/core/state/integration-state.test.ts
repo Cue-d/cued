@@ -974,9 +974,9 @@ process.exit(44);
     db.close();
   });
 
-  it("removes a requestable integration and its local browser profile", () => {
+  it("removes a requestable integration when its browser profile is already gone", () => {
     const db = createDb();
-    const profileDir = createTempDir("cued-slack-profile-");
+    const profileDir = join(createTempDir("cued-slack-profile-root-"), "missing-profile");
 
     db.upsertIntegrationState({
       platform: "slack",
@@ -1028,9 +1028,66 @@ process.exit(44);
     db.close();
   });
 
+  it("rejects account keys that could escape runtime directories", () => {
+    const db = createDb();
+
+    for (const accountKey of ["../victim", "..", ".", "team/default", "team\\default"]) {
+      expect(() => requestIntegrationAccess(db, "slack", accountKey)).toThrow(
+        "Integration account key",
+      );
+    }
+
+    expect(requestIntegrationAccess(db, "slack", "avery@example.com").integration).toMatchObject({
+      platform: "slack",
+      accountKey: "avery@example.com",
+    });
+    db.close();
+  });
+
+  it("rejects provider-derived account keys that could escape runtime directories", () => {
+    const db = createDb();
+    const requested = requestIntegrationAccess(db, "slack");
+
+    expect(() =>
+      completeAuthSession(db, requested.authSession.id, {
+        state: "authenticated",
+        resultSummary: { teamId: "../victim", teamName: "Acme" },
+      }),
+    ).toThrow("Integration account key");
+    db.close();
+  });
+
+  it("does not delete metadata runtime paths outside owned runtime roots", () => {
+    const db = createDb();
+    const outsideDir = createTempDir("cued-outside-profile-");
+    const sentinelPath = join(outsideDir, "sentinel");
+    writeFileSync(sentinelPath, "keep");
+
+    db.upsertIntegrationState({
+      platform: "slack",
+      accountKey: "T123",
+      displayName: "Acme",
+      authState: "authenticated",
+      enabled: true,
+      connectionKind: "browser-session",
+      syncCapable: true,
+      launchStrategy: "chromium-auth",
+      launchTarget: "https://slack.com/signin",
+      importedFrom: "local-cli",
+      metadata: {
+        browserProfileDir: outsideDir,
+      },
+    });
+
+    expect(() => removeIntegration(db, "slack", "T123")).toThrow("outside Cued runtime root");
+    expect(existsSync(sentinelPath)).toBe(true);
+    db.close();
+  });
+
   it("removes a signal integration and its local config directory", () => {
     const db = createDb();
-    const configDir = createTempDir("cued-signal-config-");
+    process.env.CUED_SIGNAL_DIR = createTempDir("cued-signal-root-");
+    const configDir = join(process.env.CUED_SIGNAL_DIR, "default");
     mkdirSync(configDir, { recursive: true });
 
     db.upsertIntegrationState({
@@ -1085,7 +1142,9 @@ process.exit(44);
     process.env.CUED_SLACK_APP_BINARY = join(createTempDir("cued-no-slack-app-"), "Slack");
 
     const db = createDb();
-    const configDir = createTempDir("cued-signal-config-");
+    const signalRoot = process.env.CUED_SIGNAL_DIR!;
+    const configDir = join(signalRoot, "default");
+    mkdirSync(configDir, { recursive: true });
     db.upsertIntegrationState({
       platform: "signal",
       accountKey: "default",

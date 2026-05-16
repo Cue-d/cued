@@ -3,6 +3,7 @@ import process from "node:process";
 import type { CuedDatabase } from "../../../db/database.js";
 import { importLinkedInStoredAuth } from "../../linkedin/auth/keychain-import.js";
 import { importSlackDesktopAuth } from "../../slack/auth/desktop-import.js";
+import { resolveIntegrationAccountKey } from "../account-keys.js";
 import {
   completeAuthSession,
   connectIntegration,
@@ -215,7 +216,10 @@ export class IntegrationAuthService {
     if (!normalized) {
       return null;
     }
-    const resolvedAccountKey = accountKey ?? getDefaultAccountKeyForPlatform(normalized);
+    const resolvedAccountKey = resolveIntegrationAccountKey(
+      accountKey,
+      getDefaultAccountKeyForPlatform(normalized),
+    );
 
     for (const [sessionId, runtime] of activeAuthSessions) {
       if (runtime.platform !== normalized || runtime.accountKey !== resolvedAccountKey) {

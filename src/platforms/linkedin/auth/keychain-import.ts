@@ -1,7 +1,6 @@
-import { join } from "node:path";
-import { CUED_BROWSER_DIR } from "../../../core/config.js";
 import { safeParseJsonRecord, safeParseJsonStringArray } from "../../../db/codecs.js";
 import type { CuedDatabase } from "../../../db/database.js";
+import { getChromiumProfileDir } from "../../core/runtime-paths.js";
 import {
   authKeychainService,
   legacyAuthKeychainService,
@@ -20,10 +19,6 @@ export interface ImportedLinkedInSessionResult {
   platform: "linkedin";
   accountKey: string;
   imported: boolean;
-}
-
-function getChromiumProfileDir(accountKey: string): string {
-  return join(CUED_BROWSER_DIR, "linkedin", accountKey);
 }
 
 function readLinkedInKeychainSecret(accountKey: string): Record<string, unknown> | null {
@@ -104,7 +99,7 @@ export function importLinkedInStoredAuth(
       authManagedBy: "chromium-runtime",
       runtimeKind: "chromium",
       supportedByDaemon: true,
-      browserProfileDir: getChromiumProfileDir(accountKey),
+      browserProfileDir: getChromiumProfileDir("linkedin", accountKey),
       keychainService: LINKEDIN_KEYCHAIN_SERVICE,
       keychainAccount: accountKey,
       importedSavedAt: parsed.savedAt,
