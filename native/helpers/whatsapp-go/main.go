@@ -1523,6 +1523,9 @@ func (r *helperRuntime) handleMessageEvent(event *events.Message) {
 	if event == nil {
 		return
 	}
+	if !prepareMessageEventForRead(context.Background(), r.client, event) {
+		return
+	}
 	if event.Info.IsFromMe && event.Message != nil {
 		if notification := event.Message.GetProtocolMessage().GetHistorySyncNotification(); notification != nil {
 			r.enqueueHistorySyncNotification(notification)
@@ -1728,6 +1731,7 @@ func messageFromEvent(event *events.Message) messageSnapshot {
 }
 
 func attachmentsFromMessage(messageID string, chatJID string, message *waProto.Message) ([]attachmentSnapshot, *string) {
+	message = contentMessageForRead(message)
 	if message == nil {
 		return nil, nil
 	}
@@ -1864,6 +1868,7 @@ func receiptStatus(event *events.Receipt) string {
 }
 
 func extractText(message *waProto.Message) string {
+	message = contentMessageForRead(message)
 	if message == nil {
 		return ""
 	}
@@ -1885,6 +1890,27 @@ func extractText(message *waProto.Message) string {
 	return ""
 }
 
+func contentMessageForRead(message *waProto.Message) *waProto.Message {
+	for range 4 {
+		if message == nil {
+			return nil
+		}
+		if edited := message.GetEditedMessage().GetMessage(); edited != nil {
+			message = edited
+			continue
+		}
+		protocol := message.GetProtocolMessage()
+		if protocol != nil && protocol.GetType() == waProto.ProtocolMessage_MESSAGE_EDIT {
+			if edited := protocol.GetEditedMessage(); edited != nil {
+				message = edited
+				continue
+			}
+		}
+		return message
+	}
+	return message
+}
+
 func historyMessageSnapshot(
 	client *whatsmeow.Client,
 	chatJID types.JID,
@@ -1896,11 +1922,17 @@ func historyMessageSnapshot(
 	if client != nil {
 		event, err := client.ParseWebMessage(chatJID, historyMsg.GetMessage())
 		if err == nil {
+			if !prepareMessageEventForRead(context.Background(), client, event) {
+				return messageSnapshot{}, false
+			}
 			return messageFromEvent(event), true
 		}
 	}
 
 	webMsg := historyMsg.GetMessage()
+	if hasEncryptedWrapper(webMsg.GetMessage()) {
+		return messageSnapshot{}, false
+	}
 	normalizedChatJID := normalizeJID(chatJID.String())
 	fromMe := webMsg.GetKey().GetFromMe()
 	sender := normalizeJID(webMsg.GetParticipant())
@@ -1934,6 +1966,58 @@ func historyMessageSnapshot(
 		MessageProto:   messageProto,
 		Attachments:    attachments,
 	}, true
+}
+
+func prepareMessageEventForRead(ctx context.Context, client *whatsmeow.Client, event *events.Message) bool {
+	if event == nil || event.Message == nil {
+		return false
+	}
+	if event.Message.GetSecretEncryptedMessage() != nil {
+		if client == nil {
+			return false
+		}
+		decrypted, err := client.DecryptSecretEncryptedMessage(ctx, event)
+		if err != nil {
+			return false
+		}
+		event.RawMessage = decrypted
+		event.UnwrapRaw()
+		return event.Message != nil
+	}
+	if encComment := event.Message.GetEncCommentMessage(); encComment != nil {
+		if client == nil {
+			return false
+		}
+		decrypted, err := client.DecryptComment(ctx, event)
+		if err != nil {
+			return false
+		}
+		decrypted.EncCommentMessage = encComment
+		event.RawMessage = decrypted
+		event.UnwrapRaw()
+		return event.Message != nil
+	}
+	if encReaction := event.Message.GetEncReactionMessage(); encReaction != nil {
+		if client == nil {
+			return false
+		}
+		decrypted, err := client.DecryptReaction(ctx, event)
+		if err != nil {
+			return false
+		}
+		decrypted.Key = encReaction.GetTargetMessageKey()
+		event.Message.ReactionMessage = decrypted
+	}
+	return true
+}
+
+func hasEncryptedWrapper(message *waProto.Message) bool {
+	if message == nil {
+		return false
+	}
+	return message.GetSecretEncryptedMessage() != nil ||
+		message.GetEncCommentMessage() != nil ||
+		message.GetEncReactionMessage() != nil
 }
 
 func chatFromHistoryConversation(conversation *waHistorySync.Conversation) chatSnapshot {
