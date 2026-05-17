@@ -47,9 +47,14 @@ const watchOnlySources = [
   "mautrix/linkedin",
   "signalapp/libsignal",
   "openclaw/wacli",
+  "openclaw/imsg",
   "openclaw/discrawl",
+  "openclaw/notcrawl",
+  "openclaw/gogcli",
   "openclaw/gitcrawl",
   "openclaw/openclaw",
+  "steipete/wacrawl",
+  "steipete/slacrawl",
   "beeper/bridge-manager",
 ];
 
