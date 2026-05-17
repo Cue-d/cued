@@ -260,6 +260,37 @@ func TestHistoryMessageSnapshotFallbackRetainsMediaMetadata(t *testing.T) {
 	}
 }
 
+func TestHistoryMessageSnapshotFallbackNamesDocumentFromMimeType(t *testing.T) {
+	historyMsg := &waHistorySync.HistorySyncMsg{
+		Message: &waWeb.WebMessageInfo{
+			Key: &waCommon.MessageKey{
+				ID:        proto.String("wamid-history-doc"),
+				RemoteJID: proto.String("15551234567@s.whatsapp.net"),
+				FromMe:    proto.Bool(false),
+			},
+			MessageTimestamp: proto.Uint64(1_710_000_000),
+			Message: &waProto.Message{
+				DocumentMessage: &waProto.DocumentMessage{
+					Mimetype:   proto.String("application/pdf"),
+					FileLength: proto.Uint64(42),
+					Caption:    proto.String("agenda"),
+				},
+			},
+		},
+	}
+
+	snapshot, ok := historyMessageSnapshot(nil, types.NewJID("15551234567", types.DefaultUserServer), historyMsg)
+	if !ok {
+		t.Fatal("expected fallback history snapshot")
+	}
+	if len(snapshot.Attachments) != 1 {
+		t.Fatalf("expected one attachment, got %+v", snapshot.Attachments)
+	}
+	if snapshot.Attachments[0].Filename == nil || *snapshot.Attachments[0].Filename != "file.pdf" {
+		t.Fatalf("expected MIME-aware document filename, got %+v", snapshot.Attachments[0])
+	}
+}
+
 func TestHistoryMessageSnapshotFallbackUnwrapsEditedMessageText(t *testing.T) {
 	historyMsg := &waHistorySync.HistorySyncMsg{
 		Message: &waWeb.WebMessageInfo{

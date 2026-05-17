@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildWhatsAppMessageEvent,
   buildWhatsAppRawEventsFromSnapshot,
   extractWhatsAppPhone,
   normalizeWhatsAppJid,
@@ -67,5 +68,40 @@ describe("whatsapp events", () => {
         text: "x",
       }),
     ).toBe("12016824050@s.whatsapp.net:wamid-1");
+  });
+
+  it("adds MIME-aware fallback filenames for WhatsApp documents without names", () => {
+    const event = buildWhatsAppMessageEvent(
+      {
+        messageID: "wamid-doc",
+        chatJID: "12016824050@s.whatsapp.net",
+        fromMe: false,
+        timestamp: 1_710_000_000_000,
+        text: "",
+        attachments: [
+          {
+            id: "doc-1",
+            kind: "document",
+            mime_type: "application/pdf",
+          },
+          {
+            id: "csv-1",
+            kind: "document",
+            mimetype: "text/csv",
+          },
+        ],
+      },
+      "default",
+      1_710_000_000_500,
+    );
+
+    expect(event.payload).toEqual(
+      expect.objectContaining({
+        attachments: [
+          expect.objectContaining({ filename: "file.pdf" }),
+          expect.objectContaining({ filename: "file.csv" }),
+        ],
+      }),
+    );
   });
 });

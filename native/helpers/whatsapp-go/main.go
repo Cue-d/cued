@@ -1791,7 +1791,7 @@ func attachmentsFromMessage(messageID string, chatJID string, message *waProto.M
 		return []attachmentSnapshot{
 			makeAttachment(
 				"document",
-				emptyToNil(document.GetFileName()),
+				fallbackDocumentFilename(document.GetFileName(), document.GetMimetype()),
 				emptyToNil(document.GetMimetype()),
 				int64PtrIfPositive(int64(document.GetFileLength())),
 				emptyToNil(strings.TrimSpace(document.GetCaption())),
@@ -2289,6 +2289,40 @@ func emptyToNil(value string) *string {
 		return nil
 	}
 	return &value
+}
+
+func extensionForMIMEType(mimeType string) string {
+	switch strings.ToLower(strings.TrimSpace(mimeType)) {
+	case "application/pdf":
+		return ".pdf"
+	case "text/csv":
+		return ".csv"
+	case "text/plain":
+		return ".txt"
+	case "application/json":
+		return ".json"
+	case "application/zip":
+		return ".zip"
+	case "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
+		return ".docx"
+	case "application/vnd.openxmlformats-officedocument.presentationml.presentation":
+		return ".pptx"
+	case "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":
+		return ".xlsx"
+	default:
+		return ""
+	}
+}
+
+func fallbackDocumentFilename(filename string, mimeType string) *string {
+	if trimmed := strings.TrimSpace(filename); trimmed != "" {
+		return &trimmed
+	}
+	if extension := extensionForMIMEType(mimeType); extension != "" {
+		value := "file" + extension
+		return &value
+	}
+	return nil
 }
 
 func emptyString(value string) string {

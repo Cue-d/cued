@@ -44,6 +44,53 @@ export function whatsappMessageSourceKey(message: WhatsAppMessageSnapshot): stri
   return `${normalizeWhatsAppJid(message.chatJID)}:${message.messageID}`;
 }
 
+function extensionForMimeType(mimeType: string): string | null {
+  switch (mimeType.trim().toLowerCase()) {
+    case "application/pdf":
+      return ".pdf";
+    case "text/csv":
+      return ".csv";
+    case "text/plain":
+      return ".txt";
+    case "application/json":
+      return ".json";
+    case "application/zip":
+      return ".zip";
+    case "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
+      return ".docx";
+    case "application/vnd.openxmlformats-officedocument.presentationml.presentation":
+      return ".pptx";
+    case "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":
+      return ".xlsx";
+    default:
+      return null;
+  }
+}
+
+function normalizeWhatsAppAttachments(
+  attachments: WhatsAppMessageSnapshot["attachments"] | undefined,
+): Array<Record<string, unknown>> {
+  return (attachments ?? []).map((attachment) => {
+    const kind = typeof attachment.kind === "string" ? attachment.kind.trim().toLowerCase() : "";
+    const filename =
+      typeof attachment.filename === "string" && attachment.filename.trim().length > 0
+        ? attachment.filename
+        : null;
+    const mimeType =
+      (typeof attachment.mime_type === "string" && attachment.mime_type) ||
+      (typeof attachment.mimetype === "string" && attachment.mimetype) ||
+      null;
+    const extension = mimeType ? extensionForMimeType(mimeType) : null;
+    if (filename || kind !== "document" || !extension) {
+      return attachment;
+    }
+    return {
+      ...attachment,
+      filename: `file${extension}`,
+    };
+  });
+}
+
 function bestContactName(contact: WhatsAppContactSnapshot): string {
   return (
     contact.name?.trim() ||
@@ -212,7 +259,7 @@ export function buildWhatsAppMessageEvent(
       isFromMe: message.fromMe,
       deliveredAt: message.deliveredAt ?? null,
       readAt: message.readAt ?? null,
-      attachments: message.attachments ?? [],
+      attachments: normalizeWhatsAppAttachments(message.attachments),
     } satisfies MessagePayload,
     sourceVersion: "whatsapp-v1",
   };
