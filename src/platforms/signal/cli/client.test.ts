@@ -213,4 +213,36 @@ describe("signal cli helpers", () => {
       }),
     );
   });
+
+  it("preserves mixed-case Signal group ids from received envelopes", () => {
+    const groupId = "VWATodkf2hc8zdOS76q9Tb0+5Bi522E03qLdaQ/9ypg=";
+    const message = toSignalMessage(
+      {
+        envelope: {
+          source: "+14155550123",
+          timestamp: 1_710_000_000_000,
+          serverGuid: "msg-group-1",
+          dataMessage: {
+            message: "Group hello",
+            groupInfo: {
+              groupId,
+              name: "Launch Group",
+            },
+          },
+        },
+      },
+      "+14155550000",
+      0,
+    );
+
+    expect(message).toEqual(
+      expect.objectContaining({
+        messageId: "msg-group-1",
+        threadId: `group:${groupId}`,
+        threadType: "group",
+        threadName: "Launch Group",
+        text: "Group hello",
+      }),
+    );
+  });
 });

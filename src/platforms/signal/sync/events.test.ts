@@ -74,4 +74,47 @@ describe("signal events", () => {
       }),
     ]);
   });
+
+  it("preserves mixed-case Signal group ids in conversation and message keys", () => {
+    const groupId = "VWATodkf2hc8zdOS76q9Tb0+5Bi522E03qLdaQ/9ypg=";
+    const message = {
+      messageId: "msg-group-1",
+      threadId: `group:${groupId}`,
+      threadType: "group" as const,
+      threadName: "Launch Group",
+      text: "Group hello",
+      sentAt: 1_710_000_000_000,
+      isFromMe: false,
+      senderHandle: "+14155550123",
+      senderName: "Ben Ortiz",
+      attachments: [],
+    };
+
+    const events = buildSignalRawEventsFromSnapshot({
+      accountKey: "default",
+      contacts: [],
+      groups: [
+        {
+          groupId,
+          name: "Launch Group",
+          members: [{ number: "+14155550123" }],
+        },
+      ],
+      messages: [message],
+      observedBase: 100,
+    });
+
+    const conversationKeys = events
+      .filter((event) => event.entityKind === "conversation")
+      .map((event) => (event.payload as { sourceConversationKey?: string }).sourceConversationKey);
+    expect(conversationKeys).toContain(`signal:group:${groupId}`);
+
+    const messageEvent = events.find((event) => event.entityKind === "message");
+    expect(messageEvent?.conversationExternalId).toBe(`group:${groupId}`);
+    expect(messageEvent?.payload).toEqual(
+      expect.objectContaining({
+        sourceConversationKey: `signal:group:${groupId}`,
+      }),
+    );
+  });
 });
