@@ -6,6 +6,8 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 APP_BUNDLE="${1:-$ROOT_DIR/native/macos/dist/Cued.app}"
 CLI_PATH="$APP_BUNDLE/Contents/Resources/cued-cli"
 INFO_PLIST="$APP_BUNDLE/Contents/Info.plist"
+RUNTIME_PATH="$APP_BUNDLE/Contents/Resources/cued-runtime"
+RESOURCES_PATH="$APP_BUNDLE/Contents/Resources"
 SKILL_PATH="$APP_BUNDLE/Contents/Resources/skills/cued/SKILL.md"
 EXPECTED_VERSION="${CUED_RELEASE_VERSION:-$(node -p "require(process.argv[1]).version" "$ROOT_DIR/package.json")}"
 EXPECTED_TAG="${CUED_RELEASE_TAG:-v$EXPECTED_VERSION}"
@@ -22,6 +24,61 @@ fi
 
 if [[ ! -f "$SKILL_PATH" ]]; then
   echo "Bundled Cued skill missing at $SKILL_PATH" >&2
+  exit 1
+fi
+
+if [[ ! -d "$RUNTIME_PATH/dist" || ! -d "$RUNTIME_PATH/node_modules" ]]; then
+  echo "Bundled runtime is missing compiled JS or production dependencies at $RUNTIME_PATH" >&2
+  exit 1
+fi
+
+for executable_path in \
+  "$RESOURCES_PATH/scripts/request-macos-access.sh" \
+  "$RESOURCES_PATH/helpers/cued-native-helper" \
+  "$RESOURCES_PATH/helpers/cued-slack-helper" \
+  "$RESOURCES_PATH/helpers/cued-whatsapp-helper" \
+  "$RESOURCES_PATH/helpers/signal-cli/cued-signal-cli"; do
+  if [[ ! -x "$executable_path" ]]; then
+    echo "Bundled executable missing or not executable: $executable_path" >&2
+    exit 1
+  fi
+done
+
+for forbidden_path in \
+  "$RUNTIME_PATH/scripts" \
+  "$RUNTIME_PATH/src" \
+  "$RUNTIME_PATH/native" \
+  "$RUNTIME_PATH/skills" \
+  "$RUNTIME_PATH/docs" \
+  "$RUNTIME_PATH/bin" \
+  "$RUNTIME_PATH/google-oauth-assets" \
+  "$RUNTIME_PATH/packaging" \
+  "$RUNTIME_PATH/.github" \
+  "$RUNTIME_PATH/.husky" \
+  "$RUNTIME_PATH/.turbo" \
+  "$RUNTIME_PATH/AGENTS.md" \
+  "$RUNTIME_PATH/CLAUDE.md" \
+  "$RUNTIME_PATH/CONTRIBUTING.md" \
+  "$RUNTIME_PATH/CODE_OF_CONDUCT.md" \
+  "$RUNTIME_PATH/PRIVACY.md" \
+  "$RUNTIME_PATH/ROADMAP.md" \
+  "$RUNTIME_PATH/SECURITY.md" \
+  "$RUNTIME_PATH/biome.json" \
+  "$RUNTIME_PATH/pnpm-workspace.yaml" \
+  "$RUNTIME_PATH/tsconfig.json" \
+  "$RUNTIME_PATH/tsconfig.base.json" \
+  "$RUNTIME_PATH/tsconfig.build.json" \
+  "$RUNTIME_PATH/vitest.config.ts" \
+  "$RUNTIME_PATH/.env.example" \
+  "$RUNTIME_PATH/.nvmrc"; do
+  if [[ -e "$forbidden_path" ]]; then
+    echo "Development-only file shipped in bundled runtime: $forbidden_path" >&2
+    exit 1
+  fi
+done
+
+if find "$RUNTIME_PATH/dist" -type f \( -name '*.test.js' -o -name '*.js.map' \) | grep -q .; then
+  echo "Bundled runtime contains test files or source maps under $RUNTIME_PATH/dist" >&2
   exit 1
 fi
 

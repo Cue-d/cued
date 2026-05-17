@@ -277,20 +277,40 @@ cp "$BETTER_SQLITE3_BINDING_SOURCE" "$BETTER_SQLITE3_RUNTIME_DIR/build/Release/b
 # `pnpm deploy --legacy --prod` can still leave a handful of dangling package links behind.
 find -L "$RUNTIME_DIR" -type l -exec rm -f {} +
 rm -rf "$RUNTIME_DIR/node_modules/cued" "$RUNTIME_DIR/node_modules/@cued/app"
-# The bundled CLI only needs compiled JS plus runtime dependencies. Shipping the
-# repo's native helper sources/build output duplicates unsigned binaries inside
-# the portable runtime and breaks notarization.
-rm -rf "$RUNTIME_DIR/native"
-# Local smoke artifacts are useful during release testing, but must never ship
-# inside the app bundle.
+# The bundled CLI only needs compiled JS, package metadata, and production
+# dependencies. Repo maintenance surfaces either duplicate separately staged
+# resources or are only useful for development/CI.
 rm -rf \
+  "$RUNTIME_DIR/native" \
+  "$RUNTIME_DIR/scripts" \
+  "$RUNTIME_DIR/src" \
+  "$RUNTIME_DIR/skills" \
+  "$RUNTIME_DIR/docs" \
+  "$RUNTIME_DIR/bin" \
+  "$RUNTIME_DIR/google-oauth-assets" \
+  "$RUNTIME_DIR/packaging" \
   "$RUNTIME_DIR/.cued-smoke" \
   "$RUNTIME_DIR/.github" \
   "$RUNTIME_DIR/.husky" \
   "$RUNTIME_DIR/.turbo" \
-  "$RUNTIME_DIR/docs/smoke"
+  "$RUNTIME_DIR/AGENTS.md" \
+  "$RUNTIME_DIR/CLAUDE.md" \
+  "$RUNTIME_DIR/CODE_OF_CONDUCT.md" \
+  "$RUNTIME_DIR/CONTRIBUTING.md" \
+  "$RUNTIME_DIR/PRIVACY.md" \
+  "$RUNTIME_DIR/ROADMAP.md" \
+  "$RUNTIME_DIR/README.md" \
+  "$RUNTIME_DIR/SECURITY.md" \
+  "$RUNTIME_DIR/biome.json" \
+  "$RUNTIME_DIR/pnpm-workspace.yaml" \
+  "$RUNTIME_DIR/tsconfig.json" \
+  "$RUNTIME_DIR/tsconfig.base.json" \
+  "$RUNTIME_DIR/tsconfig.build.json" \
+  "$RUNTIME_DIR/vitest.config.ts" \
+  "$RUNTIME_DIR/.env.example" \
+  "$RUNTIME_DIR/.nvmrc"
 if [[ -d "$RUNTIME_DIR/dist" ]]; then
-  find "$RUNTIME_DIR/dist" -type f \( -name '*.test.js' -o -name '*.test.js.map' \) -delete
+  find "$RUNTIME_DIR/dist" -type f \( -name '*.test.js' -o -name '*.js.map' \) -delete
   find "$RUNTIME_DIR/dist" -type d -name '__tests__' -prune -exec rm -rf {} +
 fi
 
