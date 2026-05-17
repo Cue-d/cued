@@ -7,6 +7,7 @@ APP_BUNDLE="${1:-$ROOT_DIR/native/macos/dist/Cued.app}"
 CLI_PATH="$APP_BUNDLE/Contents/Resources/cued-cli"
 INFO_PLIST="$APP_BUNDLE/Contents/Info.plist"
 RUNTIME_PATH="$APP_BUNDLE/Contents/Resources/cued-runtime"
+RESOURCES_PATH="$APP_BUNDLE/Contents/Resources"
 SKILL_PATH="$APP_BUNDLE/Contents/Resources/skills/cued/SKILL.md"
 EXPECTED_VERSION="${CUED_RELEASE_VERSION:-$(node -p "require(process.argv[1]).version" "$ROOT_DIR/package.json")}"
 EXPECTED_TAG="${CUED_RELEASE_TAG:-v$EXPECTED_VERSION}"
@@ -30,6 +31,18 @@ if [[ ! -d "$RUNTIME_PATH/dist" || ! -d "$RUNTIME_PATH/node_modules" ]]; then
   echo "Bundled runtime is missing compiled JS or production dependencies at $RUNTIME_PATH" >&2
   exit 1
 fi
+
+for executable_path in \
+  "$RESOURCES_PATH/scripts/request-macos-access.sh" \
+  "$RESOURCES_PATH/helpers/cued-native-helper" \
+  "$RESOURCES_PATH/helpers/cued-slack-helper" \
+  "$RESOURCES_PATH/helpers/cued-whatsapp-helper" \
+  "$RESOURCES_PATH/helpers/signal-cli/cued-signal-cli"; do
+  if [[ ! -x "$executable_path" ]]; then
+    echo "Bundled executable missing or not executable: $executable_path" >&2
+    exit 1
+  fi
+done
 
 for forbidden_path in \
   "$RUNTIME_PATH/scripts" \
