@@ -14,7 +14,7 @@ Cued is open source under the [Apache-2.0 license](LICENSE).
 
 The supported install path today is GitHub Releases. Homebrew and npm installation are planned, but the package remains private until those install paths are designed and tested.
 
-Most integrations in the matrix below are ready for normal use. Gmail source builds work with local OAuth credentials, but the official Cued build is waiting on Google OAuth approval before Gmail is presented as a normal no-credential user flow.
+Most integrations in the matrix below are ready for normal use. Gmail is available in shipped builds; Google may show an unverified-app warning while Cued's OAuth review is pending, but you can continue through the advanced option if you trust the local app.
 
 ## Install
 
@@ -114,6 +114,7 @@ This matrix documents current shipped behavior, not roadmap promises.
 | -------- | ---- | ------- | --------------- | ----------------- | ------------- | ------- | --------- | ----------------- | ------------- | ----------- | ------------ |
 | Contacts | ❌ | ❌ | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ |
 | Discord | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ◐ | ❌ | ✅ | ◐ |
+| Gmail | ❌ | ✅ | ❌ | ✅ | ❌ | ❌ | ❌ | ✅ | ❌ | ✅ | ✅ |
 | iMessage | ❌ | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | ❌ | ◐ | ✅ | ◐ |
 | LinkedIn | ❌ | ✅ | ✅ | ◐ | ✅ | ✅ | ✅ | ✅ | ◐ | ✅ | ✅ |
 | Signal | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | ◐ |
@@ -132,7 +133,7 @@ LinkedIn history is currently partial: Cued imports inbox-visible threads and bo
 
 Discord currently runs in DM-only mode: it discovers direct messages, hydrates up to 50 recent messages in the 5 most recent unproven DMs during sync, uses per-DM message cursors plus snowflake-based pagination to fetch newer messages on later syncs, and continues incomplete historical `messages` proofs with bounded `before` pagination. It sends only to known DMs and stores the captured Discord account token locally in the Keychain. On Discord auth invalidation such as `401` responses or forced password resets, Cued blocks the integration and stops reconnect attempts until you reconnect manually.
 
-Gmail official builds are waiting on Google OAuth approval. Source builds can connect Gmail with a local Google OAuth desktop client JSON.
+Gmail sync is available in official builds. While Google OAuth review is pending, Google may show an unverified-app warning during sign-in; choose the advanced option to continue if you trust the local Cued app. Gmail is read-only and stores account tokens in Keychain.
 
 ## Install From Source
 
@@ -198,7 +199,7 @@ cued sync run discord
 
 ### Gmail OAuth credentials
 
-Official Cued builds are waiting on Google OAuth approval before Gmail is presented as a normal no-credential user flow. Source builds keep credentials external: put a Google OAuth desktop client JSON at `~/.cued/google-oauth-client.json`, or set `CUED_GOOGLE_OAUTH_CLIENT_FILE` / `GOOGLE_OAUTH_CLIENT_FILE` before running the Gmail connect flow. Explicit env vars override any bundled client for local development.
+Official Cued builds include the Gmail OAuth client. While Google OAuth review is pending, Google may show an unverified-app warning during sign-in; choose the advanced option to continue if you trust the local Cued app. Source builds can override the bundled client by putting a Google OAuth desktop client JSON at `~/.cued/google-oauth-client.json`, or by setting `CUED_GOOGLE_OAUTH_CLIENT_FILE` / `GOOGLE_OAUTH_CLIENT_FILE` before running the Gmail connect flow. Explicit env vars override any bundled client for local development.
 
 Cued requests only `https://www.googleapis.com/auth/gmail.readonly`. It stores per-account access and refresh tokens in Keychain and stores synced Gmail message content locally in `~/.cued/local.db`.
 

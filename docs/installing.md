@@ -74,7 +74,7 @@ The setup TUI summarizes install state, daemon state, permissions, and next acti
 - `cued integrations connect linkedin default`
 - `cued integrations connect gmail`
 
-Official Cued builds are waiting on Google OAuth approval before Gmail is presented as a normal no-credential user flow. Source builds can provide a Google OAuth desktop client JSON at `~/.cued/google-oauth-client.json`, or through `CUED_GOOGLE_OAUTH_CLIENT_FILE` / `GOOGLE_OAUTH_CLIENT_FILE`. Cued stores account tokens in Keychain and keeps synced Gmail message content local in `~/.cued/local.db`.
+Gmail sync is available in official builds. While Google OAuth review is pending, Google may show an unverified-app warning during sign-in; choose the advanced option to continue if you trust the local Cued app. Source builds can provide a Google OAuth desktop client JSON at `~/.cued/google-oauth-client.json`, or through `CUED_GOOGLE_OAUTH_CLIENT_FILE` / `GOOGLE_OAUTH_CLIENT_FILE`. Cued stores account tokens in Keychain and keeps synced Gmail message content local in `~/.cued/local.db`.
 
 ## Verify
 
