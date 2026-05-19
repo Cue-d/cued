@@ -33,7 +33,6 @@ import {
   isPlatform,
   type Platform,
   type ProviderRawEventInput,
-  parsePlatform,
   type RawEventAcquisitionMode,
 } from "../../core/types/provider.js";
 import { safeParseJsonRecord, safeParseJsonStringArray } from "../../db/codecs.js";
@@ -4943,14 +4942,6 @@ async function dispatchRequest(
       }
       case "integrations-remove": {
         const integrationAuthService = await getIntegrationAuthService();
-        const parsedPlatform = parsePlatform(request.platform);
-        if (parsedPlatform && request.accountKey != null) {
-          stopActiveAuthSessionsForIntegration(
-            activeAuthSessions,
-            parsedPlatform,
-            request.accountKey,
-          );
-        }
         const result = integrationAuthService.remove(request.platform, request.accountKey);
         stopActiveAuthSessionsForIntegration(
           activeAuthSessions,
