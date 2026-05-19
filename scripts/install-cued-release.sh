@@ -66,10 +66,9 @@ validate_app_bundle() {
 
 release_json="$(curl -fsSL -H 'Accept: application/vnd.github+json' "${API_BASE}/repos/${REPO}/releases")"
 
-readarray -t release_info < <(RELEASE_JSON="$release_json" RELEASE_CHANNEL="$CHANNEL" python3 - <<'PY'
+release_info="$(RELEASE_JSON="$release_json" RELEASE_CHANNEL="$CHANNEL" python3 - <<'PY'
 import json
 import os
-import sys
 
 channel = os.environ["RELEASE_CHANNEL"]
 desired_prerelease = channel != "stable"
@@ -89,11 +88,11 @@ print(release.get("tag_name", "").lstrip("v"))
 print(tarball)
 print(release.get("html_url", ""))
 PY
-)
+)"
 
-VERSION="${release_info[0]}"
-TARBALL_URL="${release_info[1]}"
-RELEASE_URL="${release_info[2]}"
+VERSION="$(printf '%s\n' "$release_info" | sed -n '1p')"
+TARBALL_URL="$(printf '%s\n' "$release_info" | sed -n '2p')"
+RELEASE_URL="$(printf '%s\n' "$release_info" | sed -n '3p')"
 ARCHIVE_PATH="$TMP_DIR/$TARBALL_NAME"
 STAGING_DIR="$TMP_DIR/staging"
 TARGET_APP="$(pick_destination)"
