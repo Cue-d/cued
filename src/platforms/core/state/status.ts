@@ -172,7 +172,7 @@ export function resolveAccountKey(
   }
   const matches = db
     .listIntegrationStates()
-    .filter((row) => row.platform === platform && !isUserRemovedIntegrationRow(row));
+    .filter((row) => row.platform === platform && !isHiddenIntegrationRow(row));
   if (matches.length === 1) {
     return matches[0]!.account_key;
   }
@@ -296,7 +296,7 @@ export function isUserRemovedIntegrationRow(row: IntegrationStateRow): boolean {
   return isUserRemovedIntegrationMetadata(metadata);
 }
 
-function isGeneratedPendingAccountKey(platform: Platform, accountKey: string): boolean {
+export function isGeneratedPendingAccountKey(platform: Platform, accountKey: string): boolean {
   if (platform === "gmail") {
     return accountKey.startsWith(GMAIL_PENDING_ACCOUNT_KEY_PREFIX);
   }
@@ -304,6 +304,18 @@ function isGeneratedPendingAccountKey(platform: Platform, accountKey: string): b
     return accountKey.startsWith(SLACK_PENDING_ACCOUNT_KEY_PREFIX);
   }
   return false;
+}
+
+function isHiddenGeneratedPendingIntegrationRow(row: IntegrationStateRow): boolean {
+  return (
+    isGeneratedPendingAccountKey(row.platform, row.account_key) &&
+    row.auth_state !== "requested" &&
+    row.auth_state !== "in_progress"
+  );
+}
+
+function isHiddenIntegrationRow(row: IntegrationStateRow): boolean {
+  return isUserRemovedIntegrationRow(row) || isHiddenGeneratedPendingIntegrationRow(row);
 }
 
 function processExists(pid: number | null): boolean {
@@ -622,6 +634,31 @@ function buildBootstrappedLocalIntegration(
   );
 }
 
+function setupIntegrationPriority(integration: IntegrationStateSummary): number {
+  if (integration.enabled && integration.authState === "authenticated") {
+    return 0;
+  }
+  if (integration.enabled && integration.authState === "authorized") {
+    return 0;
+  }
+  if (integration.authState === "requested" || integration.authState === "in_progress") {
+    return 1;
+  }
+  return 2;
+}
+
+function compareSetupIntegrations(
+  left: IntegrationStateSummary,
+  right: IntegrationStateSummary,
+): number {
+  const leftPriority = setupIntegrationPriority(left);
+  const rightPriority = setupIntegrationPriority(right);
+  if (leftPriority !== rightPriority) {
+    return leftPriority - rightPriority;
+  }
+  return left.accountKey.localeCompare(right.accountKey);
+}
+
 function buildSetupIntegrations(
   db: CuedDatabase,
   options: { includeLiveLocalIntegrations?: boolean; includeDiagnostics?: boolean } = {},
@@ -641,7 +678,8 @@ function buildSetupIntegrations(
     if (!isOnboardingVisiblePlatform(integration.platform)) {
       continue;
     }
-    if (!byPlatform.has(integration.platform)) {
+    const existing = byPlatform.get(integration.platform);
+    if (!existing || compareSetupIntegrations(integration, existing) < 0) {
       byPlatform.set(integration.platform, integration);
     }
   }
@@ -703,7 +741,7 @@ export function listIntegrationStates(
 ): IntegrationStateSummary[] {
   return summarizeIntegrationStates(
     db,
-    db.listIntegrationStates().filter((row) => !isUserRemovedIntegrationRow(row)),
+    db.listIntegrationStates().filter((row) => !isHiddenIntegrationRow(row)),
     options,
   );
 }
@@ -711,7 +749,7 @@ export function listIntegrationStates(
 export function listMenuBarIntegrationStates(db: CuedDatabase): IntegrationStateSummary[] {
   return summarizeIntegrationStates(
     db,
-    db.listIntegrationStates().filter((row) => !isUserRemovedIntegrationRow(row)),
+    db.listIntegrationStates().filter((row) => !isHiddenIntegrationRow(row)),
     { includeDiagnostics: false },
   );
 }

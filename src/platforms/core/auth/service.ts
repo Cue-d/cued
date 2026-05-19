@@ -258,6 +258,23 @@ export class IntegrationAuthService {
       };
     }
 
+    if (generatedPendingPrefix !== null) {
+      const authSession = this.db
+        .listAuthSessions(100)
+        .find(
+          (session) =>
+            session.platform === normalized &&
+            session.account_key.startsWith(generatedPendingPrefix) &&
+            (session.state === "requested" || session.state === "in_progress"),
+        );
+      if (authSession) {
+        return {
+          integration: getIntegrationSummary(this.db, normalized, authSession.account_key),
+          authSession: getAuthSessionSummary(this.db, authSession.id)!,
+        };
+      }
+    }
+
     return null;
   }
 

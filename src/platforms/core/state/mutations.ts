@@ -18,6 +18,7 @@ import {
   getIntegrationSummary,
   getKeychainMetadata,
   getRequestableIntegration,
+  isGeneratedPendingAccountKey,
   isUserRemovedIntegrationMetadata,
   normalizeIntegrationPlatform,
   now,
@@ -318,6 +319,9 @@ export function completeAuthSession(
     ) ?? {};
   const existingTargetRemoved = isUserRemovedIntegrationMetadata(existingTargetMetadata);
   const supportedByDaemon = new Set<string>(listAdapterPlatforms()).has(integration.platform);
+  const hideGeneratedPending =
+    input.state !== "authenticated" &&
+    isGeneratedPendingAccountKey(integration.platform, targetAccountKey);
   const syncCapable =
     input.state === "authenticated"
       ? supportedByDaemon
@@ -339,9 +343,11 @@ export function completeAuthSession(
     accountKey: targetAccountKey,
     displayName: targetDisplayName,
     authState: input.state,
-    enabled: existingTargetRemoved
-      ? integration.enabled === 1
-      : (existingTarget?.enabled ?? integration.enabled) === 1,
+    enabled: hideGeneratedPending
+      ? false
+      : existingTargetRemoved
+        ? integration.enabled === 1
+        : (existingTarget?.enabled ?? integration.enabled) === 1,
     connectionKind: integration.connection_kind,
     syncCapable,
     launchStrategy: integration.launch_strategy,
@@ -353,13 +359,21 @@ export function completeAuthSession(
       ...metadata,
       ...targetMetadata,
       latestAuthSessionId: sessionId,
-      keychainService: input.keychainService ?? null,
-      keychainAccount: resolveCompletedKeychainAccount(targetAccountKey, input.keychainAccount),
+      keychainService: hideGeneratedPending ? null : (input.keychainService ?? null),
+      keychainAccount: hideGeneratedPending
+        ? null
+        : resolveCompletedKeychainAccount(targetAccountKey, input.keychainAccount),
       authenticatedAt: input.state === "authenticated" ? now() : null,
       authResult: input.resultSummary ?? null,
       lastAuthError: input.errorSummary ?? null,
       blockedAt: input.state === "authenticated" ? null : (metadata.blockedAt ?? null),
       blockedReason: input.state === "authenticated" ? null : (metadata.blockedReason ?? null),
+      ...(hideGeneratedPending
+        ? {
+            userRemoved: true,
+            removedAt: now(),
+          }
+        : {}),
     },
   });
 

@@ -257,6 +257,15 @@ final class OnboardingWindowController: NSWindowController {
       return
     }
 
+    if configuration.supportsMultipleAccounts && configuration.hasInProgressState {
+      return
+    }
+    if configuration.knownAccounts.contains(where: {
+      $0.accountKey == accountKey && ($0.authState == "requested" || $0.authState == "in_progress")
+    }) {
+      return
+    }
+
     var actions = [[String]]()
     if configuration.accounts.contains(where: { $0.accountKey == accountKey && !$0.enabled }) {
       actions.append(["integrations", "enable", platform, accountKey])

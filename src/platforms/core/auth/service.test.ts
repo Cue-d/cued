@@ -225,6 +225,47 @@ describe("IntegrationAuthService", () => {
     db.close();
   });
 
+  it("reuses a persisted generated Gmail auth session after UI refresh", async () => {
+    const db = createDb();
+    db.upsertIntegrationState({
+      platform: "gmail",
+      accountKey: "pending-gmail-existing",
+      displayName: "Gmail",
+      authState: "in_progress",
+      enabled: true,
+      connectionKind: "local-cli",
+      syncCapable: false,
+      launchStrategy: "native-auth",
+      launchTarget: null,
+      importedFrom: "local-cli",
+      metadata: {
+        runtimeKind: "oauth",
+      },
+    });
+    const sessionId = db.createAuthSession({
+      platform: "gmail",
+      accountKey: "pending-gmail-existing",
+      integrationStateId: "gmail:pending-gmail-existing",
+      state: "in_progress",
+    });
+    db.updateAuthSessionState({
+      id: sessionId,
+      state: "in_progress",
+      nativePid: process.pid,
+      startedAt: Date.now(),
+    });
+
+    const service = new IntegrationAuthService(db);
+    const result = await service.connectManaged("gmail", "pending-gmail-new", new Map());
+
+    expect(result.integration.accountKey).toBe("pending-gmail-existing");
+    expect(result.authSession?.id).toBe(sessionId);
+    expect(startAuthSessionMock).not.toHaveBeenCalled();
+    expect(db.listAuthSessions(10)).toHaveLength(1);
+
+    db.close();
+  });
+
   it("reuses slack pending discovery only when desktop import authenticates a new workspace", async () => {
     const db = createDb();
     upsertAuthenticatedSlack(db, "T_EXISTING", "Existing");

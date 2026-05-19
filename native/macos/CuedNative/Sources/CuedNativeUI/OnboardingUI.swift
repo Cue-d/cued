@@ -959,15 +959,23 @@ public struct CuedOnboardingView: View {
         }
       }
 
+      let isPending = pendingPlatformConnectPlatforms.contains(configuration.platform)
+        || configuration.hasInProgressState
       if let action = platformLevelAction(for: configuration) {
         HStack {
           Spacer(minLength: 0)
-          if pendingPlatformConnectPlatforms.contains(configuration.platform) {
+          if isPending {
             ProgressView()
               .controlSize(.small)
           } else {
             actionButton(title: action.title, prominent: false, action: action.handler)
           }
+        }
+      } else if isPending {
+        HStack {
+          Spacer(minLength: 0)
+          ProgressView()
+            .controlSize(.small)
         }
       }
     }
@@ -1109,6 +1117,9 @@ public struct CuedOnboardingView: View {
     if isConnected {
       return nil
     }
+    if integration.authState == "requested" || integration.authState == "in_progress" {
+      return nil
+    }
 
     let title =
       integration.authState == "failed"
@@ -1170,6 +1181,9 @@ public struct CuedOnboardingView: View {
       )
     }
     guard configuration.isConnectable else {
+      return nil
+    }
+    if configuration.supportsMultipleAccounts && configuration.hasInProgressState {
       return nil
     }
 

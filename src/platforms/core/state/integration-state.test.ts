@@ -1690,4 +1690,119 @@ process.exit(44);
 
     db.close();
   });
+
+  it("hides generated Gmail auth rows after OAuth timeout failures", () => {
+    const db = createDb();
+    const requested = requestIntegrationAccess(db, "gmail", "pending-gmail-timeout");
+    const completed = completeAuthSession(db, requested.authSession.id, {
+      state: "failed",
+      errorSummary: "Google OAuth timed out after 300000ms waiting for loopback redirect",
+    });
+
+    expect(completed.integration?.accountKey).toBe("pending-gmail-timeout");
+    expect(db.getIntegrationState("gmail", "pending-gmail-timeout")).toMatchObject({
+      auth_state: "failed",
+      enabled: 0,
+      sync_capable: 0,
+    });
+    expect(
+      JSON.parse(db.getIntegrationState("gmail", "pending-gmail-timeout")?.metadata_json ?? "{}"),
+    ).toMatchObject({
+      userRemoved: true,
+      keychainService: null,
+      keychainAccount: null,
+      lastAuthError: "Google OAuth timed out after 300000ms waiting for loopback redirect",
+    });
+    expect(listIntegrationStates(db)).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          platform: "gmail",
+          accountKey: "pending-gmail-timeout",
+        }),
+      ]),
+    );
+    expect(buildIntegrationStatus(db).setupIntegrations).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          platform: "gmail",
+          authState: "missing",
+        }),
+      ]),
+    );
+
+    db.close();
+  });
+
+  it("filters stale generated Gmail failure rows even before metadata cleanup", () => {
+    const db = createDb();
+    db.upsertIntegrationState({
+      platform: "gmail",
+      accountKey: "pending-gmail-old",
+      displayName: "Gmail pending-gmail-old",
+      authState: "failed",
+      enabled: true,
+      connectionKind: "local-cli",
+      syncCapable: false,
+      launchStrategy: "native-auth",
+      launchTarget: null,
+      importedFrom: "local-cli",
+      metadata: {
+        runtimeKind: "oauth",
+        userRemoved: false,
+      },
+    });
+
+    expect(listIntegrationStates(db)).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          platform: "gmail",
+          accountKey: "pending-gmail-old",
+        }),
+      ]),
+    );
+    expect(buildIntegrationStatus(db).setupIntegrations).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          platform: "gmail",
+          authState: "missing",
+        }),
+      ]),
+    );
+
+    db.close();
+  });
+
+  it("uses authenticated Gmail accounts as setup representatives while generated auth is pending", () => {
+    const db = createDb();
+    db.upsertIntegrationState({
+      platform: "gmail",
+      accountKey: "me@example.com",
+      displayName: "me@example.com",
+      authState: "authenticated",
+      enabled: true,
+      connectionKind: "local-cli",
+      syncCapable: true,
+      launchStrategy: "native-auth",
+      launchTarget: null,
+      importedFrom: "local-cli",
+      metadata: {
+        runtimeKind: "oauth",
+      },
+    });
+    requestIntegrationAccess(db, "gmail", "pending-gmail-test");
+
+    const gmailSetup = buildIntegrationStatus(db).setupIntegrations.find(
+      (integration) => integration.platform === "gmail",
+    );
+
+    expect(gmailSetup).toEqual(
+      expect.objectContaining({
+        platform: "gmail",
+        accountKey: "me@example.com",
+        authState: "authenticated",
+      }),
+    );
+
+    db.close();
+  });
 });
