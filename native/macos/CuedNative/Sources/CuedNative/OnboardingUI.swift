@@ -257,9 +257,6 @@ final class OnboardingWindowController: NSWindowController {
       return
     }
 
-    if configuration.supportsMultipleAccounts && configuration.hasInProgressState {
-      return
-    }
     if configuration.knownAccounts.contains(where: {
       $0.accountKey == accountKey && ($0.authState == "requested" || $0.authState == "in_progress")
     }) {
