@@ -14,6 +14,11 @@ vi.mock("../api/client.js", () => ({
   GmailClient: {
     fromKeychain: vi.fn(() => gmailClientMock),
   },
+  isGmailNotFoundError: (error: unknown) =>
+    typeof error === "object" &&
+    error !== null &&
+    "status" in error &&
+    (error as { status?: unknown }).status === 404,
 }));
 
 function gmailMessage(input: {
@@ -124,6 +129,39 @@ describe("Gmail sync bundle", () => {
       expect.objectContaining({
         proofKind: "messages",
         status: "running",
+      }),
+    );
+  });
+
+  it("skips Gmail messages that disappear between listing and fetch", async () => {
+    gmailClientMock.listMessages.mockResolvedValue({
+      messages: [
+        { id: "m-vanished", threadId: "t-1" },
+        { id: "m-1", threadId: "t-1" },
+      ],
+    });
+    gmailClientMock.getMessage.mockImplementation(async (id: string) => {
+      if (id === "m-vanished") {
+        throw { status: 404 };
+      }
+      return gmailMessage({
+        id,
+        threadId: "t-1",
+        from: "Friend <friend@example.com>",
+      });
+    });
+
+    const bundle = await buildGmailSyncBundle({
+      accountKey: "me@example.com",
+    });
+
+    const messageEvents = bundle.rawEvents.filter((event) => event.entityKind === "message");
+    expect(messageEvents).toHaveLength(1);
+    expect(messageEvents[0]?.externalEventId).toBe("m-1");
+    expect(bundle.proofs?.[0]?.stats).toEqual(
+      expect.objectContaining({
+        listedMessageCount: 2,
+        fetchedMessageCount: 1,
       }),
     );
   });

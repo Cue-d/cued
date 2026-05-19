@@ -1,7 +1,12 @@
 import type { ProviderRawEventInput } from "../../../core/types/provider.js";
 import { mapWithConcurrency } from "../../../core/utils/async.js";
 import type { SyncBundle } from "../../core/sync.js";
-import { GmailClient, type GmailHistoryMessageRef, type GmailMessage } from "../api/client.js";
+import {
+  GmailClient,
+  type GmailHistoryMessageRef,
+  type GmailMessage,
+  isGmailNotFoundError,
+} from "../api/client.js";
 import { buildGmailRawEvents } from "./events.js";
 
 const DEFAULT_PAGE_SIZE = Number(process.env.CUED_GMAIL_PAGE_SIZE ?? "50");
@@ -69,6 +74,24 @@ function dedupeRawEvents(rawEvents: ProviderRawEventInput[]): ProviderRawEventIn
   return [...new Map(rawEvents.map((event) => [event.id, event])).values()];
 }
 
+async function fetchExistingMessages(
+  client: GmailClient,
+  refs: Array<{ id: string }>,
+  concurrency: number,
+): Promise<GmailMessage[]> {
+  const fetched = await mapWithConcurrency(refs, concurrency, async (entry) => {
+    try {
+      return await client.getMessage(entry.id);
+    } catch (error) {
+      if (isGmailNotFoundError(error)) {
+        return null;
+      }
+      throw error;
+    }
+  });
+  return fetched.filter((message): message is GmailMessage => message !== null);
+}
+
 export async function buildGmailSyncBundle(
   input: {
     accountKey?: string;
@@ -115,9 +138,7 @@ export async function buildGmailSyncBundle(
       const ids = extractAddedMessageRefs(page);
       listedMessageCount += ids.length;
       pageCount += 1;
-      const fetched = await mapWithConcurrency(ids, fetchConcurrency, async (entry) =>
-        client.getMessage(entry.id),
-      );
+      const fetched = await fetchExistingMessages(client, ids, fetchConcurrency);
       fetchedMessageCount += fetched.length;
       messages.push(...fetched);
       const bounds = collectMessageDateBounds(fetched, {
@@ -216,9 +237,7 @@ export async function buildGmailSyncBundle(
     const ids = page.messages ?? [];
     listedMessageCount += ids.length;
     pageCount += 1;
-    const fetched = await mapWithConcurrency(ids, fetchConcurrency, async (entry) =>
-      client.getMessage(entry.id),
-    );
+    const fetched = await fetchExistingMessages(client, ids, fetchConcurrency);
     fetchedMessageCount += fetched.length;
     messages.push(...fetched);
     const bounds = collectMessageDateBounds(fetched, {

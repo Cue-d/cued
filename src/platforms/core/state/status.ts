@@ -100,6 +100,10 @@ export const REQUESTABLE_INTEGRATIONS: Record<string, RequestableIntegrationConf
 };
 
 const SLACK_PENDING_ACCOUNT_KEY_PREFIX = "pending-slack-";
+const GMAIL_PENDING_ACCOUNT_KEY_PREFIX = "pending-gmail-";
+const AUTH_SESSION_STALE_AFTER_MS = 15 * 60 * 1000;
+const AUTH_SESSION_ABANDONED_ERROR = "Auth session ended before Cued received a completion event";
+const AUTH_SESSION_EXPIRED_ERROR = "Auth session expired before completion";
 
 export function now(): number {
   return Date.now();
@@ -290,6 +294,107 @@ export function isUserRemovedIntegrationMetadata(
 export function isUserRemovedIntegrationRow(row: IntegrationStateRow): boolean {
   const metadata = safeParseJsonRecord(row.metadata_json, "integration_states.metadata_json");
   return isUserRemovedIntegrationMetadata(metadata);
+}
+
+function isGeneratedPendingAccountKey(platform: Platform, accountKey: string): boolean {
+  if (platform === "gmail") {
+    return accountKey.startsWith(GMAIL_PENDING_ACCOUNT_KEY_PREFIX);
+  }
+  if (platform === "slack") {
+    return accountKey.startsWith(SLACK_PENDING_ACCOUNT_KEY_PREFIX);
+  }
+  return false;
+}
+
+function processExists(pid: number | null): boolean {
+  if (!pid || pid <= 0) {
+    return false;
+  }
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (
+      typeof error === "object" &&
+      error !== null &&
+      "code" in error &&
+      (error as { code?: unknown }).code === "EPERM"
+    );
+  }
+}
+
+export function reconcileAbandonedAuthSessions(
+  db: CuedDatabase,
+  options: { staleAfterMs?: number; nowMs?: number } = {},
+): number {
+  const timestamp = options.nowMs ?? now();
+  const staleAfterMs = options.staleAfterMs ?? AUTH_SESSION_STALE_AFTER_MS;
+  let reconciled = 0;
+
+  for (const session of db.listAuthSessions(500)) {
+    if (session.state !== "requested" && session.state !== "in_progress") {
+      continue;
+    }
+
+    const startedAt = session.started_at ?? session.requested_at;
+    const processMissing = session.state === "in_progress" && !processExists(session.native_pid);
+    const timedOut = timestamp - startedAt >= staleAfterMs;
+    if (!processMissing && !timedOut) {
+      continue;
+    }
+
+    const errorSummary = processMissing ? AUTH_SESSION_ABANDONED_ERROR : AUTH_SESSION_EXPIRED_ERROR;
+    db.updateAuthSessionState({
+      id: session.id,
+      state: "cancelled",
+      nativePid: null,
+      finishedAt: timestamp,
+      errorSummary,
+    });
+    reconciled += 1;
+
+    const integration = db.getIntegrationState(session.platform, session.account_key);
+    if (!integration) {
+      continue;
+    }
+    const latest = db.getLatestAuthSession(session.platform, session.account_key);
+    if (latest?.id !== session.id) {
+      continue;
+    }
+
+    const metadata =
+      safeParseJsonRecord(integration.metadata_json, "integration_states.metadata_json") ?? {};
+    const hideGeneratedPending = isGeneratedPendingAccountKey(
+      integration.platform,
+      integration.account_key,
+    );
+    db.upsertIntegrationState({
+      platform: integration.platform,
+      accountKey: integration.account_key,
+      displayName: integration.display_name,
+      authState: "cancelled",
+      enabled: hideGeneratedPending ? false : integration.enabled === 1,
+      connectionKind: integration.connection_kind,
+      syncCapable: false,
+      launchStrategy: integration.launch_strategy,
+      launchTarget: integration.launch_target,
+      importedFrom: integration.imported_from,
+      artifactPaths: safeParseJsonStringArray(
+        integration.artifact_paths_json,
+        "integration_states.artifact_paths_json",
+      ),
+      metadata: {
+        ...metadata,
+        latestAuthSessionId: session.id,
+        lastAuthError: errorSummary,
+        authExpiredAt: timestamp,
+        userRemoved: hideGeneratedPending ? true : (metadata.userRemoved ?? false),
+        removedAt: hideGeneratedPending ? timestamp : (metadata.removedAt ?? null),
+      },
+    });
+  }
+
+  return reconciled;
 }
 
 export function deleteKeychainSecret(

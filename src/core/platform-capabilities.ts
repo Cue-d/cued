@@ -13,6 +13,7 @@ import {
   platformSupportsMultipleAccounts,
 } from "../platforms/core/types.js";
 import { inspectSlackHelper } from "../platforms/slack/helper/binary.js";
+import { inspectWhatsAppHelper } from "../platforms/whatsapp/helper/binary.js";
 
 export type PlatformAvailabilityState =
   | "available"
@@ -77,7 +78,14 @@ function resolveHelperAvailability(
   }
 
   if (requirements.includes("whatsapp_helper") && integration.authState === "missing") {
-    return "requires_helper";
+    const metadata = integration.metadata;
+    if (typeof metadata?.whatsappHelperPath === "string") {
+      return null;
+    }
+    if (metadata?.whatsappHelperPath === null) {
+      return "requires_helper";
+    }
+    return inspectWhatsAppHelper().helperPath ? null : "requires_helper";
   }
 
   if (requirements.includes("slack_helper")) {

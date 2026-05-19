@@ -6,9 +6,14 @@ import {
 import { summarizePlatformCapability } from "./platform-capabilities.js";
 
 const inspectSlackHelperMock = vi.fn();
+const inspectWhatsAppHelperMock = vi.fn();
 
 vi.mock("../platforms/slack/helper/binary.js", () => ({
   inspectSlackHelper: () => inspectSlackHelperMock(),
+}));
+
+vi.mock("../platforms/whatsapp/helper/binary.js", () => ({
+  inspectWhatsAppHelper: () => inspectWhatsAppHelperMock(),
 }));
 
 describe("platform capability resolver", () => {
@@ -19,6 +24,11 @@ describe("platform capability resolver", () => {
       version: "0.1.0",
       protocolVersion: 1,
       versionSupported: true,
+    });
+    inspectWhatsAppHelperMock.mockReset();
+    inspectWhatsAppHelperMock.mockReturnValue({
+      helperPath: "/tmp/cued-whatsapp-helper",
+      version: "0.1.0",
     });
   });
 
@@ -64,6 +74,50 @@ describe("platform capability resolver", () => {
       expect.objectContaining({
         availability: "requires_helper",
         supportsMultipleAccounts: false,
+      }),
+    );
+  });
+
+  it("keeps WhatsApp connectable when the bundled helper is present", () => {
+    expect(
+      summarizePlatformCapability(
+        "whatsapp",
+        {
+          platform: "whatsapp",
+          authState: "missing",
+          metadata: null,
+        },
+        "macos",
+      ),
+    ).toEqual(
+      expect.objectContaining({
+        availability: "available",
+        helperRequirements: ["whatsapp_helper"],
+      }),
+    );
+    expect(inspectWhatsAppHelperMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("marks WhatsApp as requiring a helper when the helper is unavailable", () => {
+    inspectWhatsAppHelperMock.mockReturnValue({
+      helperPath: null,
+      version: null,
+    });
+
+    expect(
+      summarizePlatformCapability(
+        "whatsapp",
+        {
+          platform: "whatsapp",
+          authState: "missing",
+          metadata: null,
+        },
+        "macos",
+      ),
+    ).toEqual(
+      expect.objectContaining({
+        availability: "requires_helper",
+        helperRequirements: ["whatsapp_helper"],
       }),
     );
   });

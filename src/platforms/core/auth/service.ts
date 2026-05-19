@@ -18,6 +18,7 @@ import {
   getAuthSessionSummary,
   getIntegrationSummary,
   listRequestableIntegrationPlatforms,
+  reconcileAbandonedAuthSessions,
   refreshPersistedRequestableIntegrationStates,
 } from "../state/status.js";
 import { getDefaultAccountKeyForPlatform, type Platform, parsePlatform } from "../types.js";
@@ -38,6 +39,7 @@ type ConnectLifecycle = {
 };
 
 const SLACK_PENDING_ACCOUNT_KEY_PREFIX = "pending-slack-";
+const GMAIL_PENDING_ACCOUNT_KEY_PREFIX = "pending-gmail-";
 
 export class IntegrationAuthService {
   constructor(private readonly db: CuedDatabase) {}
@@ -51,10 +53,12 @@ export class IntegrationAuthService {
   }
 
   listStatus() {
+    reconcileAbandonedAuthSessions(this.db);
     return buildIntegrationStatus(this.db);
   }
 
   async refresh() {
+    reconcileAbandonedAuthSessions(this.db);
     return refreshManagedIntegrationStates(this.db);
   }
 
@@ -82,6 +86,7 @@ export class IntegrationAuthService {
     integration: ReturnType<typeof getIntegrationSummary> | null;
     authSession: ReturnType<typeof getAuthSessionSummary>;
   }> {
+    reconcileAbandonedAuthSessions(this.db);
     const reusable = await this.connectReusableAuth(platform, accountKey, lifecycle);
     if (reusable) {
       return reusable;
@@ -129,6 +134,7 @@ export class IntegrationAuthService {
     integration: ReturnType<typeof getIntegrationSummary>;
     authSession: ReturnType<typeof getAuthSessionSummary>;
   }> {
+    reconcileAbandonedAuthSessions(this.db);
     const active = this.findActiveManagedAuthSession(platform, accountKey, activeAuthSessions);
     if (active) {
       return active;
@@ -220,9 +226,18 @@ export class IntegrationAuthService {
       accountKey,
       getDefaultAccountKeyForPlatform(normalized),
     );
+    const generatedPendingPrefix =
+      normalized === "slack" && resolvedAccountKey.startsWith(SLACK_PENDING_ACCOUNT_KEY_PREFIX)
+        ? SLACK_PENDING_ACCOUNT_KEY_PREFIX
+        : normalized === "gmail" && resolvedAccountKey.startsWith(GMAIL_PENDING_ACCOUNT_KEY_PREFIX)
+          ? GMAIL_PENDING_ACCOUNT_KEY_PREFIX
+          : null;
 
     for (const [sessionId, runtime] of activeAuthSessions) {
-      if (runtime.platform !== normalized || runtime.accountKey !== resolvedAccountKey) {
+      const sameAccount =
+        runtime.accountKey === resolvedAccountKey ||
+        (generatedPendingPrefix !== null && runtime.accountKey.startsWith(generatedPendingPrefix));
+      if (runtime.platform !== normalized || !sameAccount) {
         continue;
       }
       if (runtime.child.exitCode != null || runtime.child.signalCode != null) {
@@ -238,7 +253,7 @@ export class IntegrationAuthService {
         continue;
       }
       return {
-        integration: getIntegrationSummary(this.db, normalized, resolvedAccountKey),
+        integration: getIntegrationSummary(this.db, normalized, runtime.accountKey),
         authSession,
       };
     }

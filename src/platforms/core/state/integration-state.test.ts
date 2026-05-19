@@ -25,6 +25,7 @@ import {
   getAuthSessionSummary,
   listIntegrationStates,
   listRequestableIntegrationPlatforms,
+  reconcileAbandonedAuthSessions,
 } from "./status.js";
 
 describe("integration state management", () => {
@@ -1651,6 +1652,42 @@ process.exit(44);
       "Superseded by a newer auth session request",
     );
     expect(second.authSession.state).toBe("requested");
+    db.close();
+  });
+
+  it("hides abandoned generated Gmail auth rows when their helper process is gone", () => {
+    const db = createDb();
+    const requested = requestIntegrationAccess(db, "gmail", "pending-gmail-test");
+    markAuthSessionInProgress(db, requested.authSession.id, 999_999_999);
+
+    expect(reconcileAbandonedAuthSessions(db)).toBe(1);
+    expect(db.getAuthSession(requested.authSession.id)).toMatchObject({
+      state: "cancelled",
+      native_pid: null,
+      error_summary: "Auth session ended before Cued received a completion event",
+    });
+    expect(db.getIntegrationState("gmail", "pending-gmail-test")).toMatchObject({
+      auth_state: "cancelled",
+      enabled: 0,
+      sync_capable: 0,
+    });
+    expect(listIntegrationStates(db)).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          platform: "gmail",
+          accountKey: "pending-gmail-test",
+        }),
+      ]),
+    );
+    expect(buildIntegrationStatus(db).setupIntegrations).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          platform: "gmail",
+          authState: "missing",
+        }),
+      ]),
+    );
+
     db.close();
   });
 });

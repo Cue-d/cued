@@ -137,7 +137,7 @@ describe("IntegrationAuthService", () => {
     db.updateAuthSessionState({
       id: sessionId,
       state: "in_progress",
-      nativePid: 12345,
+      nativePid: process.pid,
       startedAt: Date.now(),
     });
     const service = new IntegrationAuthService(db);
@@ -148,7 +148,7 @@ describe("IntegrationAuthService", () => {
       [
         sessionId,
         {
-          child: { pid: 12345, exitCode: null, signalCode: null } as ChildProcess,
+          child: { pid: process.pid, exitCode: null, signalCode: null } as ChildProcess,
           platform: "discord",
           accountKey: "default",
         },
@@ -161,6 +161,64 @@ describe("IntegrationAuthService", () => {
     expect(result.integration.authState).toBe("in_progress");
     expect(result.authSession?.id).toBe(sessionId);
     expect(activeAuthSessions.size).toBe(1);
+    expect(startAuthSessionMock).not.toHaveBeenCalled();
+    expect(db.listAuthSessions(10)).toHaveLength(1);
+
+    db.close();
+  });
+
+  it("reuses an active generated Gmail auth session instead of launching duplicate OAuth", async () => {
+    const db = createDb();
+    db.upsertIntegrationState({
+      platform: "gmail",
+      accountKey: "pending-gmail-first",
+      displayName: "Gmail",
+      authState: "in_progress",
+      enabled: true,
+      connectionKind: "local-cli",
+      syncCapable: false,
+      launchStrategy: "native-auth",
+      launchTarget: null,
+      importedFrom: "local-cli",
+      metadata: {
+        runtimeKind: "oauth",
+      },
+    });
+    const sessionId = db.createAuthSession({
+      platform: "gmail",
+      accountKey: "pending-gmail-first",
+      integrationStateId: "gmail:pending-gmail-first",
+      state: "in_progress",
+    });
+    db.updateAuthSessionState({
+      id: sessionId,
+      state: "in_progress",
+      nativePid: process.pid,
+      startedAt: Date.now(),
+    });
+    const service = new IntegrationAuthService(db);
+    const activeAuthSessions = new Map<
+      string,
+      { child: ChildProcess; platform: "gmail"; accountKey: string }
+    >([
+      [
+        sessionId,
+        {
+          child: { pid: process.pid, exitCode: null, signalCode: null } as ChildProcess,
+          platform: "gmail",
+          accountKey: "pending-gmail-first",
+        },
+      ],
+    ]);
+
+    const result = await service.connectManaged(
+      "gmail",
+      "pending-gmail-second",
+      activeAuthSessions,
+    );
+
+    expect(result.integration.accountKey).toBe("pending-gmail-first");
+    expect(result.authSession?.id).toBe(sessionId);
     expect(startAuthSessionMock).not.toHaveBeenCalled();
     expect(db.listAuthSessions(10)).toHaveLength(1);
 
