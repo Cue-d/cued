@@ -391,7 +391,7 @@ public struct CuedOnboardingView: View {
   @State private var removalPrompt: InstallerRemovalPrompt?
   @State private var pendingGlobalSkillInstall = false
   @State private var pendingIntegrationActionIDs = Set<String>()
-  @State private var pendingPlatformConnectPlatforms = Set<String>()
+  @State private var pendingRemovedIntegrationIDs = Set<String>()
   @State private var activePermissionGuideKey: String?
 
   public init(
@@ -471,7 +471,7 @@ public struct CuedOnboardingView: View {
     }
     .onChange(of: platformRefreshSignature) { _ in
       pendingIntegrationActionIDs.removeAll()
-      pendingPlatformConnectPlatforms.removeAll()
+      pendingRemovedIntegrationIDs.removeAll()
     }
     .sheet(item: $addAccountPrompt) { prompt in
       InstallerAddAccountSheet(
@@ -480,7 +480,6 @@ public struct CuedOnboardingView: View {
         onCancel: { addAccountPrompt = nil },
         onConnect: { accountKey in
           addAccountPrompt = nil
-          pendingPlatformConnectPlatforms.insert(prompt.platform)
           onConnectIntegration(prompt.platform, accountKey)
         }
       )
@@ -491,6 +490,7 @@ public struct CuedOnboardingView: View {
         message: Text("This deletes the saved \(prompt.platformTitle) connection from this Mac."),
         primaryButton: .destructive(Text("Remove")) {
           pendingIntegrationActionIDs.insert(prompt.id)
+          pendingRemovedIntegrationIDs.insert(prompt.id)
           onRemoveIntegration(prompt.platform, prompt.accountKey)
         },
         secondaryButton: .cancel()
@@ -501,7 +501,7 @@ public struct CuedOnboardingView: View {
   private func prunePendingIntegrationActions() {
     let activePendingIDs = Set(
       viewModel.platformConfigurations.flatMap { configuration in
-        configuration.knownAccounts.compactMap { integration in
+        visibleKnownAccounts(for: configuration).compactMap { integration in
           integration.authState == "requested" || integration.authState == "in_progress"
             ? integration.id
             : nil
@@ -914,10 +914,10 @@ public struct CuedOnboardingView: View {
 
   private func shouldShowAccountRows(for configuration: InstallerPlatformConfiguration) -> Bool {
     if configuration.supportsMultipleAccounts {
-      return !configuration.accounts.isEmpty
+      return !visibleAccounts(for: configuration).isEmpty
     }
 
-    guard let integration = configuration.accounts.first else {
+    guard let integration = visibleAccounts(for: configuration).first else {
       return false
     }
 
@@ -932,13 +932,22 @@ public struct CuedOnboardingView: View {
   }
 
   private func platformIsPending(_ configuration: InstallerPlatformConfiguration) -> Bool {
-    if pendingPlatformConnectPlatforms.contains(configuration.platform) {
-      return true
-    }
-
-    return configuration.knownAccounts.contains { integration in
+    return visibleKnownAccounts(for: configuration).contains { integration in
       pendingIntegrationActionIDs.contains(integration.id)
     }
+  }
+
+  private func visibleAccounts(for configuration: InstallerPlatformConfiguration) -> [InstallerIntegrationStatus] {
+    configuration.accounts.filter { !pendingRemovedIntegrationIDs.contains($0.id) }
+  }
+
+  private func visibleKnownAccounts(for configuration: InstallerPlatformConfiguration) -> [InstallerIntegrationStatus] {
+    let accounts = visibleAccounts(for: configuration)
+    if accounts.isEmpty, let placeholder = configuration.placeholder,
+       !pendingRemovedIntegrationIDs.contains(placeholder.id) {
+      return [placeholder]
+    }
+    return accounts
   }
 
   private func singleAccountPlatformRow(
@@ -949,33 +958,21 @@ public struct CuedOnboardingView: View {
   }
 
   private func multiAccountPlatformRows(_ configuration: InstallerPlatformConfiguration) -> some View {
-    VStack(alignment: .leading, spacing: 10) {
-      if !configuration.accounts.isEmpty {
-        ForEach(Array(configuration.accounts.enumerated()), id: \.element.id) { index, integration in
+    let accounts = visibleAccounts(for: configuration)
+    return VStack(alignment: .leading, spacing: 10) {
+      if !accounts.isEmpty {
+        ForEach(Array(accounts.enumerated()), id: \.element.id) { index, integration in
           multiAccountRow(configuration, integration: integration)
-          if index < configuration.accounts.count - 1 {
+          if index < accounts.count - 1 {
             Divider()
           }
         }
       }
 
-      let isPending = pendingPlatformConnectPlatforms.contains(configuration.platform)
-        || configuration.hasInProgressState
       if let action = platformLevelAction(for: configuration) {
         HStack {
           Spacer(minLength: 0)
-          if isPending {
-            ProgressView()
-              .controlSize(.small)
-          } else {
-            actionButton(title: action.title, prominent: false, action: action.handler)
-          }
-        }
-      } else if isPending {
-        HStack {
-          Spacer(minLength: 0)
-          ProgressView()
-            .controlSize(.small)
+          actionButton(title: action.title, prominent: false, action: action.handler)
         }
       }
     }
@@ -1145,10 +1142,19 @@ public struct CuedOnboardingView: View {
       return nil
     }
 
-    guard configuration.isRequestable,
-          integration.authState != "requested",
-          integration.authState != "in_progress" else {
+    guard configuration.isRequestable else {
       return nil
+    }
+
+    if integration.authState == "requested" || integration.authState == "in_progress" {
+      return (
+        "Cancel",
+        {
+          pendingIntegrationActionIDs.insert(integration.id)
+          pendingRemovedIntegrationIDs.insert(integration.id)
+          onRemoveIntegration(configuration.platform, integration.accountKey)
+        }
+      )
     }
 
     return (
@@ -1183,20 +1189,16 @@ public struct CuedOnboardingView: View {
     guard configuration.isConnectable else {
       return nil
     }
-    if configuration.supportsMultipleAccounts && configuration.hasInProgressState {
-      return nil
-    }
 
     if configuration.supportsMultipleAccounts {
       let noun = installerAccountNoun(for: configuration.platform)
-      let title = configuration.accounts.isEmpty && installerSupportsAutomaticAccountDiscovery(configuration.platform)
+      let title = visibleAccounts(for: configuration).isEmpty && installerSupportsAutomaticAccountDiscovery(configuration.platform)
         ? "Connect"
         : "Add \(noun)"
       return (
         title,
         {
           if installerSupportsAutomaticAccountDiscovery(configuration.platform) {
-            pendingPlatformConnectPlatforms.insert(configuration.platform)
             onConnectIntegration(
               configuration.platform,
               viewModel.suggestedAccountKey(for: configuration.platform)
@@ -1239,12 +1241,12 @@ public struct CuedOnboardingView: View {
     for configuration: InstallerPlatformConfiguration,
     integration: InstallerIntegrationStatus
   ) -> String {
+    if installerShouldHideAccountKey(platform: integration.platform, accountKey: integration.accountKey) {
+      return fallbackAccountTitle(for: configuration.platform, authState: integration.authState)
+    }
+
     let title = integration.displayName?.trimmingCharacters(in: .whitespacesAndNewlines)
     if let title, !title.isEmpty {
-      if installerNormalizedTitle(title) == installerNormalizedTitle(configuration.title),
-         installerShouldHideAccountKey(platform: integration.platform, accountKey: integration.accountKey) {
-        return fallbackAccountTitle(for: configuration.platform, authState: integration.authState)
-      }
       return title
     }
     if !installerShouldHideAccountKey(platform: integration.platform, accountKey: integration.accountKey) {
@@ -1299,7 +1301,7 @@ public struct CuedOnboardingView: View {
     if configuration.platform == "phone_calls" {
       return true
     }
-    let accounts = configuration.accounts
+    let accounts = visibleAccounts(for: configuration)
     if accounts.isEmpty {
       return false
     }
@@ -1937,6 +1939,17 @@ private func fallbackAccountTitle(for platform: String, authState: String) -> St
       return "Linked WhatsApp device"
     default:
       return "Connected account"
+    }
+  }
+
+  if authState == "requested" || authState == "in_progress" {
+    switch platform {
+    case "gmail":
+      return "Gmail sign-in"
+    case "slack":
+      return "Slack sign-in"
+    default:
+      break
     }
   }
 
