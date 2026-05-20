@@ -94,10 +94,26 @@ final class OnboardingWindowController: NSWindowController {
     fatalError("init(coder:) has not been implemented")
   }
 
-  func showAndRefresh(forceActivePermissionRefresh: Bool = false) {
+  func showAndRefresh(forceActivePermissionRefresh: Bool = false, resetToFirstPage: Bool = false) {
+    if resetToFirstPage {
+      viewModel.currentPage = 0
+    }
+    NSRunningApplication.current.activate(options: [.activateIgnoringOtherApps, .activateAllWindows])
     showWindow(nil)
+    window?.makeMain()
     window?.makeKeyAndOrderFront(nil)
+    window?.orderFrontRegardless()
     NSApp.activate(ignoringOtherApps: true)
+    DispatchQueue.main.async { [weak self] in
+      guard let window = self?.window else {
+        return
+      }
+      NSRunningApplication.current.activate(options: [.activateIgnoringOtherApps, .activateAllWindows])
+      window.makeMain()
+      window.makeKeyAndOrderFront(nil)
+      window.orderFrontRegardless()
+      NSApp.activate(ignoringOtherApps: true)
+    }
     refresh(forceActivePermissionRefresh: forceActivePermissionRefresh)
   }
 
