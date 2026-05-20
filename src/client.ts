@@ -28,7 +28,8 @@ export async function sendDaemonRequest(request: DaemonRequestInput): Promise<Da
     try {
       return await sendSingleDaemonRequest(withId);
     } catch (error) {
-      if (!isRetriableDaemonConnectionError(error)) {
+      const code = error && typeof error === "object" && "code" in error ? error.code : undefined;
+      if (code !== "ECONNREFUSED" && code !== "ENOENT") {
         throw error;
       }
       lastError = error instanceof Error ? error : new Error(String(error));
@@ -101,15 +102,6 @@ function getDaemonRequestTimeoutMs(): number {
   return Number.isFinite(configured) && configured > 0
     ? Math.trunc(configured)
     : DEFAULT_DAEMON_REQUEST_TIMEOUT_MS;
-}
-
-function isRetriableDaemonConnectionError(error: unknown): boolean {
-  if (!error || typeof error !== "object") {
-    return false;
-  }
-
-  const code = "code" in error ? error.code : undefined;
-  return code === "ECONNREFUSED" || code === "ENOENT";
 }
 
 function sleep(ms: number): Promise<void> {

@@ -82,20 +82,13 @@ function normalizeCallDirection(originated: number | null): CallDirection {
   return "unknown";
 }
 
-function isLikelyCompletedCall(answered: number | null, durationSeconds: number | null): boolean {
-  if (answered === 1) {
-    return true;
-  }
-  return typeof durationSeconds === "number" && durationSeconds >= 20;
-}
-
 function normalizeCallStatus(
   direction: CallDirection,
   disconnectedCause: number | null,
   answered: number | null,
   durationSeconds: number | null,
 ): CallStatus {
-  if (isLikelyCompletedCall(answered, durationSeconds)) {
+  if (answered === 1 || (typeof durationSeconds === "number" && durationSeconds >= 20)) {
     return "completed";
   }
   if (disconnectedCause === 41) {

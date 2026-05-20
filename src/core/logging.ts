@@ -12,10 +12,6 @@ interface Logger {
 
 const DEFAULT_MAX_LOG_BYTES = Number(process.env.CUED_LOG_MAX_BYTES ?? 1_048_576);
 
-function nowIso(): string {
-  return new Date().toISOString();
-}
-
 function normalizeLogDetails(details: unknown): string {
   if (details == null) {
     return "";
@@ -71,7 +67,7 @@ export function writeLogLine(
 ): void {
   mkdirSync(dirname(logPath), { recursive: true, mode: 0o700 });
   rotateLogFileIfNeeded(logPath);
-  const line = `${nowIso()} ${level.toUpperCase()} [${subsystem}] ${message}${normalizeLogDetails(details)}\n`;
+  const line = `${new Date().toISOString()} ${level.toUpperCase()} [${subsystem}] ${message}${normalizeLogDetails(details)}\n`;
   appendFileSync(logPath, line, "utf8");
 }
 

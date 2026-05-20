@@ -40,11 +40,6 @@ function getCookieNames(session: LinkedInSessionSecret): string[] {
     .sort();
 }
 
-function hasRequiredCookies(cookieNames: readonly string[]): boolean {
-  const cookieNamesSet = new Set(cookieNames);
-  return cookieNamesSet.has("li_at") && cookieNamesSet.has("JSESSIONID");
-}
-
 export function importLinkedInStoredAuth(
   db: CuedDatabase,
   options: { reviveUserRemoved?: boolean } = {},
@@ -56,7 +51,7 @@ export function importLinkedInStoredAuth(
   }
   const parsed = parseLinkedInSessionSecret(secret);
   const cookieNames = getCookieNames(parsed);
-  if (!hasRequiredCookies(cookieNames)) {
+  if (!cookieNames.includes("li_at") || !cookieNames.includes("JSESSIONID")) {
     return [];
   }
 

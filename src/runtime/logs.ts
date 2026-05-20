@@ -59,13 +59,6 @@ export function readRecentLogLines(lineCount: number, logPath = CUED_DAEMON_LOG_
   return lines.slice(-lineCount);
 }
 
-function printLines(lines: string[]): void {
-  if (lines.length === 0) {
-    return;
-  }
-  process.stdout.write(`${lines.join("\n")}\n`);
-}
-
 async function readRange(logPath: string, start: number, end: number): Promise<string> {
   if (end <= start) {
     return "";
@@ -89,7 +82,10 @@ export async function followLogs(
 ): Promise<void> {
   const logPath = options.logPath ?? CUED_DAEMON_LOG_PATH;
   mkdirSync(dirname(logPath), { recursive: true, mode: 0o700 });
-  printLines(readRecentLogLines(options.tail, logPath));
+  const recentLines = readRecentLogLines(options.tail, logPath);
+  if (recentLines.length > 0) {
+    process.stdout.write(`${recentLines.join("\n")}\n`);
+  }
 
   let offset = existsSync(logPath) ? statSync(logPath).size : 0;
   let closed = false;

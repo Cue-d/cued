@@ -1,17 +1,13 @@
 const NANP_LOCAL_DIGIT_COUNT = 10;
 const NANP_COUNTRY_CODE_DIGIT_COUNT = 11;
 
-function digitsOnly(value: string): string {
-  return value.replace(/\D/g, "");
-}
-
 export function normalizePhone(phone: string): string {
   const trimmed = phone.trim();
   if (trimmed.length === 0) {
     return "";
   }
 
-  const digits = digitsOnly(trimmed);
+  const digits = trimmed.replace(/\D/g, "");
   if (digits.length === 0) {
     return "";
   }

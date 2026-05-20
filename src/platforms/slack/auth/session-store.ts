@@ -34,18 +34,6 @@ interface StoreSlackSessionOptions {
   reviveUserRemoved?: boolean;
 }
 
-function storeSecretInKeychain(
-  service: string,
-  account: string,
-  secret: Record<string, unknown>,
-): void {
-  storeKeychainSecret(service, account, secret);
-}
-
-function keychainSecretExists(service: string, account: string): boolean {
-  return loadKeychainSecret(service, account) !== null;
-}
-
 export function storeSlackSession(
   db: CuedDatabase,
   payload: StoredSlackSessionPayload,
@@ -72,7 +60,7 @@ export function storeSlackSession(
     existing?.auth_state === "authenticated" &&
     importedSavedAt !== null &&
     importedSavedAt >= payload.savedAt &&
-    keychainSecretExists(SLACK_KEYCHAIN_SERVICE, accountKey);
+    loadKeychainSecret(SLACK_KEYCHAIN_SERVICE, accountKey) !== null;
   if (alreadyImported) {
     return {
       platform: "slack",
@@ -82,7 +70,7 @@ export function storeSlackSession(
     };
   }
 
-  storeSecretInKeychain(SLACK_KEYCHAIN_SERVICE, accountKey, {
+  storeKeychainSecret(SLACK_KEYCHAIN_SERVICE, accountKey, {
     token: payload.token,
     cookie: payload.cookie,
     teamId: payload.teamId,

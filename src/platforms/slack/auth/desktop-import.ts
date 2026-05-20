@@ -42,16 +42,6 @@ function getDebuggingPort(): number {
   return Number.isFinite(configured) && configured > 0 ? configured : DEFAULT_DEBUGGING_PORT;
 }
 
-function hasAuthenticatedSlackIntegration(db: CuedDatabase): boolean {
-  return db
-    .listIntegrationStates()
-    .some((row) => row.platform === "slack" && row.auth_state === "authenticated");
-}
-
-function isSlackInstalled(): boolean {
-  return existsSync(getSlackAppBinary()) && existsSync(getSlackUserDataDir());
-}
-
 function canReachDebugger(port: number): boolean {
   try {
     execFileSync("curl", ["-sf", `http://127.0.0.1:${port}/json/version`], {
@@ -98,7 +88,14 @@ export async function importSlackDesktopAuth(
   }>
 > {
   const skipWhenAnyAuthenticated = options.skipWhenAnyAuthenticated ?? true;
-  if (!isSlackInstalled() || (skipWhenAnyAuthenticated && hasAuthenticatedSlackIntegration(db))) {
+  if (
+    !existsSync(getSlackAppBinary()) ||
+    !existsSync(getSlackUserDataDir()) ||
+    (skipWhenAnyAuthenticated &&
+      db
+        .listIntegrationStates()
+        .some((row) => row.platform === "slack" && row.auth_state === "authenticated"))
+  ) {
     return [];
   }
 

@@ -18,14 +18,16 @@ function header(message: GmailMessage, name: string): string | null {
   return match?.value ?? null;
 }
 
-function decodeMimeData(data: string): string {
-  return Buffer.from(data.replace(/-/g, "+").replace(/_/g, "/"), "base64").toString("utf8");
-}
-
 function collectBodyParts(payload: GmailMessagePayload | undefined, mimeType: string): string[] {
   if (!payload) return [];
   const current =
-    payload.mimeType === mimeType && payload.body?.data ? [decodeMimeData(payload.body.data)] : [];
+    payload.mimeType === mimeType && payload.body?.data
+      ? [
+          Buffer.from(payload.body.data.replace(/-/g, "+").replace(/_/g, "/"), "base64").toString(
+            "utf8",
+          ),
+        ]
+      : [];
   return [...current, ...(payload.parts ?? []).flatMap((part) => collectBodyParts(part, mimeType))];
 }
 

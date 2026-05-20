@@ -256,8 +256,6 @@ Signal support ships as a bundled `signal-cli` payload fetched by `scripts/fetch
 | `pnpm check:biome`         | Run formatting, lint, and import checks                                            |
 | `pnpm typecheck`           | Type check the root app                                                            |
 | `pnpm test`                | Run the root app tests                                                             |
-| `pnpm test:perf`           | Run synthetic sync/projection latency benchmarks                                   |
-| `pnpm test:perf:daemon-memory` | Run the macOS daemon performance benchmark                                     |
 | `pnpm build:app:macos`     | Build the local `Cued.app` dev bundle                                              |
 | `pnpm build:dmg:macos`     | Build signed/notarized release artifacts and output the DMG path                   |
 | `pnpm build:tarball:macos` | Build signed/notarized release artifacts and output the Apple Silicon tarball path |
@@ -271,47 +269,6 @@ More detail: [scripts/README.md](scripts/README.md)
 See [CONTRIBUTING.md](CONTRIBUTING.md) for local setup, architecture rules, integration policy, and PR expectations.
 
 Security reports should go to `theo@cued.so`; see [SECURITY.md](SECURITY.md). Do not open public issues with real local databases, message exports, browser profiles, tokens, cookies, OAuth secrets, or private logs.
-
-## Daemon Benchmarking
-
-Use the macOS daemon benchmark before and after each residency or scheduler optimization:
-
-```bash
-pnpm build
-pnpm test:perf:daemon-memory -- --scenario=clean --baseline=src/runtime/perf/daemon-memory-baseline.json
-pnpm test:perf
-```
-
-Recommended workflow:
-
-1. Benchmark `main` or the parent commit.
-2. Implement one memory change only.
-3. Rebuild with `pnpm build`.
-4. Rerun `pnpm test:perf:daemon-memory`.
-5. Run `pnpm test:perf`.
-6. Attach a before/after delta table to the PR or commit notes.
-
-Benchmark scenarios:
-
-- `clean_idle` is the required scenario for every memory change.
-- `cloned_profile_idle` is available via `--scenario=cloned`, but it is informational until the cloned-profile startup failure is fixed.
-- `idle_cpu_power` runs a 10-minute post-ready idle sample and captures CPU, process churn, and a best-effort power proxy.
-- `active_sync_projection` runs replay-style sync + projection work and captures active CPU and memory behavior.
-- `--baseline=...` enables regression checks for startup latency, main RSS, tree RSS, physical footprint, tree RSS spikes, and idle CPU.
-- `--write-baseline=...` updates the checked-in baseline after a merged improvement, not during experiments.
-
-Summary metrics emitted per scenario:
-
-- `startupReadyMs`
-- `mainRssMedianMb`
-- `treeRssMedianMb`
-- `physicalFootprintMb`
-- `cpuMedianPct`
-- `cpuP95Pct`
-- `treeRssMaxMb`
-- `processCount`
-- `processChurnCount`
-- `powerProxy` when available
 
 ## Notes
 

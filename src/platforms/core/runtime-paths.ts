@@ -4,13 +4,9 @@ import { CUED_BROWSER_DIR, CUED_SIGNAL_DIR, CUED_WHATSAPP_DIR } from "../../core
 import { validateIntegrationAccountKey } from "./account-keys.js";
 import type { Platform } from "./types.js";
 
-function isStrictChildPath(rootPath: string, targetPath: string): boolean {
-  const relativePath = relative(rootPath, targetPath);
-  return relativePath.length > 0 && !relativePath.startsWith("..") && !isAbsolute(relativePath);
-}
-
 function assertInsideRuntimeRoot(targetPath: string, rootPath: string, label: string): void {
-  if (!isStrictChildPath(rootPath, targetPath)) {
+  const relativePath = relative(rootPath, targetPath);
+  if (relativePath.length === 0 || relativePath.startsWith("..") || isAbsolute(relativePath)) {
     throw new Error(`Refusing to remove ${label} outside Cued runtime root`);
   }
 }

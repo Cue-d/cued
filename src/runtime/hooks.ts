@@ -59,17 +59,13 @@ function isHookEventName(value: string): value is HookEventName {
 
 function resolveCommandPath(command: string): string | null {
   try {
-    return execFileSync("sh", ["-lc", `command -v ${shellQuote(command)}`], {
+    return execFileSync("sh", ["-lc", `command -v '${command.replace(/'/g, `'\\''`)}'`], {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "ignore"],
     });
   } catch {
     return null;
   }
-}
-
-function shellQuote(value: string): string {
-  return `'${value.replace(/'/g, `'\\''`)}'`;
 }
 
 function commandExists(command: string): boolean {

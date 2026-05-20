@@ -144,7 +144,9 @@ class AuthedRequest {
     this.headers["x-li-page-instance"] =
       this.options.pageInstance ?? DEFAULT_HEADERS["x-li-page-instance"];
     this.headers["x-restli-protocol-version"] = "2.0.0";
-    this.rawQuery = `queryId=${fullQueryId}&variables=${queriesToString(variables)}`;
+    this.rawQuery = `queryId=${fullQueryId}&variables=(${Object.entries(variables)
+      .map(([key, value]) => `${key}:${value}`)
+      .join(",")})`;
     return this;
   }
 
@@ -217,12 +219,6 @@ export function linkedInEncode(value: string): string {
   return encodeURIComponent(value).replace(/[()]/g, (character) =>
     character === "(" ? "%28" : "%29",
   );
-}
-
-function queriesToString(variables: Record<string, string>): string {
-  return `(${Object.entries(variables)
-    .map(([key, value]) => `${key}:${value}`)
-    .join(",")})`;
 }
 
 function sleep(ms: number): Promise<void> {

@@ -76,7 +76,7 @@ export function selectCompetingDaemonProcesses(
       }
 
       const bundleRealpath = normalizeRealpath(bundlePath);
-      if (isTrashPath(bundleRealpath)) {
+      if (bundleRealpath?.includes("/.Trash/") || bundleRealpath?.includes("/Trash/")) {
         return true;
       }
 
@@ -187,10 +187,6 @@ function normalizeRealpath(path: string | null): string | null {
   } catch {
     return resolve(path);
   }
-}
-
-function isTrashPath(path: string | null): boolean {
-  return Boolean(path && (path.includes("/.Trash/") || path.includes("/Trash/")));
 }
 
 function defaultIsProcessRunning(pid: number): boolean {

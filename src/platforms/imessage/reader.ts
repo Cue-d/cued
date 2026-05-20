@@ -86,10 +86,6 @@ const TAPBACK_TYPE_TO_EMOJI: Record<number, string> = {
   2005: "❓",
 };
 
-function isTapbackType(type: number): boolean {
-  return type >= 2000 && type <= 3007;
-}
-
 function isTapbackRemovalType(type: number): boolean {
   return type >= 3000 && type <= 3007;
 }
@@ -281,7 +277,7 @@ export class IMessageReader {
 
   private transformMessages(rows: MessageRow[]): ImsMessage[] {
     return rows
-      .filter((row) => !isTapbackType(row.associated_message_type))
+      .filter((row) => row.associated_message_type < 2000 || row.associated_message_type > 3007)
       .map((row) => {
         const isFromMe = row.is_from_me === 1;
         const isRead = row.is_read === 1;
