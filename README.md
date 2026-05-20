@@ -20,7 +20,7 @@ Most integrations in the matrix below are ready for normal use. Gmail is availab
 
 For most people, install Cued from [GitHub Releases](https://github.com/Cue-d/cued/releases).
 
-Recommended setup: install `Cued.dmg`, open the app, finish onboarding, then configure permissions and integrations in the app's onboarding and permissions UI or from the CLI if you prefer.
+Recommended setup: install `Cued.dmg`, open the app, finish setup, then configure permissions and integrations in the app UI or from the CLI if you prefer.
 
 ### Recommended: download the app
 
@@ -33,7 +33,7 @@ Recommended setup: install `Cued.dmg`, open the app, finish onboarding, then con
 What this does:
 
 - installs the signed app bundle at a stable path macOS permissions can track
-- opens the onboarding flow, which can configure the CLI symlink and login item for you
+- opens the setup flow, which can configure the CLI symlink and login item for you
 - keeps all runtime state local under `~/.cued/`
 
 ### Optional: terminal install from the latest release
@@ -50,8 +50,8 @@ If `~/.local/bin` is not already on your `PATH`, add it before relying on the `c
 
 After the app is installed:
 
-- use the onboarding flow and permissions UI in `Cued.app` to grant access and finish setup
-- or use the CLI once onboarding has created the symlink in `~/.local/bin/cued`
+- use the setup flow in `Cued.app` to grant access and finish setup
+- or use the CLI once setup has created the symlink in `~/.local/bin/cued`
 
 CLI path:
 
@@ -66,7 +66,7 @@ Use `cued setup` any time you want to revisit install state, permissions, and ne
 
 ### Verify the install
 
-After onboarding has finished and the CLI symlink exists:
+After setup has finished and the CLI symlink exists:
 
 ```bash
 cued status

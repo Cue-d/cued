@@ -1,10 +1,10 @@
 import Foundation
 import XCTest
-@testable import CuedNativeUI
+@testable import Interface
 @testable import PreviewSupport
 
 final class PreviewTests: XCTestCase {
-  func testPreviewCasesAreStableAndNamedForTheirOnboardingState() {
+  func testPreviewCasesAreStableAndNamedForTheirRootState() {
     XCTAssertEqual(
       Preview.cases.map(\.name),
       [
@@ -31,9 +31,9 @@ final class PreviewTests: XCTestCase {
     XCTAssertEqual(previewCase.size, CGSize(width: 700, height: 800))
   }
 
-  func testMissingSkillPreviewReusesRealDefaultSkillStatusCopy() {
+  func testMissingSkillPreviewUsesDefaultSkillStatusCopy() {
     XCTAssertEqual(
-      installerDefaultGlobalSkillStatus().summary,
+      defaultPreviewSkillStatus().summary,
       "Checks whether the global Cued skill is available to your agents."
     )
   }
@@ -41,7 +41,7 @@ final class PreviewTests: XCTestCase {
   @MainActor
   func testRendersEveryPreviewFixture() throws {
     let outputDirectory = FileManager.default.temporaryDirectory
-      .appendingPathComponent("cued-onboarding-preview-tests", isDirectory: true)
+      .appendingPathComponent("cued-preview-tests", isDirectory: true)
     try? FileManager.default.removeItem(at: outputDirectory)
 
     let results = try Preview.renderAll(outputDirectory: outputDirectory)

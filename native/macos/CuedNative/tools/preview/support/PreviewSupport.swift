@@ -1,5 +1,5 @@
 import AppKit
-import CuedNativeUI
+import Interface
 import Foundation
 import SwiftUI
 
@@ -38,10 +38,10 @@ public struct PreviewMetrics: Sendable {
 }
 
 public enum Preview {
-  public static let defaultOutputDirectory = URL(fileURLWithPath: ".build/onboarding-previews", isDirectory: true)
+  public static let defaultOutputDirectory = URL(fileURLWithPath: ".build/previews", isDirectory: true)
   public static let defaultSize = CGSize(
-    width: OnboardingViewModel.windowWidth,
-    height: OnboardingViewModel.windowHeight
+    width: RootViewModel.windowWidth,
+    height: RootViewModel.windowHeight
   )
 
   public static let cases: [PreviewCase] = [
@@ -61,7 +61,7 @@ public enum Preview {
     let viewModel = makeViewModel(for: previewCase)
     viewModel.currentPage = previewCase.page
 
-    let view = CuedOnboardingView(
+    let view = RootView(
       viewModel: viewModel,
       onRefresh: {},
       onGuidePermission: { _ in },
@@ -75,7 +75,7 @@ public enum Preview {
     )
     .frame(width: previewCase.size.width, height: previewCase.size.height)
 
-    let data = try OnboardingImageRenderer.pngData(for: AnyView(view), size: previewCase.size)
+    let data = try ImageRenderer.pngData(for: AnyView(view), size: previewCase.size)
     try data.write(to: url, options: [.atomic])
 
     return PreviewResult(
@@ -103,8 +103,8 @@ public enum Preview {
   }
 
   @MainActor
-  private static func makeViewModel(for previewCase: PreviewCase) -> OnboardingViewModel {
-    let viewModel = OnboardingViewModel()
+  private static func makeViewModel(for previewCase: PreviewCase) -> RootViewModel {
+    let viewModel = RootViewModel()
     let fixture = PreviewFixture(name: previewCase.name)
     viewModel.apply(
       permissions: fixture.permissions,
@@ -119,7 +119,7 @@ public enum Preview {
 private struct PreviewFixture {
   let name: String
 
-  var permissions: [InstallerPermissionStatus] {
+  var permissions: [PermissionStatus] {
     switch name {
     case "permissions-granted", "platforms-mixed":
       return [
@@ -134,12 +134,12 @@ private struct PreviewFixture {
     }
   }
 
-  var globalSkill: InstallerGlobalSkillStatus {
+  var globalSkill: SkillStatus {
     switch name {
     case "permissions-missing":
-      installerDefaultGlobalSkillStatus()
+      defaultPreviewSkillStatus()
     default:
-      InstallerGlobalSkillStatus(
+      SkillStatus(
         installed: true,
         status: "installed",
         summary: "The global Cued skill is installed."
@@ -147,7 +147,7 @@ private struct PreviewFixture {
     }
   }
 
-  var integrations: [InstallerIntegrationStatus] {
+  var integrations: [IntegrationStatus] {
     switch name {
     case "platforms-mixed":
       return [
@@ -162,7 +162,7 @@ private struct PreviewFixture {
     }
   }
 
-  var setupIntegrations: [InstallerIntegrationStatus] {
+  var setupIntegrations: [IntegrationStatus] {
     let actual = integrations
     return [
       firstActual("contacts", actual) ?? integration("contacts", "local", "Contacts.app", fallbackState(for: "contacts"), true, nil),
@@ -176,16 +176,16 @@ private struct PreviewFixture {
     ]
   }
 
-  private var contactsStats: InstallerProjectionStats {
-    InstallerProjectionStats(rawEvents: 1_240, projectedContacts: 1_118)
+  private var contactsStats: ProjectionStats {
+    ProjectionStats(rawEvents: 1_240, projectedContacts: 1_118)
   }
 
-  private var messagesStats: InstallerProjectionStats {
-    InstallerProjectionStats(rawEvents: 34_920, projectedContacts: 997, projectedConversations: 318, projectedMessages: 28_441)
+  private var messagesStats: ProjectionStats {
+    ProjectionStats(rawEvents: 34_920, projectedContacts: 997, projectedConversations: 318, projectedMessages: 28_441)
   }
 
-  private var gmailStats: InstallerProjectionStats {
-    InstallerProjectionStats(rawEvents: 9_330, projectedContacts: 204, projectedConversations: 86, projectedMessages: 7_412)
+  private var gmailStats: ProjectionStats {
+    ProjectionStats(rawEvents: 9_330, projectedContacts: 204, projectedConversations: 86, projectedMessages: 7_412)
   }
 
   private func fallbackState(for platform: String) -> String {
@@ -199,8 +199,8 @@ private struct PreviewFixture {
 
   private func firstActual(
     _ platform: String,
-    _ integrations: [InstallerIntegrationStatus]
-  ) -> InstallerIntegrationStatus? {
+    _ integrations: [IntegrationStatus]
+  ) -> IntegrationStatus? {
     integrations.first { $0.platform == platform }
   }
 
@@ -209,8 +209,8 @@ private struct PreviewFixture {
     _ status: String,
     _ summary: String,
     _ requestFlags: [String]
-  ) -> InstallerPermissionStatus {
-    InstallerPermissionStatus(
+  ) -> PermissionStatus {
+    PermissionStatus(
       key: key,
       status: status,
       summary: summary,
@@ -224,9 +224,9 @@ private struct PreviewFixture {
     _ displayName: String,
     _ authState: String,
     _ enabled: Bool,
-    _ projectionStats: InstallerProjectionStats?
-  ) -> InstallerIntegrationStatus {
-    InstallerIntegrationStatus(
+    _ projectionStats: ProjectionStats?
+  ) -> IntegrationStatus {
+    IntegrationStatus(
       platform: platform,
       accountKey: accountKey,
       displayName: displayName,
@@ -237,26 +237,32 @@ private struct PreviewFixture {
     )
   }
 
-  private func capability(for platform: String) -> InstallerCapabilityStatus {
+  private func capability(for platform: String) -> CapabilityStatus {
     if platform == "contacts" {
-      return InstallerCapabilityStatus(
+      return CapabilityStatus(
         availability: permissions.first(where: { $0.key == "contacts" })?.status == "granted" ? "available" : "requires_permission",
-        onboardingVisible: true,
-        reason: "Contacts access is required."
+        setupVisible: true
       )
     }
     if platform == "imessage" {
-      return InstallerCapabilityStatus(
+      return CapabilityStatus(
         availability: permissions.first(where: { $0.key == "full_disk_access" })?.status == "granted" ? "available" : "requires_permission",
-        onboardingVisible: true,
-        reason: "Full Disk Access is required."
+        setupVisible: true
       )
     }
-    return InstallerCapabilityStatus(availability: "available", onboardingVisible: true, reason: nil)
+    return CapabilityStatus(availability: "available", setupVisible: true)
   }
 }
 
-public enum OnboardingImageRenderer {
+public func defaultPreviewSkillStatus() -> SkillStatus {
+  SkillStatus(
+    installed: false,
+    status: "unknown",
+    summary: "Checks whether the global Cued skill is available to your agents."
+  )
+}
+
+public enum ImageRenderer {
   @MainActor
   public static func pngData(for view: AnyView, size: CGSize) throws -> Data {
     _ = NSApplication.shared
@@ -345,7 +351,7 @@ public enum PreviewError: Error, CustomStringConvertible {
     case .invalidOption(let message):
       "Invalid option: \(message)"
     case .unknownCase(let name):
-      "Unknown onboarding preview case: \(name)"
+      "Unknown preview case: \(name)"
     case .renderFailed(let message):
       "Render failed: \(message)"
     }

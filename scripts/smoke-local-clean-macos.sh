@@ -45,7 +45,7 @@ Options:
 
 Notes:
   - This smoke run keeps all Cued-owned runtime state under a temp sandbox.
-  - The onboarding window must stay open while you grant permissions.
+  - The setup window must stay open while you grant permissions.
   - Contacts and Full Disk Access still require manual macOS interaction.
 EOF
 }
@@ -361,31 +361,31 @@ echo "$APP_PID" >"$ARTIFACTS_DIR/app.pid"
 note "app_pid=$APP_PID"
 
 wait_for_socket || die "temp daemon socket did not appear at $CUED_HOME_UNDER_TEST/cued.sock"
-wait_for_onboarding_window || die "onboarding window did not appear"
-note "onboarding_process=${ONBOARDING_PROCESS_NAME}"
+wait_for_onboarding_window || die "setup window did not appear"
+note "setup_process=${ONBOARDING_PROCESS_NAME}"
 capture_screenshot "01-onboarding-open"
 
 if click_onboarding_button "Open Permissions"; then
-  note "clicked onboarding Open Permissions button"
+  note "clicked setup Open Permissions button"
 elif click_onboarding_button "Grant Access"; then
-  note "clicked onboarding Grant Access button"
+  note "clicked setup Grant Access button"
 else
-  warn "could not click the onboarding permission button automatically"
-  note "automatic onboarding permission click failed"
-  pause_for_user "Click the onboarding permission button manually and keep the Cued Settings window open."
+  warn "could not click the setup permission button automatically"
+  note "automatic setup permission click failed"
+  pause_for_user "Click the setup permission button manually and keep the Cued Settings window open."
 fi
 
 capture_screenshot "02-after-open-permissions"
-pause_for_user "Grant Contacts and Full Disk Access while the onboarding window stays open. If macOS opens System Settings, complete the grants there, then return to Cued Settings."
+pause_for_user "Grant Contacts and Full Disk Access while the setup window stays open. If macOS opens System Settings, complete the grants there, then return to Cued Settings."
 
 activate_onboarding_app || true
 sleep 2
 capture_screenshot "03-after-permissions-return"
 
-if confirm_user "Did the onboarding UI refresh away from the failing permission state without restarting the app?"; then
-  note "user confirmed onboarding refreshed after permissions"
+if confirm_user "Did the setup UI refresh away from the failing permission state without restarting the app?"; then
+  note "user confirmed setup refreshed after permissions"
 else
-  note "user reported onboarding did not refresh after permissions"
+  note "user reported setup did not refresh after permissions"
 fi
 
 capture_cli "status-after-ui" status

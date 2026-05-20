@@ -34,7 +34,7 @@ enum PermissionGuidePanel {
   }
 }
 
-func onboardingGuidePanel(for permissionKey: String) -> PermissionGuidePanel? {
+func permissionGuidePanel(for permissionKey: String) -> PermissionGuidePanel? {
   switch permissionKey {
   case "contacts":
     return .contacts
@@ -47,15 +47,15 @@ func onboardingGuidePanel(for permissionKey: String) -> PermissionGuidePanel? {
   }
 }
 
-func onboardingPermissionGuideURL(for permissionKey: String) -> String? {
-  onboardingGuidePanel(for: permissionKey)?.settingsURL.absoluteString
+func permissionGuideURL(for permissionKey: String) -> String? {
+  permissionGuidePanel(for: permissionKey)?.settingsURL.absoluteString
 }
 
-func onboardingPermissionGuideUsesDragSource(for permissionKey: String) -> Bool {
-  onboardingGuidePanel(for: permissionKey)?.usesDragSource == true
+func permissionGuideUsesDragSource(for permissionKey: String) -> Bool {
+  permissionGuidePanel(for: permissionKey)?.usesDragSource == true
 }
 
-func onboardingPermissionGuideInstructionSentence(
+func permissionGuideInstructionSentence(
   for panel: PermissionGuidePanel,
   hostAppName: String
 ) -> String {
@@ -66,7 +66,7 @@ func onboardingPermissionGuideInstructionSentence(
   return "Enable \(hostAppName) in the list above to allow \(panel.emphasizedPermissionTerm)."
 }
 
-func onboardingPermissionGuideFrameIsApproximatelyEqual(
+func permissionGuideFrameIsApproximatelyEqual(
   _ lhs: CGRect,
   _ rhs: CGRect,
   tolerance: CGFloat = 1
@@ -268,7 +268,7 @@ private final class PermissionGuideOverlayWindowController: NSWindowController {
     let frame = CGRect(origin: anchoredOrigin(for: settingsFrame, visibleFrame: visibleFrame, size: size), size: size)
 
     if let previousFrame = currentFrame,
-       onboardingPermissionGuideFrameIsApproximatelyEqual(previousFrame, frame) {
+       permissionGuideFrameIsApproximatelyEqual(previousFrame, frame) {
       window.orderFrontRegardless()
       return
     }
@@ -317,9 +317,6 @@ private final class PassiveOverlayPanel: NSPanel {
 private final class PermissionGuideOverlayView: NSView {
   private weak var materialView: NSVisualEffectView?
   private weak var tintView: NSView?
-  private weak var motionBlurOverlay: NSView?
-  private let motionWhiteLayer = CAShapeLayer()
-  private let motionAccentLayer = CAShapeLayer()
 
   init(frame frameRect: NSRect, hostApp: PermissionGuideHostApp, panel: PermissionGuidePanel) {
     super.init(frame: frameRect)
@@ -352,15 +349,6 @@ private final class PermissionGuideOverlayView: NSView {
     tint.layer?.backgroundColor = NSColor.windowBackgroundColor.withAlphaComponent(0.92).cgColor
     materialView.addSubview(tint)
     self.tintView = tint
-
-    let motionBlurOverlay = NSView()
-    motionBlurOverlay.translatesAutoresizingMaskIntoConstraints = false
-    motionBlurOverlay.wantsLayer = true
-    motionBlurOverlay.layer?.opacity = 0
-    materialView.addSubview(motionBlurOverlay)
-    self.motionBlurOverlay = motionBlurOverlay
-
-    configureMotionBlurLayers()
 
     let arrow = NSImageView()
     arrow.translatesAutoresizingMaskIntoConstraints = false
@@ -395,10 +383,6 @@ private final class PermissionGuideOverlayView: NSView {
       tint.trailingAnchor.constraint(equalTo: materialView.trailingAnchor),
       tint.topAnchor.constraint(equalTo: materialView.topAnchor),
       tint.bottomAnchor.constraint(equalTo: materialView.bottomAnchor),
-      motionBlurOverlay.leadingAnchor.constraint(equalTo: materialView.leadingAnchor),
-      motionBlurOverlay.trailingAnchor.constraint(equalTo: materialView.trailingAnchor),
-      motionBlurOverlay.topAnchor.constraint(equalTo: materialView.topAnchor),
-      motionBlurOverlay.bottomAnchor.constraint(equalTo: materialView.bottomAnchor),
       arrow.leadingAnchor.constraint(equalTo: materialView.leadingAnchor, constant: 24),
       arrow.topAnchor.constraint(equalTo: materialView.topAnchor, constant: 14),
       arrow.widthAnchor.constraint(equalToConstant: 28),
@@ -413,122 +397,6 @@ private final class PermissionGuideOverlayView: NSView {
     ])
 
     startArrowBounce(on: arrow)
-  }
-
-  override func layout() {
-    super.layout()
-
-    guard let motionBlurOverlay else {
-      return
-    }
-
-    let bounds = motionBlurOverlay.bounds.insetBy(dx: 1, dy: 1)
-    let path = CGPath(
-      roundedRect: bounds,
-      cornerWidth: 22,
-      cornerHeight: 22,
-      transform: nil
-    )
-    motionWhiteLayer.frame = motionBlurOverlay.bounds
-    motionAccentLayer.frame = motionBlurOverlay.bounds
-    motionWhiteLayer.path = path
-    motionAccentLayer.path = path
-  }
-
-  func prepareForArrivalAnimation() {
-    wantsLayer = true
-    layer?.opacity = 0.82
-    layer?.transform = CATransform3DMakeScale(0.97, 0.97, 1)
-    materialView?.alphaValue = 0.9
-  }
-
-  func animateArrival() {
-    guard let layer else {
-      return
-    }
-
-    layer.removeAllAnimations()
-
-    let opacity = CABasicAnimation(keyPath: "opacity")
-    opacity.fromValue = 0.82
-    opacity.toValue = 1
-
-    let scale = CAKeyframeAnimation(keyPath: "transform")
-    scale.values = [
-      CATransform3DMakeScale(0.97, 0.97, 1),
-      CATransform3DMakeScale(1.014, 1.014, 1),
-      CATransform3DIdentity,
-    ]
-    scale.keyTimes = [0, 0.7, 1]
-    scale.timingFunctions = [
-      CAMediaTimingFunction(controlPoints: 0.2, 0.9, 0.24, 1),
-      CAMediaTimingFunction(name: .easeOut),
-    ]
-
-    let group = CAAnimationGroup()
-    group.animations = [opacity, scale]
-    group.duration = 0.5
-    group.timingFunction = CAMediaTimingFunction(controlPoints: 0.2, 0.9, 0.24, 1)
-    group.fillMode = .forwards
-    group.isRemovedOnCompletion = false
-    layer.add(group, forKey: "permissionGuideArrival")
-
-    NSAnimationContext.runAnimationGroup { context in
-      context.duration = 0.5
-      context.timingFunction = CAMediaTimingFunction(controlPoints: 0.2, 0.9, 0.24, 1)
-      materialView?.animator().alphaValue = 1
-    }
-  }
-
-  func animateReposition(delta: CGVector) {
-    guard let layer,
-          let motionBlurOverlay,
-          let motionLayer = motionBlurOverlay.layer,
-          hypot(delta.dx, delta.dy) > 1 else {
-      return
-    }
-
-    let offset = motionBlurOffset(for: delta)
-    motionLayer.removeAllAnimations()
-    layer.removeAnimation(forKey: "permissionGuideReposition")
-    materialView?.layer?.removeAnimation(forKey: "permissionGuideRepositionMaterial")
-
-    motionWhiteLayer.transform = CATransform3DMakeTranslation(-offset.width * 0.65, -offset.height * 0.65, 0)
-    motionAccentLayer.transform = CATransform3DMakeTranslation(-offset.width, -offset.height, 0)
-    motionBlurOverlay.alphaValue = 0.72
-
-    let settle = CAKeyframeAnimation(keyPath: "transform")
-    settle.values = [
-      CATransform3DMakeTranslation(-offset.width * 0.22, -offset.height * 0.22, 0),
-      CATransform3DMakeTranslation(offset.width * 0.04, offset.height * 0.04, 0),
-      CATransform3DIdentity,
-    ]
-    settle.keyTimes = [0, 0.72, 1]
-    settle.timingFunctions = [
-      CAMediaTimingFunction(controlPoints: 0.2, 0.9, 0.24, 1),
-      CAMediaTimingFunction(name: .easeOut),
-    ]
-
-    let settleGroup = CAAnimationGroup()
-    settleGroup.animations = [settle]
-    settleGroup.duration = 0.38
-    settleGroup.timingFunction = CAMediaTimingFunction(controlPoints: 0.2, 0.9, 0.24, 1)
-    settleGroup.fillMode = .forwards
-    settleGroup.isRemovedOnCompletion = false
-    layer.add(settleGroup, forKey: "permissionGuideReposition")
-
-    let materialOpacity = CABasicAnimation(keyPath: "opacity")
-    materialOpacity.fromValue = 0.94
-    materialOpacity.toValue = 1
-    materialOpacity.duration = 0.38
-    materialOpacity.timingFunction = CAMediaTimingFunction(controlPoints: 0.2, 0.9, 0.24, 1)
-    materialView?.layer?.add(materialOpacity, forKey: "permissionGuideRepositionMaterial")
-
-    NSAnimationContext.runAnimationGroup { context in
-      context.duration = 0.38
-      context.timingFunction = CAMediaTimingFunction(controlPoints: 0.2, 0.9, 0.24, 1)
-      motionBlurOverlay.animator().alphaValue = 0
-    }
   }
 
   private func startArrowBounce(on arrow: NSImageView) {
@@ -554,7 +422,7 @@ private final class PermissionGuideOverlayView: NSView {
     for panel: PermissionGuidePanel,
     hostApp: PermissionGuideHostApp
   ) -> NSAttributedString {
-    let sentence = onboardingPermissionGuideInstructionSentence(
+    let sentence = permissionGuideInstructionSentence(
       for: panel,
       hostAppName: hostApp.displayName
     )
@@ -578,37 +446,6 @@ private final class PermissionGuideOverlayView: NSView {
     }
 
     return attributed
-  }
-
-  private func configureMotionBlurLayers() {
-    guard let motionLayer = motionBlurOverlay?.layer else {
-      return
-    }
-
-    motionWhiteLayer.fillColor = NSColor.clear.cgColor
-    motionWhiteLayer.strokeColor = NSColor.white.withAlphaComponent(0.14).cgColor
-    motionWhiteLayer.lineWidth = 1
-    motionWhiteLayer.shadowColor = NSColor.white.withAlphaComponent(0.22).cgColor
-    motionWhiteLayer.shadowOpacity = 1
-    motionWhiteLayer.shadowRadius = 8
-    motionWhiteLayer.shadowOffset = .zero
-
-    motionAccentLayer.fillColor = NSColor.clear.cgColor
-    motionAccentLayer.strokeColor = NSColor.systemBlue.withAlphaComponent(0.12).cgColor
-    motionAccentLayer.lineWidth = 1
-    motionAccentLayer.shadowColor = NSColor.systemBlue.withAlphaComponent(0.16).cgColor
-    motionAccentLayer.shadowOpacity = 1
-    motionAccentLayer.shadowRadius = 12
-    motionAccentLayer.shadowOffset = .zero
-
-    motionLayer.addSublayer(motionWhiteLayer)
-    motionLayer.addSublayer(motionAccentLayer)
-  }
-
-  private func motionBlurOffset(for delta: CGVector) -> CGSize {
-    let distance = max(1, hypot(delta.dx, delta.dy))
-    let scale = min(16, max(5, distance * 0.18))
-    return CGSize(width: (delta.dx / distance) * scale, height: (delta.dy / distance) * scale)
   }
 }
 

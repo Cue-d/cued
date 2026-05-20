@@ -4,19 +4,22 @@ import SwiftUI
 
 private final class BundleAnchor {}
 
-public struct InstallerCapabilityStatus: Decodable, Sendable {
+public struct CapabilityStatus: Decodable, Sendable {
   public let availability: String
-  public let onboardingVisible: Bool
-  public let reason: String?
+  public let setupVisible: Bool
 
-  public init(availability: String, onboardingVisible: Bool, reason: String?) {
+  private enum CodingKeys: String, CodingKey {
+    case availability
+    case setupVisible = "onboardingVisible"
+  }
+
+  public init(availability: String, setupVisible: Bool) {
     self.availability = availability
-    self.onboardingVisible = onboardingVisible
-    self.reason = reason
+    self.setupVisible = setupVisible
   }
 }
 
-public struct InstallerProjectionStats: Decodable, Sendable {
+public struct ProjectionStats: Decodable, Sendable {
   public let rawEvents: Int
   public let projectedContacts: Int
   public let projectedConversations: Int
@@ -35,14 +38,14 @@ public struct InstallerProjectionStats: Decodable, Sendable {
   }
 }
 
-public struct InstallerIntegrationStatus: Decodable, Identifiable, Sendable {
+public struct IntegrationStatus: Decodable, Identifiable, Sendable {
   public let platform: String
   public let accountKey: String
   public let displayName: String?
   public let authState: String
   public let enabled: Bool
-  public let projectionStats: InstallerProjectionStats?
-  public let capability: InstallerCapabilityStatus
+  public let projectionStats: ProjectionStats?
+  public let capability: CapabilityStatus
 
   public var id: String { "\(platform):\(accountKey)" }
 
@@ -52,8 +55,8 @@ public struct InstallerIntegrationStatus: Decodable, Identifiable, Sendable {
     displayName: String?,
     authState: String,
     enabled: Bool,
-    projectionStats: InstallerProjectionStats? = nil,
-    capability: InstallerCapabilityStatus
+    projectionStats: ProjectionStats? = nil,
+    capability: CapabilityStatus
   ) {
     self.platform = platform
     self.accountKey = accountKey
@@ -65,23 +68,7 @@ public struct InstallerIntegrationStatus: Decodable, Identifiable, Sendable {
   }
 }
 
-public struct InstallerIntegrationStatusResponse: Decodable, Sendable {
-  public let hostOs: String
-  public let integrations: [InstallerIntegrationStatus]?
-  public let setupIntegrations: [InstallerIntegrationStatus]
-
-  public init(
-    hostOs: String,
-    integrations: [InstallerIntegrationStatus]?,
-    setupIntegrations: [InstallerIntegrationStatus]
-  ) {
-    self.hostOs = hostOs
-    self.integrations = integrations
-    self.setupIntegrations = setupIntegrations
-  }
-}
-
-public struct InstallerPermissionStatus: Decodable, Identifiable, Sendable {
+public struct PermissionStatus: Decodable, Identifiable, Sendable {
   public let key: String
   public let status: String
   public let summary: String
@@ -97,17 +84,9 @@ public struct InstallerPermissionStatus: Decodable, Identifiable, Sendable {
   }
 }
 
-public struct InstallerPermissionStatusResponse: Decodable, Sendable {
-  public let permissions: [InstallerPermissionStatus]
-
-  public init(permissions: [InstallerPermissionStatus]) {
-    self.permissions = permissions
-  }
-}
-
-func onboardingShouldDismissPermissionGuide(
+func shouldDismissPermissionGuide(
   activePermissionKey: String?,
-  permissions: [InstallerPermissionStatus]
+  permissions: [PermissionStatus]
 ) -> Bool {
   guard let activePermissionKey else {
     return false
@@ -120,7 +99,7 @@ func onboardingShouldDismissPermissionGuide(
   return status == "granted"
 }
 
-public struct InstallerGlobalSkillStatus: Decodable, Sendable {
+public struct SkillStatus: Decodable, Sendable {
   public let installed: Bool
   public let status: String
   public let summary: String
@@ -132,41 +111,25 @@ public struct InstallerGlobalSkillStatus: Decodable, Sendable {
   }
 }
 
-public struct InstallerPlatformConfiguration: Identifiable {
+public struct PlatformConfig: Identifiable {
   public let platform: String
   public let title: String
-  public let capability: InstallerCapabilityStatus
-  public let accounts: [InstallerIntegrationStatus]
-  public let placeholder: InstallerIntegrationStatus?
+  public let capability: CapabilityStatus
+  public let accounts: [IntegrationStatus]
+  public let placeholder: IntegrationStatus?
   public let supportsMultipleAccounts: Bool
 
   public var id: String { platform }
 
-  public var knownAccounts: [InstallerIntegrationStatus] {
+  public var knownAccounts: [IntegrationStatus] {
     if accounts.isEmpty, let placeholder {
       return [placeholder]
     }
     return accounts
   }
 
-  public var connectedAccountCount: Int {
-    accounts.filter { $0.enabled && installerIsConnectedIntegrationState($0.authState) }.count
-  }
-
-  public var hasBlockingState: Bool {
-    knownAccounts.contains { $0.authState == "blocked" || $0.authState == "check_failed" }
-  }
-
-  public var hasInProgressState: Bool {
-    knownAccounts.contains { $0.authState == "requested" || $0.authState == "in_progress" }
-  }
-
-  public var hasDisabledConnectedAccount: Bool {
-    knownAccounts.contains { !$0.enabled && installerIsConnectedIntegrationState($0.authState) }
-  }
-
   public var isRequestable: Bool {
-    installerIsRequestablePlatform(platform)
+    isRequestablePlatform(platform)
   }
 
   public var isConnectable: Bool {
@@ -180,9 +143,9 @@ public struct InstallerPlatformConfiguration: Identifiable {
   public init(
     platform: String,
     title: String,
-    capability: InstallerCapabilityStatus,
-    accounts: [InstallerIntegrationStatus],
-    placeholder: InstallerIntegrationStatus?,
+    capability: CapabilityStatus,
+    accounts: [IntegrationStatus],
+    placeholder: IntegrationStatus?,
     supportsMultipleAccounts: Bool
   ) {
     self.platform = platform
@@ -194,7 +157,7 @@ public struct InstallerPlatformConfiguration: Identifiable {
   }
 }
 
-public struct InstallerAddAccountPrompt: Identifiable {
+public struct AddAccountPrompt: Identifiable {
   public let platform: String
   public let platformTitle: String
   public let suggestedAccountKey: String
@@ -208,7 +171,7 @@ public struct InstallerAddAccountPrompt: Identifiable {
   }
 }
 
-public struct InstallerRemovalPrompt: Identifiable {
+public struct RemovalPrompt: Identifiable {
   public let platform: String
   public let platformTitle: String
   public let accountKey: String
@@ -225,18 +188,18 @@ public struct InstallerRemovalPrompt: Identifiable {
 }
 
 @MainActor
-public final class OnboardingViewModel: ObservableObject {
+public final class RootViewModel: ObservableObject {
   nonisolated public static let windowWidth: CGFloat = 630
   nonisolated public static let windowHeight: CGFloat = 752
 
   @Published public var currentPage = 0
   @Published public var isRefreshing = false
-  @Published public var platformConfigurations: [InstallerPlatformConfiguration] = []
-  @Published public var permissionStatuses: [InstallerPermissionStatus] = installerDefaultPermissionStatuses()
-  @Published public var globalSkillStatus = installerDefaultGlobalSkillStatus()
+  @Published public var platformConfigurations: [PlatformConfig] = []
+  @Published public var permissionStatuses: [PermissionStatus] = defaultPermissionStatuses()
+  @Published public var globalSkillStatus = defaultSkillStatus()
   @Published public private(set) var refreshSequence = 0
 
-  public let pageWidth: CGFloat = OnboardingViewModel.windowWidth
+  public let pageWidth: CGFloat = RootViewModel.windowWidth
 
   public var pageCount: Int { 2 }
 
@@ -270,10 +233,10 @@ public final class OnboardingViewModel: ObservableObject {
   }
 
   public func apply(
-    permissions: [InstallerPermissionStatus],
-    globalSkill: InstallerGlobalSkillStatus,
-    allIntegrations: [InstallerIntegrationStatus],
-    integrations: [InstallerIntegrationStatus]
+    permissions: [PermissionStatus],
+    globalSkill: SkillStatus,
+    allIntegrations: [IntegrationStatus],
+    integrations: [IntegrationStatus]
   ) {
     let normalizedPermissions = buildPermissionStatuses(permissions)
     permissionStatuses = normalizedPermissions
@@ -287,13 +250,13 @@ public final class OnboardingViewModel: ObservableObject {
     refreshSequence += 1
   }
 
-  public func configuration(for platform: String) -> InstallerPlatformConfiguration? {
+  public func configuration(for platform: String) -> PlatformConfig? {
     platformConfigurations.first { $0.platform == platform }
   }
 
   public func suggestedAccountKey(for platform: String) -> String {
-    if installerSupportsAutomaticAccountDiscovery(platform) {
-      return installerGeneratedPendingAccountKey(
+    if supportsAutomaticAccountDiscovery(platform) {
+      return pendingAccountKey(
         for: platform,
         existing: Set(configuration(for: platform)?.accounts.map(\.accountKey) ?? [])
       )
@@ -304,7 +267,7 @@ public final class OnboardingViewModel: ObservableObject {
       return "default"
     }
 
-    let base = installerAccountNoun(for: platform)
+    let base = accountNoun(for: platform)
     var index = 2
     var candidate = "\(base)-\(index)"
     while existing.contains(candidate) {
@@ -315,57 +278,57 @@ public final class OnboardingViewModel: ObservableObject {
   }
 
   private func buildPermissionStatuses(
-    _ permissions: [InstallerPermissionStatus]
-  ) -> [InstallerPermissionStatus] {
+    _ permissions: [PermissionStatus]
+  ) -> [PermissionStatus] {
     if permissions.isEmpty {
-      return installerDefaultPermissionStatuses()
+      return defaultPermissionStatuses()
     }
 
     let byKey = Dictionary(uniqueKeysWithValues: permissions.map { ($0.key, $0) })
-    let orderedKnownPermissions = installerPermissionOrder.compactMap { key in
-      byKey[key] ?? installerDefaultPermissionStatus(for: key, includeFuturePermissions: false)
+    let orderedKnownPermissions = permissionOrder.compactMap { key in
+      byKey[key] ?? defaultPermissionStatus(for: key, includeFuturePermissions: false)
     }
-    let orderedKeys = Set(installerPermissionOrder)
+    let orderedKeys = Set(permissionOrder)
     let extraPermissions = permissions.filter { !orderedKeys.contains($0.key) }
     return orderedKnownPermissions + extraPermissions
   }
 
   private func buildPlatformConfigurations(
-    permissions: [InstallerPermissionStatus],
-    allIntegrations: [InstallerIntegrationStatus],
-    setupIntegrations: [InstallerIntegrationStatus]
-  ) -> [InstallerPlatformConfiguration] {
-    let visibleSetup = setupIntegrations.filter { $0.capability.onboardingVisible }
-    let visibleAll = allIntegrations.filter { $0.capability.onboardingVisible }
+    permissions: [PermissionStatus],
+    allIntegrations: [IntegrationStatus],
+    setupIntegrations: [IntegrationStatus]
+  ) -> [PlatformConfig] {
+    let visibleSetup = setupIntegrations.filter { $0.capability.setupVisible }
+    let visibleAll = allIntegrations.filter { $0.capability.setupVisible }
     let actualByPlatform = Dictionary(grouping: visibleAll, by: \.platform)
     let setupByPlatform = Dictionary(grouping: visibleSetup, by: \.platform)
     let permissionsByKey = Dictionary(uniqueKeysWithValues: permissions.map { ($0.key, $0) })
-    var configurations = [InstallerPlatformConfiguration]()
+    var configurations = [PlatformConfig]()
 
-    for platform in installerPlatformOrder {
-      let setupIntegration = (setupByPlatform[platform] ?? []).sorted(by: installerSortIntegrations).first
-        ?? installerFallbackIntegration(for: platform)
+    for platform in platformOrder {
+      let setupIntegration = (setupByPlatform[platform] ?? []).sorted(by: sortIntegrations).first
+        ?? fallbackIntegration(for: platform)
 
-      let accounts = (actualByPlatform[platform] ?? []).sorted(by: installerSortIntegrations)
+      let accounts = (actualByPlatform[platform] ?? []).sorted(by: sortIntegrations)
       let placeholder = accounts.isEmpty
-        ? ((setupByPlatform[platform] ?? []).sorted(by: installerSortIntegrations).first
-          ?? installerFallbackIntegration(for: platform))
+        ? ((setupByPlatform[platform] ?? []).sorted(by: sortIntegrations).first
+          ?? fallbackIntegration(for: platform))
         : nil
       let base = accounts.first ?? placeholder ?? setupIntegration
-      let capability = installerCapabilityForOnboarding(
+      let capability = effectiveCapability(
         platform: platform,
         base: base.capability,
         permissionsByKey: permissionsByKey
       )
 
       configurations.append(
-        InstallerPlatformConfiguration(
+        PlatformConfig(
           platform: platform,
-          title: installerPlatformTitle(platform, fallback: base.displayName),
+          title: platformTitle(platform, fallback: base.displayName),
           capability: capability,
           accounts: accounts,
           placeholder: placeholder,
-          supportsMultipleAccounts: installerSupportsMultipleAccounts(platform)
+          supportsMultipleAccounts: supportsMultipleAccounts(platform)
         )
       )
     }
@@ -374,8 +337,8 @@ public final class OnboardingViewModel: ObservableObject {
   }
 }
 
-public struct CuedOnboardingView: View {
-  @ObservedObject var viewModel: OnboardingViewModel
+public struct RootView: View {
+  @ObservedObject var viewModel: RootViewModel
 
   let onRefresh: () -> Void
   let onGuidePermission: (String) -> Void
@@ -387,15 +350,15 @@ public struct CuedOnboardingView: View {
   let onConnectIntegration: (String, String) -> Void
   let onFinish: () -> Void
 
-  @State private var addAccountPrompt: InstallerAddAccountPrompt?
-  @State private var removalPrompt: InstallerRemovalPrompt?
+  @State private var addAccountPrompt: AddAccountPrompt?
+  @State private var removalPrompt: RemovalPrompt?
   @State private var pendingGlobalSkillInstall = false
   @State private var pendingIntegrationActionIDs = Set<String>()
   @State private var pendingRemovedIntegrationIDs = Set<String>()
   @State private var activePermissionGuideKey: String?
 
   public init(
-    viewModel: OnboardingViewModel,
+    viewModel: RootViewModel,
     onRefresh: @escaping () -> Void,
     onGuidePermission: @escaping (String) -> Void,
     onDismissPermissionGuide: @escaping () -> Void,
@@ -423,7 +386,7 @@ public struct CuedOnboardingView: View {
       GeometryReader { geo in
         HStack(spacing: 0) {
           ForEach(0..<viewModel.pageCount, id: \.self) { pageIndex in
-            pageView(for: pageIndex)
+            page(for: pageIndex)
               .frame(width: viewModel.pageWidth, height: geo.size.height)
           }
         }
@@ -435,9 +398,9 @@ public struct CuedOnboardingView: View {
         .clipped()
       }
 
-      navigationBar
+      navigationFooter
     }
-    .frame(width: viewModel.pageWidth, height: OnboardingViewModel.windowHeight)
+    .frame(width: viewModel.pageWidth, height: RootViewModel.windowHeight)
     .background(Color(NSColor.windowBackgroundColor))
     .onAppear {
       if viewModel.currentPage >= viewModel.pageCount {
@@ -454,7 +417,7 @@ public struct CuedOnboardingView: View {
     .onChange(of: viewModel.refreshSequence) { _ in
       pendingGlobalSkillInstall = false
       prunePendingIntegrationActions()
-      if onboardingShouldDismissPermissionGuide(
+      if shouldDismissPermissionGuide(
         activePermissionKey: activePermissionGuideKey,
         permissions: viewModel.permissionStatuses
       ) {
@@ -474,7 +437,8 @@ public struct CuedOnboardingView: View {
       pendingRemovedIntegrationIDs.removeAll()
     }
     .sheet(item: $addAccountPrompt) { prompt in
-      InstallerAddAccountSheet(
+      AddAccountSheet(
+        platform: prompt.platform,
         platformTitle: prompt.platformTitle,
         suggestedAccountKey: prompt.suggestedAccountKey,
         onCancel: { addAccountPrompt = nil },
@@ -520,7 +484,7 @@ public struct CuedOnboardingView: View {
   }
 
   @ViewBuilder
-  private func pageView(for pageIndex: Int) -> some View {
+  private func page(for pageIndex: Int) -> some View {
     switch pageIndex {
     case 0:
       permissionsPage
@@ -531,14 +495,14 @@ public struct CuedOnboardingView: View {
     }
   }
 
-  private var navigationBar: some View {
+  private var navigationFooter: some View {
     HStack(spacing: 20) {
       ZStack(alignment: .leading) {
         Button(action: {}, label: {
           Label("Back", systemImage: "chevron.left").labelStyle(.iconOnly)
         })
         .buttonStyle(
-          InstallerPermissionActionButtonStyle(
+          PermissionActionButtonStyle(
             variant: .secondary,
             size: .icon
           )
@@ -555,7 +519,7 @@ public struct CuedOnboardingView: View {
             Label("Back", systemImage: "chevron.left").labelStyle(.iconOnly)
           }
           .buttonStyle(
-            InstallerPermissionActionButtonStyle(
+            PermissionActionButtonStyle(
               variant: .secondary,
               size: .icon
             )
@@ -591,7 +555,7 @@ public struct CuedOnboardingView: View {
       }
       .keyboardShortcut(.return)
       .buttonStyle(
-        InstallerPermissionActionButtonStyle(
+        PermissionActionButtonStyle(
           variant: viewModel.buttonTitle == "Skip for now" ? .secondary : .prominent,
           size: .regular
         )
@@ -612,7 +576,7 @@ public struct CuedOnboardingView: View {
     }
   }
 
-  private func onboardingPage(@ViewBuilder _ content: () -> some View) -> some View {
+  private func pageContainer(@ViewBuilder _ content: () -> some View) -> some View {
     ScrollView {
       VStack(spacing: 16) {
         content()
@@ -627,7 +591,7 @@ public struct CuedOnboardingView: View {
     .frame(width: viewModel.pageWidth, alignment: .top)
   }
 
-  private func onboardingCard(
+  private func card(
     spacing: CGFloat = 12,
     padding: CGFloat = 16,
     @ViewBuilder _ content: () -> some View
@@ -645,7 +609,7 @@ public struct CuedOnboardingView: View {
   }
 
   private var permissionsPage: some View {
-    onboardingPage {
+    pageContainer {
       Text("Permissions")
         .font(.largeTitle.weight(.semibold))
 
@@ -669,7 +633,7 @@ public struct CuedOnboardingView: View {
         ForEach(viewModel.permissionStatuses) { permission in
           permissionRow(permission)
         }
-        globalSkillRow
+        skillRow
       }
     }
   }
@@ -677,7 +641,7 @@ public struct CuedOnboardingView: View {
 
 
   private var platformsPage: some View {
-    onboardingPage {
+    pageContainer {
       Text("Platforms")
         .font(.largeTitle.weight(.semibold))
 
@@ -687,7 +651,7 @@ public struct CuedOnboardingView: View {
         .multilineTextAlignment(.center)
         .frame(maxWidth: 540)
 
-      onboardingCard {
+      card {
         if viewModel.platformConfigurations.isEmpty {
           VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 12) {
@@ -706,7 +670,7 @@ public struct CuedOnboardingView: View {
           }
         } else {
           ForEach(Array(viewModel.platformConfigurations.enumerated()), id: \.element.id) { index, configuration in
-            platformConfigurationCard(configuration)
+            platformCard(configuration)
             if index < viewModel.platformConfigurations.count - 1 {
               Divider()
             }
@@ -716,15 +680,14 @@ public struct CuedOnboardingView: View {
     }
   }
 
-  private func permissionRow(_ permission: InstallerPermissionStatus) -> some View {
-    let descriptor = installerPermissionDescriptor(for: permission.key)
+  private func permissionRow(_ permission: PermissionStatus) -> some View {
+    let descriptor = permissionDescriptor(for: permission.key)
     let isGranted = permission.status == "granted"
 
     return HStack(spacing: 14) {
-      permissionIconBadge(
+      statusIcon(
         systemImage: descriptor.systemImage,
-        tint: descriptor.accentColor,
-        isGranted: isGranted
+        tint: descriptor.accentColor
       )
 
       VStack(alignment: .leading, spacing: 3) {
@@ -748,7 +711,7 @@ public struct CuedOnboardingView: View {
           handlePermissionAction(for: permission, descriptor: descriptor)
         }
         .buttonStyle(
-          InstallerPermissionActionButtonStyle(
+          PermissionActionButtonStyle(
             variant: .prominent,
             size: .compact
           )
@@ -758,17 +721,16 @@ public struct CuedOnboardingView: View {
     .padding(.horizontal, 16)
     .padding(.vertical, 15)
     .frame(maxWidth: .infinity, alignment: .leading)
-    .background(permissionItemBackground())
+    .background(rowBackground())
   }
 
-  private var globalSkillRow: some View {
+  private var skillRow: some View {
     let isInstalled = viewModel.globalSkillStatus.installed
 
     return HStack(spacing: 14) {
-      permissionIconBadge(
+      statusIcon(
         systemImage: "terminal",
-        tint: Color(red: 0.12, green: 0.76, blue: 0.29),
-        isGranted: isInstalled
+        tint: Color(red: 0.12, green: 0.76, blue: 0.29)
       )
 
       VStack(alignment: .leading, spacing: 3) {
@@ -797,7 +759,7 @@ public struct CuedOnboardingView: View {
           onInstallGlobalSkill()
         }
         .buttonStyle(
-          InstallerPermissionActionButtonStyle(
+          PermissionActionButtonStyle(
             variant: .secondary,
             size: .compact
           )
@@ -807,32 +769,31 @@ public struct CuedOnboardingView: View {
     .padding(.horizontal, 16)
     .padding(.vertical, 15)
     .frame(maxWidth: .infinity, alignment: .leading)
-    .background(permissionItemBackground())
+    .background(rowBackground())
   }
 
   private func handlePermissionAction(
-    for permission: InstallerPermissionStatus,
-    descriptor: InstallerPermissionDescriptor
+    for permission: PermissionStatus,
+    descriptor: PermissionDescriptor
   ) {
-    switch installerPermissionActionKind(for: permission, descriptor: descriptor) {
+    switch permissionAction(for: permission, descriptor: descriptor) {
     case .requestPrompt:
       onRequestPermission(permission.requestFlags)
     case .guideInSettings:
-      startPermissionGuideTransition(for: permission.key)
+      showPermissionGuide(for: permission.key)
     case .none:
       return
     }
   }
 
-  private func startPermissionGuideTransition(for permissionKey: String) {
+  private func showPermissionGuide(for permissionKey: String) {
     activePermissionGuideKey = permissionKey
     onGuidePermission(permissionKey)
   }
 
-  private func permissionIconBadge(
+  private func statusIcon(
     systemImage: String,
-    tint: Color,
-    isGranted _: Bool
+    tint: Color
   ) -> some View {
     ZStack {
       Circle()
@@ -856,7 +817,7 @@ public struct CuedOnboardingView: View {
     .frame(width: 40, height: 40)
   }
 
-  private func permissionItemBackground() -> some View {
+  private func rowBackground() -> some View {
     RoundedRectangle(cornerRadius: 20, style: .continuous)
       .fill(Color(NSColor.controlBackgroundColor))
       .overlay(
@@ -865,20 +826,20 @@ public struct CuedOnboardingView: View {
       )
   }
 
-  private func platformConfigurationCard(_ configuration: InstallerPlatformConfiguration) -> some View {
-    let isFullyConnected = platformIsFullyConnected(configuration)
-    let shouldShowAccountControls = shouldShowAccountRows(for: configuration)
+  private func platformCard(_ configuration: PlatformConfig) -> some View {
+    let isFullyConnected = isPlatformComplete(configuration)
+    let shouldShowAccountControls = showsAccountRows(for: configuration)
     let shouldDimCard = isFullyConnected && !shouldShowAccountControls
 
     return VStack(alignment: .leading, spacing: 14) {
       HStack(alignment: .top, spacing: 12) {
-        InstallerPlatformIcon(platform: configuration.platform)
+        PlatformIcon(platform: configuration.platform)
 
         VStack(alignment: .leading, spacing: 5) {
           Text(configuration.title)
             .font(.headline)
             .foregroundStyle(isFullyConnected ? .secondary : .primary)
-          Text(platformWalkthrough(for: configuration))
+          Text(platformDescription(for: configuration))
             .font(.subheadline)
             .foregroundStyle(isFullyConnected ? .tertiary : .secondary)
             .fixedSize(horizontal: false, vertical: true)
@@ -891,7 +852,9 @@ public struct CuedOnboardingView: View {
             .font(.title3.weight(.semibold))
             .foregroundStyle(.green)
             .accessibilityLabel("\(configuration.title) connected")
-        } else if !shouldShowAccountControls && platformIsPending(configuration) {
+        } else if !shouldShowAccountControls && visibleKnownAccounts(for: configuration).contains(where: {
+          pendingIntegrationActionIDs.contains($0.id)
+        }) {
           ProgressView()
             .controlSize(.small)
             .padding(.top, 10)
@@ -902,9 +865,9 @@ public struct CuedOnboardingView: View {
 
       if shouldShowAccountControls {
         if configuration.supportsMultipleAccounts {
-          multiAccountPlatformRows(configuration)
+          multiAccountRows(configuration)
         } else if let integration = configuration.accounts.first ?? configuration.placeholder {
-          singleAccountPlatformRow(configuration, integration: integration)
+          accountRow(configuration, integration: integration)
         }
       }
     }
@@ -912,7 +875,7 @@ public struct CuedOnboardingView: View {
     .opacity(shouldDimCard ? 0.7 : 1.0)
   }
 
-  private func shouldShowAccountRows(for configuration: InstallerPlatformConfiguration) -> Bool {
+  private func showsAccountRows(for configuration: PlatformConfig) -> Bool {
     if configuration.supportsMultipleAccounts {
       return !visibleAccounts(for: configuration).isEmpty
     }
@@ -921,7 +884,7 @@ public struct CuedOnboardingView: View {
       return false
     }
 
-    if installerIsConnectedIntegrationState(integration.authState) {
+    if isConnectedAuthState(integration.authState) {
       return true
     }
 
@@ -931,17 +894,11 @@ public struct CuedOnboardingView: View {
       || integration.authState == "check_failed"
   }
 
-  private func platformIsPending(_ configuration: InstallerPlatformConfiguration) -> Bool {
-    return visibleKnownAccounts(for: configuration).contains { integration in
-      pendingIntegrationActionIDs.contains(integration.id)
-    }
-  }
-
-  private func visibleAccounts(for configuration: InstallerPlatformConfiguration) -> [InstallerIntegrationStatus] {
+  private func visibleAccounts(for configuration: PlatformConfig) -> [IntegrationStatus] {
     configuration.accounts.filter { !pendingRemovedIntegrationIDs.contains($0.id) }
   }
 
-  private func visibleKnownAccounts(for configuration: InstallerPlatformConfiguration) -> [InstallerIntegrationStatus] {
+  private func visibleKnownAccounts(for configuration: PlatformConfig) -> [IntegrationStatus] {
     let accounts = visibleAccounts(for: configuration)
     if accounts.isEmpty, let placeholder = configuration.placeholder,
        !pendingRemovedIntegrationIDs.contains(placeholder.id) {
@@ -950,19 +907,12 @@ public struct CuedOnboardingView: View {
     return accounts
   }
 
-  private func singleAccountPlatformRow(
-    _ configuration: InstallerPlatformConfiguration,
-    integration: InstallerIntegrationStatus
-  ) -> some View {
-    accountSummaryRow(configuration, integration: integration)
-  }
-
-  private func multiAccountPlatformRows(_ configuration: InstallerPlatformConfiguration) -> some View {
+  private func multiAccountRows(_ configuration: PlatformConfig) -> some View {
     let accounts = visibleAccounts(for: configuration)
     return VStack(alignment: .leading, spacing: 10) {
       if !accounts.isEmpty {
         ForEach(Array(accounts.enumerated()), id: \.element.id) { index, integration in
-          multiAccountRow(configuration, integration: integration)
+          accountRow(configuration, integration: integration)
           if index < accounts.count - 1 {
             Divider()
           }
@@ -978,19 +928,12 @@ public struct CuedOnboardingView: View {
     }
   }
 
-  private func multiAccountRow(
-    _ configuration: InstallerPlatformConfiguration,
-    integration: InstallerIntegrationStatus
+  private func accountRow(
+    _ configuration: PlatformConfig,
+    integration: IntegrationStatus
   ) -> some View {
-    accountSummaryRow(configuration, integration: integration)
-  }
-
-  private func accountSummaryRow(
-    _ configuration: InstallerPlatformConfiguration,
-    integration: InstallerIntegrationStatus
-  ) -> some View {
-    let action = accountAction(for: configuration, integration: integration)
-    let removeAction = removeAction(for: configuration, integration: integration)
+    let action = primaryAccountAction(for: configuration, integration: integration)
+    let removeAccountAction = removeAccountAction(for: configuration, integration: integration)
     let isPending = pendingIntegrationActionIDs.contains(integration.id)
 
     return HStack(alignment: .top, spacing: 12) {
@@ -1006,11 +949,11 @@ public struct CuedOnboardingView: View {
       Spacer(minLength: 12)
 
       if isPending {
-        pendingIntegrationIndicator()
+        pendingIndicator()
           .padding(.top, 3)
       }
-      if let removeAction {
-        actionButton(title: removeAction.title, action: removeAction.handler)
+      if let removeAccountAction {
+        actionButton(title: removeAccountAction.title, action: removeAccountAction.handler)
       }
       if let action {
         actionButton(title: action.title, action: action.handler)
@@ -1028,7 +971,7 @@ public struct CuedOnboardingView: View {
       if prominent {
         Button(title, action: action)
           .buttonStyle(
-            InstallerPermissionActionButtonStyle(
+            PermissionActionButtonStyle(
               variant: .prominent,
               size: .regular
             )
@@ -1036,7 +979,7 @@ public struct CuedOnboardingView: View {
       } else {
         Button(title, action: action)
           .buttonStyle(
-            InstallerPermissionActionButtonStyle(
+            PermissionActionButtonStyle(
               variant: .secondary,
               size: .regular
             )
@@ -1045,44 +988,15 @@ public struct CuedOnboardingView: View {
     }
   }
 
-  private func pendingIntegrationIndicator() -> some View {
+  private func pendingIndicator() -> some View {
     ProgressView()
       .controlSize(.small)
       .frame(width: 24, height: 24, alignment: .center)
   }
 
-  private func singleAccountDetail(
-    for configuration: InstallerPlatformConfiguration,
-    integration: InstallerIntegrationStatus
-  ) -> String {
-    if configuration.needsPermission {
-      return "Finish the required permissions on the previous step."
-    }
-    if configuration.capability.availability == "requires_helper" {
-      return helperWalkthrough(for: configuration.platform)
-    }
-    if configuration.isRequestable {
-      if !integration.enabled && installerIsConnectedIntegrationState(integration.authState) {
-        return "Authenticated on this Mac, but not currently turned on."
-      }
-      if integration.authState == "requested" || integration.authState == "in_progress" {
-        return "Authentication is in progress."
-      }
-      if installerShouldShowAuthAttention(configuration.platform, authState: integration.authState) {
-        return "Authentication needs attention. Try again."
-      }
-      return installerIsConnectedIntegrationState(integration.authState)
-        ? "Authenticated on this Mac."
-        : authFlowDetail(for: configuration.platform)
-    }
-    return installerIsConnectedIntegrationState(integration.authState)
-      ? "This local source is available on this Mac."
-      : connectorDetail(integration)
-  }
-
-  private func accountAction(
-    for configuration: InstallerPlatformConfiguration,
-    integration: InstallerIntegrationStatus
+  private func primaryAccountAction(
+    for configuration: PlatformConfig,
+    integration: IntegrationStatus
   ) -> (title: String, handler: () -> Void)? {
     if configuration.capability.availability == "unsupported" || configuration.capability.availability == "requires_helper" {
       return nil
@@ -1101,7 +1015,7 @@ public struct CuedOnboardingView: View {
       return nil
     }
 
-    let isConnected = installerIsConnectedIntegrationState(integration.authState)
+    let isConnected = isConnectedAuthState(integration.authState)
     if !integration.enabled && isConnected {
       return (
         "Turn on",
@@ -1120,7 +1034,7 @@ public struct CuedOnboardingView: View {
 
     let title =
       integration.authState == "failed"
-        || installerShouldShowAuthAttention(configuration.platform, authState: integration.authState)
+        || needsAuthAttention(configuration.platform, authState: integration.authState)
         ? "Connect again"
         : "Connect"
     return (
@@ -1132,9 +1046,9 @@ public struct CuedOnboardingView: View {
     )
   }
 
-  private func removeAction(
-    for configuration: InstallerPlatformConfiguration,
-    integration: InstallerIntegrationStatus
+  private func removeAccountAction(
+    for configuration: PlatformConfig,
+    integration: IntegrationStatus
   ) -> (title: String, handler: () -> Void)? {
     guard configuration.accounts.contains(where: {
       $0.platform == integration.platform && $0.accountKey == integration.accountKey
@@ -1160,7 +1074,7 @@ public struct CuedOnboardingView: View {
     return (
       "Remove",
       {
-        removalPrompt = InstallerRemovalPrompt(
+        removalPrompt = RemovalPrompt(
           platform: configuration.platform,
           platformTitle: configuration.title,
           accountKey: integration.accountKey,
@@ -1171,7 +1085,7 @@ public struct CuedOnboardingView: View {
   }
 
   private func platformLevelAction(
-    for configuration: InstallerPlatformConfiguration
+    for configuration: PlatformConfig
   ) -> (title: String, handler: () -> Void)? {
     if configuration.capability.availability == "unsupported" || configuration.capability.availability == "requires_helper" {
       return nil
@@ -1191,20 +1105,20 @@ public struct CuedOnboardingView: View {
     }
 
     if configuration.supportsMultipleAccounts {
-      let noun = installerAccountNoun(for: configuration.platform)
-      let title = visibleAccounts(for: configuration).isEmpty && installerSupportsAutomaticAccountDiscovery(configuration.platform)
+      let noun = accountNoun(for: configuration.platform)
+      let title = visibleAccounts(for: configuration).isEmpty && supportsAutomaticAccountDiscovery(configuration.platform)
         ? "Connect"
         : "Add \(noun)"
       return (
         title,
         {
-          if installerSupportsAutomaticAccountDiscovery(configuration.platform) {
+          if supportsAutomaticAccountDiscovery(configuration.platform) {
             onConnectIntegration(
               configuration.platform,
               viewModel.suggestedAccountKey(for: configuration.platform)
             )
           } else {
-            addAccountPrompt = InstallerAddAccountPrompt(
+            addAccountPrompt = AddAccountPrompt(
               platform: configuration.platform,
               platformTitle: configuration.title,
               suggestedAccountKey: viewModel.suggestedAccountKey(for: configuration.platform)
@@ -1215,7 +1129,7 @@ public struct CuedOnboardingView: View {
     }
 
     if let integration = configuration.placeholder ?? configuration.accounts.first {
-      let isConnected = installerIsConnectedIntegrationState(integration.authState)
+      let isConnected = isConnectedAuthState(integration.authState)
       if !integration.enabled && isConnected {
         return (
           "Turn on",
@@ -1238,10 +1152,10 @@ public struct CuedOnboardingView: View {
   }
 
   private func accountTitle(
-    for configuration: InstallerPlatformConfiguration,
-    integration: InstallerIntegrationStatus
+    for configuration: PlatformConfig,
+    integration: IntegrationStatus
   ) -> String {
-    if installerShouldHideAccountKey(platform: integration.platform, accountKey: integration.accountKey) {
+    if hidesAccountKey(platform: integration.platform, accountKey: integration.accountKey) {
       return fallbackAccountTitle(for: configuration.platform, authState: integration.authState)
     }
 
@@ -1249,55 +1163,55 @@ public struct CuedOnboardingView: View {
     if let title, !title.isEmpty {
       return title
     }
-    if !installerShouldHideAccountKey(platform: integration.platform, accountKey: integration.accountKey) {
+    if !hidesAccountKey(platform: integration.platform, accountKey: integration.accountKey) {
       return integration.accountKey
     }
     return fallbackAccountTitle(for: configuration.platform, authState: integration.authState)
   }
 
   private func accountDetail(
-    for configuration: InstallerPlatformConfiguration,
-    integration: InstallerIntegrationStatus
+    for configuration: PlatformConfig,
+    integration: IntegrationStatus
   ) -> String {
-    var parts = [installerReadableIntegrationState(configuration.platform, integration.authState)]
-    if let dataSummary = integrationDataSummary(integration) {
+    var parts = [readableAuthState(configuration.platform, integration.authState)]
+    if let dataSummary = dataSummary(integration) {
       parts.append(dataSummary)
     }
-    if !integration.enabled && installerIsConnectedIntegrationState(integration.authState) {
+    if !integration.enabled && isConnectedAuthState(integration.authState) {
       parts.append("turned off")
     }
-    if installerNormalizedTitle(accountTitle(for: configuration, integration: integration))
-      != installerNormalizedTitle(integration.accountKey),
-       !installerShouldHideAccountKey(platform: integration.platform, accountKey: integration.accountKey) {
+    if normalizedTitle(accountTitle(for: configuration, integration: integration))
+      != normalizedTitle(integration.accountKey),
+       !hidesAccountKey(platform: integration.platform, accountKey: integration.accountKey) {
       parts.append(integration.accountKey)
     }
     return parts.joined(separator: " • ")
   }
 
-  private func integrationDataSummary(_ integration: InstallerIntegrationStatus) -> String? {
+  private func dataSummary(_ integration: IntegrationStatus) -> String? {
     guard let stats = integration.projectionStats else {
       return nil
     }
-    if !installerIsConnectedIntegrationState(integration.authState) && integration.platform != "whatsapp" {
+    if !isConnectedAuthState(integration.authState) && integration.platform != "whatsapp" {
       return nil
     }
 
     if stats.projectedMessages > 0 {
-      return "\(installerFormatCount(stats.projectedMessages)) messages indexed"
+      return "\(formatCount(stats.projectedMessages)) messages indexed"
     }
     if stats.projectedContacts > 0 {
-      return "\(installerFormatCount(stats.projectedContacts)) contacts indexed"
+      return "\(formatCount(stats.projectedContacts)) contacts indexed"
     }
 
     let projectedItems =
       stats.projectedContacts + stats.projectedConversations + stats.projectedMessages
     if stats.rawEvents > 0 && projectedItems == 0 {
-      return "\(installerFormatCount(stats.rawEvents)) items captured, indexing"
+      return "\(formatCount(stats.rawEvents)) items captured, indexing"
     }
     return nil
   }
 
-  private func platformIsFullyConnected(_ configuration: InstallerPlatformConfiguration) -> Bool {
+  private func isPlatformComplete(_ configuration: PlatformConfig) -> Bool {
     if configuration.platform == "phone_calls" {
       return true
     }
@@ -1305,20 +1219,11 @@ public struct CuedOnboardingView: View {
     if accounts.isEmpty {
       return false
     }
-    return accounts.allSatisfy { installerShowsCompletionCheckmark(for: configuration, integration: $0) }
-  }
-
-  private func connectorDetail(_ integration: InstallerIntegrationStatus) -> String {
-    var parts = [installerReadableIntegrationState(integration.platform, integration.authState)]
-    if let reason = integration.capability.reason?.trimmingCharacters(in: .whitespacesAndNewlines),
-       !reason.isEmpty {
-      parts.append(reason)
-    }
-    return parts.joined(separator: " • ")
+    return accounts.allSatisfy { showsCompletionCheckmark(for: configuration, integration: $0) }
   }
 }
 
-public struct InstallerPlatformIcon: View {
+public struct PlatformIcon: View {
   let platform: String
 
   public init(platform: String) {
@@ -1338,13 +1243,13 @@ public struct InstallerPlatformIcon: View {
       RoundedRectangle(cornerRadius: 12, style: .continuous)
         .strokeBorder(Color.white.opacity(0.34), lineWidth: 0.75)
 
-      if let image = loadPlatformImage() {
+      if let image = platformImage() {
         Image(nsImage: image)
           .resizable()
           .interpolation(.high)
           .antialiased(true)
           .aspectRatio(contentMode: .fit)
-          .padding(brandLogoPadding)
+          .padding(logoPadding)
       } else {
         fallbackIcon
       }
@@ -1352,15 +1257,15 @@ public struct InstallerPlatformIcon: View {
     .frame(width: 40, height: 40)
   }
 
-  private func loadPlatformImage() -> NSImage? {
-    guard let assetName = installerPlatformIconAssetName(for: platform),
-          let url = installerPlatformIconURL(named: assetName),
+  private func platformImage() -> NSImage? {
+    guard let assetName = platformIconAssetName(for: platform),
+          let url = platformIconURL(named: assetName),
           let image = NSImage(contentsOf: url) else { return nil }
     return image
   }
 
   private var accentColor: Color {
-    installerPlatformAccentColor(for: platform)
+    platformAccentColor(for: platform)
   }
 
   private var backgroundColors: [Color] {
@@ -1376,7 +1281,7 @@ public struct InstallerPlatformIcon: View {
     ]
   }
 
-  private var brandLogoPadding: CGFloat {
+  private var logoPadding: CGFloat {
     switch platform {
     case "slack":
       9
@@ -1442,7 +1347,8 @@ public struct InstallerPlatformIcon: View {
   }
 }
 
-private struct InstallerAddAccountSheet: View {
+private struct AddAccountSheet: View {
+  let platform: String
   let platformTitle: String
   let suggestedAccountKey: String
   let onCancel: () -> Void
@@ -1451,11 +1357,13 @@ private struct InstallerAddAccountSheet: View {
   @State private var accountKey: String
 
   init(
+    platform: String,
     platformTitle: String,
     suggestedAccountKey: String,
     onCancel: @escaping () -> Void,
     onConnect: @escaping (String) -> Void
   ) {
+    self.platform = platform
     self.platformTitle = platformTitle
     self.suggestedAccountKey = suggestedAccountKey
     self.onCancel = onCancel
@@ -1465,7 +1373,7 @@ private struct InstallerAddAccountSheet: View {
 
   var body: some View {
     VStack(alignment: .leading, spacing: 16) {
-      Text("Add \(platformTitle) \(installerAccountNoun(for: platformTitle.lowercased()))")
+      Text("Add \(platformTitle) \(accountNoun(for: platform))")
         .font(.title2.weight(.semibold))
 
       Text("Choose a stable account key. For Slack, a workspace slug or team ID works well.")
@@ -1484,7 +1392,7 @@ private struct InstallerAddAccountSheet: View {
         Spacer(minLength: 0)
         Button("Cancel", action: onCancel)
           .buttonStyle(
-            InstallerPermissionActionButtonStyle(
+            PermissionActionButtonStyle(
               variant: .secondary,
               size: .regular
             )
@@ -1497,7 +1405,7 @@ private struct InstallerAddAccountSheet: View {
           onConnect(trimmed)
         }
         .buttonStyle(
-          InstallerPermissionActionButtonStyle(
+          PermissionActionButtonStyle(
             variant: .prominent,
             size: .regular
           )
@@ -1510,18 +1418,18 @@ private struct InstallerAddAccountSheet: View {
   }
 }
 
-private let installerPermissionOrder = [
+private let permissionOrder = [
   "contacts",
   "full_disk_access",
   "messages_automation",
 ]
 
-private let installerDefaultPermissionOrder = [
+private let defaultPermissionOrder = [
   "contacts",
   "full_disk_access",
 ]
 
-private let installerPlatformOrder = [
+private let platformOrder = [
   "contacts",
   "phone_calls",
   "imessage",
@@ -1533,32 +1441,32 @@ private let installerPlatformOrder = [
   "signal",
 ]
 
-private func installerDefaultPermissionStatuses() -> [InstallerPermissionStatus] {
-  installerDefaultPermissionOrder.compactMap { installerDefaultPermissionStatus(for: $0) }
+private func defaultPermissionStatuses() -> [PermissionStatus] {
+  defaultPermissionOrder.compactMap { defaultPermissionStatus(for: $0) }
 }
 
-public func installerDefaultGlobalSkillStatus() -> InstallerGlobalSkillStatus {
-  InstallerGlobalSkillStatus(
+private func defaultSkillStatus() -> SkillStatus {
+  SkillStatus(
     installed: false,
     status: "unknown",
     summary: "Checks whether the global Cued skill is available to your agents."
   )
 }
 
-private func installerDefaultPermissionStatus(
+private func defaultPermissionStatus(
   for key: String,
   includeFuturePermissions: Bool = true
-) -> InstallerPermissionStatus? {
+) -> PermissionStatus? {
   switch key {
   case "contacts":
-    return InstallerPermissionStatus(
+    return PermissionStatus(
       key: key,
       status: "unknown",
       summary: "Contacts permission has not been checked yet",
       requestFlags: ["--contacts"]
     )
   case "full_disk_access":
-    return InstallerPermissionStatus(
+    return PermissionStatus(
       key: key,
       status: "unknown",
       summary: "Full Disk Access has not been checked yet",
@@ -1568,7 +1476,7 @@ private func installerDefaultPermissionStatus(
     guard includeFuturePermissions else {
       return nil
     }
-    return InstallerPermissionStatus(
+    return PermissionStatus(
       key: key,
       status: "unknown",
       summary: "Messages automation access has not been checked yet",
@@ -1579,7 +1487,7 @@ private func installerDefaultPermissionStatus(
   }
 }
 
-private func installerPlatformIconAssetName(for platform: String) -> String? {
+private func platformIconAssetName(for platform: String) -> String? {
   switch platform {
   case "contacts", "phone_calls", "imessage":
     return nil  // Use SF Symbol fallback icons
@@ -1600,7 +1508,7 @@ private func installerPlatformIconAssetName(for platform: String) -> String? {
   }
 }
 
-private func installerPlatformAccentColor(for platform: String) -> Color {
+private func platformAccentColor(for platform: String) -> Color {
   switch platform {
   case "contacts":
     return Color(red: 0.07, green: 0.72, blue: 0.84)
@@ -1625,10 +1533,11 @@ private func installerPlatformAccentColor(for platform: String) -> Color {
   }
 }
 
-private func installerPlatformIconURL(named assetName: String) -> URL? {
+private func platformIconURL(named assetName: String) -> URL? {
   let bundles: [Bundle] = [
-    Bundle(url: Bundle.main.bundleURL.appendingPathComponent("CuedNative_CuedNativeUI.bundle")),
-    Bundle.main.resourceURL.flatMap { Bundle(url: $0.appendingPathComponent("CuedNative_CuedNativeUI.bundle")) },
+    Bundle.module,
+    Bundle(url: Bundle.main.bundleURL.appendingPathComponent("CuedNative_Interface.bundle")),
+    Bundle.main.resourceURL.flatMap { Bundle(url: $0.appendingPathComponent("CuedNative_Interface.bundle")) },
     Bundle(for: BundleAnchor.self),
     Bundle.main,
   ].compactMap { $0 }
@@ -1643,52 +1552,39 @@ private func installerPlatformIconURL(named assetName: String) -> URL? {
   return nil
 }
 
-private func installerFallbackIntegration(for platform: String) -> InstallerIntegrationStatus {
-  InstallerIntegrationStatus(
+private func fallbackIntegration(for platform: String) -> IntegrationStatus {
+  let accountKey = platform == "contacts" || platform == "phone_calls" || platform == "imessage" ? "local" : "default"
+  let authState: String
+  switch platform {
+  case "phone_calls":
+    authState = "authorized"
+  case "contacts", "imessage":
+    authState = "not_determined"
+  default:
+    authState = "missing"
+  }
+
+  let availability = platform == "contacts" || platform == "imessage" ? "requires_permission" : "available"
+
+  return IntegrationStatus(
     platform: platform,
-    accountKey: installerDefaultAccountKey(for: platform),
-    displayName: installerPlatformTitle(platform, fallback: nil),
-    authState: installerFallbackAuthState(for: platform),
+    accountKey: accountKey,
+    displayName: platformTitle(platform, fallback: nil),
+    authState: authState,
     enabled: true,
-    capability: installerFallbackCapability(for: platform)
+    capability: CapabilityStatus(
+      availability: availability,
+      setupVisible: true
+    )
   )
 }
 
-private func installerFallbackCapability(for platform: String) -> InstallerCapabilityStatus {
-  switch platform {
-  case "contacts":
-    return InstallerCapabilityStatus(
-      availability: "requires_permission",
-      onboardingVisible: true,
-      reason: "Contacts access is required."
-    )
-  case "phone_calls":
-    return InstallerCapabilityStatus(
-      availability: "available",
-      onboardingVisible: true,
-      reason: nil
-    )
-  case "imessage":
-    return InstallerCapabilityStatus(
-      availability: "requires_permission",
-      onboardingVisible: true,
-      reason: "Full Disk Access is required."
-    )
-  default:
-    return InstallerCapabilityStatus(
-      availability: "available",
-      onboardingVisible: true,
-      reason: nil
-    )
-  }
-}
-
-private func installerCapabilityForOnboarding(
+private func effectiveCapability(
   platform: String,
-  base: InstallerCapabilityStatus,
-  permissionsByKey: [String: InstallerPermissionStatus]
-) -> InstallerCapabilityStatus {
-  guard let permissionKey = installerPermissionKey(for: platform),
+  base: CapabilityStatus,
+  permissionsByKey: [String: PermissionStatus]
+) -> CapabilityStatus {
+  guard let permissionKey = permissionKey(for: platform),
         let permission = permissionsByKey[permissionKey],
         base.availability != "unsupported" else {
     return base
@@ -1696,23 +1592,21 @@ private func installerCapabilityForOnboarding(
 
   switch permission.status {
   case "granted":
-    return InstallerCapabilityStatus(
+    return CapabilityStatus(
       availability: "available",
-      onboardingVisible: base.onboardingVisible,
-      reason: nil
+      setupVisible: base.setupVisible
     )
   case "needs_action":
-    return InstallerCapabilityStatus(
+    return CapabilityStatus(
       availability: "requires_permission",
-      onboardingVisible: base.onboardingVisible,
-      reason: base.reason ?? "Permission required"
+      setupVisible: base.setupVisible
     )
   default:
     return base
   }
 }
 
-private func installerPermissionKey(for platform: String) -> String? {
+private func permissionKey(for platform: String) -> String? {
   switch platform {
   case "contacts":
     return "contacts"
@@ -1723,32 +1617,17 @@ private func installerPermissionKey(for platform: String) -> String? {
   }
 }
 
-private func installerShowsCompletionCheckmark(
-  for configuration: InstallerPlatformConfiguration,
-  integration: InstallerIntegrationStatus
+private func showsCompletionCheckmark(
+  for configuration: PlatformConfig,
+  integration: IntegrationStatus
 ) -> Bool {
   if !configuration.isRequestable {
     return configuration.capability.availability == "available"
   }
-  return integration.enabled && installerIsConnectedIntegrationState(integration.authState)
+  return integration.enabled && isConnectedAuthState(integration.authState)
 }
 
-private func installerFallbackAuthState(for platform: String) -> String {
-  switch platform {
-  case "phone_calls":
-    return "authorized"
-  case "contacts", "imessage":
-    return "not_determined"
-  default:
-    return "missing"
-  }
-}
-
-private func installerDefaultAccountKey(for platform: String) -> String {
-  platform == "contacts" || platform == "phone_calls" || platform == "imessage" ? "local" : "default"
-}
-
-private func platformWalkthrough(for configuration: InstallerPlatformConfiguration) -> String {
+private func platformDescription(for configuration: PlatformConfig) -> String {
   switch configuration.platform {
   case "contacts":
     return "Adds your local contacts so Cued can recognize people across conversations."
@@ -1773,44 +1652,7 @@ private func platformWalkthrough(for configuration: InstallerPlatformConfigurati
   }
 }
 
-private func authFlowDetail(for platform: String) -> String {
-  switch platform {
-  case "gmail":
-    return "Opens Google OAuth and requests readonly Gmail message access."
-  case "slack":
-    return "Opens Slack sign-in in a browser tab for this workspace."
-  case "discord":
-    return "Opens Discord sign-in in a browser window."
-  case "linkedin":
-    return "Opens LinkedIn sign-in in a browser window."
-  case "whatsapp":
-    return "Starts a QR linking flow for your phone."
-  case "signal":
-    return "Starts a QR linking flow for Signal."
-  default:
-    return "Starts the authentication flow for this source."
-  }
-}
-
-private func helperWalkthrough(for platform: String) -> String {
-  switch platform {
-  case "whatsapp":
-    return "Install the WhatsApp helper before starting the QR linking flow."
-  case "signal":
-    return "Install signal-cli before starting the QR linking flow."
-  default:
-    return "Install the required helper before authenticating this source."
-  }
-}
-
-private func multiAccountEmptyStateDetail(for configuration: InstallerPlatformConfiguration) -> String {
-  if configuration.capability.availability == "requires_helper" {
-    return helperWalkthrough(for: configuration.platform)
-  }
-  return "No \(installerAccountNoun(for: configuration.platform))s added yet. \(authFlowDetail(for: configuration.platform))"
-}
-
-public func installerShouldAutoConfigurePrerequisites() -> Bool {
+public func shouldAutoConfigurePrerequisites() -> Bool {
   if ProcessInfo.processInfo.environment["XCODE_RUNNING_FOR_PREVIEWS"] == "1" {
     return false
   }
@@ -1821,11 +1663,11 @@ public func installerShouldAutoConfigurePrerequisites() -> Bool {
   return bundlePath.hasSuffix(".app")
 }
 
-private func installerIsConnectedIntegrationState(_ value: String) -> Bool {
+private func isConnectedAuthState(_ value: String) -> Bool {
   value == "authorized" || value == "authenticated"
 }
 
-private func installerReadableIntegrationState(_ platform: String, _ value: String) -> String {
+private func readableAuthState(_ platform: String, _ value: String) -> String {
   switch value {
   case "authorized", "authenticated":
     return "Authenticated"
@@ -1838,7 +1680,7 @@ private func installerReadableIntegrationState(_ platform: String, _ value: Stri
   case "native_helper_missing":
     return "Needs helper"
   case "check_failed":
-    if installerIsQrLinkPlatform(platform) {
+    if usesQRLink(platform) {
       return "Not authenticated"
     }
     return "Needs attention"
@@ -1847,7 +1689,7 @@ private func installerReadableIntegrationState(_ platform: String, _ value: Stri
   case "needs_auth":
     return "Not authenticated"
   case "blocked":
-    if installerIsQrLinkPlatform(platform) {
+    if usesQRLink(platform) {
       return "Not authenticated"
     }
     return "Blocked"
@@ -1860,24 +1702,24 @@ private func installerReadableIntegrationState(_ platform: String, _ value: Stri
   }
 }
 
-private func installerIsQrLinkPlatform(_ platform: String) -> Bool {
+private func usesQRLink(_ platform: String) -> Bool {
   platform == "signal" || platform == "whatsapp"
 }
 
-private func installerShouldShowAuthAttention(_ platform: String, authState: String) -> Bool {
-  if installerIsQrLinkPlatform(platform) {
+private func needsAuthAttention(_ platform: String, authState: String) -> Bool {
+  if usesQRLink(platform) {
     return false
   }
   return authState == "blocked" || authState == "check_failed"
 }
 
-private func installerFormatCount(_ value: Int) -> String {
+private func formatCount(_ value: Int) -> String {
   let formatter = NumberFormatter()
   formatter.numberStyle = .decimal
   return formatter.string(from: NSNumber(value: value)) ?? "\(value)"
 }
 
-private func installerPlatformTitle(_ platform: String, fallback: String?) -> String {
+private func platformTitle(_ platform: String, fallback: String?) -> String {
   switch platform {
   case "contacts":
     return "Contacts"
@@ -1905,31 +1747,31 @@ private func installerPlatformTitle(_ platform: String, fallback: String?) -> St
   }
 }
 
-private func installerAccountNoun(for platform: String) -> String {
+private func accountNoun(for platform: String) -> String {
   platform == "slack" ? "workspace" : "account"
 }
 
-private func installerSupportsAutomaticAccountDiscovery(_ platform: String) -> Bool {
+private func supportsAutomaticAccountDiscovery(_ platform: String) -> Bool {
   platform == "gmail" || platform == "slack"
 }
 
-private func installerShouldHideAccountKey(platform: String, accountKey: String) -> Bool {
-  if installerSupportsAutomaticAccountDiscovery(platform)
+private func hidesAccountKey(platform: String, accountKey: String) -> Bool {
+  if supportsAutomaticAccountDiscovery(platform)
     && (accountKey.hasPrefix("pending-slack-") || accountKey.hasPrefix("pending-gmail-")) {
     return true
   }
-  if !installerSupportsMultipleAccounts(platform) && accountKey == "default" {
+  if !supportsMultipleAccounts(platform) && accountKey == "default" {
     return true
   }
   return false
 }
 
-private func installerNormalizedTitle(_ value: String?) -> String {
+private func normalizedTitle(_ value: String?) -> String {
   value?.trimmingCharacters(in: .whitespacesAndNewlines).localizedLowercase ?? ""
 }
 
 private func fallbackAccountTitle(for platform: String, authState: String) -> String {
-  if installerIsConnectedIntegrationState(authState) {
+  if isConnectedAuthState(authState) {
     switch platform {
     case "linkedin":
       return "LinkedIn account"
@@ -1965,7 +1807,7 @@ private func fallbackAccountTitle(for platform: String, authState: String) -> St
   }
 }
 
-private func installerGeneratedPendingAccountKey(
+private func pendingAccountKey(
   for platform: String,
   existing: Set<String>
 ) -> String {
@@ -1977,11 +1819,11 @@ private func installerGeneratedPendingAccountKey(
   return candidate
 }
 
-private func installerSupportsMultipleAccounts(_ platform: String) -> Bool {
+private func supportsMultipleAccounts(_ platform: String) -> Bool {
   platform == "gmail" || platform == "slack"
 }
 
-private func installerIsRequestablePlatform(_ platform: String) -> Bool {
+private func isRequestablePlatform(_ platform: String) -> Bool {
   switch platform {
   case "discord", "gmail", "linkedin", "signal", "slack", "whatsapp":
     return true
@@ -1990,12 +1832,12 @@ private func installerIsRequestablePlatform(_ platform: String) -> Bool {
   }
 }
 
-private func installerSortIntegrations(
-  left: InstallerIntegrationStatus,
-  right: InstallerIntegrationStatus
+private func sortIntegrations(
+  left: IntegrationStatus,
+  right: IntegrationStatus
 ) -> Bool {
-  let leftConnected = installerIsConnectedIntegrationState(left.authState)
-  let rightConnected = installerIsConnectedIntegrationState(right.authState)
+  let leftConnected = isConnectedAuthState(left.authState)
+  let rightConnected = isConnectedAuthState(right.authState)
   if left.enabled != right.enabled {
     return left.enabled && !right.enabled
   }
@@ -2014,14 +1856,14 @@ private func installerSortIntegrations(
 
 #if DEBUG
 @MainActor
-private func installerPreviewViewModel(
+private func previewModel(
   page: Int,
-  permissions: [InstallerPermissionStatus],
-  globalSkill: InstallerGlobalSkillStatus,
-  allIntegrations: [InstallerIntegrationStatus],
-  setupIntegrations: [InstallerIntegrationStatus]
-) -> OnboardingViewModel {
-  let viewModel = OnboardingViewModel()
+  permissions: [PermissionStatus],
+  globalSkill: SkillStatus,
+  allIntegrations: [IntegrationStatus],
+  setupIntegrations: [IntegrationStatus]
+) -> RootViewModel {
+  let viewModel = RootViewModel()
   viewModel.currentPage = page
   viewModel.apply(
     permissions: permissions,
@@ -2032,22 +1874,21 @@ private func installerPreviewViewModel(
   return viewModel
 }
 
-private func installerPreviewCapability(
-  availability: String = "available",
-  reason: String? = nil
-) -> InstallerCapabilityStatus {
-  InstallerCapabilityStatus(availability: availability, onboardingVisible: true, reason: reason)
+private func previewCapability(
+  availability: String = "available"
+) -> CapabilityStatus {
+  CapabilityStatus(availability: availability, setupVisible: true)
 }
 
-private func installerPreviewIntegration(
+private func previewIntegration(
   platform: String,
   accountKey: String,
   displayName: String?,
   authState: String,
   enabled: Bool,
-  capability: InstallerCapabilityStatus
-) -> InstallerIntegrationStatus {
-  InstallerIntegrationStatus(
+  capability: CapabilityStatus
+) -> IntegrationStatus {
+  IntegrationStatus(
     platform: platform,
     accountKey: accountKey,
     displayName: displayName,
@@ -2057,18 +1898,18 @@ private func installerPreviewIntegration(
   )
 }
 
-private struct InstallerPreviewContainer: View {
-  @StateObject private var viewModel: OnboardingViewModel
+private struct RootPreview: View {
+  @StateObject private var viewModel: RootViewModel
 
   init(
     page: Int,
-    permissions: [InstallerPermissionStatus],
-    globalSkill: InstallerGlobalSkillStatus,
-    allIntegrations: [InstallerIntegrationStatus],
-    setupIntegrations: [InstallerIntegrationStatus]
+    permissions: [PermissionStatus],
+    globalSkill: SkillStatus,
+    allIntegrations: [IntegrationStatus],
+    setupIntegrations: [IntegrationStatus]
   ) {
     _viewModel = StateObject(
-      wrappedValue: installerPreviewViewModel(
+      wrappedValue: previewModel(
         page: page,
         permissions: permissions,
         globalSkill: globalSkill,
@@ -2079,7 +1920,7 @@ private struct InstallerPreviewContainer: View {
   }
 
   var body: some View {
-    CuedOnboardingView(
+    RootView(
       viewModel: viewModel,
       onRefresh: {},
       onGuidePermission: { _ in },
@@ -2096,40 +1937,40 @@ private struct InstallerPreviewContainer: View {
 
 @available(macOS 14.0, *)
 #Preview("Permissions · Partial Access") {
-  InstallerPreviewContainer(
+  RootPreview(
     page: 0,
     permissions: [
-      InstallerPermissionStatus(
+      PermissionStatus(
         key: "contacts",
         status: "granted",
         summary: "Contacts access is authorized",
         requestFlags: ["--contacts"]
       ),
-      InstallerPermissionStatus(
+      PermissionStatus(
         key: "full_disk_access",
         status: "needs_action",
         summary: "Messages database is not readable from the current process",
         requestFlags: ["--full-disk-access"]
       ),
     ],
-    globalSkill: installerDefaultGlobalSkillStatus(),
+    globalSkill: defaultSkillStatus(),
     allIntegrations: [],
     setupIntegrations: [
-      installerPreviewIntegration(
+      previewIntegration(
         platform: "contacts",
         accountKey: "local",
         displayName: "Contacts.app",
         authState: "authorized",
         enabled: true,
-        capability: installerPreviewCapability()
+        capability: previewCapability()
       ),
-      installerPreviewIntegration(
+      previewIntegration(
         platform: "imessage",
         accountKey: "local",
         displayName: "Messages",
         authState: "needs_full_disk_access",
         enabled: true,
-        capability: installerPreviewCapability(availability: "requires_permission", reason: "Permission required")
+        capability: previewCapability(availability: "requires_permission")
       ),
     ]
   )
@@ -2137,76 +1978,76 @@ private struct InstallerPreviewContainer: View {
 
 @available(macOS 14.0, *)
 #Preview("Platforms · No Accounts") {
-  InstallerPreviewContainer(
+  RootPreview(
     page: 1,
-    permissions: installerDefaultPermissionStatuses(),
-    globalSkill: installerDefaultGlobalSkillStatus(),
+    permissions: defaultPermissionStatuses(),
+    globalSkill: defaultSkillStatus(),
     allIntegrations: [
-      installerPreviewIntegration(
+      previewIntegration(
         platform: "contacts",
         accountKey: "local",
         displayName: "Contacts.app",
         authState: "authorized",
         enabled: true,
-        capability: installerPreviewCapability()
+        capability: previewCapability()
       ),
-      installerPreviewIntegration(
+      previewIntegration(
         platform: "imessage",
         accountKey: "local",
         displayName: "Messages",
         authState: "authorized",
         enabled: true,
-        capability: installerPreviewCapability()
+        capability: previewCapability()
       ),
     ],
     setupIntegrations: [
-      installerPreviewIntegration(
+      previewIntegration(
         platform: "contacts",
         accountKey: "local",
         displayName: "Contacts.app",
         authState: "authorized",
         enabled: true,
-        capability: installerPreviewCapability()
+        capability: previewCapability()
       ),
-      installerPreviewIntegration(
+      previewIntegration(
         platform: "imessage",
         accountKey: "local",
         displayName: "Messages",
         authState: "authorized",
         enabled: true,
-        capability: installerPreviewCapability()
+        capability: previewCapability()
       ),
-      installerPreviewIntegration(
+      previewIntegration(
         platform: "slack",
         accountKey: "default",
         displayName: "Slack",
         authState: "missing",
         enabled: true,
-        capability: installerPreviewCapability()
+        capability: previewCapability()
       ),
-      installerPreviewIntegration(
+      previewIntegration(
         platform: "linkedin",
         accountKey: "default",
         displayName: "LinkedIn",
         authState: "missing",
         enabled: true,
-        capability: installerPreviewCapability()
+        capability: previewCapability()
       ),
-      installerPreviewIntegration(
+      previewIntegration(
         platform: "whatsapp",
         accountKey: "default",
         displayName: "WhatsApp",
         authState: "missing",
         enabled: true,
-        capability: installerPreviewCapability()
+        capability: previewCapability()
       ),
-      installerPreviewIntegration(
+      previewIntegration(
         platform: "signal",
         accountKey: "default",
         displayName: "Signal",
         authState: "missing",
         enabled: true,
-        capability: installerPreviewCapability()
+        capability: previewCapability()
       ),
     ]
   )
@@ -2214,100 +2055,100 @@ private struct InstallerPreviewContainer: View {
 
 @available(macOS 14.0, *)
 #Preview("Platforms · Slack Multi-Workspace") {
-  InstallerPreviewContainer(
+  RootPreview(
     page: 1,
-    permissions: installerDefaultPermissionStatuses(),
-    globalSkill: installerDefaultGlobalSkillStatus(),
+    permissions: defaultPermissionStatuses(),
+    globalSkill: defaultSkillStatus(),
     allIntegrations: [
-      installerPreviewIntegration(
+      previewIntegration(
         platform: "contacts",
         accountKey: "local",
         displayName: "Contacts.app",
         authState: "authorized",
         enabled: true,
-        capability: installerPreviewCapability()
+        capability: previewCapability()
       ),
-      installerPreviewIntegration(
+      previewIntegration(
         platform: "imessage",
         accountKey: "local",
         displayName: "Messages",
         authState: "authorized",
         enabled: true,
-        capability: installerPreviewCapability()
+        capability: previewCapability()
       ),
-      installerPreviewIntegration(
+      previewIntegration(
         platform: "slack",
         accountKey: "workspace-a",
         displayName: "Acme Product",
         authState: "authenticated",
         enabled: true,
-        capability: installerPreviewCapability()
+        capability: previewCapability()
       ),
-      installerPreviewIntegration(
+      previewIntegration(
         platform: "slack",
         accountKey: "workspace-b",
         displayName: "Acme Sales",
         authState: "authenticated",
         enabled: false,
-        capability: installerPreviewCapability()
+        capability: previewCapability()
       ),
-      installerPreviewIntegration(
+      previewIntegration(
         platform: "linkedin",
         accountKey: "default",
         displayName: "LinkedIn",
         authState: "authenticated",
         enabled: true,
-        capability: installerPreviewCapability()
+        capability: previewCapability()
       ),
     ],
     setupIntegrations: [
-      installerPreviewIntegration(
+      previewIntegration(
         platform: "contacts",
         accountKey: "local",
         displayName: "Contacts.app",
         authState: "authorized",
         enabled: true,
-        capability: installerPreviewCapability()
+        capability: previewCapability()
       ),
-      installerPreviewIntegration(
+      previewIntegration(
         platform: "imessage",
         accountKey: "local",
         displayName: "Messages",
         authState: "authorized",
         enabled: true,
-        capability: installerPreviewCapability()
+        capability: previewCapability()
       ),
-      installerPreviewIntegration(
+      previewIntegration(
         platform: "slack",
         accountKey: "default",
         displayName: "Slack",
         authState: "missing",
         enabled: true,
-        capability: installerPreviewCapability()
+        capability: previewCapability()
       ),
-      installerPreviewIntegration(
+      previewIntegration(
         platform: "linkedin",
         accountKey: "default",
         displayName: "LinkedIn",
         authState: "authenticated",
         enabled: true,
-        capability: installerPreviewCapability()
+        capability: previewCapability()
       ),
-      installerPreviewIntegration(
+      previewIntegration(
         platform: "whatsapp",
         accountKey: "default",
         displayName: "WhatsApp",
         authState: "missing",
         enabled: true,
-        capability: installerPreviewCapability()
+        capability: previewCapability()
       ),
-      installerPreviewIntegration(
+      previewIntegration(
         platform: "signal",
         accountKey: "default",
         displayName: "Signal",
         authState: "missing",
         enabled: true,
-        capability: installerPreviewCapability()
+        capability: previewCapability()
       ),
     ]
   )
@@ -2315,92 +2156,92 @@ private struct InstallerPreviewContainer: View {
 
 @available(macOS 14.0, *)
 #Preview("Platforms · Helpers Missing") {
-  InstallerPreviewContainer(
+  RootPreview(
     page: 1,
-    permissions: installerDefaultPermissionStatuses(),
-    globalSkill: installerDefaultGlobalSkillStatus(),
+    permissions: defaultPermissionStatuses(),
+    globalSkill: defaultSkillStatus(),
     allIntegrations: [
-      installerPreviewIntegration(
+      previewIntegration(
         platform: "contacts",
         accountKey: "local",
         displayName: "Contacts.app",
         authState: "authorized",
         enabled: true,
-        capability: installerPreviewCapability()
+        capability: previewCapability()
       ),
-      installerPreviewIntegration(
+      previewIntegration(
         platform: "imessage",
         accountKey: "local",
         displayName: "Messages",
         authState: "authorized",
         enabled: true,
-        capability: installerPreviewCapability()
+        capability: previewCapability()
       ),
-      installerPreviewIntegration(
+      previewIntegration(
         platform: "signal",
         accountKey: "default",
         displayName: "Signal",
         authState: "missing",
         enabled: true,
-        capability: installerPreviewCapability(availability: "requires_helper", reason: "Helper required")
+        capability: previewCapability(availability: "requires_helper")
       ),
-      installerPreviewIntegration(
+      previewIntegration(
         platform: "whatsapp",
         accountKey: "default",
         displayName: "WhatsApp",
         authState: "missing",
         enabled: true,
-        capability: installerPreviewCapability(availability: "requires_helper", reason: "Helper required")
+        capability: previewCapability(availability: "requires_helper")
       ),
     ],
     setupIntegrations: [
-      installerPreviewIntegration(
+      previewIntegration(
         platform: "contacts",
         accountKey: "local",
         displayName: "Contacts.app",
         authState: "authorized",
         enabled: true,
-        capability: installerPreviewCapability()
+        capability: previewCapability()
       ),
-      installerPreviewIntegration(
+      previewIntegration(
         platform: "imessage",
         accountKey: "local",
         displayName: "Messages",
         authState: "authorized",
         enabled: true,
-        capability: installerPreviewCapability()
+        capability: previewCapability()
       ),
-      installerPreviewIntegration(
+      previewIntegration(
         platform: "slack",
         accountKey: "default",
         displayName: "Slack",
         authState: "missing",
         enabled: true,
-        capability: installerPreviewCapability()
+        capability: previewCapability()
       ),
-      installerPreviewIntegration(
+      previewIntegration(
         platform: "linkedin",
         accountKey: "default",
         displayName: "LinkedIn",
         authState: "missing",
         enabled: true,
-        capability: installerPreviewCapability()
+        capability: previewCapability()
       ),
-      installerPreviewIntegration(
+      previewIntegration(
         platform: "whatsapp",
         accountKey: "default",
         displayName: "WhatsApp",
         authState: "missing",
         enabled: true,
-        capability: installerPreviewCapability(availability: "requires_helper", reason: "Helper required")
+        capability: previewCapability(availability: "requires_helper")
       ),
-      installerPreviewIntegration(
+      previewIntegration(
         platform: "signal",
         accountKey: "default",
         displayName: "Signal",
         authState: "missing",
         enabled: true,
-        capability: installerPreviewCapability(availability: "requires_helper", reason: "Helper required")
+        capability: previewCapability(availability: "requires_helper")
       ),
     ]
   )

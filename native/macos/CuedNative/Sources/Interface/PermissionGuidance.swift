@@ -1,12 +1,12 @@
 import AppKit
 import SwiftUI
 
-enum InstallerRoundedButtonVariant {
+enum ActionButtonVariant {
   case prominent
   case secondary
 }
 
-enum InstallerRoundedButtonSize {
+enum ActionButtonSize {
   case compact
   case regular
   case icon
@@ -56,113 +56,71 @@ enum InstallerRoundedButtonSize {
   }
 }
 
-struct InstallerPermissionDescriptor {
+struct PermissionDescriptor {
   let key: String
   let title: String
   let subtitle: String
   let systemImage: String
   let accentColor: Color
-  let settingsLabel: String
-  let walkthroughTitle: String
-  let walkthroughBody: String
-  let requestButtonTitle: String
   let supportsDirectRequest: Bool
   let supportsGuidedSettings: Bool
-  let needsDragAndDrop: Bool
-  let steps: [String]
 }
 
-enum InstallerPermissionActionKind: Equatable {
+enum PermissionAction: Equatable {
   case requestPrompt
   case guideInSettings
   case none
 }
 
-func installerPermissionDescriptor(for key: String) -> InstallerPermissionDescriptor {
+func permissionDescriptor(for key: String) -> PermissionDescriptor {
   switch key {
   case "contacts":
-    return InstallerPermissionDescriptor(
+    return PermissionDescriptor(
       key: key,
       title: "Contacts",
       subtitle: "Allow Cued to read Contacts.app so it can resolve people consistently across local data.",
       systemImage: "person.crop.circle.badge.checkmark",
       accentColor: Color(red: 0.05, green: 0.70, blue: 0.82),
-      settingsLabel: "Contacts",
-      walkthroughTitle: "Confirm Contacts access for Cued",
-      walkthroughBody: "Use the macOS prompt first. If you already dismissed it, turn Cued back on in the Contacts privacy list.",
-      requestButtonTitle: "Request access",
       supportsDirectRequest: true,
-      supportsGuidedSettings: true,
-      needsDragAndDrop: false,
-      steps: [
-        "Request the system prompt from Cued.",
-        "If needed, reopen Settings and enable Cued under Contacts.",
-        "Return here and refresh.",
-      ]
+      supportsGuidedSettings: true
     )
   case "full_disk_access":
-    return InstallerPermissionDescriptor(
+    return PermissionDescriptor(
       key: key,
       title: "Full Disk Access",
       subtitle: "Required to read the Messages database for passive sync on this Mac.",
       systemImage: "internaldrive.fill",
       accentColor: Color(red: 0.91, green: 0.58, blue: 0.11),
-      settingsLabel: "Full Disk Access",
-      walkthroughTitle: "Drag Cued into Full Disk Access",
-      walkthroughBody: "This is the manual step. Open the pane, drag the Cued app into the list, enable it, then restart the app identity if macOS asks.",
-      requestButtonTitle: "Guide in Settings",
       supportsDirectRequest: false,
-      supportsGuidedSettings: true,
-      needsDragAndDrop: true,
-      steps: [
-        "Open the Full Disk Access pane.",
-        "Drag Cued into the list and switch it on.",
-        "Return to Cued after macOS finishes updating access.",
-      ]
+      supportsGuidedSettings: true
     )
   case "messages_automation":
-    return InstallerPermissionDescriptor(
+    return PermissionDescriptor(
       key: key,
       title: "Messages automation",
       subtitle: "Required only for AppleScript send and control flows in Messages. Passive sync does not use this.",
       systemImage: "paperplane.circle.fill",
       accentColor: Color(red: 0.15, green: 0.46, blue: 0.98),
-      settingsLabel: "Automation",
-      walkthroughTitle: "Allow Cued to control Messages",
-      walkthroughBody: "After the Apple Events prompt appears, approve it. If you already denied it, open Automation in Settings and turn Cued back on for Messages.",
-      requestButtonTitle: "Request access",
       supportsDirectRequest: true,
-      supportsGuidedSettings: true,
-      needsDragAndDrop: false,
-      steps: [
-        "Request the Messages automation prompt.",
-        "Approve the Cued to Messages automation request.",
-        "If it was denied, reopen Automation in Settings and toggle Cued on.",
-      ]
+      supportsGuidedSettings: true
     )
   default:
-    return InstallerPermissionDescriptor(
+    return PermissionDescriptor(
       key: key,
       title: "Permission",
       subtitle: "Review this macOS permission.",
       systemImage: "hand.raised.fill",
       accentColor: .accentColor,
-      settingsLabel: "Privacy",
-      walkthroughTitle: "Review this permission",
-      walkthroughBody: "Open Settings and complete the requested step.",
-      requestButtonTitle: "Open Settings",
       supportsDirectRequest: false,
       supportsGuidedSettings: true,
-      needsDragAndDrop: false,
-      steps: ["Open Settings.", "Complete the permission step.", "Return to Cued."],
     )
   }
 }
 
-func installerPermissionActionKind(
-  for permission: InstallerPermissionStatus,
-  descriptor: InstallerPermissionDescriptor
-) -> InstallerPermissionActionKind {
+func permissionAction(
+  for permission: PermissionStatus,
+  descriptor: PermissionDescriptor
+) -> PermissionAction {
   if descriptor.supportsDirectRequest && permission.status == "unknown" {
     return .requestPrompt
   }
@@ -178,15 +136,15 @@ func installerPermissionActionKind(
   return .none
 }
 
-struct InstallerPermissionActionButtonStyle: ButtonStyle {
+struct PermissionActionButtonStyle: ButtonStyle {
   @Environment(\.isEnabled) private var isEnabled
 
-  let variant: InstallerRoundedButtonVariant
-  let size: InstallerRoundedButtonSize
+  let variant: ActionButtonVariant
+  let size: ActionButtonSize
 
   init(
-    variant: InstallerRoundedButtonVariant = .prominent,
-    size: InstallerRoundedButtonSize = .compact
+    variant: ActionButtonVariant = .prominent,
+    size: ActionButtonSize = .compact
   ) {
     self.variant = variant
     self.size = size

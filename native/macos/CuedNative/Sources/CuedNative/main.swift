@@ -24,13 +24,13 @@ struct ContactRecord: Encodable {
   let emails: [String]
 }
 
-struct IMessageHandle: Codable {
+struct IMessageHandle: Encodable {
   let id: Int
   let identifier: String
   let service: String
 }
 
-struct IMessageChat: Codable {
+struct IMessageChat: Encodable {
   let id: Int
   let identifier: String
   let displayName: String?
@@ -38,14 +38,14 @@ struct IMessageChat: Codable {
   let participants: [IMessageHandle]
 }
 
-struct IMessageReaction: Codable {
+struct IMessageReaction: Encodable {
   let emoji: String
   let reactorIdentifier: String
   let isFromMe: Bool
   let timestamp: Int
 }
 
-struct IMessageAttachment: Codable {
+struct IMessageAttachment: Encodable {
   let guid: String
   let filename: String?
   let transferName: String?
@@ -57,7 +57,7 @@ struct IMessageAttachment: Codable {
   let ckRecordId: String?
 }
 
-struct IMessageMessage: Codable {
+struct IMessageMessage: Encodable {
   let id: Int
   let guid: String
   let chatId: Int
@@ -75,7 +75,7 @@ struct IMessageMessage: Codable {
   var reactions: [IMessageReaction]
 }
 
-struct IMessageSyncBatch: Codable {
+struct IMessageSyncBatch: Encodable {
   let cursor: Int
   let fetchedCount: Int
   let chats: [IMessageChat]
@@ -122,7 +122,7 @@ struct WatchEvent: Encodable {
   let timestamp: Int
 }
 
-struct CallHistoryRecord: Codable {
+struct CallHistoryRecord: Encodable {
   let pk: Int
   let sourceCallKey: String
   let sourceConversationKey: String
@@ -141,7 +141,7 @@ struct CallHistoryRecord: Codable {
   let syntheticConversation: Bool
 }
 
-struct CallHistorySyncBatch: Codable {
+struct CallHistorySyncBatch: Encodable {
   let cursor: Int
   let fetchedCount: Int
   let calls: [CallHistoryRecord]
@@ -243,7 +243,7 @@ struct BrowserCommandResult: Encodable {
   let closedTabs: Int?
 }
 
-struct NativeAuthResult: Encodable {
+struct AuthResult: Encodable {
   let sessionId: String
   let platform: String
   let accountKey: String
@@ -254,7 +254,7 @@ struct NativeAuthResult: Encodable {
   let errorSummary: String?
 }
 
-struct NativeQRResult: Encodable {
+struct QRResult: Encodable {
   let state: String
 }
 
@@ -318,7 +318,7 @@ final class SQLiteConnection {
 }
 
 @main
-struct CuedNativeCLI {
+struct Command {
   static func main() {
     do {
       try run()
@@ -732,13 +732,13 @@ struct CuedNativeCLI {
   }
 
   @MainActor
-  private static func runManagedAuth(options: AuthOpenOptions) throws -> NativeAuthResult {
+  private static func runManagedAuth(options: AuthOpenOptions) throws -> AuthResult {
     let coordinator = try ManagedAuthCoordinator(options: options)
     return try coordinator.run()
   }
 
   @MainActor
-  private static func runAuthQRCode(options: AuthQROptions) throws -> NativeQRResult {
+  private static func runAuthQRCode(options: AuthQROptions) throws -> QRResult {
     let coordinator = QRCodeCoordinator(options: options)
     return coordinator.run()
   }
@@ -1925,14 +1925,13 @@ private final class QRCodeCoordinator: NSObject, NSWindowDelegate {
   private let options: AuthQROptions
   private let app = NSApplication.shared
   private var window: NSWindow?
-  private var finalState = "cancelled"
 
   init(options: AuthQROptions) {
     self.options = options
     super.init()
   }
 
-  func run() -> NativeQRResult {
+  func run() -> QRResult {
     app.setActivationPolicy(.regular)
 
     let window = NSWindow(
@@ -1993,12 +1992,7 @@ private final class QRCodeCoordinator: NSObject, NSWindowDelegate {
     self.window = window
     app.activate(ignoringOtherApps: true)
     app.run()
-    return NativeQRResult(state: finalState)
-  }
-
-  func closeAsCompleted() {
-    finalState = "completed"
-    stopRunLoop()
+    return QRResult(state: "cancelled")
   }
 
   func windowWillClose(_ notification: Notification) {
@@ -2061,7 +2055,7 @@ private final class ManagedAuthCoordinator: NSObject, NSWindowDelegate, WKNaviga
   private var timeoutTimer: Timer?
   private var resolved = false
   private var extractionInProgress = false
-  private var finalResult: NativeAuthResult?
+  private var finalResult: AuthResult?
 
   init(options: AuthOpenOptions) throws {
     guard let platform = ManagedAuthPlatform(rawValue: options.platform.lowercased()) else {
@@ -2072,7 +2066,7 @@ private final class ManagedAuthCoordinator: NSObject, NSWindowDelegate, WKNaviga
     super.init()
   }
 
-  func run() throws -> NativeAuthResult {
+  func run() throws -> AuthResult {
     app.setActivationPolicy(.regular)
     let configuration = WKWebViewConfiguration()
     configuration.websiteDataStore = .default()
@@ -2330,7 +2324,7 @@ private final class ManagedAuthCoordinator: NSObject, NSWindowDelegate, WKNaviga
     resolved = true
     pollTimer?.invalidate()
     timeoutTimer?.invalidate()
-    finalResult = NativeAuthResult(
+    finalResult = AuthResult(
       sessionId: options.sessionID,
       platform: platform.rawValue,
       accountKey: options.accountKey,
