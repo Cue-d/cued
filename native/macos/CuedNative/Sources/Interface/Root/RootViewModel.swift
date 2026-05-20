@@ -197,6 +197,8 @@ public final class RootViewModel: ObservableObject {
   @Published public var platformConfigurations: [PlatformConfig] = []
   @Published public var permissionStatuses: [PermissionStatus] = defaultPermissionStatuses()
   @Published public var globalSkillStatus = defaultSkillStatus()
+  @Published public var agentTargetStatuses = defaultAgentTargetStatuses()
+  @Published public var agentLaunchFeedback: AgentLaunchFeedback?
   @Published public private(set) var refreshSequence = 0
 
   public let pageWidth: CGFloat = RootViewModel.windowWidth
@@ -256,6 +258,18 @@ public final class RootViewModel: ObservableObject {
 
   public func configuration(for platform: String) -> PlatformConfig? {
     platformConfigurations.first { $0.platform == platform }
+  }
+
+  public func applyAgentTargetStatuses(_ statuses: [AgentTarget: AgentTargetStatus]) {
+    agentTargetStatuses = statuses
+  }
+
+  public func showAgentLaunchFeedback(_ feedback: AgentLaunchFeedback) {
+    agentLaunchFeedback = feedback
+  }
+
+  public func clearAgentLaunchFeedback() {
+    agentLaunchFeedback = nil
   }
 
   public func suggestedAccountKey(for platform: String) -> String {

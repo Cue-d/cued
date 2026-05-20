@@ -20,6 +20,36 @@ final class RootViewTests: XCTestCase {
     XCTAssertTrue(shouldActivelyRefreshPermissions(for: ["--all"]))
   }
 
+  func testCodexCLIStatusReportsMissingAuthAndReadyStates() {
+    XCTAssertEqual(
+      AgentLaunchService.codexCLIStatus(commandPath: nil, loginStatus: nil, output: "").readiness,
+      .missing
+    )
+    XCTAssertEqual(
+      AgentLaunchService.codexCLIStatus(commandPath: "/usr/local/bin/codex", loginStatus: 1, output: "not logged in").readiness,
+      .notLoggedIn
+    )
+    XCTAssertEqual(
+      AgentLaunchService.codexCLIStatus(commandPath: "/usr/local/bin/codex", loginStatus: 0, output: "Logged in using ChatGPT").readiness,
+      .ready
+    )
+  }
+
+  func testClaudeCodeStatusReportsMissingAuthAndReadyStates() {
+    XCTAssertEqual(
+      AgentLaunchService.claudeCodeStatus(commandPath: nil, authStatus: nil, output: "").readiness,
+      .missing
+    )
+    XCTAssertEqual(
+      AgentLaunchService.claudeCodeStatus(commandPath: "/opt/homebrew/bin/claude", authStatus: 1, output: "Please login").readiness,
+      .notLoggedIn
+    )
+    XCTAssertEqual(
+      AgentLaunchService.claudeCodeStatus(commandPath: "/opt/homebrew/bin/claude", authStatus: 0, output: "{\"authenticated\":true}").readiness,
+      .ready
+    )
+  }
+
   func testPermissionGuideURLsMatchExpectedSystemSettingsPanes() {
     XCTAssertEqual(
       permissionGuideURL(for: "contacts"),

@@ -72,6 +72,9 @@ final class RootWindowController: NSWindowController {
         onConnectIntegration: { [weak self] platform, accountKey in
           self?.connectIntegration(platform: platform, accountKey: accountKey)
         },
+        onLaunchAgentExample: { [weak self] exampleID, target in
+          self?.launchAgentExample(exampleID: exampleID, target: target)
+        },
         onFinish: { [weak self] in self?.finishSetup() }
       )
     )
@@ -142,6 +145,7 @@ final class RootWindowController: NSWindowController {
       let setupIntegrations = (snapshot?.setupIntegrations ?? []).filter {
         $0.capability.setupVisible
       }
+      let agentTargetStatuses = AgentLaunchService.targetStatuses()
 
       await MainActor.run {
         self.cachedAllIntegrations = snapshot?.integrations ?? []
@@ -153,6 +157,7 @@ final class RootWindowController: NSWindowController {
           allIntegrations: self.cachedAllIntegrations,
           integrations: setupIntegrations
         )
+        self.viewModel.applyAgentTargetStatuses(agentTargetStatuses)
         self.schedulePermissionRefresh()
         self.schedulePendingAuthRefreshIfNeeded()
         self.runPendingRefreshIfNeeded()
@@ -306,6 +311,70 @@ final class RootWindowController: NSWindowController {
         alert.runModal()
       }
     }
+  }
+
+  private func launchAgentExample(exampleID: AgentExampleID, target: AgentTarget) {
+    viewModel.showAgentLaunchFeedback(
+      AgentLaunchFeedback(
+        title: "Preparing \(target.title)",
+        detail: "Checking auth, installing the Cued skill if needed, and preparing the example prompt."
+      )
+    )
+
+    let daemonSupervisor = self.daemonSupervisor
+    let skillAlreadyInstalled = viewModel.globalSkillStatus.installed
+    Task { [daemonSupervisor, skillAlreadyInstalled] in
+      if let installError = await Self.installGlobalSkillIfNeeded(
+        daemonSupervisor: daemonSupervisor,
+        alreadyInstalled: skillAlreadyInstalled
+      ) {
+        viewModel.showAgentLaunchFeedback(
+          AgentLaunchFeedback(
+            title: "Cued skill install failed",
+            detail: installError,
+            isError: true
+          )
+        )
+        refreshAgentTargets()
+        return
+      }
+
+      let feedback = AgentLaunchService.launch(exampleID: exampleID, target: target)
+      viewModel.showAgentLaunchFeedback(feedback)
+      refreshAgentTargets()
+    }
+  }
+
+  private func refreshAgentTargets() {
+    Task.detached(priority: .utility) {
+      let statuses = AgentLaunchService.targetStatuses()
+      await MainActor.run {
+        self.viewModel.applyAgentTargetStatuses(statuses)
+      }
+    }
+  }
+
+  private nonisolated static func installGlobalSkillIfNeeded(
+    daemonSupervisor: DaemonSupervisor,
+    alreadyInstalled: Bool
+  ) async -> String? {
+    guard !alreadyInstalled else {
+      return nil
+    }
+
+    let result = await Task.detached(priority: .userInitiated) {
+      daemonSupervisor.runCLI(arguments: ["skill", "install-global"])
+    }.value
+
+    guard result?.status == 0 else {
+      let stderr = result?.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
+      if stderr?.isEmpty == false {
+        return stderr
+      }
+      return "Run `cued skill install-global` from Terminal, then retry the example."
+    }
+
+    return nil
   }
 
   private func finishSetup() {

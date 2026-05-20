@@ -13,6 +13,7 @@ public struct RootView: View {
   let onEnableIntegration: (String, String) -> Void
   let onRemoveIntegration: (String, String) -> Void
   let onConnectIntegration: (String, String) -> Void
+  let onLaunchAgentExample: (AgentExampleID, AgentTarget) -> Void
   let onFinish: () -> Void
 
   @State var addAccountPrompt: AddAccountPrompt?
@@ -32,6 +33,7 @@ public struct RootView: View {
     onEnableIntegration: @escaping (String, String) -> Void,
     onRemoveIntegration: @escaping (String, String) -> Void,
     onConnectIntegration: @escaping (String, String) -> Void,
+    onLaunchAgentExample: @escaping (AgentExampleID, AgentTarget) -> Void,
     onFinish: @escaping () -> Void
   ) {
     self.viewModel = viewModel
@@ -43,6 +45,7 @@ public struct RootView: View {
     self.onEnableIntegration = onEnableIntegration
     self.onRemoveIntegration = onRemoveIntegration
     self.onConnectIntegration = onConnectIntegration
+    self.onLaunchAgentExample = onLaunchAgentExample
     self.onFinish = onFinish
   }
 

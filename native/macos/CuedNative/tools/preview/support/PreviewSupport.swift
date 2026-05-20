@@ -74,6 +74,7 @@ public enum Preview {
       onEnableIntegration: { _, _ in },
       onRemoveIntegration: { _, _ in },
       onConnectIntegration: { _, _ in },
+      onLaunchAgentExample: { _, _ in },
       onFinish: {}
     )
     .frame(width: previewCase.size.width, height: previewCase.size.height)
@@ -115,6 +116,7 @@ public enum Preview {
       allIntegrations: fixture.integrations,
       integrations: fixture.setupIntegrations
     )
+    viewModel.applyAgentTargetStatuses(fixture.agentTargetStatuses)
     return viewModel
   }
 }
@@ -177,6 +179,20 @@ private struct PreviewFixture {
       firstActual("whatsapp", actual) ?? integration("whatsapp", "default", "WhatsApp", "missing", true, nil),
       firstActual("signal", actual) ?? integration("signal", "default", "Signal", "missing", true, nil),
     ]
+  }
+
+  var agentTargetStatuses: [AgentTarget: AgentTargetStatus] {
+    Dictionary(
+      uniqueKeysWithValues: AgentTarget.allCases.map { target in
+        (
+          target,
+          AgentTargetStatus(
+            readiness: .ready,
+            detail: "\(target.title) is ready for preview."
+          )
+        )
+      }
+    )
   }
 
   private var contactsStats: ProjectionStats {
