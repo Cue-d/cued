@@ -462,6 +462,27 @@ struct AppStatusSnapshot {
   let updateSummary: AppUpdateSummary?
 }
 
+enum LaunchPresentation: Equatable {
+  case none
+  case onboarding(forceActivePermissionRefresh: Bool, resetToFirstPage: Bool)
+}
+
+func launchPresentationForCuedOpen(
+  onboardingCompletedVersion: String?,
+  currentVersion: String?,
+  hasPermissionRelaunchSetupIntent: Bool
+) -> LaunchPresentation {
+  if hasPermissionRelaunchSetupIntent {
+    return .onboarding(forceActivePermissionRefresh: true, resetToFirstPage: true)
+  }
+
+  guard onboardingCompletedVersion == currentVersion else {
+    return .onboarding(forceActivePermissionRefresh: false, resetToFirstPage: true)
+  }
+
+  return .none
+}
+
 final class AppStatusStore: @unchecked Sendable {
   private let dbPath: String
 
@@ -1459,7 +1480,7 @@ final class MenuBarAppController: NSObject, NSApplicationDelegate {
   }
 
   func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
-    rootWindowController.showAndRefresh(forceActivePermissionRefresh: true)
+    presentCuedOpen(forceActivePermissionRefreshWhenComplete: true)
     return true
   }
 
@@ -1489,8 +1510,7 @@ final class MenuBarAppController: NSObject, NSApplicationDelegate {
   }
 
   @objc private func handleMenuBarReopenNotification(_ notification: Notification) {
-    rootWindowController.showAndRefresh()
-    NSApp.activate(ignoringOtherApps: true)
+    presentCuedOpen()
   }
 
   @objc private func quitApp() {
@@ -1525,18 +1545,36 @@ final class MenuBarAppController: NSObject, NSApplicationDelegate {
   }
 
   private func openRootWindowIfNeeded() {
-    if consumePermissionRelaunchSetupIntent() {
-      rootWindowController.showAndRefresh(forceActivePermissionRefresh: true)
-      return
-    }
+    presentCuedOpen(showWhenComplete: false)
+  }
 
+  private func presentCuedOpen(
+    showWhenComplete: Bool = true,
+    forceActivePermissionRefreshWhenComplete: Bool = false
+  ) {
     let snapshot = statusStore.readSnapshot()
     let currentVersion = (Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String)
       ?? snapshot.installedAppVersion
-    guard snapshot.setupCompletedVersion != currentVersion else {
-      return
+    let presentation = launchPresentationForCuedOpen(
+      onboardingCompletedVersion: snapshot.setupCompletedVersion,
+      currentVersion: currentVersion,
+      hasPermissionRelaunchSetupIntent: consumePermissionRelaunchSetupIntent()
+    )
+
+    switch presentation {
+    case let .onboarding(forceActivePermissionRefresh, resetToFirstPage):
+      rootWindowController.showAndRefresh(
+        forceActivePermissionRefresh: forceActivePermissionRefresh,
+        resetToFirstPage: resetToFirstPage
+      )
+    case .none:
+      guard showWhenComplete else {
+        return
+      }
+      rootWindowController.showAndRefresh(
+        forceActivePermissionRefresh: forceActivePermissionRefreshWhenComplete
+      )
     }
-    rootWindowController.showAndRefresh()
   }
 
   private func rebuildMenu() {
