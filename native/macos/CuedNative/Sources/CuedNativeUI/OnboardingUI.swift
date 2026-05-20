@@ -226,8 +226,8 @@ public struct InstallerRemovalPrompt: Identifiable {
 
 @MainActor
 public final class OnboardingViewModel: ObservableObject {
-  public static let windowWidth: CGFloat = 630
-  public static let windowHeight: CGFloat = 752
+  nonisolated public static let windowWidth: CGFloat = 630
+  nonisolated public static let windowHeight: CGFloat = 752
 
   @Published public var currentPage = 0
   @Published public var isRefreshing = false
@@ -1537,7 +1537,7 @@ private func installerDefaultPermissionStatuses() -> [InstallerPermissionStatus]
   installerDefaultPermissionOrder.compactMap { installerDefaultPermissionStatus(for: $0) }
 }
 
-private func installerDefaultGlobalSkillStatus() -> InstallerGlobalSkillStatus {
+public func installerDefaultGlobalSkillStatus() -> InstallerGlobalSkillStatus {
   InstallerGlobalSkillStatus(
     installed: false,
     status: "unknown",
