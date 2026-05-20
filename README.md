@@ -6,7 +6,7 @@
 
 Local-only message and contact sync for agents.
 
-[Releases](https://github.com/Cue-d/cued/releases) · [Installing](docs/installing.md) · [Development](docs/development.md) · [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md) · [Privacy](PRIVACY.md)
+[Releases](https://github.com/Cue-d/cued/releases) · [Installing](docs/installing.md) · [Troubleshooting](docs/troubleshooting.md) · [Development](docs/development.md) · [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md) · [Privacy](PRIVACY.md)
 
 ## Project Status
 
@@ -134,6 +134,8 @@ LinkedIn history is currently partial: Cued imports inbox-visible threads and bo
 Discord currently runs in DM-only mode: it discovers direct messages, hydrates up to 50 recent messages in the 5 most recent unproven DMs during sync, uses per-DM message cursors plus snowflake-based pagination to fetch newer messages on later syncs, and continues incomplete historical `messages` proofs with bounded `before` pagination. It stores the captured Discord account token locally in the Keychain. On Discord auth invalidation such as `401` responses or forced password resets, Cued blocks the integration and stops reconnect attempts until you reconnect manually.
 
 Gmail sync is available in official builds. While Google OAuth review is pending, Google may show an unverified-app warning during sign-in; choose the advanced option to continue if you trust the local Cued app. Gmail is read-only and stores account tokens in Keychain.
+
+WhatsApp QR/device linking can hang in some environments. If that happens, use the recovery steps in [docs/troubleshooting.md](docs/troubleshooting.md#whatsapp-qr-or-login-hangs).
 
 ## Install From Source
 

@@ -142,6 +142,7 @@ After `pnpm dev -- install` completes, you can use `cued permissions request --a
 | Contacts prompt does not appear | Re-run `cued permissions request --contacts` or open the Contacts privacy pane with `pnpm permissions:macos -- --contacts --open-only`. |
 | Messages sync cannot read the database | Grant Full Disk Access to `/Applications/Cued.app` or the terminal you are using, then restart Cued. |
 | WhatsApp helper is missing | Rebuild it with `GOWORK=off go build -C native/helpers/whatsapp-go -o .build/cued-whatsapp-helper` or use the packaged app bundle. |
+| WhatsApp QR or login hangs | Collect helper status/logs, restart the helper/app, remove the stale integration, and retry from [Troubleshooting](troubleshooting.md#whatsapp-qr-or-login-hangs). |
 | The setup screen says the app is not installed | Run `pnpm dev -- install` again. |
 
 ## Discord credentials

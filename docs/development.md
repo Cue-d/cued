@@ -78,6 +78,8 @@ cued sync run imessage
 cued sync run contacts
 ```
 
+For WhatsApp QR or login hangs, use [Troubleshooting](troubleshooting.md#whatsapp-qr-or-login-hangs) before changing helper code. Capture helper path/version, daemon logs, integration status, and whether the helper ever reached a durable `accountJid`.
+
 ## Discord development notes
 
 Discord currently uses a Chromium auth capture flow plus local polling for new messages.
