@@ -22,8 +22,6 @@ This folder captures the workflow image iterations and the SwiftUI preview rende
 
 ![Platforms mixed](previews/platforms-mixed.png)
 
-![Automatic bugfixing](previews/automatic-bugfixing.png)
-
 ![Use cases](previews/use-cases.png)
 
 ![Application home](previews/application-home.png)
