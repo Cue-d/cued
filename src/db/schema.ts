@@ -99,6 +99,11 @@ export const syncRuns = sqliteTable("sync_runs", {
   scheduledAt: integer("scheduled_at").notNull(),
   startedAt: integer("started_at"),
   finishedAt: integer("finished_at"),
+  attempt: integer("attempt").notNull(),
+  ownerId: text("owner_id"),
+  leaseExpiresAt: integer("lease_expires_at"),
+  lastProgressAt: integer("last_progress_at"),
+  errorCode: text("error_code"),
   detailsJson: text("details_json"),
 });
 
@@ -212,6 +217,19 @@ export const rawEvents = sqliteTable("raw_events", {
   normalizedSchema: text("normalized_schema"),
   provenanceJson: text("provenance_json"),
   sourceVersion: text("source_version"),
+});
+
+export const rawEventProjectionFailures = sqliteTable("raw_event_projection_failures", {
+  rawEventRowId: integer("raw_event_rowid").primaryKey(),
+  rawEventId: text("raw_event_id").notNull(),
+  platform: textEnum("platform", PLATFORM_VALUES).notNull(),
+  accountKey: text("account_key").notNull(),
+  entityKind: textEnum("entity_kind", RAW_EVENT_ENTITY_KIND_VALUES).notNull(),
+  eventKind: text("event_kind").notNull(),
+  normalizedSchema: text("normalized_schema"),
+  sourceVersion: text("source_version"),
+  errorMessage: text("error_message").notNull(),
+  failedAt: integer("failed_at").notNull(),
 });
 
 export const messageReactions = sqliteTable("message_reactions", {

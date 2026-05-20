@@ -189,6 +189,9 @@ const DAEMON_STATUS_CACHE_MAX_AGE_MS = 30_000;
 const UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
 const UPDATE_SHUTDOWN_GRACE_MS = 30_000;
 const QUEUE_DRAIN_RETRY_DELAY_MS = 1_000;
+const INGEST_RUN_LEASE_MS = 15 * 60_000;
+const PROJECTION_WORKER_TIMEOUT_MS = 30 * 60_000;
+const PROJECTION_RUN_LEASE_MS = PROJECTION_WORKER_TIMEOUT_MS + 5 * 60_000;
 const SIGNAL_SEND_SESSION_WAIT_MS = 3_000;
 const SIGNAL_SEND_ECHO_TIMEOUT_MS = 5_000;
 const WHATSAPP_SEND_SESSION_WAIT_MS = 3_000;
@@ -716,14 +719,35 @@ function runProjectionWorkerProcess(
 
     let stdout = "";
     let stderr = "";
+    let settled = false;
+    const timeout = setTimeout(() => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      child.kill("SIGKILL");
+      reject(new Error(`Projection worker timed out after ${PROJECTION_WORKER_TIMEOUT_MS}ms`));
+    }, PROJECTION_WORKER_TIMEOUT_MS);
     child.stdout.on("data", (chunk) => {
       stdout += chunk.toString("utf8");
     });
     child.stderr.on("data", (chunk) => {
       stderr += chunk.toString("utf8");
     });
-    child.on("error", reject);
+    child.on("error", (error) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      clearTimeout(timeout);
+      reject(error);
+    });
     child.on("exit", (code, signal) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      clearTimeout(timeout);
       const lines = stdout
         .split("\n")
         .map((line) => line.trim())
@@ -1710,6 +1734,7 @@ export async function runDaemon(): Promise<void> {
   }
   const db = openedDb;
   const startedAt = now();
+  const runOwnerId = `daemon:${process.pid}:${startedAt}`;
   const ingestConcurrency = getIngestConcurrency();
   const messageFtsIndexBatchSize = getMessageFtsIndexBatchSize();
   const realtimeProjectionEnabled = getRealtimeProjectionEnabled();
@@ -2690,11 +2715,14 @@ export async function runDaemon(): Promise<void> {
       }
     }
     while (activeIngestRuns.size < ingestConcurrency) {
-      const currentRun = db.claimNextQueuedRun(["sync", "sync_resume"], "ingesting");
+      const currentRun = db.claimNextQueuedRun(["sync", "sync_resume"], "ingesting", {
+        ownerId: runOwnerId,
+        leaseMs: INGEST_RUN_LEASE_MS,
+      });
       if (!currentRun) {
-        const nextScheduledAt = db.getNextQueuedRunScheduledAt(["sync", "sync_resume"]);
-        if (nextScheduledAt != null) {
-          scheduleIngestDrain(Math.max(QUEUE_DRAIN_RETRY_DELAY_MS, nextScheduledAt - now()));
+        const nextClaimableAt = db.getNextClaimableRunAt(["sync", "sync_resume"], "ingesting");
+        if (nextClaimableAt != null) {
+          scheduleIngestDrain(Math.max(QUEUE_DRAIN_RETRY_DELAY_MS, nextClaimableAt - now()));
         }
         break;
       }
@@ -2901,7 +2929,10 @@ export async function runDaemon(): Promise<void> {
       activeIngestRuns.size > 0 ? (["project"] as const) : (["project", "rebuild"] as const);
     try {
       currentRun = db.withBusyTimeoutSync(DAEMON_STATUS_BUSY_TIMEOUT_MS, () =>
-        db.claimNextQueuedRun([...claimableProjectionRunTypes], "projecting"),
+        db.claimNextQueuedRun([...claimableProjectionRunTypes], "projecting", {
+          ownerId: runOwnerId,
+          leaseMs: PROJECTION_RUN_LEASE_MS,
+        }),
       );
     } catch (error) {
       if (!isSqliteBusyError(error)) {
@@ -2915,7 +2946,7 @@ export async function runDaemon(): Promise<void> {
       let nextScheduledAt: number | null = null;
       try {
         nextScheduledAt = db.withBusyTimeoutSync(DAEMON_STATUS_BUSY_TIMEOUT_MS, () =>
-          db.getNextQueuedRunScheduledAt([...claimableProjectionRunTypes]),
+          db.getNextClaimableRunAt([...claimableProjectionRunTypes], "projecting"),
         );
       } catch (error) {
         if (!isSqliteBusyError(error)) {
@@ -3350,7 +3381,7 @@ export async function runDaemon(): Promise<void> {
       });
   };
 
-  db.failInProgressRuns("Recovered stale in-progress sync after daemon restart");
+  db.recoverInProgressRuns();
   const daemonIdentity = getDaemonIdentity();
   daemonLogger.info("daemon starting", {
     pid: process.pid,
@@ -3693,6 +3724,7 @@ export async function runDaemon(): Promise<void> {
     currentRun: NonNullable<ReturnType<typeof db.claimNextQueuedRun>>,
   ) {
     const ingestStartedAt = now();
+    const runClaim = { ownerId: currentRun.owner_id, attempt: currentRun.attempt };
     daemonLogger.info("ingest run started", {
       runId: currentRun.id,
       platform: currentRun.platform,
@@ -3708,11 +3740,20 @@ export async function runDaemon(): Promise<void> {
         db.failRun(
           currentRun.id,
           `Unsupported ingest run target: ${currentRun.run_type}:${currentRun.platform ?? "none"}`,
+          undefined,
+          null,
+          runClaim,
         );
         return;
       }
       if (!isAdapterPlatform(currentRun.platform)) {
-        db.failRun(currentRun.id, `No adapter registered for platform: ${currentRun.platform}`);
+        db.failRun(
+          currentRun.id,
+          `No adapter registered for platform: ${currentRun.platform}`,
+          undefined,
+          null,
+          runClaim,
+        );
         return;
       }
 
@@ -3808,6 +3849,7 @@ export async function runDaemon(): Promise<void> {
         let hasMore = false;
         let lastCompletedAt = now();
         do {
+          db.updateRunProgress(currentRun.id, { leaseMs: INGEST_RUN_LEASE_MS, claim: runClaim });
           const pageFetchStartedAt = now();
           const page = await session.resync({
             cursor,
@@ -3841,6 +3883,7 @@ export async function runDaemon(): Promise<void> {
           const pageInsertStartedAt = now();
           const pageInsertResult = db.insertRawEvents(rawEvents);
           rawEventInsertMs += now() - pageInsertStartedAt;
+          db.updateRunProgress(currentRun.id, { leaseMs: INGEST_RUN_LEASE_MS, claim: runClaim });
           insertResult = {
             insertedCount: insertResult.insertedCount + pageInsertResult.insertedCount,
             insertedEvents: [...insertResult.insertedEvents, ...pageInsertResult.insertedEvents],
@@ -3908,6 +3951,7 @@ export async function runDaemon(): Promise<void> {
           }),
         });
       } else {
+        db.updateRunProgress(currentRun.id, { leaseMs: INGEST_RUN_LEASE_MS, claim: runClaim });
         const bundle =
           platform === "signal"
             ? await runSignalSyncExclusively(
@@ -3916,6 +3960,7 @@ export async function runDaemon(): Promise<void> {
               )
             : await runAdapter(platform, accountKey, envOverrides);
         adapterFetchMs = now() - adapterStartedAt;
+        db.updateRunProgress(currentRun.id, { leaseMs: INGEST_RUN_LEASE_MS, claim: runClaim });
         sourceAccounts = bundle.sourceAccounts as typeof sourceAccounts;
         bundleSourceCursor =
           (bundle.sourceCursor as Record<string, unknown> | undefined | null) ?? null;
@@ -4087,16 +4132,20 @@ export async function runDaemon(): Promise<void> {
           endRowId: insertResult.lastInsertedRowId,
         });
       }
-      db.finishRun(currentRun.id, {
-        ingested: ingestedCount,
-        insertedRawEvents: insertResult.insertedCount,
-        projectionQueued,
-        hasMore: bundleHasMore,
-        syncMode: checkpointSyncMode,
-        timings,
-        ...(bundleContinuation ? { continuation: bundleContinuation } : {}),
-        ...(runDiagnostics ? { diagnostics: runDiagnostics } : {}),
-      });
+      db.finishRun(
+        currentRun.id,
+        {
+          ingested: ingestedCount,
+          insertedRawEvents: insertResult.insertedCount,
+          projectionQueued,
+          hasMore: bundleHasMore,
+          syncMode: checkpointSyncMode,
+          timings,
+          ...(bundleContinuation ? { continuation: bundleContinuation } : {}),
+          ...(runDiagnostics ? { diagnostics: runDiagnostics } : {}),
+        },
+        runClaim,
+      );
       if (platform === "signal") {
         requestSignalRealtimeReconcile();
       }
@@ -4162,7 +4211,7 @@ export async function runDaemon(): Promise<void> {
         );
         requestDiscordRealtimeReconcile();
       }
-      db.failRun(currentRun.id, errorMessage);
+      db.failRun(currentRun.id, errorMessage, undefined, null, runClaim);
       if (currentRun.platform === "signal") {
         requestSignalRealtimeReconcile();
       }
@@ -4179,6 +4228,7 @@ export async function runDaemon(): Promise<void> {
   const processProjectionRun = async (
     currentRun: NonNullable<ReturnType<typeof db.claimNextQueuedRun>>,
   ) => {
+    const runClaim = { ownerId: currentRun.owner_id, attempt: currentRun.attempt };
     try {
       const projectionBacklogBeforeRun = db.withBusyTimeoutSync(DAEMON_STATUS_BUSY_TIMEOUT_MS, () =>
         db.getProjectionBacklog(),
@@ -4193,10 +4243,12 @@ export async function runDaemon(): Promise<void> {
         pendingRawEvents: projectionBacklogBeforeRun.pending_raw_events,
         projectionBatchSize: adaptiveProjectionBatchSize,
       });
+      db.updateRunProgress(currentRun.id, { leaseMs: PROJECTION_RUN_LEASE_MS, claim: runClaim });
       const workerResult = await runProjectionWorkerProcess(
         currentRun,
         adaptiveProjectionBatchSize,
       );
+      db.updateRunProgress(currentRun.id, { leaseMs: PROJECTION_RUN_LEASE_MS, claim: runClaim });
       const {
         projected,
         timings,
@@ -4277,7 +4329,13 @@ export async function runDaemon(): Promise<void> {
         runType: currentRun.run_type,
         error: error instanceof Error ? error.message : String(error),
       });
-      db.failRun(currentRun.id, error instanceof Error ? error.message : String(error));
+      db.failRun(
+        currentRun.id,
+        error instanceof Error ? error.message : String(error),
+        undefined,
+        null,
+        runClaim,
+      );
       await safeEmitHookEvent("sync.failed", {
         runId: currentRun.id,
         platform: currentRun.platform,

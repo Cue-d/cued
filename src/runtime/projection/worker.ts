@@ -32,6 +32,7 @@ function now(): number {
 export async function runProjectionWorker(run: QueuedSyncRun): Promise<ProjectionWorkerSuccess> {
   const db = openCuedDatabase();
   const projectionStartedAt = now();
+  const runClaim = { ownerId: run.owner_id, attempt: run.attempt };
   try {
     const projectionDetails = parseProjectionRunDetails(run.details_json);
     const projectionBatchSize = Number(process.env.CUED_PROJECTION_BATCH_SIZE || "25");
@@ -65,11 +66,18 @@ export async function runProjectionWorker(run: QueuedSyncRun): Promise<Projectio
     };
     const deferredProjected =
       run.run_type === "project" ? (projected as ReturnType<typeof projectDeferredRange>) : null;
-    db.finishRun(run.id, {
-      projected,
-      timings,
-      range: projectionDetails,
-    });
+    const finished = db.finishRun(
+      run.id,
+      {
+        projected,
+        timings,
+        range: projectionDetails,
+      },
+      runClaim,
+    );
+    if (!finished) {
+      throw new Error(`Projection run ${run.id} lost ownership before completion`);
+    }
     const projectedRangeStart =
       deferredProjected?.rangeStartRowId ?? projectionDetails?.startRowId ?? null;
     const projectedRangeEnd =
@@ -89,7 +97,13 @@ export async function runProjectionWorker(run: QueuedSyncRun): Promise<Projectio
       projectedRangeEnd,
     };
   } catch (error) {
-    db.failRun(run.id, error instanceof Error ? error.message : String(error));
+    db.failRun(
+      run.id,
+      error instanceof Error ? error.message : String(error),
+      undefined,
+      null,
+      runClaim,
+    );
     throw error;
   } finally {
     db.close();

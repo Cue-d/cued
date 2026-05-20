@@ -64,6 +64,7 @@ const {
   messages,
   outboundMessages,
   projectionState,
+  rawEventProjectionFailures,
   rawEvents,
   sourceAccounts,
   slackBackfillProofs,
@@ -107,7 +108,16 @@ export interface QueuedSyncRun {
   queued_at: number;
   scheduled_at: number;
   started_at: number | null;
+  attempt: number;
+  owner_id: string | null;
+  lease_expires_at: number | null;
+  last_progress_at: number | null;
   details_json: string | null;
+}
+
+export interface SyncRunClaim {
+  ownerId: string | null;
+  attempt: number;
 }
 
 export interface QueuedJob {
@@ -3206,6 +3216,23 @@ export class CuedDatabase {
     });
   }
 
+  recoverInProgressRuns(errorCode = "daemon_recovered"): number {
+    const timestamp = now();
+    const result = this.db
+      .update(syncRuns)
+      .set({
+        status: "queued",
+        scheduledAt: timestamp,
+        ownerId: null,
+        leaseExpiresAt: null,
+        lastProgressAt: timestamp,
+        errorCode,
+      })
+      .where(sql`${syncRuns.status} IN ('ingesting', 'projecting')`)
+      .run();
+    return Number(result.changes);
+  }
+
   queueSyncRun(input: {
     platform?: Platform | null;
     accountKey?: string | null;
@@ -3235,6 +3262,11 @@ export class CuedDatabase {
         scheduledAt,
         startedAt: null,
         finishedAt: null,
+        attempt: 0,
+        ownerId: null,
+        leaseExpiresAt: null,
+        lastProgressAt: null,
+        errorCode: null,
         detailsJson: safeStringifyJson(input.details),
       })
       .run();
@@ -3279,6 +3311,11 @@ export class CuedDatabase {
             scheduledAt,
             startedAt: null,
             finishedAt: null,
+            attempt: 0,
+            ownerId: null,
+            leaseExpiresAt: null,
+            lastProgressAt: null,
+            errorCode: null,
             detailsJson: safeStringifyJson(input.details),
           };
         });
@@ -3785,13 +3822,24 @@ export class CuedDatabase {
   claimNextQueuedRun(
     runTypes?: SyncRunType[],
     nextStatus: SyncRunStatus = "ingesting",
+    options: { ownerId?: string; leaseMs?: number } = {},
   ): QueuedSyncRun | null {
+    const timestamp = now();
     return this.db.transaction((tx) => {
-      const statusPredicate =
-        runTypes && runTypes.length > 0
-          ? and(eq(syncRuns.status, "queued"), inArray(syncRuns.runType, runTypes))
-          : eq(syncRuns.status, "queued");
-      const claimablePredicate = and(statusPredicate, sql`${syncRuns.scheduledAt} <= ${now()}`);
+      const typePredicate =
+        runTypes && runTypes.length > 0 ? inArray(syncRuns.runType, runTypes) : sql`1 = 1`;
+      const activeStatus = nextStatus === "projecting" ? "projecting" : "ingesting";
+      const claimablePredicate = and(
+        typePredicate,
+        sql`(
+          (${syncRuns.status} = 'queued' AND ${syncRuns.scheduledAt} <= ${timestamp})
+          OR (
+            ${syncRuns.status} = ${activeStatus}
+            AND ${syncRuns.leaseExpiresAt} IS NOT NULL
+            AND ${syncRuns.leaseExpiresAt} <= ${timestamp}
+          )
+        )`,
+      );
 
       const row = tx
         .select({
@@ -3804,6 +3852,10 @@ export class CuedDatabase {
           queued_at: syncRuns.queuedAt,
           scheduled_at: syncRuns.scheduledAt,
           started_at: syncRuns.startedAt,
+          attempt: syncRuns.attempt,
+          owner_id: syncRuns.ownerId,
+          lease_expires_at: syncRuns.leaseExpiresAt,
+          last_progress_at: syncRuns.lastProgressAt,
           details_json: syncRuns.detailsJson,
         })
         .from(syncRuns)
@@ -3821,6 +3873,10 @@ export class CuedDatabase {
             queued_at: number;
             scheduled_at: number;
             started_at: number | null;
+            attempt: number;
+            owner_id: string | null;
+            lease_expires_at: number | null;
+            last_progress_at: number | null;
             details_json: string | null;
           }
         | undefined;
@@ -3829,13 +3885,32 @@ export class CuedDatabase {
         return null;
       }
 
-      const startedAt = now();
+      const startedAt = row.started_at ?? timestamp;
+      const leaseExpiresAt =
+        options.leaseMs == null ? null : timestamp + Math.max(1, Math.trunc(options.leaseMs));
+      const ownerId = options.ownerId ?? null;
       tx.update(syncRuns)
-        .set({ status: nextStatus, startedAt })
+        .set({
+          status: nextStatus,
+          startedAt,
+          attempt: row.attempt + 1,
+          ownerId,
+          leaseExpiresAt,
+          lastProgressAt: timestamp,
+          errorCode: null,
+        })
         .where(eq(syncRuns.id, row.id))
         .run();
 
-      return { ...row, status: nextStatus, started_at: startedAt };
+      return {
+        ...row,
+        status: nextStatus,
+        started_at: startedAt,
+        attempt: row.attempt + 1,
+        owner_id: ownerId,
+        lease_expires_at: leaseExpiresAt,
+        last_progress_at: timestamp,
+      };
     });
   }
 
@@ -3854,6 +3929,48 @@ export class CuedDatabase {
     return row?.scheduled_at ?? null;
   }
 
+  getNextClaimableRunAt(
+    runTypes?: SyncRunType[],
+    activeStatus: SyncRunStatus = "ingesting",
+  ): number | null {
+    const typePredicate =
+      runTypes && runTypes.length > 0 ? inArray(syncRuns.runType, runTypes) : sql`1 = 1`;
+    const row = this.db
+      .select({
+        next_at: sql<number>`MIN(
+          CASE
+            WHEN ${syncRuns.status} = 'queued' THEN ${syncRuns.scheduledAt}
+            WHEN ${syncRuns.status} = ${activeStatus} THEN ${syncRuns.leaseExpiresAt}
+          END
+        )`,
+      })
+      .from(syncRuns)
+      .where(
+        and(
+          typePredicate,
+          sql`(
+            ${syncRuns.status} = 'queued'
+            OR (${syncRuns.status} = ${activeStatus} AND ${syncRuns.leaseExpiresAt} IS NOT NULL)
+          )`,
+        ),
+      )
+      .get() as { next_at: number | null } | undefined;
+    return row?.next_at ?? null;
+  }
+
+  private syncRunClaimPredicate(runId: string, claim?: SyncRunClaim) {
+    const predicates = [eq(syncRuns.id, runId)];
+    if (claim) {
+      predicates.push(eq(syncRuns.attempt, claim.attempt));
+      predicates.push(
+        claim.ownerId == null
+          ? sql`${syncRuns.ownerId} IS NULL`
+          : eq(syncRuns.ownerId, claim.ownerId),
+      );
+    }
+    return and(...predicates);
+  }
+
   updateRunStatus(runId: string, status: SyncRunStatus, details?: unknown): void {
     const values: {
       status: SyncRunStatus;
@@ -3869,24 +3986,59 @@ export class CuedDatabase {
     this.db.update(syncRuns).set(values).where(eq(syncRuns.id, runId)).run();
   }
 
-  finishRun(runId: string, details?: unknown): void {
+  updateRunProgress(
+    runId: string,
+    input: { details?: unknown; leaseMs?: number; claim?: SyncRunClaim } = {},
+  ): boolean {
+    const timestamp = now();
+    const result = this.db
+      .update(syncRuns)
+      .set({
+        lastProgressAt: timestamp,
+        leaseExpiresAt:
+          input.leaseMs == null ? undefined : timestamp + Math.max(1, Math.trunc(input.leaseMs)),
+        detailsJson: input.details === undefined ? undefined : safeStringifyJson(input.details),
+      })
+      .where(this.syncRunClaimPredicate(runId, input.claim))
+      .run();
+    return Number(result.changes) > 0;
+  }
+
+  finishRun(runId: string, details?: unknown, claim?: SyncRunClaim): boolean {
     const values: {
       status: SyncRunStatus;
       finishedAt: number;
+      ownerId: null;
+      leaseExpiresAt: null;
+      lastProgressAt: number;
+      errorCode: null;
       detailsJson?: string | null;
     } =
       details === undefined
         ? {
             status: "completed",
             finishedAt: now(),
+            ownerId: null,
+            leaseExpiresAt: null,
+            lastProgressAt: now(),
+            errorCode: null,
           }
         : {
             status: "completed",
             finishedAt: now(),
+            ownerId: null,
+            leaseExpiresAt: null,
+            lastProgressAt: now(),
+            errorCode: null,
             detailsJson: safeStringifyJson(details),
           };
 
-    this.db.update(syncRuns).set(values).where(eq(syncRuns.id, runId)).run();
+    const result = this.db
+      .update(syncRuns)
+      .set(values)
+      .where(this.syncRunClaimPredicate(runId, claim))
+      .run();
+    return Number(result.changes) > 0;
   }
 
   getLatestFinishedSyncRun(
@@ -3926,7 +4078,14 @@ export class CuedDatabase {
     );
   }
 
-  failRun(runId: string, errorMessage: string, details?: unknown): void {
+  failRun(
+    runId: string,
+    errorMessage: string,
+    details?: unknown,
+    errorCode?: string | null,
+    claim?: SyncRunClaim,
+  ): boolean {
+    let updated = false;
     this.db.transaction((tx) => {
       const run = tx
         .select({
@@ -3939,20 +4098,40 @@ export class CuedDatabase {
       const values: {
         status: SyncRunStatus;
         finishedAt: number;
+        ownerId: null;
+        leaseExpiresAt: null;
+        lastProgressAt: number;
+        errorCode: string | null;
         detailsJson?: string | null;
       } =
         details === undefined
           ? {
               status: "failed",
               finishedAt: now(),
+              ownerId: null,
+              leaseExpiresAt: null,
+              lastProgressAt: now(),
+              errorCode: errorCode ?? null,
             }
           : {
               status: "failed",
               finishedAt: now(),
+              ownerId: null,
+              leaseExpiresAt: null,
+              lastProgressAt: now(),
+              errorCode: errorCode ?? null,
               detailsJson: safeStringifyJson(details),
             };
 
-      tx.update(syncRuns).set(values).where(eq(syncRuns.id, runId)).run();
+      const result = tx
+        .update(syncRuns)
+        .set(values)
+        .where(this.syncRunClaimPredicate(runId, claim))
+        .run();
+      updated = Number(result.changes) > 0;
+      if (!updated) {
+        return;
+      }
 
       tx.insert(syncRunErrors)
         .values({
@@ -3960,12 +4139,14 @@ export class CuedDatabase {
           syncRunId: runId,
           platform: run?.platform ?? null,
           accountKey: run?.accountKey ?? null,
+          errorCode: errorCode ?? null,
           errorMessage,
           detailsJson: safeStringifyJson(details),
           createdAt: now(),
         })
         .run();
     });
+    return updated;
   }
 
   getLatestSyncRunError(
@@ -4239,6 +4420,43 @@ export class CuedDatabase {
     };
   }
 
+  quarantineRawEventProjectionFailure(
+    event: {
+      rowid: number;
+      id: string;
+      platform: Platform;
+      account_key: string;
+      entity_kind: RawEventEntityKind;
+      event_kind: string;
+      normalized_schema: string | null;
+      source_version: string | null;
+    },
+    error: unknown,
+  ): void {
+    this.db
+      .insert(rawEventProjectionFailures)
+      .values({
+        rawEventRowId: event.rowid,
+        rawEventId: event.id,
+        platform: event.platform,
+        accountKey: event.account_key,
+        entityKind: event.entity_kind,
+        eventKind: event.event_kind,
+        normalizedSchema: event.normalized_schema,
+        sourceVersion: event.source_version,
+        errorMessage: error instanceof Error ? error.message : String(error),
+        failedAt: now(),
+      })
+      .onConflictDoUpdate({
+        target: rawEventProjectionFailures.rawEventRowId,
+        set: {
+          errorMessage: error instanceof Error ? error.message : String(error),
+          failedAt: now(),
+        },
+      })
+      .run();
+  }
+
   listRawEvents(): Array<{
     id: string;
     platform: Platform;
@@ -4431,6 +4649,10 @@ export class CuedDatabase {
           queued_at: syncRuns.queuedAt,
           scheduled_at: syncRuns.scheduledAt,
           started_at: syncRuns.startedAt,
+          attempt: syncRuns.attempt,
+          owner_id: syncRuns.ownerId,
+          lease_expires_at: syncRuns.leaseExpiresAt,
+          last_progress_at: syncRuns.lastProgressAt,
           details_json: syncRuns.detailsJson,
         })
         .from(syncRuns)

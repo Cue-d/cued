@@ -936,6 +936,11 @@ export const MIGRATIONS: Migration[] = [
         scheduled_at INTEGER NOT NULL DEFAULT 0,
         started_at INTEGER,
         finished_at INTEGER,
+        attempt INTEGER NOT NULL DEFAULT 0,
+        owner_id TEXT,
+        lease_expires_at INTEGER,
+        last_progress_at INTEGER,
+        error_code TEXT,
         details_json TEXT
       );
 
@@ -2158,6 +2163,70 @@ export const MIGRATIONS: Migration[] = [
           ON timeline_events(conversation_id, event_kind, event_at DESC, updated_at DESC, id DESC);
         `);
       }
+    },
+  },
+  {
+    id: "0019_harden_sync_runs",
+    apply: (db) => {
+      if (!tableExists(db, "sync_runs")) {
+        return;
+      }
+
+      addColumnIfMissing(db, "sync_runs", "attempt INTEGER NOT NULL DEFAULT 0");
+      addColumnIfMissing(db, "sync_runs", "owner_id TEXT");
+      addColumnIfMissing(db, "sync_runs", "lease_expires_at INTEGER");
+      addColumnIfMissing(db, "sync_runs", "last_progress_at INTEGER");
+      addColumnIfMissing(db, "sync_runs", "error_code TEXT");
+      db.exec(`
+        UPDATE sync_runs
+        SET attempt = COALESCE(attempt, 0)
+        WHERE attempt IS NULL;
+
+        UPDATE sync_runs
+        SET
+          status = 'queued',
+          scheduled_at = strftime('%s','now') * 1000,
+          owner_id = NULL,
+          lease_expires_at = NULL,
+          last_progress_at = COALESCE(last_progress_at, started_at, queued_at),
+          error_code = 'daemon_recovered'
+        WHERE status IN ('ingesting', 'projecting');
+
+        DROP INDEX IF EXISTS idx_sync_runs_status_type_queue;
+        DROP INDEX IF EXISTS idx_sync_runs_platform_account_status_queue;
+        DROP INDEX IF EXISTS idx_sync_runs_owner_lease;
+
+        CREATE INDEX IF NOT EXISTS idx_sync_runs_status_type_queue
+        ON sync_runs(status, run_type, scheduled_at, queued_at);
+
+        CREATE INDEX IF NOT EXISTS idx_sync_runs_platform_account_status_queue
+        ON sync_runs(platform, account_key, status, scheduled_at, queued_at);
+
+        CREATE INDEX IF NOT EXISTS idx_sync_runs_owner_lease
+        ON sync_runs(owner_id, lease_expires_at);
+      `);
+    },
+  },
+  {
+    id: "0020_raw_event_projection_failures",
+    apply: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS raw_event_projection_failures (
+          raw_event_rowid INTEGER PRIMARY KEY,
+          raw_event_id TEXT NOT NULL,
+          platform TEXT NOT NULL,
+          account_key TEXT NOT NULL,
+          entity_kind TEXT NOT NULL,
+          event_kind TEXT NOT NULL,
+          normalized_schema TEXT,
+          source_version TEXT,
+          error_message TEXT NOT NULL,
+          failed_at INTEGER NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_raw_event_projection_failures_platform
+        ON raw_event_projection_failures(platform, account_key, failed_at);
+      `);
     },
   },
 ];
