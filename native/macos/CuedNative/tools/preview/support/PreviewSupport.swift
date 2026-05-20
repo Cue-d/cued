@@ -45,10 +45,14 @@ public enum Preview {
   )
 
   public static let cases: [PreviewCase] = [
-    PreviewCase(name: "permissions-missing", page: 0),
-    PreviewCase(name: "permissions-granted", page: 0),
-    PreviewCase(name: "platforms-fresh", page: 1),
-    PreviewCase(name: "platforms-mixed", page: 1),
+    PreviewCase(name: "welcome", page: 0),
+    PreviewCase(name: "permissions-missing", page: 1),
+    PreviewCase(name: "permissions-granted", page: 1),
+    PreviewCase(name: "platforms-fresh", page: 2),
+    PreviewCase(name: "platforms-mixed", page: 2),
+    PreviewCase(name: "automatic-bugfixing", page: 3),
+    PreviewCase(name: "use-cases", page: 4),
+    PreviewCase(name: "application-home", page: 5),
   ]
 
   @MainActor
