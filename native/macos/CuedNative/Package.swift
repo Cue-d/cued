@@ -8,14 +8,14 @@ let package = Package(
     .macOS(.v13),
   ],
   products: [
-    .library(name: "CuedNativeUI", type: .dynamic, targets: ["CuedNativeUI"]),
-    .executable(name: "onboarding-preview", targets: ["Preview"]),
+    .library(name: "Interface", type: .dynamic, targets: ["Interface"]),
+    .executable(name: "preview", targets: ["Preview"]),
     .executable(name: "CuedNative", targets: ["CuedNative"]),
   ],
   targets: [
     .target(
-      name: "CuedNativeUI",
-      path: "Sources/CuedNativeUI",
+      name: "Interface",
+      path: "Sources/Interface",
       resources: [
         .process("Resources"),
       ],
@@ -25,7 +25,7 @@ let package = Package(
     ),
     .executableTarget(
       name: "CuedNative",
-      dependencies: ["CuedNativeUI"],
+      dependencies: ["Interface"],
       path: "Sources/CuedNative",
       swiftSettings: [
         .unsafeFlags(["-parse-as-library"]),
@@ -36,8 +36,8 @@ let package = Package(
     ),
     .target(
       name: "PreviewSupport",
-      dependencies: ["CuedNativeUI"],
-      path: "tools/onboarding-preview/support",
+      dependencies: ["Interface"],
+      path: "tools/preview/support",
       linkerSettings: [
         .linkedFramework("AppKit"),
         .linkedFramework("SwiftUI"),
@@ -46,11 +46,11 @@ let package = Package(
     .executableTarget(
       name: "Preview",
       dependencies: ["PreviewSupport"],
-      path: "tools/onboarding-preview/source"
+      path: "tools/preview/source"
     ),
     .testTarget(
       name: "CuedNativeTests",
-      dependencies: ["CuedNative", "CuedNativeUI", "PreviewSupport"],
+      dependencies: ["CuedNative", "Interface", "PreviewSupport"],
       path: "Tests/CuedNativeTests"
     ),
   ]

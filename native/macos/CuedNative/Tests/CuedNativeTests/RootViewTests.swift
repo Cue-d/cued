@@ -1,63 +1,68 @@
 import XCTest
 @testable import CuedNative
-@testable import CuedNativeUI
+@testable import Interface
 
-final class OnboardingUITests: XCTestCase {
+final class RootViewTests: XCTestCase {
   func testPermissionKeyMappingMatchesExpectedFlags() {
-    XCTAssertEqual(onboardingPermissionKeys(for: ["--contacts"]), ["contacts"])
-    XCTAssertEqual(onboardingPermissionKeys(for: ["--full-disk-access"]), ["full_disk_access"])
+    XCTAssertEqual(permissionKeys(for: ["--contacts"]), ["contacts"])
+    XCTAssertEqual(permissionKeys(for: ["--full-disk-access"]), ["full_disk_access"])
+    XCTAssertEqual(permissionKeys(for: ["--messages"]), ["messages_automation"])
     XCTAssertEqual(
-      onboardingPermissionKeys(for: ["--all"]),
+      permissionKeys(for: ["--all"]),
       ["contacts", "full_disk_access"]
     )
   }
 
-  func testPermissionRefreshRetryIsScheduledForLiveVerifiableRequests() {
-    XCTAssertFalse(onboardingShouldRetryPermissionRefresh(for: ["--contacts"]))
-    XCTAssertTrue(onboardingShouldRetryPermissionRefresh(for: ["--full-disk-access"]))
-    XCTAssertTrue(onboardingShouldRetryPermissionRefresh(for: ["--all"]))
-  }
-
   func testActivePermissionRefreshIsForcedForLiveVerifiableRequests() {
-    XCTAssertFalse(onboardingShouldRefreshPermissionsActively(for: ["--contacts"]))
-    XCTAssertTrue(onboardingShouldRefreshPermissionsActively(for: ["--full-disk-access"]))
-    XCTAssertTrue(onboardingShouldRefreshPermissionsActively(for: ["--all"]))
+    XCTAssertFalse(shouldActivelyRefreshPermissions(for: ["--contacts"]))
+    XCTAssertTrue(shouldActivelyRefreshPermissions(for: ["--full-disk-access"]))
+    XCTAssertTrue(shouldActivelyRefreshPermissions(for: ["--messages"]))
+    XCTAssertTrue(shouldActivelyRefreshPermissions(for: ["--all"]))
   }
 
   func testPermissionGuideURLsMatchExpectedSystemSettingsPanes() {
     XCTAssertEqual(
-      onboardingPermissionGuideURL(for: "contacts"),
+      permissionGuideURL(for: "contacts"),
       "x-apple.systempreferences:com.apple.preference.security?Privacy_Contacts"
     )
     XCTAssertEqual(
-      onboardingPermissionGuideURL(for: "full_disk_access"),
+      permissionGuideURL(for: "full_disk_access"),
       "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles"
     )
-    XCTAssertNil(onboardingPermissionGuideURL(for: "missing"))
+    XCTAssertEqual(
+      permissionGuideURL(for: "messages_automation"),
+      "x-apple.systempreferences:com.apple.preference.security?Privacy_Automation"
+    )
+    XCTAssertNil(permissionGuideURL(for: "missing"))
   }
 
   func testOnlyFullDiskAccessUsesDragGuide() {
-    XCTAssertFalse(onboardingPermissionGuideUsesDragSource(for: "contacts"))
-    XCTAssertTrue(onboardingPermissionGuideUsesDragSource(for: "full_disk_access"))
+    XCTAssertFalse(permissionGuideUsesDragSource(for: "contacts"))
+    XCTAssertTrue(permissionGuideUsesDragSource(for: "full_disk_access"))
+    XCTAssertFalse(permissionGuideUsesDragSource(for: "messages_automation"))
   }
 
   func testPermissionGuideInstructionCopyMatchesPanelBehavior() {
     XCTAssertEqual(
-      onboardingPermissionGuideInstructionSentence(for: .fullDiskAccess, hostAppName: "Cued"),
+      permissionGuideInstructionSentence(for: .fullDiskAccess, hostAppName: "Cued"),
       "Drag Cued to the list above to allow Full Disk Access."
     )
     XCTAssertEqual(
-      onboardingPermissionGuideInstructionSentence(for: .contacts, hostAppName: "Cued"),
+      permissionGuideInstructionSentence(for: .contacts, hostAppName: "Cued"),
       "Enable Cued in the list above to allow Contacts."
+    )
+    XCTAssertEqual(
+      permissionGuideInstructionSentence(for: .messagesAutomation, hostAppName: "Cued"),
+      "Enable Cued in the list above to allow Messages automation."
     )
   }
 
   func testPermissionGuideStaysVisibleAcrossRefreshUntilPermissionIsGranted() {
     XCTAssertFalse(
-      onboardingShouldDismissPermissionGuide(
+      shouldDismissPermissionGuide(
         activePermissionKey: "full_disk_access",
         permissions: [
-          InstallerPermissionStatus(
+          PermissionStatus(
             key: "full_disk_access",
             status: "unknown",
             summary: "Waiting",
@@ -68,10 +73,10 @@ final class OnboardingUITests: XCTestCase {
     )
 
     XCTAssertTrue(
-      onboardingShouldDismissPermissionGuide(
+      shouldDismissPermissionGuide(
         activePermissionKey: "full_disk_access",
         permissions: [
-          InstallerPermissionStatus(
+          PermissionStatus(
             key: "full_disk_access",
             status: "granted",
             summary: "Granted",
@@ -82,7 +87,7 @@ final class OnboardingUITests: XCTestCase {
     )
 
     XCTAssertTrue(
-      onboardingShouldDismissPermissionGuide(
+      shouldDismissPermissionGuide(
         activePermissionKey: "full_disk_access",
         permissions: []
       )
@@ -91,14 +96,14 @@ final class OnboardingUITests: XCTestCase {
 
   func testPermissionGuideFrameComparisonDetectsResizeWithoutMovement() {
     XCTAssertTrue(
-      onboardingPermissionGuideFrameIsApproximatelyEqual(
+      permissionGuideFrameIsApproximatelyEqual(
         CGRect(x: 120, y: 80, width: 420, height: 126),
         CGRect(x: 120.4, y: 80.4, width: 420.3, height: 126.2)
       )
     )
 
     XCTAssertFalse(
-      onboardingPermissionGuideFrameIsApproximatelyEqual(
+      permissionGuideFrameIsApproximatelyEqual(
         CGRect(x: 120, y: 80, width: 420, height: 126),
         CGRect(x: 120, y: 80, width: 470, height: 126)
       )

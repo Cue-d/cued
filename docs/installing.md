@@ -2,7 +2,7 @@
 
 This guide covers both supported install paths: the normal GitHub Releases flow for users, and the source build flow for contributors.
 
-Recommended path: install from [GitHub Releases](https://github.com/Cue-d/cued/releases), open `Cued.app`, complete onboarding, then use the CLI once `~/.local/bin/cued` exists.
+Recommended path: install from [GitHub Releases](https://github.com/Cue-d/cued/releases), open `Cued.app`, complete setup, then use the CLI once `~/.local/bin/cued` exists.
 
 ## What gets installed
 
@@ -23,9 +23,9 @@ This is the default path for most users.
 2. Download the latest `Cued.dmg`.
 3. Drag `Cued.app` into `/Applications`.
 4. Open `Cued.app`.
-5. Complete onboarding and approve the requested permissions.
+5. Complete setup and approve the requested permissions.
 
-The app onboarding flow can configure the CLI symlink and login item automatically, so a DMG install does not require a terminal first.
+The app setup flow can configure the CLI symlink and login item automatically, so a DMG install does not require a terminal first.
 
 ### Option 2: terminal installer
 
@@ -44,7 +44,7 @@ If `~/.local/bin` is not on your `PATH`, add it before using `cued` from the ter
 
 ## Grant macOS permissions
 
-From the DMG flow, you can do this directly in the app onboarding flow. From the terminal installer flow, you can use either the app onboarding flow or the CLI:
+From the DMG flow, you can do this directly in the app setup flow. From the terminal installer flow, you can use either the app setup flow or the CLI:
 
 ```bash
 cued permissions request --all
@@ -59,7 +59,7 @@ macOS does not allow Cued to self-grant Full Disk Access. You must manually add 
 
 ## Finish setup
 
-If you installed from the DMG and stayed in the app UI, continue through onboarding. If you want the CLI-driven setup screen after the symlink exists, run:
+If you installed from the DMG and stayed in the app UI, continue through setup. If you want the CLI-driven setup screen after the symlink exists, run:
 
 ```bash
 cued setup
