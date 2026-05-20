@@ -37,7 +37,7 @@ private func configuredMenuBarStatusPath() -> String {
   "\(configuredCuedHomePath())/menu-bar-status.json"
 }
 
-private func bundledNativeHelperPath() -> String? {
+private func bundledHelperPath() -> String? {
   guard let resourcePath = Bundle.main.resourcePath?.trimmingCharacters(in: .whitespacesAndNewlines),
         !resourcePath.isEmpty else {
     return nil
@@ -448,22 +448,17 @@ struct AppUpdateSummary {
 struct AppStatusSnapshot {
   let daemonRunning: Bool
   let daemonPID: Int?
-  let daemonUpdatedAt: Int?
   let contacts: Int
   let conversations: Int
   let messages: Int
-  let rawEvents: Int
   let capturedRawEvents: Int
   let projectedMessages: Int
   let pendingProjectionEvents: Int
   let pendingSearchIndexMessages: Int
-  let failedSearchIndexMessages: Int
   let messageBreakdown: [AppPlatformMessageCount]
   let integrations: [AppIntegrationStatus]
-  let onboardingCompletedVersion: String?
+  let setupCompletedVersion: String?
   let installedAppVersion: String?
-  let releaseChannel: String?
-  let cliSymlinkInstalled: Bool
   let updateSummary: AppUpdateSummary?
 }
 
@@ -480,22 +475,17 @@ final class AppStatusStore: @unchecked Sendable {
       return AppStatusSnapshot(
         daemonRunning: daemonLockState.running,
         daemonPID: daemonLockState.pid,
-        daemonUpdatedAt: daemonLockState.updatedAt,
         contacts: 0,
         conversations: 0,
         messages: 0,
-        rawEvents: 0,
         capturedRawEvents: 0,
         projectedMessages: 0,
         pendingProjectionEvents: 0,
         pendingSearchIndexMessages: 0,
-        failedSearchIndexMessages: 0,
         messageBreakdown: [],
         integrations: [],
-        onboardingCompletedVersion: nil,
+        setupCompletedVersion: nil,
         installedAppVersion: nil,
-        releaseChannel: nil,
-        cliSymlinkInstalled: false,
         updateSummary: nil
       )
     }
@@ -511,22 +501,17 @@ final class AppStatusStore: @unchecked Sendable {
       return AppStatusSnapshot(
         daemonRunning: daemonLockState.running,
         daemonPID: daemonLockState.pid,
-        daemonUpdatedAt: daemonLockState.updatedAt,
         contacts: 0,
         conversations: 0,
         messages: 0,
-        rawEvents: 0,
         capturedRawEvents: 0,
         projectedMessages: 0,
         pendingProjectionEvents: 0,
         pendingSearchIndexMessages: 0,
-        failedSearchIndexMessages: 0,
         messageBreakdown: [],
         integrations: [],
-        onboardingCompletedVersion: nil,
+        setupCompletedVersion: nil,
         installedAppVersion: nil,
-        releaseChannel: nil,
-        cliSymlinkInstalled: false,
         updateSummary: nil
       )
     }
@@ -550,22 +535,17 @@ final class AppStatusStore: @unchecked Sendable {
     return AppStatusSnapshot(
       daemonRunning: daemonState.running,
       daemonPID: daemonState.pid,
-      daemonUpdatedAt: daemonState.updatedAt,
       contacts: counts[0],
       conversations: counts[1],
       messages: counts[2],
-      rawEvents: counts[3],
       capturedRawEvents: counts[3],
       projectedMessages: counts[2],
       pendingProjectionEvents: 0,
       pendingSearchIndexMessages: 0,
-      failedSearchIndexMessages: 0,
       messageBreakdown: messageBreakdown,
       integrations: integrations,
-      onboardingCompletedVersion: queryAppSetting(db: db, key: "onboarding_completed_version"),
+      setupCompletedVersion: queryAppSetting(db: db, key: "onboarding_completed_version"),
       installedAppVersion: queryAppSetting(db: db, key: "installed_app_version"),
-      releaseChannel: queryAppSetting(db: db, key: "release_channel"),
-      cliSymlinkInstalled: queryAppSetting(db: db, key: "cli_symlink_installed") == "1",
       updateSummary: updateSummary
     )
   }
@@ -612,22 +592,17 @@ final class AppStatusStore: @unchecked Sendable {
     return AppStatusSnapshot(
       daemonRunning: daemonRunning,
       daemonPID: daemonLockState.running ? daemonLockState.pid : daemonPID,
-      daemonUpdatedAt: daemonLockState.running ? daemonLockState.updatedAt : daemonUpdatedAt,
       contacts: intValue(overview["contacts"]) ?? 0,
       conversations: intValue(overview["conversations"]) ?? 0,
       messages: intValue(overview["messages"]) ?? 0,
-      rawEvents: intValue(overview["rawEvents"]) ?? 0,
       capturedRawEvents: intValue(dataStatus["capturedRawEvents"]) ?? intValue(overview["rawEvents"]) ?? 0,
       projectedMessages: intValue(dataStatus["projectedMessages"]) ?? intValue(overview["messages"]) ?? 0,
       pendingProjectionEvents: intValue(dataStatus["pendingProjectionEvents"]) ?? 0,
       pendingSearchIndexMessages: intValue(dataStatus["pendingSearchIndexMessages"]) ?? 0,
-      failedSearchIndexMessages: intValue(dataStatus["failedSearchIndexMessages"]) ?? 0,
       messageBreakdown: parseMessageBreakdown(overview["messageBreakdown"]),
       integrations: mergeLiveLocalIntegrations(integrations),
-      onboardingCompletedVersion: stringValue(install["onboardingCompletedVersion"]),
+      setupCompletedVersion: stringValue(install["onboardingCompletedVersion"]),
       installedAppVersion: stringValue(install["installedAppVersion"]),
-      releaseChannel: stringValue(install["releaseChannel"]),
-      cliSymlinkInstalled: boolValue(install["cliSymlinkInstalled"]) ?? false,
       updateSummary: parseUpdateSummary(update)
     )
   }
@@ -866,7 +841,7 @@ final class AppStatusStore: @unchecked Sendable {
   ) -> [AppPlatformMessageCount] {
     var counts = Dictionary(uniqueKeysWithValues: existing.map { ($0.platform, $0.messages) })
 
-    for integration in integrations where shouldIncludeMessageDebugPlatform(integration.platform) {
+    for integration in integrations where integration.platform != "contacts" {
       counts[integration.platform] = counts[integration.platform] ?? 0
     }
 
@@ -1161,10 +1136,6 @@ private func sourceSummaryTitle(connected: Int, needsAttention: Int) -> String {
   return "\(connectedText) • \(needsAttention) need\(needsAttention == 1 ? "s" : "") attention"
 }
 
-private func shouldIncludeMessageDebugPlatform(_ platform: String) -> Bool {
-  platform != "contacts"
-}
-
 private func platformDisplayTitle(_ platform: String) -> String {
   switch platform {
   case "imessage":
@@ -1182,37 +1153,20 @@ private func platformDisplayTitle(_ platform: String) -> String {
   }
 }
 
-private func platformMessageDebugTitle(_ item: AppPlatformMessageCount) -> String {
-  "\(platformDisplayTitle(item.platform)) \(item.messages) message\(item.messages == 1 ? "" : "s")"
-}
-
-private func debugSummaryTitle(
-  label: String,
-  value: String
-) -> String {
-  "\(label): \(value)"
-}
-
 @MainActor
 final class DaemonSupervisor {
   private var daemonProcess: Process?
   private let daemonLaunchPath: String?
   private let daemonCommand: String
-  private let setupCommand: String
-  private let permissionsCommand: String
   private let statusStore: AppStatusStore
 
   init(
     daemonLaunchPath: String?,
     daemonCommand: String,
-    setupCommand: String,
-    permissionsCommand: String,
     statusStore: AppStatusStore
   ) {
     self.daemonLaunchPath = daemonLaunchPath
     self.daemonCommand = daemonCommand
-    self.setupCommand = setupCommand
-    self.permissionsCommand = permissionsCommand
     self.statusStore = statusStore
   }
 
@@ -1254,39 +1208,6 @@ final class DaemonSupervisor {
     }
 
     _ = Darwin.kill(pid_t(activePID), SIGTERM)
-  }
-
-  func openSetupInTerminal() {
-    let command: String
-    if let daemonLaunchPath, !daemonLaunchPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-      command = "\(shellEscape(daemonLaunchPath)) setup"
-    } else {
-      var environment = daemonEnvironment()
-      let bundlePath = Bundle.main.bundlePath.trimmingCharacters(in: .whitespacesAndNewlines)
-      if !bundlePath.isEmpty {
-        environment["CUED_APP_PATH"] = bundlePath
-      }
-      if let executablePath = Bundle.main.executablePath,
-         !executablePath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-      {
-        environment["CUED_AUTH_NATIVE_BINARY"] = executablePath
-      }
-      command = buildShellCommand(setupCommand, environment: environment)
-    }
-
-    runInTerminal(command)
-  }
-
-  func requestPermissions() {
-    var environment = daemonEnvironment()
-    if let helperPath = bundledNativeHelperPath() {
-      environment["CUED_NATIVE_BINARY"] = helperPath
-    }
-    let bundlePath = Bundle.main.bundlePath.trimmingCharacters(in: .whitespacesAndNewlines)
-    if !bundlePath.isEmpty {
-      environment["CUED_PERMISSION_TARGET"] = bundlePath
-    }
-    _ = launchShellCommand(permissionsCommand, environment: environment)
   }
 
   nonisolated func runCLI(arguments: [String]) -> (status: Int32, stdout: String, stderr: String)? {
@@ -1341,7 +1262,7 @@ final class DaemonSupervisor {
     }
     let executablePath = Bundle.main.executablePath?.trimmingCharacters(in: .whitespacesAndNewlines)
 
-    if let helperPath = bundledNativeHelperPath() {
+    if let helperPath = bundledHelperPath() {
       if environment["CUED_NATIVE_BINARY"] == nil {
         environment["CUED_NATIVE_BINARY"] = helperPath
       }
@@ -1446,73 +1367,26 @@ final class DaemonSupervisor {
     }
   }
 
-  private func runInTerminal(_ command: String) {
-    let escaped = command
-      .replacingOccurrences(of: "\\", with: "\\\\")
-      .replacingOccurrences(of: "\"", with: "\\\"")
-
-    let script = """
-    tell application "Terminal"
-      activate
-      do script "\(escaped)"
-    end tell
-    """
-
-    var error: NSDictionary?
-    NSAppleScript(source: script)?.executeAndReturnError(&error)
-  }
 }
 
-private struct SetupCapabilityStatus: Decodable {
-  let availability: String
-  let onboardingVisible: Bool
-  let reason: String?
-}
-
-private struct SetupIntegrationStatus: Decodable {
-  let platform: String
-  let accountKey: String
-  let displayName: String?
-  let authState: String
-  let capability: SetupCapabilityStatus
-}
-
-private struct IntegrationStatusResponse: Decodable {
-  let hostOs: String
-  let setupIntegrations: [SetupIntegrationStatus]
-}
-
-private struct LaunchAgentStatusResponse: Decodable {
-  let loaded: Bool
-}
-
-private struct CLISymlinkStatusResponse: Decodable {
+struct CLISymlinkStatusResponse: Decodable {
   let installed: Bool
-  let path: String
 }
 
 private struct UpdateErrorResponse: Decodable {
-  let stage: String
   let message: String
 }
 
 private struct UpdateStatusResponse: Decodable {
   let currentVersion: String
-  let releaseChannel: String
-  let lastCheckedAt: Int?
-  let latestVersion: String?
   let availableVersion: String?
   let available: Bool
   let releaseUrl: String?
-  let tarballUrl: String?
   let lastError: UpdateErrorResponse?
 }
 
 private struct UpdateInstallResponse: Decodable {
   let started: Bool
-  let targetVersion: String
-  let releaseUrl: String?
-  let installedAppPath: String
 }
 
 @MainActor
@@ -1526,7 +1400,7 @@ final class MenuBarAppController: NSObject, NSApplicationDelegate {
   private let menuBarLease: SingletonLockLease
   private let statusStore: AppStatusStore
   private let daemonSupervisor: DaemonSupervisor
-  private lazy var onboardingWindowController = OnboardingWindowController(
+  private lazy var rootWindowController = RootWindowController(
     daemonSupervisor: daemonSupervisor,
     onRefresh: { [weak self] in
       self?.refreshStatus()
@@ -1543,8 +1417,6 @@ final class MenuBarAppController: NSObject, NSApplicationDelegate {
     dbPath: String,
     daemonLaunchPath: String?,
     daemonCommand: String,
-    setupCommand: String,
-    permissionsCommand: String,
     menuBarLease: SingletonLockLease
   ) {
     self.dbPath = dbPath
@@ -1553,8 +1425,6 @@ final class MenuBarAppController: NSObject, NSApplicationDelegate {
     self.daemonSupervisor = DaemonSupervisor(
       daemonLaunchPath: daemonLaunchPath,
       daemonCommand: daemonCommand,
-      setupCommand: setupCommand,
-      permissionsCommand: permissionsCommand,
       statusStore: self.statusStore
     )
     super.init()
@@ -1577,7 +1447,7 @@ final class MenuBarAppController: NSObject, NSApplicationDelegate {
       RunLoop.main.add(timer, forMode: .common)
     }
     DispatchQueue.main.asyncAfter(deadline: .now() + 0.75) { [weak self] in
-      self?.openSetupIfNeeded()
+      self?.openRootWindowIfNeeded()
     }
   }
 
@@ -1589,12 +1459,12 @@ final class MenuBarAppController: NSObject, NSApplicationDelegate {
   }
 
   func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
-    onboardingWindowController.showAndRefresh(forceActivePermissionRefresh: true)
+    rootWindowController.showAndRefresh(forceActivePermissionRefresh: true)
     return true
   }
 
-  @objc private func openSetup() {
-    onboardingWindowController.showAndRefresh()
+  @objc private func openRootWindow() {
+    rootWindowController.showAndRefresh()
   }
 
   @objc private func toggleDaemon() {
@@ -1619,7 +1489,7 @@ final class MenuBarAppController: NSObject, NSApplicationDelegate {
   }
 
   @objc private func handleMenuBarReopenNotification(_ notification: Notification) {
-    onboardingWindowController.showAndRefresh()
+    rootWindowController.showAndRefresh()
     NSApp.activate(ignoringOtherApps: true)
   }
 
@@ -1654,19 +1524,19 @@ final class MenuBarAppController: NSObject, NSApplicationDelegate {
     }
   }
 
-  private func openSetupIfNeeded() {
+  private func openRootWindowIfNeeded() {
     if consumePermissionRelaunchSetupIntent() {
-      onboardingWindowController.showAndRefresh(forceActivePermissionRefresh: true)
+      rootWindowController.showAndRefresh(forceActivePermissionRefresh: true)
       return
     }
 
     let snapshot = statusStore.readSnapshot()
     let currentVersion = (Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String)
       ?? snapshot.installedAppVersion
-    guard snapshot.onboardingCompletedVersion != currentVersion else {
+    guard snapshot.setupCompletedVersion != currentVersion else {
       return
     }
-    onboardingWindowController.showAndRefresh()
+    rootWindowController.showAndRefresh()
   }
 
   private func rebuildMenu() {
@@ -1727,7 +1597,7 @@ final class MenuBarAppController: NSObject, NSApplicationDelegate {
     ).isEnabled = false
 
     menu.addItem(.separator())
-    menu.addItem(withTitle: "Open Cued", action: #selector(openSetup), keyEquivalent: "").target = self
+    menu.addItem(withTitle: "Open Cued", action: #selector(openRootWindow), keyEquivalent: "").target = self
 
     let debugItem = NSMenuItem(title: "Debug", action: nil, keyEquivalent: "")
     debugItem.submenu = buildDebugMenu(snapshot: snapshot, daemonStarting: daemonStarting)
@@ -1812,7 +1682,7 @@ final class MenuBarAppController: NSObject, NSApplicationDelegate {
 
   private func openReleaseURL(_ value: String?) {
     guard let value, let url = URL(string: value) else {
-      onboardingWindowController.openReleasesPage()
+      rootWindowController.openReleasesPage()
       return
     }
     NSWorkspace.shared.open(url)
@@ -1822,10 +1692,7 @@ final class MenuBarAppController: NSObject, NSApplicationDelegate {
     let debugMenu = NSMenu(title: "Debug")
 
     let daemonItem = NSMenuItem(
-      title: debugSummaryTitle(
-        label: "Daemon",
-        value: snapshot.daemonRunning ? "running" : daemonStarting ? "starting" : "stopped"
-      ),
+      title: "Daemon: \(snapshot.daemonRunning ? "running" : daemonStarting ? "starting" : "stopped")",
       action: nil,
       keyEquivalent: ""
     )
@@ -1833,9 +1700,9 @@ final class MenuBarAppController: NSObject, NSApplicationDelegate {
     debugMenu.addItem(daemonItem)
 
     let totals = [
-      debugSummaryTitle(label: "Messages", value: "\(snapshot.messages)"),
-      debugSummaryTitle(label: "Contacts", value: "\(snapshot.contacts)"),
-      debugSummaryTitle(label: "Conversations", value: "\(snapshot.conversations)"),
+      "Messages: \(snapshot.messages)",
+      "Contacts: \(snapshot.contacts)",
+      "Conversations: \(snapshot.conversations)",
     ]
 
     for title in totals {
@@ -1891,7 +1758,8 @@ final class MenuBarAppController: NSObject, NSApplicationDelegate {
       debugMenu.addItem(item)
     } else {
       for item in snapshot.messageBreakdown {
-        let menuItem = NSMenuItem(title: platformMessageDebugTitle(item), action: nil, keyEquivalent: "")
+        let title = "\(platformDisplayTitle(item.platform)) \(item.messages) message\(item.messages == 1 ? "" : "s")"
+        let menuItem = NSMenuItem(title: title, action: nil, keyEquivalent: "")
         menuItem.isEnabled = false
         debugMenu.addItem(menuItem)
       }
@@ -1970,12 +1838,6 @@ func runMenuBarApp() throws {
   let daemonCommand = (Bundle.main.object(forInfoDictionaryKey: "CuedDaemonCommand") as? String)
     ?? ProcessInfo.processInfo.environment["CUED_DAEMON_COMMAND"]
     ?? ""
-  let setupCommand = (Bundle.main.object(forInfoDictionaryKey: "CuedSetupCommand") as? String)
-    ?? ProcessInfo.processInfo.environment["CUED_SETUP_COMMAND"]
-    ?? "cued setup"
-  let permissionsCommand = (Bundle.main.object(forInfoDictionaryKey: "CuedPermissionsCommand") as? String)
-    ?? ProcessInfo.processInfo.environment["CUED_PERMISSIONS_COMMAND"]
-    ?? "cued permissions request --all"
   let dbPath = environmentPath("CUED_DB_PATH")
     ?? (Bundle.main.object(forInfoDictionaryKey: "CuedDBPath") as? String)
     ?? configuredCuedDBPath()
@@ -2009,8 +1871,6 @@ func runMenuBarApp() throws {
     dbPath: dbPath,
     daemonLaunchPath: daemonLaunchPath,
     daemonCommand: daemonCommand,
-    setupCommand: setupCommand,
-    permissionsCommand: permissionsCommand,
     menuBarLease: menuBarLease
   )
   app.delegate = delegate

@@ -1,41 +1,30 @@
 import AppKit
-import CuedNativeUI
+import Interface
 import SwiftUI
 
-struct InstallerLoginItemStatusResponse: Decodable {
-  let enabled: Bool
-  let status: String
-}
-
-struct InstallerCLISymlinkStatusResponse: Decodable {
-  let installed: Bool
-  let path: String
-}
-
-struct InstallerSkillInstallResponse: Decodable {
+struct SkillInstallResponse: Decodable {
   let ok: Bool
   let error: String?
 }
 
-struct InstallerOnboardingSnapshotResponse: Decodable {
-  let permissions: [InstallerPermissionStatus]
-  let globalSkill: InstallerGlobalSkillStatus
-  let hostOs: String
-  let integrations: [InstallerIntegrationStatus]?
-  let setupIntegrations: [InstallerIntegrationStatus]
+struct RootSnapshotResponse: Decodable {
+  let permissions: [PermissionStatus]
+  let globalSkill: SkillStatus
+  let integrations: [IntegrationStatus]?
+  let setupIntegrations: [IntegrationStatus]
 }
 
+private let liveRefreshPermissionKeys: Set<String> = ["messages_automation", "full_disk_access"]
+
 @MainActor
-final class OnboardingWindowController: NSWindowController {
+final class RootWindowController: NSWindowController {
   private let daemonSupervisor: DaemonSupervisor
   private let onRefresh: () -> Void
-  private let viewModel = OnboardingViewModel()
-  private var cachedPermissions: [InstallerPermissionStatus] = []
-  private var cachedAllIntegrations: [InstallerIntegrationStatus] = []
-  private var cachedSetupIntegrations: [InstallerIntegrationStatus] = []
+  private let viewModel = RootViewModel()
+  private var cachedAllIntegrations: [IntegrationStatus] = []
   private var isRefreshing = false
-  private var prerequisitesEnsured = false
-  private var pendingAuthKickoffRefreshTask: Task<Void, Never>?
+  private var didEnsurePrerequisites = false
+  private var pendingAuthLaunchRefreshTask: Task<Void, Never>?
   private var pendingStatusRefreshTask: Task<Void, Never>?
   private var pendingPermissionRefreshTask: Task<Void, Never>?
   private var pendingLivePermissionKeys = Set<String>()
@@ -51,8 +40,8 @@ final class OnboardingWindowController: NSWindowController {
       contentRect: NSRect(
         x: 0,
         y: 0,
-        width: OnboardingViewModel.windowWidth,
-        height: OnboardingViewModel.windowHeight
+        width: RootViewModel.windowWidth,
+        height: RootViewModel.windowHeight
       ),
       styleMask: [.titled, .closable, .miniaturizable, .fullSizeContentView],
       backing: .buffered,
@@ -67,13 +56,13 @@ final class OnboardingWindowController: NSWindowController {
     super.init(window: window)
 
     let hosting = NSHostingController(
-      rootView: CuedOnboardingView(
+      rootView: RootView(
         viewModel: viewModel,
         onRefresh: { [weak self] in self?.refresh() },
         onGuidePermission: { [weak self] key in self?.guidePermission(key: key) },
         onDismissPermissionGuide: { PermissionGuideAssistant.shared.dismiss() },
         onRequestPermission: { [weak self] flags in self?.requestPermission(flags: flags) },
-        onInstallGlobalSkill: { [weak self] in self?.installGlobalSkill() },
+        onInstallGlobalSkill: { [weak self] in self?.installSkill() },
         onEnableIntegration: { [weak self] platform, accountKey in
           self?.enableIntegration(platform: platform, accountKey: accountKey)
         },
@@ -81,9 +70,9 @@ final class OnboardingWindowController: NSWindowController {
           self?.removeIntegration(platform: platform, accountKey: accountKey)
         },
         onConnectIntegration: { [weak self] platform, accountKey in
-          self?.handleIntegrationAction(platform: platform, accountKey: accountKey)
+          self?.connectIntegration(platform: platform, accountKey: accountKey)
         },
-        onFinish: { [weak self] in self?.finishOnboarding() }
+        onFinish: { [weak self] in self?.finishSetup() }
       )
     )
     window.contentViewController = hosting
@@ -112,8 +101,8 @@ final class OnboardingWindowController: NSWindowController {
     viewModel.beginRefresh()
 
     let daemonSupervisor = self.daemonSupervisor
-    let shouldEnsurePrerequisites = consumePrerequisiteSetupFlag()
-    let shouldRefreshPermissions = forceActivePermissionRefresh || shouldRefreshPermissionsActively()
+    let shouldEnsurePrerequisites = consumePrerequisiteSetupIntent()
+    let shouldRefreshPermissions = forceActivePermissionRefresh || shouldRefreshLivePermissions()
 
     Task.detached(priority: .userInitiated) { [daemonSupervisor] in
       if shouldEnsurePrerequisites {
@@ -122,35 +111,34 @@ final class OnboardingWindowController: NSWindowController {
 
       let snapshot = Self.decodeJSON(
         daemonSupervisor: daemonSupervisor,
-        InstallerOnboardingSnapshotResponse.self,
+        RootSnapshotResponse.self,
         arguments: ["onboarding", "snapshot"] + (shouldRefreshPermissions ? ["--refresh-permissions"] : [])
       )
       let globalSkill = Self.decodeJSON(
         daemonSupervisor: daemonSupervisor,
-        InstallerGlobalSkillStatus.self,
+        SkillStatus.self,
         arguments: ["skill", "status"]
-      ) ?? snapshot?.globalSkill ?? InstallerGlobalSkillStatus(
+      ) ?? snapshot?.globalSkill ?? SkillStatus(
         installed: false,
         status: "unknown",
         summary: "Checks whether the global Cued skill is available to your agents."
       )
+      let setupIntegrations = (snapshot?.setupIntegrations ?? []).filter {
+        $0.capability.setupVisible
+      }
 
       await MainActor.run {
-        self.cachedPermissions = snapshot?.permissions ?? []
         self.cachedAllIntegrations = snapshot?.integrations ?? []
-        self.cachedSetupIntegrations = (snapshot?.setupIntegrations ?? []).filter {
-          $0.capability.onboardingVisible
-        }
-        self.resolvePendingLivePermissions(using: snapshot?.permissions ?? [])
+        self.clearGrantedLivePermissions(using: snapshot?.permissions ?? [])
         self.isRefreshing = false
         self.viewModel.apply(
           permissions: snapshot?.permissions ?? [],
           globalSkill: globalSkill,
           allIntegrations: self.cachedAllIntegrations,
-          integrations: self.cachedSetupIntegrations
+          integrations: setupIntegrations
         )
-        self.schedulePermissionRefreshRetry()
-        self.schedulePendingStatusRefreshIfNeeded()
+        self.schedulePermissionRefresh()
+        self.schedulePendingAuthRefreshIfNeeded()
         self.runPendingRefreshIfNeeded()
       }
     }
@@ -163,18 +151,18 @@ final class OnboardingWindowController: NSWindowController {
     NSWorkspace.shared.open(url)
   }
 
-  private func consumePrerequisiteSetupFlag() -> Bool {
-    guard !prerequisitesEnsured, installerShouldAutoConfigurePrerequisites() else {
+  private func consumePrerequisiteSetupIntent() -> Bool {
+    guard !didEnsurePrerequisites, shouldAutoConfigurePrerequisites() else {
       return false
     }
-    prerequisitesEnsured = true
+    didEnsurePrerequisites = true
     return true
   }
 
   private nonisolated static func ensurePrerequisites(daemonSupervisor: DaemonSupervisor) {
     let launchAgentStatus = decodeJSON(
       daemonSupervisor: daemonSupervisor,
-      InstallerLoginItemStatusResponse.self,
+      LoginItemStatusResponse.self,
       arguments: ["login-item", "status"]
     )
     if launchAgentStatus?.enabled != true && launchAgentStatus?.status != "requires_approval" {
@@ -183,7 +171,7 @@ final class OnboardingWindowController: NSWindowController {
 
     let cliStatus = decodeJSON(
       daemonSupervisor: daemonSupervisor,
-      InstallerCLISymlinkStatusResponse.self,
+      CLISymlinkStatusResponse.self,
       arguments: ["cli", "status"]
     )
     if cliStatus?.installed != true {
@@ -204,9 +192,7 @@ final class OnboardingWindowController: NSWindowController {
     return try? JSONDecoder().decode(type, from: data)
   }
 
-  private func runActions(
-    argumentsList: [[String]]
-  ) {
+  private func runCLICommands(_ argumentsList: [[String]]) {
     viewModel.beginRefresh()
     let daemonSupervisor = self.daemonSupervisor
     Task.detached(priority: .userInitiated) { [daemonSupervisor] in
@@ -221,18 +207,18 @@ final class OnboardingWindowController: NSWindowController {
   }
 
   private func requestPermission(flags: [String]) {
-    if onboardingPermissionKeys(for: flags).contains("full_disk_access") {
+    if permissionKeys(for: flags).contains("full_disk_access") {
       markPermissionRelaunchSetupIntent()
     }
-    markPendingLivePermissions(flags: flags)
-    runActions(
-      argumentsList: [["permissions", "request"] + flags],
-      forceActivePermissionRefreshAfter: onboardingShouldRefreshPermissionsActively(for: flags)
+    trackLivePermissionRequests(flags: flags)
+    runPermissionCommands(
+      [["permissions", "request"] + flags],
+      forceActiveRefreshAfter: shouldActivelyRefreshPermissions(for: flags)
     )
   }
 
   private func guidePermission(key: String) {
-    guard let panel = onboardingGuidePanel(for: key) else {
+    guard let panel = permissionGuidePanel(for: key) else {
       return
     }
     if key == "full_disk_access" {
@@ -242,14 +228,14 @@ final class OnboardingWindowController: NSWindowController {
   }
 
   private func enableIntegration(platform: String, accountKey: String) {
-    runActions(argumentsList: [["integrations", "enable", platform, accountKey]])
+    runCLICommands([["integrations", "enable", platform, accountKey]])
   }
 
   private func removeIntegration(platform: String, accountKey: String) {
-    runActions(argumentsList: [["integrations", "remove", platform, accountKey]])
+    runCLICommands([["integrations", "remove", platform, accountKey]])
   }
 
-  private func handleIntegrationAction(platform: String, accountKey: String) {
+  private func connectIntegration(platform: String, accountKey: String) {
     guard let configuration = viewModel.configuration(for: platform),
           configuration.capability.availability != "unsupported",
           configuration.capability.availability != "requires_helper",
@@ -268,10 +254,10 @@ final class OnboardingWindowController: NSWindowController {
       actions.append(["integrations", "enable", platform, accountKey])
     }
     actions.append(["integrations", "connect", platform, accountKey])
-    runConnectActions(argumentsList: actions)
+    runConnectCommands(actions)
   }
 
-  private func installGlobalSkill() {
+  private func installSkill() {
     viewModel.beginRefresh()
     let daemonSupervisor = self.daemonSupervisor
 
@@ -279,12 +265,12 @@ final class OnboardingWindowController: NSWindowController {
       let installCommandResult = await Task.detached(priority: .userInitiated) { [daemonSupervisor] in
         daemonSupervisor.runCLI(arguments: ["skill", "install-global"])
       }.value
-      let installResult: InstallerSkillInstallResponse? =
+      let installResult: SkillInstallResponse? =
         installCommandResult.flatMap { result in
           guard result.status == 0, let data = result.stdout.data(using: .utf8) else {
             return nil
           }
-          return try? JSONDecoder().decode(InstallerSkillInstallResponse.self, from: data)
+          return try? JSONDecoder().decode(SkillInstallResponse.self, from: data)
         }
       let installFailed = ((installCommandResult?.status ?? 1) != 0 || installResult?.ok == false)
 
@@ -306,7 +292,7 @@ final class OnboardingWindowController: NSWindowController {
     }
   }
 
-  private func finishOnboarding() {
+  private func finishSetup() {
     let daemonSupervisor = self.daemonSupervisor
     close()
     onRefresh()
@@ -318,8 +304,8 @@ final class OnboardingWindowController: NSWindowController {
   override func close() {
     pendingRefreshAfterCurrent = false
     pendingForceActivePermissionRefreshAfterCurrent = false
-    pendingAuthKickoffRefreshTask?.cancel()
-    pendingAuthKickoffRefreshTask = nil
+    pendingAuthLaunchRefreshTask?.cancel()
+    pendingAuthLaunchRefreshTask = nil
     pendingStatusRefreshTask?.cancel()
     pendingStatusRefreshTask = nil
     pendingPermissionRefreshTask?.cancel()
@@ -338,7 +324,7 @@ final class OnboardingWindowController: NSWindowController {
     refresh(forceActivePermissionRefresh: forceActivePermissionRefresh)
   }
 
-  private func runConnectActions(argumentsList: [[String]]) {
+  private func runConnectCommands(_ argumentsList: [[String]]) {
     guard let connectArguments = argumentsList.last else {
       return
     }
@@ -354,7 +340,7 @@ final class OnboardingWindowController: NSWindowController {
       await MainActor.run {
         self.onRefresh()
         if launched {
-          self.scheduleAuthKickoffRefresh()
+          self.scheduleAuthLaunchRefresh()
         } else {
           self.refresh()
         }
@@ -362,7 +348,7 @@ final class OnboardingWindowController: NSWindowController {
     }
   }
 
-  private func schedulePendingStatusRefreshIfNeeded() {
+  private func schedulePendingAuthRefreshIfNeeded() {
     pendingStatusRefreshTask?.cancel()
     pendingStatusRefreshTask = nil
 
@@ -384,9 +370,9 @@ final class OnboardingWindowController: NSWindowController {
     }
   }
 
-  private func scheduleAuthKickoffRefresh() {
-    pendingAuthKickoffRefreshTask?.cancel()
-    pendingAuthKickoffRefreshTask = Task { [weak self] in
+  private func scheduleAuthLaunchRefresh() {
+    pendingAuthLaunchRefreshTask?.cancel()
+    pendingAuthLaunchRefreshTask = Task { [weak self] in
       for delay in [200, 700, 1_500, 3_000, 6_000, 10_000] {
         try? await Task.sleep(for: .milliseconds(delay))
         guard !Task.isCancelled else {
@@ -397,14 +383,14 @@ final class OnboardingWindowController: NSWindowController {
         }
       }
       await MainActor.run {
-        self?.pendingAuthKickoffRefreshTask = nil
+        self?.pendingAuthLaunchRefreshTask = nil
       }
     }
   }
 
-  private func runActions(
-    argumentsList: [[String]],
-    forceActivePermissionRefreshAfter: Bool
+  private func runPermissionCommands(
+    _ argumentsList: [[String]],
+    forceActiveRefreshAfter: Bool
   ) {
     viewModel.beginRefresh()
     let daemonSupervisor = self.daemonSupervisor
@@ -414,12 +400,12 @@ final class OnboardingWindowController: NSWindowController {
       }
       await MainActor.run {
         self.onRefresh()
-        self.refresh(forceActivePermissionRefresh: forceActivePermissionRefreshAfter)
+        self.refresh(forceActivePermissionRefresh: forceActiveRefreshAfter)
       }
     }
   }
 
-  private func shouldRefreshPermissionsActively() -> Bool {
+  private func shouldRefreshLivePermissions() -> Bool {
     guard !pendingLivePermissionKeys.isEmpty else {
       pendingLivePermissionDeadline = nil
       return false
@@ -432,19 +418,19 @@ final class OnboardingWindowController: NSWindowController {
       pendingLivePermissionDeadline = nil
       return false
     }
-    return pendingLivePermissionKeys.contains("full_disk_access")
+    return !pendingLivePermissionKeys.isDisjoint(with: liveRefreshPermissionKeys)
   }
 
-  private func markPendingLivePermissions(flags: [String]) {
+  private func trackLivePermissionRequests(flags: [String]) {
     pendingLivePermissionKeys.formUnion(
-      onboardingPermissionKeys(for: flags).filter(isRetryablePermissionKey)
+      permissionKeys(for: flags).filter { liveRefreshPermissionKeys.contains($0) }
     )
     if !pendingLivePermissionKeys.isEmpty {
       pendingLivePermissionDeadline = Date().addingTimeInterval(30)
     }
   }
 
-  private func resolvePendingLivePermissions(using permissions: [InstallerPermissionStatus]) {
+  private func clearGrantedLivePermissions(using permissions: [PermissionStatus]) {
     guard !pendingLivePermissionKeys.isEmpty else {
       pendingLivePermissionDeadline = nil
       return
@@ -459,7 +445,7 @@ final class OnboardingWindowController: NSWindowController {
     }
   }
 
-  private func schedulePermissionRefreshRetry() {
+  private func schedulePermissionRefresh() {
     guard !pendingLivePermissionKeys.isEmpty else {
       pendingPermissionRefreshTask?.cancel()
       pendingPermissionRefreshTask = nil
@@ -484,7 +470,7 @@ final class OnboardingWindowController: NSWindowController {
 
 }
 
-func onboardingPermissionKeys(for flags: [String]) -> Set<String> {
+func permissionKeys(for flags: [String]) -> Set<String> {
   if flags.contains("--all") {
     return ["contacts", "full_disk_access"]
   }
@@ -496,18 +482,13 @@ func onboardingPermissionKeys(for flags: [String]) -> Set<String> {
   if flags.contains("--full-disk-access") {
     keys.insert("full_disk_access")
   }
+  if flags.contains("--messages") {
+    keys.insert("messages_automation")
+  }
   return keys
 }
 
-func onboardingShouldRetryPermissionRefresh(for flags: [String]) -> Bool {
-  onboardingPermissionKeys(for: flags).contains(where: isRetryablePermissionKey)
-}
-
-func onboardingShouldRefreshPermissionsActively(for flags: [String]) -> Bool {
-  let keys = onboardingPermissionKeys(for: flags)
-  return keys.contains("full_disk_access")
-}
-
-func isRetryablePermissionKey(_ key: String) -> Bool {
-  key == "full_disk_access"
+func shouldActivelyRefreshPermissions(for flags: [String]) -> Bool {
+  let keys = permissionKeys(for: flags)
+  return !keys.isDisjoint(with: liveRefreshPermissionKeys)
 }

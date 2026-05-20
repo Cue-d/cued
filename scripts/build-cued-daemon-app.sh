@@ -19,9 +19,8 @@ RUNTIME_NODE_ROOT="$RESOURCES_DIR/runtime/node"
 RUNTIME_NODE_BIN_DIR="$RUNTIME_NODE_ROOT/bin"
 PLAYWRIGHT_CHROMIUM_ROOT="$RESOURCES_DIR/runtime/chromium"
 PLAYWRIGHT_CHROMIUM_PAYLOAD_DIR="$PLAYWRIGHT_CHROMIUM_ROOT/chrome"
-PLAYWRIGHT_CHROMIUM_EXECUTABLE="$PLAYWRIGHT_CHROMIUM_PAYLOAD_DIR/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing"
 HELPERS_DIR="$RESOURCES_DIR/helpers"
-NATIVE_HELPER_NAME="cued-native-helper"
+HELPER_NAME="cued-native-helper"
 SIGNAL_FETCH_SCRIPT="$ROOT_DIR/scripts/fetch-signal-cli-macos.sh"
 NODE_RUNTIME_FETCH_SCRIPT="$ROOT_DIR/scripts/fetch-node-runtime-macos.sh"
 PLAYWRIGHT_CHROMIUM_FETCH_SCRIPT="$ROOT_DIR/scripts/fetch-playwright-chromium-macos.sh"
@@ -42,8 +41,6 @@ NODE_VERSION="$("$NODE_PATH" -p 'process.versions.node')"
 NODE_ARCH="$("$NODE_PATH" -p 'process.arch === "arm64" ? "arm64" : "x64"')"
 RELEASE_CHANNEL="${CUED_RELEASE_CHANNEL:-internal}"
 DAEMON_COMMAND="${CUED_DAEMON_COMMAND:-\"\$CUED_APP_PATH/Contents/Resources/cued-cli\" daemon}"
-SETUP_COMMAND="${CUED_SETUP_COMMAND:-\"\$CUED_APP_PATH/Contents/Resources/cued-cli\" setup}"
-PERMISSIONS_COMMAND="${CUED_PERMISSIONS_COMMAND:-\"\$CUED_APP_PATH/Contents/Resources/cued-cli\" permissions request --all}"
 BETTER_SQLITE3_BINDING_SOURCE="$(find "$ROOT_DIR/node_modules/.pnpm" -path "*/better-sqlite3-multiple-ciphers/build/Release/better_sqlite3.node" | head -n 1)"
 DEPLOY_STAGING_DIR="$(mktemp -d "${TMPDIR:-/tmp}/cued-runtime.XXXXXX")"
 
@@ -114,7 +111,7 @@ runtime_entitlements_for_binary() {
     "$MACOS_DIR/$APP_EXECUTABLE_NAME")
       printf '%s\n' "$APP_PERMISSIONS_ENTITLEMENTS"
       ;;
-    "$HELPERS_DIR/$NATIVE_HELPER_NAME")
+    "$HELPERS_DIR/$HELPER_NAME")
       printf '%s\n' "$APP_PERMISSIONS_ENTITLEMENTS"
       ;;
     "$RUNTIME_NODE_BIN_DIR/node"|"$HELPERS_DIR"/signal-cli/jre/Contents/Home/bin/java|"$PLAYWRIGHT_CHROMIUM_ROOT"/*)
@@ -244,8 +241,8 @@ mkdir -p \
 
 cp "$SWIFT_BINARY" "$MACOS_DIR/$APP_EXECUTABLE_NAME"
 chmod +x "$MACOS_DIR/$APP_EXECUTABLE_NAME"
-cp "$SWIFT_BINARY" "$HELPERS_DIR/$NATIVE_HELPER_NAME"
-chmod +x "$HELPERS_DIR/$NATIVE_HELPER_NAME"
+cp "$SWIFT_BINARY" "$HELPERS_DIR/$HELPER_NAME"
+chmod +x "$HELPERS_DIR/$HELPER_NAME"
 for resource_bundle in "${SWIFT_RESOURCE_BUNDLES[@]}"; do
   cp -R "$resource_bundle" "$RESOURCES_DIR/$(basename "$resource_bundle")"
 done
@@ -372,10 +369,6 @@ cat > "$CONTENTS_DIR/Info.plist" <<EOF
   <string>Cued reads local contacts so your local message database can resolve people consistently across platforms.</string>
   <key>CuedDaemonCommand</key>
   <string>$(xml_escape "$DAEMON_COMMAND")</string>
-  <key>CuedSetupCommand</key>
-  <string>$(xml_escape "$SETUP_COMMAND")</string>
-  <key>CuedPermissionsCommand</key>
-  <string>$(xml_escape "$PERMISSIONS_COMMAND")</string>
 $INFO_PLIST_DB_PATH_BLOCK
 </dict>
 </plist>
@@ -396,14 +389,14 @@ APP_BUNDLE_PATH="\$(cd "\$SCRIPT_DIR/../.." && pwd)"
 RUNTIME_ROOT="\$SCRIPT_DIR/cued-runtime"
 SCRIPT_ROOT="\$SCRIPT_DIR/scripts"
 NODE_BIN="\$SCRIPT_DIR/runtime/node/bin/node"
-NATIVE_HELPER="\$SCRIPT_DIR/helpers/$NATIVE_HELPER_NAME"
+HELPER_BINARY="\$SCRIPT_DIR/helpers/$HELPER_NAME"
 export PATH="\$(dirname "\$NODE_BIN"):\$PATH"
 export CUED_APP_PATH="\${CUED_APP_PATH:-\$APP_BUNDLE_PATH}"
 export CUED_BUNDLED_RUNTIME_ROOT="\${CUED_BUNDLED_RUNTIME_ROOT:-\$RUNTIME_ROOT}"
 export CUED_BUNDLED_SCRIPT_ROOT="\${CUED_BUNDLED_SCRIPT_ROOT:-\$SCRIPT_ROOT}"
-export CUED_NATIVE_BINARY="\${CUED_NATIVE_BINARY:-\$NATIVE_HELPER}"
-export CUED_IMESSAGE_NATIVE_BINARY="\${CUED_IMESSAGE_NATIVE_BINARY:-\$NATIVE_HELPER}"
-export CUED_CONTACTS_NATIVE_BINARY="\${CUED_CONTACTS_NATIVE_BINARY:-\$NATIVE_HELPER}"
+export CUED_NATIVE_BINARY="\${CUED_NATIVE_BINARY:-\$HELPER_BINARY}"
+export CUED_IMESSAGE_NATIVE_BINARY="\${CUED_IMESSAGE_NATIVE_BINARY:-\$HELPER_BINARY}"
+export CUED_CONTACTS_NATIVE_BINARY="\${CUED_CONTACTS_NATIVE_BINARY:-\$HELPER_BINARY}"
 export CUED_AUTH_NATIVE_BINARY="\${CUED_AUTH_NATIVE_BINARY:-\$APP_EXEC}"
 export CUED_CHROMIUM_EXECUTABLE_PATH="\${CUED_CHROMIUM_EXECUTABLE_PATH:-\$SCRIPT_DIR/runtime/chromium/chrome/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing}"
 if [[ -f "\$SCRIPT_DIR/oauth/google-oauth-client.json" ]]; then

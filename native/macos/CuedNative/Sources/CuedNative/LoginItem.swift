@@ -1,7 +1,7 @@
 import Foundation
 import ServiceManagement
 
-struct LoginItemStatusResponse: Encodable {
+struct LoginItemStatusResponse: Codable {
   let enabled: Bool
   let status: String
   let requiresApproval: Bool

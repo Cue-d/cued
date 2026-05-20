@@ -1,9 +1,9 @@
 import XCTest
-@testable import CuedNativeUI
+@testable import Interface
 
-final class PermissionGuidanceUITests: XCTestCase {
+final class PermissionGuidanceTests: XCTestCase {
   func testPermissionActionRequestsPromptWhileStatusIsUnknown() {
-    let permission = InstallerPermissionStatus(
+    let permission = PermissionStatus(
       key: "contacts",
       status: "unknown",
       summary: "Contacts access has not been checked yet.",
@@ -11,33 +11,33 @@ final class PermissionGuidanceUITests: XCTestCase {
     )
 
     XCTAssertEqual(
-      installerPermissionActionKind(
+      permissionAction(
         for: permission,
-        descriptor: installerPermissionDescriptor(for: permission.key)
+        descriptor: permissionDescriptor(for: permission.key)
       ),
       .requestPrompt
     )
   }
 
-  func testPermissionActionFallsBackToGuideForUnknownPermission() {
-    let permission = InstallerPermissionStatus(
-      key: "unknown_permission",
+  func testPermissionActionFallsBackToGuideAfterPromptNeedsAttention() {
+    let permission = PermissionStatus(
+      key: "messages_automation",
       status: "needs_action",
       summary: "Permission needs attention.",
       requestFlags: []
     )
 
     XCTAssertEqual(
-      installerPermissionActionKind(
+      permissionAction(
         for: permission,
-        descriptor: installerPermissionDescriptor(for: permission.key)
+        descriptor: permissionDescriptor(for: permission.key)
       ),
       .guideInSettings
     )
   }
 
   func testPermissionActionGuidesManualPermissions() {
-    let permission = InstallerPermissionStatus(
+    let permission = PermissionStatus(
       key: "full_disk_access",
       status: "needs_action",
       summary: "Full Disk Access is required.",
@@ -45,9 +45,9 @@ final class PermissionGuidanceUITests: XCTestCase {
     )
 
     XCTAssertEqual(
-      installerPermissionActionKind(
+      permissionAction(
         for: permission,
-        descriptor: installerPermissionDescriptor(for: permission.key)
+        descriptor: permissionDescriptor(for: permission.key)
       ),
       .guideInSettings
     )

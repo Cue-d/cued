@@ -51,14 +51,14 @@ enum PreviewCommand {
     print(
       """
       Usage:
-        swift run onboarding-preview list
-        swift run onboarding-preview all [--output .build/onboarding-previews]
-        swift run onboarding-preview <case-name> [--size 630x752] [--output dir]
+        swift run preview list
+        swift run preview all [--output .build/previews]
+        swift run preview <case-name> [--size 630x752] [--output dir]
 
       Examples:
-        swift run onboarding-preview all
-        swift run onboarding-preview permissions-missing
-        swift run onboarding-preview platforms-mixed --output .build/onboarding-previews
+        swift run preview all
+        swift run preview permissions-missing
+        swift run preview platforms-mixed --output .build/previews
       """
     )
   }

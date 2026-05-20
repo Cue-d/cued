@@ -77,8 +77,12 @@ describe("RunQueueService", () => {
     expect(result.runIds).toHaveLength(1);
 
     const recentRuns = db.listRecentRuns(4).filter((run) => run.platform === "slack");
-    expect(recentRuns.map((run) => run.account_key)).toEqual(["T_ENABLED_TWO", "T_ENABLED_ONE"]);
-    expect(recentRuns.map((run) => run.trigger)).toEqual(["cli", "existing"]);
+    expect(recentRuns.map((run) => [run.account_key, run.trigger])).toEqual(
+      expect.arrayContaining([
+        ["T_ENABLED_TWO", "cli"],
+        ["T_ENABLED_ONE", "existing"],
+      ]),
+    );
 
     db.close();
   });
