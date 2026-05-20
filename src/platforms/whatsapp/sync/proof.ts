@@ -1,7 +1,7 @@
 import type { SyncMode, SyncProofInput } from "../../../core/types/provider.js";
 import type { WhatsAppMessageSnapshot } from "../types.js";
 
-export type WhatsAppResyncStats = {
+type WhatsAppResyncStats = {
   pageCount: number;
   contactCount: number;
   chatCount: number;
@@ -9,12 +9,12 @@ export type WhatsAppResyncStats = {
   rawEventCount: number;
 };
 
-export type WhatsAppResyncCoverage = {
+type WhatsAppResyncCoverage = {
   oldestMessageAt: number | null;
   newestMessageAt: number | null;
 };
 
-export type WhatsAppDesktopCursor = {
+type WhatsAppDesktopCursor = {
   importedAt?: number;
   sourcePath?: string;
   chatRows?: number;
@@ -24,7 +24,7 @@ export type WhatsAppDesktopCursor = {
   newestMessageAt?: number | null;
 };
 
-export type WhatsAppSourceCursor = {
+type WhatsAppSourceCursor = {
   lastSyncAt?: number;
   resyncCursor?: string | null;
   resyncSinceMs?: number | null;

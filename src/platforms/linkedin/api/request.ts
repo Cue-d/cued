@@ -229,7 +229,7 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-export function withJitter(ms: number): number {
+function withJitter(ms: number): number {
   return Math.max(50, Math.round(ms * (0.85 + Math.random() * 0.3)));
 }
 
@@ -239,14 +239,6 @@ export function newGetRequest(
   options?: RequestOptions,
 ): AuthedRequest {
   return new AuthedRequest(url, cookies, options).withMethod("GET");
-}
-
-export function newPostRequest(
-  url: string,
-  cookies: Cookie[],
-  options?: RequestOptions,
-): AuthedRequest {
-  return new AuthedRequest(url, cookies, options).withMethod("POST");
 }
 
 export function newMessagingGraphQLRequest(

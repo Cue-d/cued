@@ -11,12 +11,7 @@ import {
 const DEFAULT_DM_POLL_INTERVAL_MS = 45_000;
 const DEFAULT_RECONNECT_BASE_MS = 1_000;
 const DEFAULT_RECONNECT_MAX_MS = 60_000;
-export type DiscordRealtimeState =
-  | "connecting"
-  | "connected"
-  | "reconnecting"
-  | "degraded"
-  | "stopped";
+type DiscordRealtimeState = "connecting" | "connected" | "reconnecting" | "degraded" | "stopped";
 
 export interface DiscordRealtimeStatus {
   platform: "discord";
@@ -56,7 +51,7 @@ export type DiscordRealtimeEventEnvelope =
       };
     };
 
-export interface DiscordRealtimeSessionLike {
+interface DiscordRealtimeSessionLike {
   start(): void;
   stop(): void;
   getStatus(): DiscordRealtimeStatus;
@@ -68,7 +63,7 @@ export interface DiscordRealtimeSessionLike {
   ): Promise<DiscordMessage>;
 }
 
-export interface DiscordRealtimeSupervisorSessionInput {
+interface DiscordRealtimeSupervisorSessionInput {
   accountKey: string;
   credentials: Pick<DiscordStoredCredentials, "token">;
   dmPollIntervalMs?: number;
@@ -98,10 +93,6 @@ type ManagedDiscordSession = {
   desired: DiscordRealtimeSupervisorSessionInput;
   session: DiscordRealtimeSessionLike;
 };
-
-function now(): number {
-  return Date.now();
-}
 
 function makeStatus(input: {
   accountKey: string;
@@ -222,7 +213,7 @@ export class DiscordRealtimeSession implements DiscordRealtimeSessionLike {
         state: "connected",
         userId: currentUser.id,
         username: discordDisplayName(currentUser),
-        connectedAt: this.status.connectedAt ?? now(),
+        connectedAt: this.status.connectedAt ?? Date.now(),
         reconnectAttempts: 0,
         lastSessionError: null,
       });
@@ -357,7 +348,7 @@ export class DiscordRealtimeSession implements DiscordRealtimeSessionLike {
   }
 
   private emitEvent(event: DiscordRealtimeEventEnvelope): void {
-    this.setStatus({ lastEventAt: now() });
+    this.setStatus({ lastEventAt: Date.now() });
     this.onEvent?.(this.accountKey, event);
   }
 
@@ -371,7 +362,7 @@ export class DiscordRealtimeSession implements DiscordRealtimeSessionLike {
       this.setStatus({
         state: "stopped",
         lastSessionError: message,
-        lastReconnectAt: now(),
+        lastReconnectAt: Date.now(),
         reconnectAttempts,
       });
       this.onAuthInvalidated?.(this.getStatus(), message);
@@ -380,7 +371,7 @@ export class DiscordRealtimeSession implements DiscordRealtimeSessionLike {
     this.setStatus({
       state: "degraded",
       lastSessionError: message,
-      lastReconnectAt: now(),
+      lastReconnectAt: Date.now(),
       reconnectAttempts,
     });
     if (!this.shouldReconnect) {

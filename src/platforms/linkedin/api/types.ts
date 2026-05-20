@@ -15,7 +15,7 @@ export interface VectorImage {
   height?: number;
 }
 
-export interface MemberParticipantInfo {
+interface MemberParticipantInfo {
   profileUrl: string;
   firstName: string;
   lastName: string;
@@ -23,13 +23,13 @@ export interface MemberParticipantInfo {
   picture?: VectorImage;
 }
 
-export interface OrganizationParticipantInfo {
+interface OrganizationParticipantInfo {
   name: string;
   logoUrl?: string;
   pageUrl?: string;
 }
 
-export interface ParticipantType {
+interface ParticipantType {
   member?: MemberParticipantInfo;
   organization?: OrganizationParticipantInfo;
 }
@@ -57,7 +57,7 @@ export interface ReactionSummary {
   firstReactedAt?: number;
 }
 
-export interface RepliedMessageContent {
+interface RepliedMessageContent {
   originalMessage?: {
     entityUrn?: string;
     deliveredAt?: number;
@@ -66,7 +66,7 @@ export interface RepliedMessageContent {
   };
 }
 
-export interface RenderContentItem {
+interface RenderContentItem {
   repliedMessageContent?: RepliedMessageContent;
   file?: Record<string, unknown>;
   audio?: Record<string, unknown>;
@@ -119,7 +119,7 @@ export interface RealtimeReaction {
   reactionSummary: ReactionSummary;
 }
 
-export interface RealtimeDecoratedEvent {
+interface RealtimeDecoratedEvent {
   topic: string;
   leftServerAt: number;
   id: string;

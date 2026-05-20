@@ -13,9 +13,9 @@ import {
   platformSupportsMultipleAccounts,
 } from "../platforms/core/types.js";
 import { inspectSlackHelper } from "../platforms/slack/helper/binary.js";
-import { inspectWhatsAppHelper } from "../platforms/whatsapp/helper/binary.js";
+import { inspectWhatsAppHelper } from "../platforms/whatsapp/helper/pair.js";
 
-export type PlatformAvailabilityState =
+type PlatformAvailabilityState =
   | "available"
   | "requires_permission"
   | "requires_helper"

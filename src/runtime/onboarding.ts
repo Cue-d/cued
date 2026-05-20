@@ -4,7 +4,7 @@ import { buildIntegrationStatus } from "../platforms/core/state/status.js";
 import { getGlobalCuedSkillStatus } from "../skills/install.js";
 import { buildPermissionStatus } from "./doctor.js";
 
-export interface OnboardingSnapshot {
+interface OnboardingSnapshot {
   permissions: Awaited<ReturnType<typeof buildPermissionStatus>>["permissions"];
   globalSkill: ReturnType<typeof getGlobalCuedSkillStatus>;
   hostOs: ReturnType<typeof buildIntegrationStatus>["hostOs"];

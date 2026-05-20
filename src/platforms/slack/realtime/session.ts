@@ -8,12 +8,7 @@ const DEFAULT_RECONNECT_BASE_MS = 1_000;
 const DEFAULT_RECONNECT_MAX_MS = 60_000;
 const slackLogger = createLogger("slack");
 
-export type SlackRealtimeState =
-  | "connecting"
-  | "connected"
-  | "reconnecting"
-  | "degraded"
-  | "stopped";
+type SlackRealtimeState = "connecting" | "connected" | "reconnecting" | "degraded" | "stopped";
 
 export interface SlackRealtimeStatus {
   platform: "slack";
@@ -98,7 +93,7 @@ export interface SlackRealtimeSessionLike {
   isConnected(): boolean;
 }
 
-export interface SlackRealtimeSupervisorSessionInput {
+interface SlackRealtimeSupervisorSessionInput {
   accountKey: string;
   helperPath: string;
   credentials: SlackCredentials;
@@ -114,10 +109,6 @@ interface SlackRealtimeSupervisorOptions {
   onConnected?: (accountKey: string, status: SlackRealtimeStatus, reconnected: boolean) => void;
   onDisconnected?: (accountKey: string, status: SlackRealtimeStatus) => void;
   onStatusChange?: (accountKey: string, status: SlackRealtimeStatus) => void;
-}
-
-function now(): number {
-  return Date.now();
 }
 
 function makeStatus(input: {
@@ -299,7 +290,7 @@ export class SlackRealtimeSession implements SlackRealtimeSessionLike {
       return;
     }
 
-    const eventAt = now();
+    const eventAt = Date.now();
     if (parsed.event === "connected") {
       const reconnected = this.hasEverConnected;
       this.hasEverConnected = true;
@@ -349,7 +340,7 @@ export class SlackRealtimeSession implements SlackRealtimeSessionLike {
       state: this.shouldReconnect ? "reconnecting" : "degraded",
       connectedAt: null,
       reconnectAttempts,
-      lastReconnectAt: this.shouldReconnect ? now() : this.status.lastReconnectAt,
+      lastReconnectAt: this.shouldReconnect ? Date.now() : this.status.lastReconnectAt,
       lastSessionError: error.message,
     });
     this.onDisconnected?.(this.getStatus());

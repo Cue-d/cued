@@ -12,7 +12,7 @@ vi.mock("../platforms/slack/helper/binary.js", () => ({
   inspectSlackHelper: () => inspectSlackHelperMock(),
 }));
 
-vi.mock("../platforms/whatsapp/helper/binary.js", () => ({
+vi.mock("../platforms/whatsapp/helper/pair.js", () => ({
   inspectWhatsAppHelper: () => inspectWhatsAppHelperMock(),
 }));
 

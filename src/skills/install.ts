@@ -8,7 +8,7 @@ import { getCurrentAppPath } from "../macos/install.js";
 const CUED_SKILL_NAME = "cued";
 const GLOBAL_SKILL_AGENT = "*";
 
-export interface GlobalCuedSkillInstallResult {
+interface GlobalCuedSkillInstallResult {
   ok: boolean;
   agent: typeof GLOBAL_SKILL_AGENT;
   skillName: typeof CUED_SKILL_NAME;
@@ -20,7 +20,7 @@ export interface GlobalCuedSkillInstallResult {
   error?: string;
 }
 
-export interface GlobalCuedSkillStatusResult {
+interface GlobalCuedSkillStatusResult {
   installed: boolean;
   status: "installed" | "needs_action" | "unknown";
   summary: string;
@@ -97,7 +97,7 @@ export function resolveNvmNpxPath(): string | null {
   );
 }
 
-export function resolveNpxPath(): string | null {
+function resolveNpxPath(): string | null {
   const candidates = [
     resolveShellNpxPath(),
     join("/opt", "homebrew", "bin", "npx"),

@@ -8,15 +8,15 @@ import type {
 import type { SyncBundle } from "../../core/sync.js";
 import type { SlackConversation, SlackMessage, SlackUser } from "../types.js";
 
-export function slackDedupeKey(seed: string): string {
+function slackDedupeKey(seed: string): string {
   return createHash("sha256").update(seed).digest("hex");
 }
 
-export function slackSourceKey(teamId: string, userId: string): string {
+function slackSourceKey(teamId: string, userId: string): string {
   return `slack:${teamId}:${userId}`;
 }
 
-export function slackMessageKey(teamId: string, conversationId: string, messageTs: string): string {
+function slackMessageKey(teamId: string, conversationId: string, messageTs: string): string {
   return `slack:${teamId}:${conversationId}:${messageTs}`;
 }
 
@@ -88,7 +88,7 @@ function toAttachmentMetadata(message: SlackMessage): Array<Record<string, unkno
   return attachments;
 }
 
-export function buildSlackConversationDisplayName(
+function buildSlackConversationDisplayName(
   conversation: SlackConversation,
   usersById: Map<string, SlackUser>,
   explicitDisplayName?: string | null,

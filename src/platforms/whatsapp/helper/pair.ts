@@ -148,13 +148,13 @@ export async function readWhatsAppHelperStatus(storeDir: string): Promise<WhatsA
   };
 }
 
-export interface WhatsAppPairResult {
+interface WhatsAppPairResult {
   accountJid: string;
   pushName?: string | null;
   helperVersion?: string | null;
 }
 
-export interface WhatsAppPairHandle {
+interface WhatsAppPairHandle {
   child: ChildProcess;
   qrCode: Promise<string>;
   completion: Promise<WhatsAppPairResult>;

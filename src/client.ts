@@ -16,7 +16,7 @@ export class DaemonRequestTimeoutError extends Error {
   }
 }
 
-export type DaemonRequestInput = {
+type DaemonRequestInput = {
   [K in DaemonRequest["command"]]: Omit<Extract<DaemonRequest, { command: K }>, "id">;
 }[DaemonRequest["command"]];
 

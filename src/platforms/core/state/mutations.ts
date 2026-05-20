@@ -1,7 +1,7 @@
 import { safeParseJsonRecord, safeParseJsonStringArray } from "../../../db/codecs.js";
 import type { AuthSessionRow, CuedDatabase } from "../../../db/database.js";
-import { getSignalConfigDir } from "../../signal/cli/binary.js";
-import { getWhatsAppStoreDir } from "../../whatsapp/helper/binary.js";
+import { getSignalConfigDir } from "../../signal/cli/client.js";
+import { getWhatsAppStoreDir } from "../../whatsapp/helper/pair.js";
 import { resolveIntegrationAccountKey, validateIntegrationAccountKey } from "../account-keys.js";
 import { listAdapterPlatforms } from "../registry.js";
 import {

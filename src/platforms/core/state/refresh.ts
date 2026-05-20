@@ -5,10 +5,13 @@ import {
   inspectSignalCli,
   isSignalCliVersionSupported,
   readSignalLinkedAccount,
-} from "../../signal/cli/binary.js";
+} from "../../signal/cli/client.js";
 import { importSlackDesktopAuth } from "../../slack/auth/desktop-import.js";
-import { getWhatsAppStoreDir, inspectWhatsAppHelper } from "../../whatsapp/helper/binary.js";
-import { readWhatsAppHelperStatus } from "../../whatsapp/helper/status.js";
+import {
+  getWhatsAppStoreDir,
+  inspectWhatsAppHelper,
+  readWhatsAppHelperStatus,
+} from "../../whatsapp/helper/pair.js";
 import { listAdapterPlatforms } from "../registry.js";
 import type { IntegrationAuthState } from "../types.js";
 import { refreshLocalIntegrationStates } from "./local-refresh.js";

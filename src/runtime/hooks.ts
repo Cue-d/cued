@@ -12,9 +12,9 @@ export const HOOK_EVENT_NAMES = [
   "message.received",
 ] as const;
 
-export type HookEventName = (typeof HOOK_EVENT_NAMES)[number];
+type HookEventName = (typeof HOOK_EVENT_NAMES)[number];
 
-export interface HookDefinition {
+interface HookDefinition {
   event: HookEventName;
   enabled: boolean;
   command: string;
@@ -28,7 +28,7 @@ interface HookConfigFile {
   hooks?: HookDefinition[];
 }
 
-export interface HookExecutionResult {
+interface HookExecutionResult {
   event: HookEventName;
   command: string;
   args: string[];
@@ -109,7 +109,7 @@ function normalizeHook(raw: Record<string, unknown>): HookDefinition {
   };
 }
 
-export function loadHooksConfig(): { path: string; exists: boolean; hooks: HookDefinition[] } {
+function loadHooksConfig(): { path: string; exists: boolean; hooks: HookDefinition[] } {
   ensureCuedDirs();
   if (!existsSync(CUED_HOOKS_PATH)) {
     return { path: CUED_HOOKS_PATH, exists: false, hooks: [] };

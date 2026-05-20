@@ -22,11 +22,6 @@ function textEnum<const TValues extends readonly [string, ...string[]]>(
   return text(name, { enum: values });
 }
 
-export const schemaMigrations = sqliteTable("schema_migrations", {
-  id: text("id").primaryKey(),
-  appliedAt: integer("applied_at").notNull(),
-});
-
 export const sourceAccounts = sqliteTable("source_accounts", {
   id: text("id").primaryKey(),
   platform: textEnum("platform", PLATFORM_VALUES).notNull(),

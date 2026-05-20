@@ -6,17 +6,16 @@ import { cuedAuthKeychainService } from "../../../core/identity.js";
 
 export const GMAIL_KEYCHAIN_SERVICE = cuedAuthKeychainService("gmail");
 export const GMAIL_READONLY_SCOPE = "https://www.googleapis.com/auth/gmail.readonly";
-export const GOOGLE_OAUTH_CLIENT_RESOURCE_PATH =
-  "Contents/Resources/oauth/google-oauth-client.json";
+const GOOGLE_OAUTH_CLIENT_RESOURCE_PATH = "Contents/Resources/oauth/google-oauth-client.json";
 
-export interface GoogleOAuthClientConfig {
+interface GoogleOAuthClientConfig {
   clientId: string;
   clientSecret: string;
   authUri: string;
   tokenUri: string;
 }
 
-export interface GmailTokenPayload {
+interface GmailTokenPayload {
   access_token: string;
   refresh_token?: string;
   expires_in?: number;

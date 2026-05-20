@@ -16,12 +16,7 @@ const DEFAULT_RECONNECT_BASE_MS = 1_000;
 const DEFAULT_RECONNECT_MAX_MS = 60_000;
 const whatsAppLogger = createLogger("whatsapp");
 
-export type WhatsAppRealtimeState =
-  | "connecting"
-  | "connected"
-  | "reconnecting"
-  | "degraded"
-  | "stopped";
+type WhatsAppRealtimeState = "connecting" | "connected" | "reconnecting" | "degraded" | "stopped";
 
 export interface WhatsAppRealtimeStatus {
   platform: "whatsapp";
@@ -78,7 +73,7 @@ export interface WhatsAppRealtimeSessionLike {
   }): Promise<WhatsAppResyncPage>;
 }
 
-export interface WhatsAppRealtimeSupervisorSessionInput {
+interface WhatsAppRealtimeSupervisorSessionInput {
   accountKey: string;
   helperPath: string;
   storeDir: string;
@@ -90,10 +85,6 @@ interface WhatsAppRealtimeSupervisorOptions {
   onConnected?: (accountKey: string, status: WhatsAppRealtimeStatus, reconnected: boolean) => void;
   onDisconnected?: (accountKey: string, status: WhatsAppRealtimeStatus) => void;
   onStatusChange?: (accountKey: string, status: WhatsAppRealtimeStatus) => void;
-}
-
-function now(): number {
-  return Date.now();
 }
 
 function makeStatus(input: {
@@ -378,7 +369,7 @@ export class WhatsAppRealtimeSession implements WhatsAppRealtimeSessionLike {
     }
 
     const eventData = parsed.data as Record<string, unknown>;
-    const eventAt = now();
+    const eventAt = Date.now();
     if (parsed.event === "connected") {
       const reconnected = this.hasEverConnected;
       this.hasEverConnected = true;
@@ -443,7 +434,7 @@ export class WhatsAppRealtimeSession implements WhatsAppRealtimeSessionLike {
       state: this.shouldReconnect ? "reconnecting" : "degraded",
       connectedAt: null,
       reconnectAttempts,
-      lastReconnectAt: this.shouldReconnect ? now() : this.status.lastReconnectAt,
+      lastReconnectAt: this.shouldReconnect ? Date.now() : this.status.lastReconnectAt,
       lastSessionError: error.message,
     });
     this.onDisconnected?.(this.getStatus());

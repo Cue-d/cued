@@ -8,12 +8,7 @@ const DEFAULT_RECONNECT_BASE_MS = 1_000;
 const DEFAULT_RECONNECT_MAX_MS = 60_000;
 const signalLogger = createLogger("signal");
 
-export type SignalRealtimeState =
-  | "connecting"
-  | "connected"
-  | "reconnecting"
-  | "degraded"
-  | "stopped";
+type SignalRealtimeState = "connecting" | "connected" | "reconnecting" | "degraded" | "stopped";
 
 export interface SignalRealtimeStatus {
   platform: "signal";
@@ -71,7 +66,7 @@ export interface SignalRealtimeSessionLike {
   ): Promise<{ timestamp: number }>;
 }
 
-export interface SignalRealtimeSupervisorSessionInput {
+interface SignalRealtimeSupervisorSessionInput {
   accountKey: string;
   account: string;
   cliPath: string;
@@ -98,10 +93,6 @@ export function parseSignalJsonRpcLine(line: string): SignalJsonRpcMessage | nul
   } catch {
     return null;
   }
-}
-
-function now(): number {
-  return Date.now();
 }
 
 function makeStatus(input: {
@@ -240,7 +231,7 @@ export class SignalRealtimeSession implements SignalRealtimeSessionLike {
 
     const result = await this.request<{ timestamp?: number }>("send", params);
     return {
-      timestamp: typeof result?.timestamp === "number" ? result.timestamp : now(),
+      timestamp: typeof result?.timestamp === "number" ? result.timestamp : Date.now(),
     };
   }
 
@@ -322,7 +313,7 @@ export class SignalRealtimeSession implements SignalRealtimeSessionLike {
       this.hasEverConnected = true;
       this.setStatus({
         state: "connected",
-        connectedAt: now(),
+        connectedAt: Date.now(),
         reconnectAttempts: 0,
         lastSessionError: null,
       });
@@ -370,7 +361,7 @@ export class SignalRealtimeSession implements SignalRealtimeSessionLike {
       return;
     }
 
-    this.setStatus({ lastNotificationAt: now(), lastSessionError: null });
+    this.setStatus({ lastNotificationAt: Date.now(), lastSessionError: null });
     const parsed = toSignalMessage(message.params, this.account, this.nextNotificationIndex++);
     if (parsed) {
       this.onMessage?.(parsed);
@@ -403,7 +394,7 @@ export class SignalRealtimeSession implements SignalRealtimeSessionLike {
       state: this.shouldReconnect ? "reconnecting" : "degraded",
       connectedAt: null,
       reconnectAttempts,
-      lastReconnectAt: this.shouldReconnect ? now() : this.status.lastReconnectAt,
+      lastReconnectAt: this.shouldReconnect ? Date.now() : this.status.lastReconnectAt,
       lastSessionError: error.message,
     });
     this.onDisconnected?.(this.getStatus());

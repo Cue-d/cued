@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-export type ReleaseChannel = "internal" | "stable" | "dev";
+type ReleaseChannel = "internal" | "stable" | "dev";
 
 const FALLBACK_APP_VERSION = "0.1.0";
 const FALLBACK_RELEASE_CHANNEL: ReleaseChannel = "dev";

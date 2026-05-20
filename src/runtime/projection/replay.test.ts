@@ -8,7 +8,7 @@ import {
   projectRealtimeRange,
   rebuildProjectedState,
 } from "./projector.js";
-import { replayFixtures } from "./replay-fixtures.js";
+import { replayFixtures } from "./replay-fixtures/index.js";
 import { readCanonicalProjectionSnapshot } from "./replay-snapshot.js";
 
 describe("projection replay", () => {

@@ -14,7 +14,7 @@ import type {
   Conversation,
   Message,
   MessagingParticipant,
-} from "../../platforms/linkedin/api/index.js";
+} from "../../platforms/linkedin/api/types.js";
 import { buildLinkedInSyncBundle } from "../../platforms/linkedin/sync/bundle.js";
 import { buildSlackSyncBundle } from "../../platforms/slack/sync/bundle.js";
 import type { SlackConversation, SlackMessage, SlackUser } from "../../platforms/slack/types.js";

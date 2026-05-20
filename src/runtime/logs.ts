@@ -3,7 +3,7 @@ import { dirname } from "node:path";
 import process from "node:process";
 import { CUED_DAEMON_LOG_PATH } from "../core/config.js";
 
-export interface LogsCommandOptions {
+interface LogsCommandOptions {
   follow: boolean;
   pathOnly: boolean;
   tail: number;

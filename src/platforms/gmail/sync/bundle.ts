@@ -13,7 +13,7 @@ const DEFAULT_PAGE_SIZE = Number(process.env.CUED_GMAIL_PAGE_SIZE ?? "50");
 const DEFAULT_PAGE_BUDGET = Number(process.env.CUED_GMAIL_PAGE_BUDGET ?? "5");
 const DEFAULT_FETCH_CONCURRENCY = Number(process.env.CUED_GMAIL_FETCH_CONCURRENCY ?? "8");
 
-export interface GmailSourceCursor {
+interface GmailSourceCursor {
   emailAddress?: string;
   historyId?: string | null;
   pageToken?: string | null;

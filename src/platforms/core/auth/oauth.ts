@@ -18,7 +18,7 @@ import type { AuthSessionSummary, IntegrationStateSummary } from "../state/types
 
 const DEFAULT_OAUTH_TIMEOUT_MS = 5 * 60 * 1000;
 
-export interface OAuthAuthResult {
+interface OAuthAuthResult {
   sessionId: string;
   platform: Platform;
   accountKey: string;
@@ -29,7 +29,7 @@ export interface OAuthAuthResult {
   errorSummary?: string | null;
 }
 
-export interface OAuthAuthHandle {
+interface OAuthAuthHandle {
   child: ChildProcess;
   completion: Promise<OAuthAuthResult>;
 }

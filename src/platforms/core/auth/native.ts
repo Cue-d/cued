@@ -4,7 +4,7 @@ import type { CuedDatabase } from "../../../db/database.js";
 import { resolveMacOSNativeBinary } from "../../../runtime/native-binary.js";
 import type { AuthSessionSummary } from "../state/types.js";
 
-export interface NativeAuthResult {
+interface NativeAuthResult {
   sessionId: string;
   platform: Platform;
   accountKey: string;
@@ -15,7 +15,7 @@ export interface NativeAuthResult {
   errorSummary?: string | null;
 }
 
-export interface NativeAuthHandle {
+interface NativeAuthHandle {
   child: ChildProcess;
   completion: Promise<NativeAuthResult>;
 }

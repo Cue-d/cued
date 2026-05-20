@@ -5,14 +5,14 @@ import {
   type StoredGmailCredentials,
 } from "../oauth/client.js";
 
-export interface GmailProfile {
+interface GmailProfile {
   emailAddress: string;
   messagesTotal?: number;
   threadsTotal?: number;
   historyId?: string;
 }
 
-export interface GmailMessageListPage {
+interface GmailMessageListPage {
   messages?: Array<{ id: string; threadId: string }>;
   nextPageToken?: string;
   resultSizeEstimate?: number;
@@ -23,13 +23,13 @@ export interface GmailHistoryMessageRef {
   threadId: string;
 }
 
-export interface GmailHistoryRecord {
+interface GmailHistoryRecord {
   id?: string;
   messages?: GmailHistoryMessageRef[];
   messagesAdded?: Array<{ message: GmailHistoryMessageRef }>;
 }
 
-export interface GmailHistoryListPage {
+interface GmailHistoryListPage {
   history?: GmailHistoryRecord[];
   nextPageToken?: string;
   historyId?: string;
@@ -54,13 +54,13 @@ export interface GmailMessagePayload {
   parts?: GmailMessagePayload[];
 }
 
-export interface GmailAttachment {
+interface GmailAttachment {
   attachmentId?: string;
   data: string;
   size?: number;
 }
 
-export class GmailApiError extends Error {
+class GmailApiError extends Error {
   constructor(
     public readonly status: number,
     public readonly responseBody: unknown,
@@ -73,7 +73,7 @@ export function isGmailNotFoundError(error: unknown): boolean {
   return error instanceof GmailApiError && error.status === 404;
 }
 
-export function readGmailSecret(accountKey: string): StoredGmailCredentials {
+function readGmailSecret(accountKey: string): StoredGmailCredentials {
   const stdout = execFileSync(
     "security",
     ["find-generic-password", "-s", GMAIL_KEYCHAIN_SERVICE, "-a", accountKey, "-w"],

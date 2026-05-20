@@ -2,13 +2,10 @@ import { execFileSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import type { ContactObservationPayload } from "../../core/types/provider.js";
-import {
-  getMacOSNativeBinaryCandidates,
-  resolveMacOSNativeBinary,
-} from "../../runtime/native-binary.js";
+import { resolveMacOSNativeBinary } from "../../runtime/native-binary.js";
 import type { SyncBundle } from "../core/sync.js";
 
-export interface ContactRecordInput {
+interface ContactRecordInput {
   sourceId: string;
   displayName: string;
   company?: string | null;
@@ -119,8 +116,6 @@ function loadContactsFromMacOS(): ContactRecordInput[] {
   });
   return JSON.parse(stdout) as ContactRecordInput[];
 }
-
-export const getNativeContactsBinaryCandidates = getMacOSNativeBinaryCandidates;
 
 export function resolveContactsLoader(
   env: NodeJS.ProcessEnv = process.env,

@@ -12,7 +12,7 @@ export interface SlackAuthTestResponse {
   user_id?: string;
 }
 
-export interface SlackUserProfile {
+interface SlackUserProfile {
   real_name?: string;
   display_name?: string;
   email?: string;
@@ -31,13 +31,13 @@ export interface SlackUser {
   profile: SlackUserProfile;
 }
 
-export interface SlackReaction {
+interface SlackReaction {
   name: string;
   count: number;
   users: string[];
 }
 
-export interface SlackFile {
+interface SlackFile {
   id: string;
   name: string;
   mimetype?: string;
@@ -49,7 +49,7 @@ export interface SlackFile {
   thumb_480?: string;
 }
 
-export interface SlackAttachment {
+interface SlackAttachment {
   fallback?: string;
   text?: string;
   title?: string;

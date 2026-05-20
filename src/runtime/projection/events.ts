@@ -11,7 +11,7 @@ type StoredRawEvent = Pick<ProviderRawEventInput, "entityKind" | "eventKind"> & 
   normalizedSchema?: string | null;
 };
 
-export type NormalizedProjectedRawEvent = {
+type NormalizedProjectedRawEvent = {
   entityKind: RawEventEntityKind;
   eventKind: string;
   normalizedSchema: string;

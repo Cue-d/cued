@@ -19,7 +19,7 @@ export interface DiscordChannel {
   last_message_id?: string | null;
 }
 
-export interface DiscordAttachment {
+interface DiscordAttachment {
   id: string;
   filename: string;
   content_type?: string | null;
@@ -30,13 +30,13 @@ export interface DiscordAttachment {
   height?: number | null;
 }
 
-export interface DiscordMessageReference {
+interface DiscordMessageReference {
   message_id?: string;
   channel_id?: string;
   guild_id?: string;
 }
 
-export interface DiscordMember {
+interface DiscordMember {
   nick?: string | null;
 }
 
@@ -61,7 +61,7 @@ export interface DiscordStoredCredentials {
   globalName?: string | null;
 }
 
-export const DISCORD_DM_CHANNEL_TYPES = new Set([1, 3]);
+const DISCORD_DM_CHANNEL_TYPES = new Set([1, 3]);
 
 export function isDiscordDmChannel(channel: Pick<DiscordChannel, "type">): boolean {
   return DISCORD_DM_CHANNEL_TYPES.has(channel.type);

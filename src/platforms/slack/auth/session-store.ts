@@ -11,7 +11,7 @@ import { isUserRemovedIntegrationMetadata } from "../../core/state/status.js";
 
 const SLACK_KEYCHAIN_SERVICE = authKeychainService("slack");
 
-export interface StoredSlackSessionPayload {
+interface StoredSlackSessionPayload {
   accountKey: string;
   teamId: string;
   teamName: string;
@@ -23,14 +23,14 @@ export interface StoredSlackSessionPayload {
   importMethod: string;
 }
 
-export interface StoredSlackSessionResult {
+interface StoredSlackSessionResult {
   platform: "slack";
   accountKey: string;
   sourcePath: string;
   imported: boolean;
 }
 
-export interface StoreSlackSessionOptions {
+interface StoreSlackSessionOptions {
   reviveUserRemoved?: boolean;
 }
 

@@ -8,14 +8,14 @@ import { readSingletonLock, type SingletonLockMetadata } from "../core/singleton
 const DEFAULT_WAIT_MS = 5_000;
 const DEFAULT_POLL_MS = 100;
 
-export interface RunningCuedProcess {
+interface RunningCuedProcess {
   pid: number;
   command: string;
   executablePath: string | null;
   appBundlePath: string | null;
 }
 
-export interface TerminateCompetingDaemonsOptions {
+interface TerminateCompetingDaemonsOptions {
   expectedExecutablePath: string;
   currentPid?: number;
   psOutput?: string;

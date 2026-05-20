@@ -7,7 +7,7 @@ import type {
 
 export type { ProviderRawEventInput as RawEventInput, SourceAccountInput };
 
-export type SyncContinuationReason =
+type SyncContinuationReason =
   | "account_pagination"
   | "scoped_proof_continuation"
   | "rate_limit_backoff"

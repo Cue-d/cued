@@ -1,6 +1,6 @@
 import type { AdapterPlatform, Platform, SyncProofInput } from "../../core/types/provider.js";
 
-export interface SyncProofKindContract {
+interface SyncProofKindContract {
   platform: AdapterPlatform;
   proofKind: string;
   scopeKind: string;

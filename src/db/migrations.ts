@@ -2,7 +2,7 @@ import type Database from "better-sqlite3-multiple-ciphers";
 
 type MigrationDatabase = InstanceType<typeof Database>;
 
-export type Migration = {
+type Migration = {
   id: string;
   legacyIds?: string[];
   sql?: string;

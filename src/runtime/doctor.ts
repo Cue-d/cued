@@ -12,16 +12,19 @@ import {
   parseSignalCliVersion,
   readSignalLinkedAccount,
   resolveSignalCliPath,
-} from "../platforms/signal/cli/binary.js";
+} from "../platforms/signal/cli/client.js";
 import { inspectSlackHelper } from "../platforms/slack/helper/binary.js";
 import { inspectWhatsAppDesktopSource } from "../platforms/whatsapp/desktop.js";
 import { buildWhatsAppDiagnostics } from "../platforms/whatsapp/diagnostics.js";
-import { getWhatsAppStoreDir, inspectWhatsAppHelper } from "../platforms/whatsapp/helper/binary.js";
-import { readWhatsAppHelperStatus } from "../platforms/whatsapp/helper/status.js";
+import {
+  getWhatsAppStoreDir,
+  inspectWhatsAppHelper,
+  readWhatsAppHelperStatus,
+} from "../platforms/whatsapp/helper/pair.js";
 import type { WhatsAppRealtimeStatus } from "../platforms/whatsapp/realtime/session.js";
 import { resolveMacOSNativeBinary } from "./native-binary.js";
 
-export interface DoctorCheck {
+interface DoctorCheck {
   name: string;
   status: "ok" | "warning" | "error" | "unknown";
   summary: string;
@@ -29,7 +32,7 @@ export interface DoctorCheck {
   remediation?: string;
 }
 
-export interface DoctorRuntimeStatus {
+interface DoctorRuntimeStatus {
   discordRealtimeSessions?: unknown;
   slackRealtimeSessions?: unknown;
   linkedinRealtimeSessions?: unknown;
@@ -37,7 +40,7 @@ export interface DoctorRuntimeStatus {
   whatsappRealtimeSessions?: unknown;
 }
 
-export interface AuthDiagnostic {
+interface AuthDiagnostic {
   platform: string;
   accountKey: string;
   displayName: string | null;
@@ -56,10 +59,10 @@ export interface AuthDiagnostic {
   remediation?: string;
 }
 
-export type PermissionStatusKey = "contacts" | "full_disk_access" | "messages_automation";
-export type PermissionStatusState = "granted" | "needs_action" | "unknown";
+type PermissionStatusKey = "contacts" | "full_disk_access" | "messages_automation";
+type PermissionStatusState = "granted" | "needs_action" | "unknown";
 
-export interface PermissionStatusSummary {
+interface PermissionStatusSummary {
   key: PermissionStatusKey;
   status: PermissionStatusState;
   summary: string;
@@ -73,14 +76,14 @@ export interface PermissionCheckSummaryInput {
   messagesNativeHelper: DoctorCheck;
 }
 
-export type PermissionStatusMode = "active" | "passive";
+type PermissionStatusMode = "active" | "passive";
 
 type PermissionStatusDatabase = Pick<
   CuedDatabase,
   "getMessagesAutomationVerification" | "setMessagesAutomationVerification"
 >;
 
-export interface BuildPermissionStatusOptions {
+interface BuildPermissionStatusOptions {
   mode?: PermissionStatusMode;
   db?: PermissionStatusDatabase | null;
 }

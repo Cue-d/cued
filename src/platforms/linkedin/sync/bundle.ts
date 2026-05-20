@@ -3,16 +3,15 @@ import type { SourceAccountInput, SyncProofInput } from "../../../core/types/pro
 import { mapWithConcurrency } from "../../../core/utils/async.js";
 import { openCuedDatabaseReadOnly } from "../../../db/database.js";
 import type { SyncBundle } from "../../core/sync.js";
-import {
-  type Connection,
-  type Conversation,
-  type Cookie,
-  LinkedInClient,
-  type Message,
-  type MessagesResult,
-  type MessagingParticipant,
-} from "../api/index.js";
+import { LinkedInClient, type MessagesResult } from "../api/client.js";
 import { LinkedInRequestError } from "../api/request.js";
+import type {
+  Connection,
+  Conversation,
+  Cookie,
+  Message,
+  MessagingParticipant,
+} from "../api/types.js";
 import { loadLinkedInSessionSecret } from "../auth/session-store.js";
 import {
   buildLinkedInConversationEvent,
@@ -102,10 +101,6 @@ interface LinkedInMessageBatchResult {
   };
   messageCount: number;
   error?: unknown;
-}
-
-function now(): number {
-  return Date.now();
 }
 
 function stableId(seed: string): string {
@@ -392,7 +387,7 @@ async function listConversations(
       complete: false,
       resumeScan: {
         mode: "full",
-        startedAt: resumeScan?.startedAt ?? now(),
+        startedAt: resumeScan?.startedAt ?? Date.now(),
         conversationCursor: resumeScan?.conversationCursor ?? null,
         oldestLastActivity: resumeScan?.oldestLastActivity ?? null,
       },
@@ -460,7 +455,7 @@ async function listConversations(
       ? null
       : {
           mode: "full",
-          startedAt: resumeScan?.startedAt ?? now(),
+          startedAt: resumeScan?.startedAt ?? Date.now(),
           conversationCursor: nextCursor,
           oldestLastActivity: Number.isFinite(oldestLastActivity) ? oldestLastActivity : null,
         },
@@ -870,7 +865,7 @@ export async function buildLinkedInSyncBundle(options?: {
     ((lookupAccountKey: string, sourceMessageKey: string) =>
       loadProjectedReactions(db!, lookupAccountKey, sourceMessageKey));
   try {
-    const observedBase = now();
+    const observedBase = Date.now();
     const cutoffMs = incrementalOldestMs(previousLastSyncAt);
     const incremental = Boolean(!resumeScan && (previousLastSyncAt || savedSyncToken));
     const syncMode = incremental ? "incremental" : "full";

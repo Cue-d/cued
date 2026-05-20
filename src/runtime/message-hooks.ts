@@ -1,6 +1,6 @@
 import type { ProviderRawEventInput, RawEventAcquisitionMode } from "../core/types/provider.js";
 
-export type MessageReceivedHookMessage = {
+type MessageReceivedHookMessage = {
   platform: ProviderRawEventInput["platform"];
   accountKey: string;
   observedAt: number;
@@ -8,7 +8,7 @@ export type MessageReceivedHookMessage = {
   payload: Record<string, unknown>;
 };
 
-export type MessageReceivedHookPayload = {
+type MessageReceivedHookPayload = {
   runId: string;
   message: MessageReceivedHookMessage;
 };

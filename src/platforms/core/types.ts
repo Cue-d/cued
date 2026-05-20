@@ -35,15 +35,15 @@ export const PLATFORM_FEATURE_VALUES = [
   "attachments",
   "contact_sync",
 ] as const;
-export type PlatformFeature = (typeof PLATFORM_FEATURE_VALUES)[number];
+type PlatformFeature = (typeof PLATFORM_FEATURE_VALUES)[number];
 
 export const PLATFORM_FEATURE_SUPPORT_VALUES = ["yes", "partial", "no"] as const;
-export type PlatformFeatureSupport = (typeof PLATFORM_FEATURE_SUPPORT_VALUES)[number];
+type PlatformFeatureSupport = (typeof PLATFORM_FEATURE_SUPPORT_VALUES)[number];
 
-export const PLATFORM_FUTURE_FEATURE_NOTES = {
+const PLATFORM_FUTURE_FEATURE_NOTES = {
   send: "Outbound send is planned for a future release.",
 } as const;
-export type PlatformFutureFeatureNotes = Partial<typeof PLATFORM_FUTURE_FEATURE_NOTES>;
+type PlatformFutureFeatureNotes = Partial<typeof PLATFORM_FUTURE_FEATURE_NOTES>;
 
 const PLATFORM_FUTURE_SEND_VALUES = ["discord", "imessage", "signal", "whatsapp"] as const;
 const platformFutureSendSet = new Set<Platform>(PLATFORM_FUTURE_SEND_VALUES);
@@ -60,7 +60,7 @@ type PlatformDefinition = {
   helperRequirements: readonly PlatformHelperRequirement[];
 };
 
-export const PLATFORM_DEFINITIONS = {
+const PLATFORM_DEFINITIONS = {
   contacts: {
     adapter: true,
     defaultAccountKey: "local",
@@ -149,7 +149,7 @@ export const PLATFORM_DEFINITIONS = {
   },
 } as const satisfies Record<Platform, PlatformDefinition>;
 
-export const PLATFORM_FEATURE_MATRIX = {
+const PLATFORM_FEATURE_MATRIX = {
   contacts: {
     receive: "no",
     realtime_ingest: "yes",
@@ -259,7 +259,7 @@ export const ADAPTER_PLATFORM_VALUES = PLATFORM_VALUES.filter(
   (platform): platform is AdapterPlatform => PLATFORM_DEFINITIONS[platform].adapter,
 );
 
-export type RequestableIntegrationPlatform = PlatformsMatching<"requestableIntegration">;
+type RequestableIntegrationPlatform = PlatformsMatching<"requestableIntegration">;
 export const REQUESTABLE_INTEGRATION_PLATFORM_VALUES = PLATFORM_VALUES.filter(
   (platform): platform is RequestableIntegrationPlatform =>
     PLATFORM_DEFINITIONS[platform].requestableIntegration,
@@ -309,7 +309,6 @@ export const RAW_EVENT_ENTITY_KIND_VALUES = [
 export type RawEventEntityKind = (typeof RAW_EVENT_ENTITY_KIND_VALUES)[number];
 
 export const CONTACT_KIND_VALUES = ["person"] as const;
-export type ContactKind = (typeof CONTACT_KIND_VALUES)[number];
 
 export const CONVERSATION_TYPE_VALUES = ["dm", "group"] as const;
 export type ConversationType = (typeof CONVERSATION_TYPE_VALUES)[number];
@@ -371,7 +370,6 @@ const adapterPlatformSet = new Set<string>(ADAPTER_PLATFORM_VALUES);
 const requestableIntegrationPlatformSet = new Set<string>(REQUESTABLE_INTEGRATION_PLATFORM_VALUES);
 const integrationAuthStateSet = new Set<string>(INTEGRATION_AUTH_STATE_VALUES);
 const integrationRuntimeKindSet = new Set<string>(INTEGRATION_RUNTIME_KIND_VALUES);
-const hostOsSet = new Set<string>(HOST_OS_VALUES);
 
 export function isPlatform(value: string): value is Platform {
   return platformSet.has(value);
@@ -389,14 +387,6 @@ export function isRequestableIntegrationPlatform(
 
 export function parsePlatform(value: string): Platform | null {
   return isPlatform(value) ? value : null;
-}
-
-export function isHostOS(value: string): value is HostOS {
-  return hostOsSet.has(value);
-}
-
-export function parseHostOS(value: string | null | undefined): HostOS | null {
-  return value && isHostOS(value) ? value : null;
 }
 
 export function getDefaultAccountKeyForPlatform(platform: Platform): string {
@@ -448,7 +438,7 @@ export function getPlatformFutureFeatureNotes(platform: Platform): PlatformFutur
   return platformFutureSendSet.has(platform) ? PLATFORM_FUTURE_FEATURE_NOTES : {};
 }
 
-export function isIntegrationAuthState(value: string): value is IntegrationAuthState {
+function isIntegrationAuthState(value: string): value is IntegrationAuthState {
   return integrationAuthStateSet.has(value);
 }
 
@@ -459,7 +449,7 @@ export function parseIntegrationAuthState(
   return value && isIntegrationAuthState(value) ? value : fallback;
 }
 
-export function isIntegrationRuntimeKind(value: string): value is IntegrationRuntimeKind {
+function isIntegrationRuntimeKind(value: string): value is IntegrationRuntimeKind {
   return integrationRuntimeKindSet.has(value);
 }
 

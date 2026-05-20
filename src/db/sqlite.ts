@@ -46,7 +46,7 @@ function hardenDbPaths(dbPath: string): void {
   }
 }
 
-export function loadOrCreateDatabaseKey(): string {
+function loadOrCreateDatabaseKey(): string {
   const existingKey = loadExistingDatabaseKey();
   if (existingKey) {
     if (shouldUseKeychainBackedDatabaseKey()) {
@@ -58,7 +58,7 @@ export function loadOrCreateDatabaseKey(): string {
   return createAndStoreDatabaseKey();
 }
 
-export function loadExistingDatabaseKey(): string | null {
+function loadExistingDatabaseKey(): string | null {
   return loadExistingDatabaseKeyCandidates()[0] ?? null;
 }
 
@@ -126,7 +126,7 @@ function createAndStoreDatabaseKey(): string {
   return key;
 }
 
-export function migrateDatabaseKeyToCurrentService(): boolean {
+function migrateDatabaseKeyToCurrentService(): boolean {
   const key = loadExistingDatabaseKey();
   if (!key) {
     return false;

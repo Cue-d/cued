@@ -100,7 +100,7 @@ function bestContactName(contact: WhatsAppContactSnapshot): string {
   );
 }
 
-export function buildWhatsAppContactEvent(
+function buildWhatsAppContactEvent(
   contact: WhatsAppContactSnapshot,
   accountKey: string,
   observedAt: number,
@@ -142,7 +142,7 @@ export function buildWhatsAppContactEvent(
   };
 }
 
-export function buildWhatsAppChatEvent(
+function buildWhatsAppChatEvent(
   chat: WhatsAppChatSnapshot,
   accountKey: string,
   observedAt: number,

@@ -1,4 +1,3 @@
-import { existsSync } from "node:fs";
 import { stdin as input, stdout as output } from "node:process";
 import readline from "node:readline/promises";
 import { openCuedDatabase } from "./db/database.js";
@@ -99,9 +98,4 @@ export async function runSetupTUI(): Promise<void> {
     rl.close();
     db.close();
   }
-}
-
-export function hasInstalledAppBundle(): boolean {
-  const appPath = resolveInstalledAppPath();
-  return Boolean(appPath && existsSync(appPath));
 }

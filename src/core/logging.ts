@@ -2,9 +2,9 @@ import { appendFileSync, existsSync, mkdirSync, renameSync, statSync } from "nod
 import { dirname } from "node:path";
 import { CUED_DAEMON_LOG_PATH } from "./config.js";
 
-export type LogLevel = "info" | "warn" | "error";
+type LogLevel = "info" | "warn" | "error";
 
-export interface Logger {
+interface Logger {
   info(message: string, details?: unknown): void;
   warn(message: string, details?: unknown): void;
   error(message: string, details?: unknown): void;

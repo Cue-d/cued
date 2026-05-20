@@ -37,7 +37,7 @@ type CallHistoryRow = {
   call_category: number | null;
 };
 
-export interface ImsCallRecord {
+interface ImsCallRecord {
   pk: number;
   sourceCallKey: string;
   sourceConversationKey: string;

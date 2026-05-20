@@ -329,7 +329,7 @@ function bestSourceHandle(envelope: SignalEnvelope): string | undefined {
   );
 }
 
-export function makeSignalMessageFallbackId(options: {
+function makeSignalMessageFallbackId(options: {
   timestamp: number;
   threadId: string;
   isFromMe: boolean;

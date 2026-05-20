@@ -101,7 +101,7 @@ type ProjectionOverview = {
   projectionWatermark: number;
 };
 
-export type ProjectionRangeResult = ProjectionOverview & {
+type ProjectionRangeResult = ProjectionOverview & {
   completed: boolean;
   nextStartRowId: number | null;
   rangeStartRowId: number | null;

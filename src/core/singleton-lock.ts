@@ -55,7 +55,7 @@ type AcquireSingletonLockOptions = {
   probe?: (metadata: SingletonLockMetadata | null) => ProbeState | Promise<ProbeState>;
 };
 
-export type SingletonLockLease = {
+type SingletonLockLease = {
   path: string;
   metadata: SingletonLockMetadata;
   heartbeat: () => void;

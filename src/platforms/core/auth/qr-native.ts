@@ -19,7 +19,7 @@ import {
 } from "../../whatsapp/helper/pair.js";
 import type { AuthSessionSummary, IntegrationStateSummary } from "../state/types.js";
 
-export interface QrNativeAuthResult {
+interface QrNativeAuthResult {
   sessionId: string;
   platform: Platform;
   accountKey: string;
@@ -30,7 +30,7 @@ export interface QrNativeAuthResult {
   errorSummary?: string | null;
 }
 
-export interface QrNativeAuthHandle {
+interface QrNativeAuthHandle {
   child: ChildProcess;
   completion: Promise<QrNativeAuthResult>;
 }

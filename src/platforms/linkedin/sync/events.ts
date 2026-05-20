@@ -34,7 +34,7 @@ export function normalizeMemberUrn(urn: string): string {
   return id ? `urn:li:member:${id}` : base;
 }
 
-export function extractUrnId(urn: string | undefined): string | null {
+function extractUrnId(urn: string | undefined): string | null {
   if (!urn) {
     return null;
   }
@@ -42,7 +42,7 @@ export function extractUrnId(urn: string | undefined): string | null {
   return match?.[1] ?? null;
 }
 
-export function linkedinProfileUrlFromUrn(urn: string | undefined): string | null {
+function linkedinProfileUrlFromUrn(urn: string | undefined): string | null {
   const id = extractUrnId(urn);
   if (!id || /^ACo/i.test(id)) {
     return null;
@@ -54,7 +54,7 @@ export function participantSourceKey(participant: Pick<MessagingParticipant, "en
   return `linkedin:${normalizeMemberUrn(participant.entityURN)}`;
 }
 
-export function bestParticipantName(participant: MessagingParticipant): string {
+function bestParticipantName(participant: MessagingParticipant): string {
   if (participant.participantType.member) {
     return [
       participant.participantType.member.firstName,
@@ -67,7 +67,7 @@ export function bestParticipantName(participant: MessagingParticipant): string {
   return participant.participantType.organization?.name ?? participant.entityURN;
 }
 
-export function bestParticipantPhoto(participant: MessagingParticipant): string | null {
+function bestParticipantPhoto(participant: MessagingParticipant): string | null {
   return (
     participant.participantType.member?.picture?.url ??
     participant.participantType.organization?.logoUrl ??
@@ -75,7 +75,7 @@ export function bestParticipantPhoto(participant: MessagingParticipant): string 
   );
 }
 
-export function participantHandles(participant: MessagingParticipant): ContactHandleInput[] {
+function participantHandles(participant: MessagingParticipant): ContactHandleInput[] {
   const handles: ContactHandleInput[] = [
     {
       type: "linkedin_entity_urn",
@@ -180,7 +180,7 @@ export function replyToSourceMessageKey(message: Message): string | null {
   return null;
 }
 
-export function normalizeLinkedInAttachments(message: Message): Array<Record<string, unknown>> {
+function normalizeLinkedInAttachments(message: Message): Array<Record<string, unknown>> {
   const attachments: Array<Record<string, unknown>> = [];
   for (const [index, item] of (message.renderContent ?? []).entries()) {
     if (item.repliedMessageContent) {
@@ -274,16 +274,12 @@ export function normalizeLinkedInAttachments(message: Message): Array<Record<str
   return attachments;
 }
 
-export function isLinkedInMessageDeleted(message: Message): boolean {
+function isLinkedInMessageDeleted(message: Message): boolean {
   return message.messageBodyRenderFormat === "RECALLED";
 }
 
-export function isLinkedInMessageEdited(message: Message): boolean {
+function isLinkedInMessageEdited(message: Message): boolean {
   return message.messageBodyRenderFormat === "EDITED";
-}
-
-export function isLinkedInSystemMessage(message: Message): boolean {
-  return message.messageBodyRenderFormat === "SYSTEM";
 }
 
 export function conversationSourceKey(conversationUrn: string): string {

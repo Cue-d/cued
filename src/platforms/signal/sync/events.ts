@@ -18,15 +18,15 @@ function stableId(seed: string): string {
   return createHash("sha256").update(seed).digest("hex");
 }
 
-export function normalizeSignalHandle(value: string): string {
+function normalizeSignalHandle(value: string): string {
   return value.trim().toLowerCase();
 }
 
-export function signalSourceEntityKey(handle: string): string {
+function signalSourceEntityKey(handle: string): string {
   return `signal:${normalizeSignalHandle(handle)}`;
 }
 
-export function signalSourceConversationKey(threadId: string): string {
+function signalSourceConversationKey(threadId: string): string {
   return `signal:${threadId}`;
 }
 
@@ -97,7 +97,7 @@ function contactHandles(contact: SignalContact): ContactHandleInput[] {
   return handles;
 }
 
-export function buildSignalContactEvent(
+function buildSignalContactEvent(
   contact: SignalContact,
   accountKey: string,
   observedAt: number,
@@ -127,7 +127,7 @@ export function buildSignalContactEvent(
   };
 }
 
-export function buildSignalGroupConversationEvent(
+function buildSignalGroupConversationEvent(
   group: SignalGroup,
   accountKey: string,
   observedAt: number,
@@ -161,7 +161,7 @@ export function buildSignalGroupConversationEvent(
   };
 }
 
-export function buildSignalMessageConversationEvent(
+function buildSignalMessageConversationEvent(
   message: SignalReceivedMessage,
   accountKey: string,
   observedAt: number,
@@ -194,7 +194,7 @@ export function buildSignalMessageConversationEvent(
   };
 }
 
-export function buildSyntheticSignalContactEvent(
+function buildSyntheticSignalContactEvent(
   handle: string,
   displayName: string,
   accountKey: string,

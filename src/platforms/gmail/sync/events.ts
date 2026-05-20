@@ -7,7 +7,7 @@ import type {
 import type { SyncBundle } from "../../core/sync.js";
 import type { GmailMessage, GmailMessagePayload } from "../api/client.js";
 
-export function gmailStableId(seed: string): string {
+function gmailStableId(seed: string): string {
   return createHash("sha256").update(seed).digest("hex");
 }
 
@@ -77,7 +77,7 @@ function stripHtml(input: string): string {
     .trim();
 }
 
-export function extractGmailMessageText(message: GmailMessage): string {
+function extractGmailMessageText(message: GmailMessage): string {
   const plain = collectBodyParts(message.payload, "text/plain").join("\n").trim();
   if (plain) return plain;
   const html = collectBodyParts(message.payload, "text/html").join("\n");

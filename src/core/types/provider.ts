@@ -8,9 +8,9 @@ import type {
 export * from "../../platforms/core/types.js";
 
 export const CONTACT_FIELD_NAME_VALUES = ["company", "display_name", "photo_url"] as const;
-export type ContactFieldName = (typeof CONTACT_FIELD_NAME_VALUES)[number];
+type ContactFieldName = (typeof CONTACT_FIELD_NAME_VALUES)[number];
 
-export type ContactFields = Partial<Record<ContactFieldName, string | null | undefined>>;
+type ContactFields = Partial<Record<ContactFieldName, string | null | undefined>>;
 
 export interface ContactHandleInput {
   type: string;
@@ -25,7 +25,7 @@ export interface ContactObservationPayload {
   sourceProfileUrl?: string | null;
 }
 
-export interface ConversationParticipantInput {
+interface ConversationParticipantInput {
   sourceEntityKey: string;
   isSelf?: boolean;
 }
@@ -174,8 +174,8 @@ export const SYNC_SCOPE_KIND_VALUES = [
   "conversation",
   "thread",
 ] as const;
-export type StandardSyncScopeKind = (typeof SYNC_SCOPE_KIND_VALUES)[number];
-export type SyncScopeKind = StandardSyncScopeKind | (string & {});
+type StandardSyncScopeKind = (typeof SYNC_SCOPE_KIND_VALUES)[number];
+type SyncScopeKind = StandardSyncScopeKind | (string & {});
 
 export const SYNC_PROOF_KIND_VALUES = [
   "discovery",
@@ -184,10 +184,10 @@ export const SYNC_PROOF_KIND_VALUES = [
   "attachments",
   "participants",
 ] as const;
-export type StandardSyncProofKind = (typeof SYNC_PROOF_KIND_VALUES)[number];
-export type SyncProofKind = StandardSyncProofKind | (string & {});
+type StandardSyncProofKind = (typeof SYNC_PROOF_KIND_VALUES)[number];
+type SyncProofKind = StandardSyncProofKind | (string & {});
 
-export interface SyncScopeInput {
+interface SyncScopeInput {
   kind: SyncScopeKind;
   key: string;
   parent?: {
@@ -216,7 +216,7 @@ export interface SyncProofInput {
 export const RAW_EVENT_ACQUISITION_MODE_VALUES = ["sync", "realtime"] as const;
 export type RawEventAcquisitionMode = (typeof RAW_EVENT_ACQUISITION_MODE_VALUES)[number];
 
-export interface RawEventProvenance {
+interface RawEventProvenance {
   providerApiVersion?: string | null;
   adapterVersion?: string | null;
   acquisitionMode?: RawEventAcquisitionMode | null;
@@ -240,8 +240,6 @@ export interface ProviderRawEventInput<TPayload = RawEventPayload> {
   provenance?: RawEventProvenance | null;
   sourceVersion?: string | null;
 }
-
-const contactFieldNameSet = new Set<string>(CONTACT_FIELD_NAME_VALUES);
 
 export function buildNormalizedRawEventSchema(
   entityKind: RawEventEntityKind,
@@ -272,12 +270,4 @@ export function resolveRawEventNormalizedSchema(
     input.normalizedSchema?.trim() ||
     buildNormalizedRawEventSchema(input.entityKind, input.eventKind)
   );
-}
-
-export function parseConversationType(value: string): ConversationType {
-  return value === "group" ? "group" : "dm";
-}
-
-export function isContactFieldName(value: string): value is ContactFieldName {
-  return contactFieldNameSet.has(value);
 }

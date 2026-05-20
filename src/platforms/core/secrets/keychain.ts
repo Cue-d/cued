@@ -3,7 +3,7 @@ import { cuedAuthKeychainService, legacyCuedAuthKeychainService } from "../../..
 import type { Platform } from "../../../core/types/provider.js";
 import { openCuedDatabaseReadOnly } from "../../../db/database.js";
 
-export interface IntegrationSecretPayload {
+interface IntegrationSecretPayload {
   keychainService: string;
   keychainAccount: string;
   metadata: Record<string, unknown>;

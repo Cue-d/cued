@@ -7,7 +7,7 @@ function getConfiguredPath(name: "CUED_HOME" | "CUED_DB_PATH", env = process.env
   return raw ? raw : null;
 }
 
-export function resolveCuedHome(env = process.env): string {
+function resolveCuedHome(env = process.env): string {
   const configuredHome = getConfiguredPath("CUED_HOME", env);
   if (configuredHome) {
     return configuredHome;
@@ -21,7 +21,7 @@ export function resolveCuedHome(env = process.env): string {
   return join(homedir(), ".cued");
 }
 
-export function resolveCuedDbPath(env = process.env): string {
+function resolveCuedDbPath(env = process.env): string {
   return getConfiguredPath("CUED_DB_PATH", env) ?? join(resolveCuedHome(env), "local.db");
 }
 
@@ -31,17 +31,17 @@ export const CUED_SOCKET_PATH = join(CUED_HOME, "cued.sock");
 export const CUED_DAEMON_LOCK_PATH = join(CUED_HOME, "daemon.lock");
 export const CUED_MENU_BAR_LOCK_PATH = join(CUED_HOME, "menu-bar.lock");
 export const CUED_MENU_BAR_STATUS_PATH = join(CUED_HOME, "menu-bar-status.json");
-export const CUED_LOG_DIR = join(CUED_HOME, "logs");
+const CUED_LOG_DIR = join(CUED_HOME, "logs");
 export const CUED_DAEMON_LOG_PATH = join(CUED_LOG_DIR, "daemon.log");
 export const CUED_BROWSER_DIR = join(CUED_HOME, "browser");
-export const CUED_INTEGRATIONS_DIR = join(CUED_HOME, "integrations");
+const CUED_INTEGRATIONS_DIR = join(CUED_HOME, "integrations");
 export const CUED_SIGNAL_DIR = join(CUED_INTEGRATIONS_DIR, "signal");
 export const CUED_WHATSAPP_DIR = join(CUED_INTEGRATIONS_DIR, "whatsapp");
-export const CUED_ATTACHMENTS_DIR = join(CUED_HOME, "attachments");
+const CUED_ATTACHMENTS_DIR = join(CUED_HOME, "attachments");
 export const CUED_ATTACHMENTS_OBJECTS_DIR = join(CUED_ATTACHMENTS_DIR, "objects");
 export const CUED_ATTACHMENTS_TMP_DIR = join(CUED_ATTACHMENTS_DIR, "tmp");
 export const CUED_HOOKS_PATH = join(CUED_HOME, "hooks.toml");
-export const CUED_UPDATES_DIR = join(CUED_HOME, "updates");
+const CUED_UPDATES_DIR = join(CUED_HOME, "updates");
 export const CUED_UPDATE_DOWNLOADS_DIR = join(CUED_UPDATES_DIR, "downloads");
 export const CUED_UPDATE_ROLLBACK_DIR = join(CUED_UPDATES_DIR, "rollback");
 export const CUED_BACKUPS_DIR = join(CUED_HOME, "backups");

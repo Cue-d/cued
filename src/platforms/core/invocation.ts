@@ -1,7 +1,7 @@
 import { safeParseJsonRecord } from "../../db/codecs.js";
 import type { AdapterPlatform } from "./types.js";
 
-export type AdapterInvocationProofRow = {
+type AdapterInvocationProofRow = {
   scope_kind: string;
   scope_key: string;
   proof_kind: string;

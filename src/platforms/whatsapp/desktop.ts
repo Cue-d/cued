@@ -60,7 +60,7 @@ type DesktopMessageRow = {
   media_size: number;
 };
 
-export interface WhatsAppDesktopSourceStatus {
+interface WhatsAppDesktopSourceStatus {
   path: string;
   available: boolean;
   chatDbPath: string;
@@ -73,13 +73,13 @@ export interface WhatsAppDesktopSourceStatus {
   newestMessageAt: number | null;
 }
 
-export interface WhatsAppDesktopImportOptions {
+interface WhatsAppDesktopImportOptions {
   sourcePath?: string;
   accountKey?: string;
   observedBase?: number;
 }
 
-export function defaultWhatsAppDesktopSourcePath(): string {
+function defaultWhatsAppDesktopSourcePath(): string {
   return join(homedir(), "Library", "Group Containers", "group.net.whatsapp.WhatsApp.shared");
 }
 

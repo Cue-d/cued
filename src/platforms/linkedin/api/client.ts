@@ -32,7 +32,7 @@ export interface ConnectionsResult {
   cursor?: string;
 }
 
-export interface LinkedInClientOptions {
+interface LinkedInClientOptions {
   cookies?: Cookie[];
   userAgent?: string;
   xLiTrack?: string;

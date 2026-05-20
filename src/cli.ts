@@ -86,7 +86,7 @@ function isOutboundSendEnabled(): boolean {
   return process.env[OUTBOUND_SEND_ENV] === "1" || process.env[OUTBOUND_SEND_ENV] === "true";
 }
 
-export function resolveBundledScriptPath(scriptName: string): string | null {
+function resolveBundledScriptPath(scriptName: string): string | null {
   const candidates = [
     process.env.CUED_BUNDLED_SCRIPT_ROOT
       ? join(process.env.CUED_BUNDLED_SCRIPT_ROOT, scriptName)
@@ -104,7 +104,7 @@ export function resolvePermissionsScriptPath(): string {
   );
 }
 
-export function normalizeInvocationPath(path: string): string {
+function normalizeInvocationPath(path: string): string {
   try {
     return existsSync(path) ? realpathSync(path) : resolve(path);
   } catch {

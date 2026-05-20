@@ -7,7 +7,7 @@ import { runNativeAuthSessionSync, startNativeAuthSession } from "./native.js";
 import { runOAuthAuthSessionSync, startOAuthAuthSession } from "./oauth.js";
 import { runQrNativeAuthSessionSync, startQrNativeAuthSession } from "./qr-native.js";
 
-export interface AuthRuntimeResult {
+interface AuthRuntimeResult {
   sessionId: string;
   platform: Platform;
   accountKey: string;
@@ -18,7 +18,7 @@ export interface AuthRuntimeResult {
   errorSummary?: string | null;
 }
 
-export interface AuthRuntimeHandle {
+interface AuthRuntimeHandle {
   child: ChildProcess;
   completion: Promise<AuthRuntimeResult>;
 }

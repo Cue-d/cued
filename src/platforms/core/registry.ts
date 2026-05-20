@@ -8,7 +8,7 @@ import {
 
 export { isAdapterPlatform } from "../../core/types/provider.js";
 
-export interface AdapterDefinition {
+interface AdapterDefinition {
   platform: AdapterPlatform;
   workerEntrypoint: string;
   autoSync: boolean;

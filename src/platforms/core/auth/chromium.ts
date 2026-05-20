@@ -5,7 +5,7 @@ import type { AuthSessionState, Platform } from "../../../core/types/provider.js
 import type { CuedDatabase } from "../../../db/database.js";
 import type { AuthSessionSummary, IntegrationStateSummary } from "../state/types.js";
 
-export interface ChromiumAuthResult {
+interface ChromiumAuthResult {
   sessionId: string;
   platform: Platform;
   accountKey: string;
@@ -16,7 +16,7 @@ export interface ChromiumAuthResult {
   errorSummary?: string | null;
 }
 
-export interface ChromiumAuthHandle {
+interface ChromiumAuthHandle {
   child: ChildProcess;
   completion: Promise<ChromiumAuthResult>;
 }

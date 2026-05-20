@@ -7,12 +7,7 @@ const DEFAULT_RECONNECT_BASE_MS = 1_000;
 const DEFAULT_RECONNECT_MAX_MS = 60_000;
 const HEARTBEAT_INTERVAL_MS = 60_000;
 
-export type LinkedInRealtimeState =
-  | "connecting"
-  | "connected"
-  | "reconnecting"
-  | "degraded"
-  | "stopped";
+type LinkedInRealtimeState = "connecting" | "connected" | "reconnecting" | "degraded" | "stopped";
 
 export interface LinkedInRealtimeStatus {
   platform: "linkedin";
@@ -41,14 +36,14 @@ interface LinkedInRealtimeSessionOptions {
   onStatusChange?: (status: LinkedInRealtimeStatus) => void;
 }
 
-export interface LinkedInRealtimeSessionLike {
+interface LinkedInRealtimeSessionLike {
   start(): void;
   stop(): void;
   getStatus(): LinkedInRealtimeStatus;
   isConnected(): boolean;
 }
 
-export interface LinkedInRealtimeSupervisorSessionInput {
+interface LinkedInRealtimeSupervisorSessionInput {
   accountKey: string;
   cookies: Cookie[];
   pageInstance: string;
@@ -64,10 +59,6 @@ interface LinkedInRealtimeSupervisorOptions {
   onConnected?: (accountKey: string, status: LinkedInRealtimeStatus, reconnected: boolean) => void;
   onDisconnected?: (accountKey: string, status: LinkedInRealtimeStatus) => void;
   onStatusChange?: (accountKey: string, status: LinkedInRealtimeStatus) => void;
-}
-
-function now(): number {
-  return Date.now();
 }
 
 function getCsrfToken(cookies: Cookie[]): string | null {
@@ -281,7 +272,7 @@ export class LinkedInRealtimeSession implements LinkedInRealtimeSessionLike {
         this.setStatus({
           state: this.hasEverConnected ? "reconnecting" : "connecting",
           connectedAt: null,
-          lastReconnectAt: now(),
+          lastReconnectAt: Date.now(),
           reconnectAttempts: attempt,
           lastSessionError: message,
         });
@@ -342,7 +333,7 @@ export class LinkedInRealtimeSession implements LinkedInRealtimeSessionLike {
       throw new Error(`LinkedIn realtime connect failed (${response.status})`);
     }
 
-    const connectedAt = now();
+    const connectedAt = Date.now();
     const reconnected = this.hasEverConnected;
     this.hasEverConnected = true;
     this.setStatus({
@@ -439,7 +430,7 @@ export class LinkedInRealtimeSession implements LinkedInRealtimeSessionLike {
           }
           try {
             const event = JSON.parse(payload) as RealtimeEventEnvelope;
-            this.setStatus({ lastEventAt: now() });
+            this.setStatus({ lastEventAt: Date.now() });
             if (event["com.linkedin.realtimefrontend.DecoratedEvent"] && this.userEntityUrn) {
               this.onEvent?.(this.accountKey, event, this.userEntityUrn);
             }

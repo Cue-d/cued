@@ -15,7 +15,7 @@ const LINKEDIN_KEYCHAIN_SERVICE = authKeychainService("linkedin");
 const LEGACY_LINKEDIN_KEYCHAIN_SERVICE = legacyAuthKeychainService("linkedin");
 const LINKEDIN_DEFAULT_ACCOUNT_KEY = "default";
 
-export interface ImportedLinkedInSessionResult {
+interface ImportedLinkedInSessionResult {
   platform: "linkedin";
   accountKey: string;
   imported: boolean;
