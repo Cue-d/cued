@@ -53,7 +53,6 @@ cued permissions request --all
 This performs three different actions:
 
 - triggers the Contacts prompt through the native helper
-- triggers the Messages Apple Events automation prompt through AppleScript
 - opens the Full Disk Access pane and prints the manual step for granting it
 
 macOS does not allow Cued to self-grant Full Disk Access. You must manually add and enable the installed app or binary shown by the command.
@@ -159,7 +158,6 @@ Current Discord scope in Cued:
 - hydrates up to 50 messages in the 5 most recent unseen DMs during sync
 - uses persisted per-DM cursors to fetch only newer messages on later syncs
 - syncs new messages after connection
-- sends messages only to known DMs
 - does not backfill guild or server channel history
 - stops and requires reconnect if Discord invalidates auth, such as after a forced password reset
 

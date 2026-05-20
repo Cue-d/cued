@@ -40,13 +40,7 @@ export type PlatformFeature = (typeof PLATFORM_FEATURE_VALUES)[number];
 export const PLATFORM_FEATURE_SUPPORT_VALUES = ["yes", "partial", "no"] as const;
 export type PlatformFeatureSupport = (typeof PLATFORM_FEATURE_SUPPORT_VALUES)[number];
 
-export const PLATFORM_FUTURE_FEATURE_NOTES = {
-  send: "Outbound send is planned for a future release.",
-} as const;
-export type PlatformFutureFeatureNotes = Partial<typeof PLATFORM_FUTURE_FEATURE_NOTES>;
-
-const PLATFORM_FUTURE_SEND_VALUES = ["discord", "imessage", "signal", "whatsapp"] as const;
-const platformFutureSendSet = new Set<Platform>(PLATFORM_FUTURE_SEND_VALUES);
+export type PlatformFutureFeatureNotes = Record<string, never>;
 
 type PlatformDefinition = {
   adapter: boolean;
@@ -445,7 +439,8 @@ export function getPlatformFeatureMatrixRow(
 }
 
 export function getPlatformFutureFeatureNotes(platform: Platform): PlatformFutureFeatureNotes {
-  return platformFutureSendSet.has(platform) ? PLATFORM_FUTURE_FEATURE_NOTES : {};
+  void platform;
+  return {};
 }
 
 export function isIntegrationAuthState(value: string): value is IntegrationAuthState {

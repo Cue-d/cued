@@ -1752,7 +1752,6 @@ private struct AddAccountSheet: View {
 private let permissionOrder = [
   "contacts",
   "full_disk_access",
-  "messages_automation",
 ]
 
 private let defaultPermissionOrder = [

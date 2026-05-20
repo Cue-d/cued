@@ -23,8 +23,8 @@ final class PermissionGuidanceTests: XCTestCase {
     let permission = PermissionStatus(
       key: "messages_automation",
       status: "needs_action",
-      summary: "Messages automation needs attention.",
-      requestFlags: ["--messages"]
+      summary: "Permission needs attention.",
+      requestFlags: []
     )
 
     XCTAssertEqual(
