@@ -149,7 +149,6 @@ import {
 } from "./local-watchers.js";
 
 const DAEMON_VERSION = getCurrentAppVersion();
-const OUTBOUND_SEND_ENV = "CUED_ENABLE_OUTBOUND_SEND";
 const DEFAULT_AUTOSYNC_INTERVAL_MS = 60_000;
 const DEFAULT_DISCORD_AUTOSYNC_INTERVAL_MS = 10 * 60_000;
 const DEFAULT_SIGNAL_CATCHUP_INTERVAL_MS = 300_000;
@@ -233,7 +232,7 @@ function getFallbackAppStatusMetadata(): {
 }
 
 function isOutboundSendEnabled(): boolean {
-  return process.env[OUTBOUND_SEND_ENV] === "1" || process.env[OUTBOUND_SEND_ENV] === "true";
+  return false;
 }
 
 function writeMenuBarStatusSnapshot(
@@ -5065,22 +5064,6 @@ async function dispatchRequest(
             accountKey: request.accountKey,
             conversationId: request.conversationId,
             limit: request.limit,
-          }),
-        };
-      case "message-send":
-        if (!isOutboundSendEnabled()) {
-          throw new Error(
-            `Outbound send is not enabled in v1. Set ${OUTBOUND_SEND_ENV}=1 for internal development.`,
-          );
-        }
-        return {
-          id: request.id,
-          ok: true,
-          result: runQueueService.queueMessageSend({
-            platform: request.platform,
-            target: request.target,
-            text: request.text,
-            accountKey: request.accountKey,
           }),
         };
       case "sync-run":

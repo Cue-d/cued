@@ -215,14 +215,10 @@ describe("platform capability resolver", () => {
     expect(getPlatformFeatureSupport("imessage", "realtime_ingest")).toBe("yes");
   });
 
-  it("limits future send notes to planned outbound messaging platforms", () => {
+  it("does not expose outbound send notes in product capabilities", () => {
     expect(getPlatformFutureFeatureNotes("contacts")).toEqual({});
     expect(getPlatformFutureFeatureNotes("gmail")).toEqual({});
-    expect(getPlatformFutureFeatureNotes("imessage")).toEqual({
-      send: "Outbound send is planned for a future release.",
-    });
-    expect(getPlatformFutureFeatureNotes("signal")).toEqual({
-      send: "Outbound send is planned for a future release.",
-    });
+    expect(getPlatformFutureFeatureNotes("imessage")).toEqual({});
+    expect(getPlatformFutureFeatureNotes("signal")).toEqual({});
   });
 });
