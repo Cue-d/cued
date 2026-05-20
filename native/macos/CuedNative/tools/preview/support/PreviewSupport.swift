@@ -50,9 +50,8 @@ public enum Preview {
     PreviewCase(name: "permissions-granted", page: 1),
     PreviewCase(name: "platforms-fresh", page: 2),
     PreviewCase(name: "platforms-mixed", page: 2),
-    PreviewCase(name: "automatic-bugfixing", page: 3),
-    PreviewCase(name: "use-cases", page: 4),
-    PreviewCase(name: "application-home", page: 5),
+    PreviewCase(name: "use-cases", page: 3),
+    PreviewCase(name: "application-home", page: 4),
   ]
 
   @MainActor

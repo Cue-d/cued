@@ -13,7 +13,6 @@ final class PreviewTests: XCTestCase {
         "permissions-granted",
         "platforms-fresh",
         "platforms-mixed",
-        "automatic-bugfixing",
         "use-cases",
         "application-home",
       ]
