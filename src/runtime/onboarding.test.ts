@@ -154,4 +154,25 @@ describe("onboarding snapshot", () => {
 
     db.close();
   });
+
+  it("keeps the Signal setup row connectable before helper diagnostics are refreshed", async () => {
+    const db = createDb();
+    const snapshot = await buildOnboardingSnapshot(db, { refreshManagedIntegrations: false });
+    const signal = snapshot.setupIntegrations.find(
+      (integration) => integration.platform === "signal",
+    );
+
+    expect(signal).toEqual(
+      expect.objectContaining({
+        accountKey: "default",
+        authState: "missing",
+        capability: expect.objectContaining({
+          availability: "available",
+          onboardingVisible: true,
+        }),
+      }),
+    );
+
+    db.close();
+  });
 });

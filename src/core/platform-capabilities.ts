@@ -74,7 +74,17 @@ function resolveHelperAvailability(
     requirements.includes("signal_cli") &&
     (integration.authState === "missing" || integration.authState === "outdated")
   ) {
-    return "requires_helper";
+    const metadata = integration.metadata;
+    const hasSignalHelperMetadata =
+      "signalCliPath" in (metadata ?? {}) || "signalVersionSupported" in (metadata ?? {});
+
+    if (!hasSignalHelperMetadata) {
+      return null;
+    }
+
+    return metadata?.signalCliPath && metadata?.signalVersionSupported === true
+      ? null
+      : "requires_helper";
   }
 
   if (requirements.includes("whatsapp_helper") && integration.authState === "missing") {
