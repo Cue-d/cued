@@ -5,11 +5,11 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 APP_BUILDER="$ROOT_DIR/scripts/build-cued-daemon-app.sh"
 RELEASE_VALIDATOR="$ROOT_DIR/scripts/validate-cued-release-artifact.sh"
+DMG_CREATOR="$ROOT_DIR/scripts/create-cued-dmg.sh"
 DIST_DIR="$ROOT_DIR/native/macos/dist"
 APP_BUNDLE="$DIST_DIR/Cued.app"
 DMG_PATH="$DIST_DIR/Cued.dmg"
 TARBALL_PATH="$DIST_DIR/cued-macos-arm64.tar.gz"
-STAGING_DIR="$DIST_DIR/dmg-staging"
 JIT_RUNTIME_ENTITLEMENTS="$ROOT_DIR/scripts/packaging/jit-runtime.entitlements.plist"
 APP_PERMISSIONS_ENTITLEMENTS="$ROOT_DIR/scripts/packaging/app-permissions.entitlements.plist"
 
@@ -141,19 +141,7 @@ sign_nested_code_containers
 sign_macos_binary "$APP_BUNDLE" "$APP_PERMISSIONS_ENTITLEMENTS"
 bash "$RELEASE_VALIDATOR" "$APP_BUNDLE" >/dev/null
 
-rm -rf "$STAGING_DIR" "$DMG_PATH"
-mkdir -p "$STAGING_DIR"
-cp -R "$APP_BUNDLE" "$STAGING_DIR/"
-ln -s /Applications "$STAGING_DIR/Applications"
-
-hdiutil create \
-  -volname "Cued" \
-  -srcfolder "$STAGING_DIR" \
-  -ov \
-  -format UDZO \
-  "$DMG_PATH" >/dev/null
-
-rm -rf "$STAGING_DIR"
+bash "$DMG_CREATOR" "$APP_BUNDLE" "$DMG_PATH" >/dev/null
 codesign --force --timestamp --sign "$CUED_CODESIGN_IDENTITY" "$DMG_PATH"
 xcrun notarytool submit "$DMG_PATH" --keychain-profile "$CUED_NOTARY_PROFILE" --wait
 xcrun stapler staple "$APP_BUNDLE"

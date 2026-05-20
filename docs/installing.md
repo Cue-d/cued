@@ -21,7 +21,7 @@ This is the default path for most users.
 
 1. Open [GitHub Releases](https://github.com/Cue-d/cued/releases).
 2. Download the latest `Cued.dmg`.
-3. Drag `Cued.app` into `/Applications`.
+3. Open the DMG and drag `Cued.app` onto the `Applications` alias.
 4. Open `Cued.app`.
 5. Complete onboarding and approve the requested permissions.
 
