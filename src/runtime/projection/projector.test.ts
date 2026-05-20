@@ -78,7 +78,7 @@ describe("projector", () => {
     );
   });
 
-  it("fails with raw-event context for unsupported normalized schemas", () => {
+  it("quarantines unsupported normalized schemas with raw-event context", () => {
     const db = createDb();
 
     db.orm().run(sql`
@@ -120,9 +120,95 @@ describe("projector", () => {
       )
     `);
 
-    expect(() => projectPendingRawEvents(db)).toThrowError(
-      /Failed to normalize raw event \(row 1, event unsupported-schema, linkedin\/default, message:created, schema message\.created@99, sourceVersion linkedin-v99, providerApiVersion 2026-03, acquisitionMode realtime\): Unsupported normalized raw event schema 'message\.created@99'/,
-    );
+    expect(projectPendingRawEvents(db)).toEqual({
+      contacts: 0,
+      conversations: 0,
+      messages: 0,
+      rawEvents: 1,
+      appliedRawEvents: 0,
+      projectionWatermark: 1,
+    });
+    expect(
+      db.orm().get(sql`
+          SELECT raw_event_rowid, raw_event_id, platform, account_key, error_message
+          FROM raw_event_projection_failures
+        `),
+    ).toEqual({
+      raw_event_rowid: 1,
+      raw_event_id: "unsupported-schema",
+      platform: "linkedin",
+      account_key: "default",
+      error_message:
+        "Failed to normalize raw event (row 1, event unsupported-schema, linkedin/default, message:created, schema message.created@99, sourceVersion linkedin-v99, providerApiVersion 2026-03, acquisitionMode realtime): Unsupported normalized raw event schema 'message.created@99'",
+    });
+
+    db.close();
+  });
+
+  it("quarantines malformed raw events without blocking later projection", () => {
+    const db = createDb();
+
+    db.orm().run(sql`
+      INSERT INTO raw_events (
+        id,
+        platform,
+        account_key,
+        entity_kind,
+        event_kind,
+        observed_at,
+        dedupe_key,
+        payload_json,
+        normalized_schema,
+        source_version
+      ) VALUES (
+        'malformed-json',
+        'linkedin',
+        'default',
+        'message',
+        'created',
+        1710000000000,
+        'linkedin:malformed-json',
+        '{',
+        'message.created@1',
+        'linkedin-v1'
+      )
+    `);
+    db.insertRawEvent({
+      id: "contact-after-malformed",
+      platform: "contacts",
+      accountKey: "local",
+      entityKind: "contact",
+      eventKind: "observed",
+      observedAt: 1_710_000_000_001,
+      dedupeKey: "contacts:after-malformed",
+      payload: {
+        sourceEntityKey: "contacts:after-malformed",
+        fields: { display_name: "After Malformed" },
+        handles: [{ type: "email", value: "after@example.com", deterministic: true }],
+      },
+      sourceVersion: "contacts-v1",
+    });
+
+    expect(projectPendingRawEvents(db)).toEqual({
+      contacts: 1,
+      conversations: 0,
+      messages: 0,
+      rawEvents: 2,
+      appliedRawEvents: 1,
+      projectionWatermark: 2,
+    });
+    expect(
+      db.orm().get(sql`
+        SELECT raw_event_rowid, raw_event_id, error_message
+        FROM raw_event_projection_failures
+      `),
+    ).toEqual({
+      raw_event_rowid: 1,
+      raw_event_id: "malformed-json",
+      error_message: expect.stringContaining(
+        "Failed to normalize raw event (row 1, event malformed-json",
+      ),
+    });
 
     db.close();
   });

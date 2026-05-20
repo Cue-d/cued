@@ -2243,9 +2243,54 @@ function projectEventBatch(
     resetCache?: boolean;
     clearState?: boolean;
   },
-): void {
+): number {
   const cache = input.resetCache ? resetProjectionCache(db) : getProjectionCache(db);
   const changes = createProjectionChangeSet();
+  const shapedEvents: Array<{
+    rawEvent: RawEventRow;
+    platform: Platform;
+    account_key: string;
+    entity_kind: RawEventEntityKind;
+    event_kind: string;
+    normalized_schema: string;
+    observed_at: number;
+    payload_json: string;
+  }> = [];
+
+  for (const event of input.rawEvents) {
+    let normalizedEvent: ReturnType<typeof normalizeStoredRawEventForProjection>;
+    try {
+      normalizedEvent = normalizeStoredRawEventForProjection(
+        {
+          entityKind: event.entity_kind as RawEventEntityKind,
+          eventKind: event.event_kind,
+          normalizedSchema: event.normalized_schema,
+        },
+        JSON.parse(event.payload_json) as RawEventPayload,
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      db.quarantineRawEventProjectionFailure(
+        {
+          ...event,
+          entity_kind: event.entity_kind as RawEventEntityKind,
+        },
+        new Error(`Failed to normalize raw event (${describeRawEventContext(event)}): ${message}`),
+      );
+      continue;
+    }
+    shapedEvents.push({
+      rawEvent: event,
+      platform: event.platform,
+      account_key: event.account_key,
+      entity_kind: normalizedEvent.entityKind,
+      event_kind: normalizedEvent.eventKind,
+      normalized_schema: normalizedEvent.normalizedSchema,
+      observed_at: event.observed_at,
+      payload_json: JSON.stringify(normalizedEvent.payload),
+    });
+  }
+  const projectionFailures: Array<{ event: RawEventRow; error: unknown }> = [];
 
   db.orm().transaction((tx) => {
     const projectedAt = Date.now();
@@ -2253,59 +2298,29 @@ function projectEventBatch(
       clearProjectedState(tx);
     }
 
-    for (const event of input.rawEvents) {
-      let normalizedEvent: ReturnType<typeof normalizeStoredRawEventForProjection>;
+    for (const shapedEvent of shapedEvents) {
+      tx.run(sql.raw(`SAVEPOINT projection_event_${shapedEvent.rawEvent.rowid}`));
       try {
-        normalizedEvent = normalizeStoredRawEventForProjection(
-          {
-            entityKind: event.entity_kind as RawEventEntityKind,
-            eventKind: event.event_kind,
-            normalizedSchema: event.normalized_schema,
-          },
-          JSON.parse(event.payload_json) as RawEventPayload,
-        );
+        if (shapedEvent.entity_kind === "contact") {
+          projectContactObservation(tx, cache, changes, shapedEvent);
+        } else if (shapedEvent.entity_kind === "conversation") {
+          projectConversationObservation(tx, cache, changes, shapedEvent);
+        } else if (shapedEvent.entity_kind === "call") {
+          projectCallEvent(tx, cache, changes, shapedEvent);
+        } else if (shapedEvent.entity_kind === "message") {
+          projectMessageEvent(tx, cache, changes, shapedEvent);
+        } else if (shapedEvent.entity_kind === "reaction") {
+          projectReactionEvent(tx, cache, changes, shapedEvent);
+        } else if (shapedEvent.entity_kind === "participant") {
+          projectParticipantEvent(tx, cache, changes, shapedEvent);
+        } else if (shapedEvent.entity_kind === "timeline_event") {
+          projectTimelineEvent(tx, cache, changes, shapedEvent);
+        }
+        tx.run(sql.raw(`RELEASE projection_event_${shapedEvent.rawEvent.rowid}`));
       } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        throw new Error(
-          `Failed to normalize raw event (${describeRawEventContext(event)}): ${message}`,
-        );
-      }
-      const shapedEvent = {
-        platform: event.platform,
-        account_key: event.account_key,
-        entity_kind: normalizedEvent.entityKind,
-        event_kind: normalizedEvent.eventKind,
-        normalized_schema: normalizedEvent.normalizedSchema,
-        observed_at: event.observed_at,
-        payload_json: JSON.stringify(normalizedEvent.payload),
-      };
-
-      if (shapedEvent.entity_kind === "contact") {
-        projectContactObservation(tx, cache, changes, shapedEvent);
-        continue;
-      }
-      if (shapedEvent.entity_kind === "conversation") {
-        projectConversationObservation(tx, cache, changes, shapedEvent);
-        continue;
-      }
-      if (shapedEvent.entity_kind === "call") {
-        projectCallEvent(tx, cache, changes, shapedEvent);
-        continue;
-      }
-      if (shapedEvent.entity_kind === "message") {
-        projectMessageEvent(tx, cache, changes, shapedEvent);
-        continue;
-      }
-      if (shapedEvent.entity_kind === "reaction") {
-        projectReactionEvent(tx, cache, changes, shapedEvent);
-        continue;
-      }
-      if (shapedEvent.entity_kind === "participant") {
-        projectParticipantEvent(tx, cache, changes, shapedEvent);
-        continue;
-      }
-      if (shapedEvent.entity_kind === "timeline_event") {
-        projectTimelineEvent(tx, cache, changes, shapedEvent);
+        tx.run(sql.raw(`ROLLBACK TO projection_event_${shapedEvent.rawEvent.rowid}`));
+        tx.run(sql.raw(`RELEASE projection_event_${shapedEvent.rawEvent.rowid}`));
+        projectionFailures.push({ event: shapedEvent.rawEvent, error });
       }
     }
 
@@ -2320,7 +2335,17 @@ function projectEventBatch(
       });
     }
   });
+  for (const failure of projectionFailures) {
+    db.quarantineRawEventProjectionFailure(
+      {
+        ...failure.event,
+        entity_kind: failure.event.entity_kind as RawEventEntityKind,
+      },
+      failure.error,
+    );
+  }
   db.enqueueMessageFtsIndex(changes.dirtyMessageIds, `projection:${input.mode}`);
+  return shapedEvents.length - projectionFailures.length;
 }
 
 function projectRangeInternal(
@@ -2368,7 +2393,7 @@ function projectRangeInternal(
         ? deferredProjectionWatermark
         : null
       : deferredProjectionWatermark;
-  projectEventBatch(db, {
+  const projectedEventCount = projectEventBatch(db, {
     mode: input.mode,
     rawEvents,
     projectionWatermark: committedProjectionWatermark,
@@ -2382,7 +2407,7 @@ function projectRangeInternal(
 
   return summarizeResult(
     db,
-    rawEvents.length,
+    projectedEventCount,
     projectionWatermark,
     input.startRowId,
     input.endRowId,

@@ -1262,6 +1262,8 @@ describe("CuedDatabase", () => {
         status: "ingesting",
         queued_at: queuedRun.queued_at,
         details_json: JSON.stringify({ requestId: "abc" }),
+        attempt: 1,
+        owner_id: null,
       }),
     );
     expect(claimedRun?.started_at).toEqual(expect.any(Number));
@@ -1294,6 +1296,134 @@ describe("CuedDatabase", () => {
       created_at: expect.any(Number),
       details_json: JSON.stringify({ code: "x" }),
     });
+    expect(
+      sqlite(db)
+        .prepare(
+          "SELECT status, owner_id, lease_expires_at, error_code FROM sync_runs WHERE id = ?",
+        )
+        .get(failedId),
+    ).toEqual({
+      status: "failed",
+      owner_id: null,
+      lease_expires_at: null,
+      error_code: null,
+    });
+
+    db.close();
+  });
+
+  it("reclaims expired sync run leases automatically", () => {
+    const db = createDb();
+    const runId = db.queueSyncRun({
+      platform: "slack",
+      accountKey: "T123",
+      runType: "sync",
+      trigger: "scheduler",
+    });
+
+    expect(
+      db.claimNextQueuedRun(["sync"], "ingesting", {
+        ownerId: "daemon-a",
+        leaseMs: 10_000,
+      }),
+    ).toEqual(expect.objectContaining({ id: runId, attempt: 1, owner_id: "daemon-a" }));
+    expect(db.claimNextQueuedRun(["sync"], "ingesting")).toBeNull();
+
+    sqlite(db).prepare("UPDATE sync_runs SET lease_expires_at = 1 WHERE id = ?").run(runId);
+    expect(
+      db.claimNextQueuedRun(["sync"], "ingesting", {
+        ownerId: "daemon-b",
+        leaseMs: 20_000,
+      }),
+    ).toEqual(expect.objectContaining({ id: runId, attempt: 2, owner_id: "daemon-b" }));
+    expect(
+      db.finishRun(runId, undefined, {
+        ownerId: "daemon-a",
+        attempt: 1,
+      }),
+    ).toBe(false);
+    expect(
+      sqlite(db).prepare("SELECT status, owner_id, attempt FROM sync_runs WHERE id = ?").get(runId),
+    ).toEqual({ status: "ingesting", owner_id: "daemon-b", attempt: 2 });
+
+    expect(db.finishRun(runId, undefined, { ownerId: "daemon-b", attempt: 2 })).toBe(true);
+    expect(
+      sqlite(db)
+        .prepare("SELECT status, owner_id, lease_expires_at FROM sync_runs WHERE id = ?")
+        .get(runId),
+    ).toEqual({ status: "completed", owner_id: null, lease_expires_at: null });
+
+    db.close();
+  });
+
+  it("reports queued and expired sync runs as future claimable wakeups", () => {
+    const db = createDb();
+    const timestamp = Date.now();
+    const queuedRunId = db.queueSyncRun({
+      platform: "contacts",
+      accountKey: "local",
+      runType: "sync",
+      trigger: "scheduler",
+      scheduledAt: timestamp + 60_000,
+    });
+    const runningRunId = db.queueSyncRun({
+      platform: "slack",
+      accountKey: "T123",
+      runType: "sync",
+      trigger: "scheduler",
+    });
+    db.claimNextQueuedRun(["sync"], "ingesting", {
+      ownerId: "daemon-a",
+      leaseMs: 30_000,
+    });
+    sqlite(db)
+      .prepare("UPDATE sync_runs SET lease_expires_at = ? WHERE id = ?")
+      .run(timestamp + 30_000, runningRunId);
+
+    expect(db.getNextClaimableRunAt(["sync"], "ingesting")).toBe(timestamp + 30_000);
+    db.failRun(runningRunId, "forced", undefined, "forced");
+    expect(db.getNextClaimableRunAt(["sync"], "ingesting")).toBeGreaterThanOrEqual(timestamp);
+    expect(db.getNextClaimableRunAt(["sync"], "ingesting")).toBeLessThanOrEqual(timestamp + 60_000);
+
+    db.failRun(queuedRunId, "forced", undefined, "forced");
+    expect(db.getNextClaimableRunAt(["sync"], "ingesting")).toBeNull();
+
+    db.close();
+  });
+
+  it("recovers in-progress sync runs as queued after daemon restart", () => {
+    const db = createDb();
+    const runId = db.queueSyncRun({
+      platform: "slack",
+      accountKey: "T123",
+      runType: "sync",
+      trigger: "scheduler",
+    });
+    db.claimNextQueuedRun(["sync"], "ingesting", {
+      ownerId: "daemon-before-restart",
+      leaseMs: 60_000,
+    });
+
+    expect(db.recoverInProgressRuns()).toBe(1);
+    expect(
+      sqlite(db)
+        .prepare(
+          `
+          SELECT status, owner_id, lease_expires_at, error_code
+          FROM sync_runs
+          WHERE id = ?
+        `,
+        )
+        .get(runId),
+    ).toEqual({
+      status: "queued",
+      owner_id: null,
+      lease_expires_at: null,
+      error_code: "daemon_recovered",
+    });
+    expect(db.claimNextQueuedRun(["sync"], "ingesting")).toEqual(
+      expect.objectContaining({ id: runId, attempt: 2 }),
+    );
 
     db.close();
   });
@@ -1854,6 +1984,15 @@ describe("CuedDatabase", () => {
         .prepare("SELECT queued_at, scheduled_at, started_at FROM sync_runs WHERE id = ?")
         .get("legacy-run"),
     ).toEqual({ queued_at: 123, scheduled_at: 123, started_at: null });
+    expect(syncRunColumns).toEqual(
+      expect.arrayContaining([
+        "attempt",
+        "owner_id",
+        "lease_expires_at",
+        "last_progress_at",
+        "error_code",
+      ]),
+    );
     expect(messageAttachmentColumns).toEqual(
       expect.arrayContaining([
         "access_kind",
