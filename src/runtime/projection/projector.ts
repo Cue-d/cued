@@ -721,6 +721,45 @@ function createProjectionChangeSet(): ProjectionChangeSet {
   };
 }
 
+function cloneProjectionCache(cache: ProjectionCache): ProjectionCache {
+  return {
+    initialized: cache.initialized,
+    contactMergeAliasMap: new Map(cache.contactMergeAliasMap),
+    sourceContactMap: new Map(cache.sourceContactMap),
+    deterministicHandleMap: new Map(cache.deterministicHandleMap),
+    conversationMap: new Map(cache.conversationMap),
+    contactNameMap: new Map(cache.contactNameMap),
+    conversationNameMap: new Map(cache.conversationNameMap),
+  };
+}
+
+function replaceProjectionCache(target: ProjectionCache, source: ProjectionCache): void {
+  target.initialized = source.initialized;
+  target.contactMergeAliasMap = source.contactMergeAliasMap;
+  target.sourceContactMap = source.sourceContactMap;
+  target.deterministicHandleMap = source.deterministicHandleMap;
+  target.conversationMap = source.conversationMap;
+  target.contactNameMap = source.contactNameMap;
+  target.conversationNameMap = source.conversationNameMap;
+}
+
+function mergeProjectionChangeSet(target: ProjectionChangeSet, source: ProjectionChangeSet): void {
+  for (const id of source.dirtyContactIds) {
+    target.dirtyContactIds.add(id);
+  }
+  for (const id of source.dirtyConversationIds) {
+    target.dirtyConversationIds.add(id);
+  }
+  for (const id of source.dirtyConversationSummaryIds) {
+    target.dirtyConversationSummaryIds.add(id);
+  }
+  for (const id of source.dirtyMessageIds) {
+    target.dirtyMessageIds.add(id);
+  }
+  target.touchedAttachments ||= source.touchedAttachments;
+  target.touchedReactions ||= source.touchedReactions;
+}
+
 function buildOverview(db: CuedDatabase): {
   contacts: number;
   conversations: number;
@@ -2299,24 +2338,28 @@ function projectEventBatch(
     }
 
     for (const shapedEvent of shapedEvents) {
+      const eventCache = cloneProjectionCache(cache);
+      const eventChanges = createProjectionChangeSet();
       tx.run(sql.raw(`SAVEPOINT projection_event_${shapedEvent.rawEvent.rowid}`));
       try {
         if (shapedEvent.entity_kind === "contact") {
-          projectContactObservation(tx, cache, changes, shapedEvent);
+          projectContactObservation(tx, eventCache, eventChanges, shapedEvent);
         } else if (shapedEvent.entity_kind === "conversation") {
-          projectConversationObservation(tx, cache, changes, shapedEvent);
+          projectConversationObservation(tx, eventCache, eventChanges, shapedEvent);
         } else if (shapedEvent.entity_kind === "call") {
-          projectCallEvent(tx, cache, changes, shapedEvent);
+          projectCallEvent(tx, eventCache, eventChanges, shapedEvent);
         } else if (shapedEvent.entity_kind === "message") {
-          projectMessageEvent(tx, cache, changes, shapedEvent);
+          projectMessageEvent(tx, eventCache, eventChanges, shapedEvent);
         } else if (shapedEvent.entity_kind === "reaction") {
-          projectReactionEvent(tx, cache, changes, shapedEvent);
+          projectReactionEvent(tx, eventCache, eventChanges, shapedEvent);
         } else if (shapedEvent.entity_kind === "participant") {
-          projectParticipantEvent(tx, cache, changes, shapedEvent);
+          projectParticipantEvent(tx, eventCache, eventChanges, shapedEvent);
         } else if (shapedEvent.entity_kind === "timeline_event") {
-          projectTimelineEvent(tx, cache, changes, shapedEvent);
+          projectTimelineEvent(tx, eventCache, eventChanges, shapedEvent);
         }
         tx.run(sql.raw(`RELEASE projection_event_${shapedEvent.rawEvent.rowid}`));
+        replaceProjectionCache(cache, eventCache);
+        mergeProjectionChangeSet(changes, eventChanges);
       } catch (error) {
         tx.run(sql.raw(`ROLLBACK TO projection_event_${shapedEvent.rawEvent.rowid}`));
         tx.run(sql.raw(`RELEASE projection_event_${shapedEvent.rawEvent.rowid}`));

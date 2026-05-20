@@ -66,7 +66,7 @@ export async function runProjectionWorker(run: QueuedSyncRun): Promise<Projectio
     };
     const deferredProjected =
       run.run_type === "project" ? (projected as ReturnType<typeof projectDeferredRange>) : null;
-    db.finishRun(
+    const finished = db.finishRun(
       run.id,
       {
         projected,
@@ -75,6 +75,9 @@ export async function runProjectionWorker(run: QueuedSyncRun): Promise<Projectio
       },
       runClaim,
     );
+    if (!finished) {
+      throw new Error(`Projection run ${run.id} lost ownership before completion`);
+    }
     const projectedRangeStart =
       deferredProjected?.rangeStartRowId ?? projectionDetails?.startRowId ?? null;
     const projectedRangeEnd =
