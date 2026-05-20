@@ -1513,7 +1513,6 @@ private struct InstallerAddAccountSheet: View {
 private let installerPermissionOrder = [
   "contacts",
   "full_disk_access",
-  "messages_automation",
 ]
 
 private let installerDefaultPermissionOrder = [
@@ -1563,16 +1562,6 @@ private func installerDefaultPermissionStatus(
       status: "unknown",
       summary: "Full Disk Access has not been checked yet",
       requestFlags: ["--full-disk-access"]
-    )
-  case "messages_automation":
-    guard includeFuturePermissions else {
-      return nil
-    }
-    return InstallerPermissionStatus(
-      key: key,
-      status: "unknown",
-      summary: "Messages automation access has not been checked yet",
-      requestFlags: ["--messages"]
     )
   default:
     return nil

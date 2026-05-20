@@ -46,11 +46,7 @@ import {
   platformSupportsMultipleAccounts,
 } from "./platforms/core/types.js";
 import { runDaemon } from "./runtime/daemon/server.js";
-import {
-  buildDoctorReport,
-  buildPermissionStatus,
-  refreshMessagesAutomationVerification,
-} from "./runtime/doctor.js";
+import { buildDoctorReport, buildPermissionStatus } from "./runtime/doctor.js";
 import {
   doctorHooksConfig,
   emitHookEvent,
@@ -80,11 +76,6 @@ import { getGlobalCuedSkillStatus, installGlobalCuedSkill } from "./skills/insta
 
 const DIST_ROOT = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(DIST_ROOT, "..");
-const OUTBOUND_SEND_ENV = "CUED_ENABLE_OUTBOUND_SEND";
-
-function isOutboundSendEnabled(): boolean {
-  return process.env[OUTBOUND_SEND_ENV] === "1" || process.env[OUTBOUND_SEND_ENV] === "true";
-}
 
 export function resolveBundledScriptPath(scriptName: string): string | null {
   const candidates = [
@@ -145,7 +136,7 @@ Usage:
   cued login-item enable|disable|status
   cued onboarding complete|snapshot|status [--refresh-managed] [--refresh-permissions]
   cued skill install-global|status
-  cued permissions doctor|status|request [--all|--contacts|--messages|--full-disk-access]
+  cued permissions doctor|status|request [--all|--contacts|--full-disk-access]
   cued sql <query>
   cued integrations list
   cued integrations status
@@ -167,7 +158,6 @@ Usage:
   cued hooks init
   cued hooks doctor
   cued hooks test <event>
-${isOutboundSendEnabled() ? "  cued send <platform> <target> <text> [account]\n" : ""}
   cued sync run [source]
   cued sync resume
   cued rebuild
@@ -798,19 +788,11 @@ async function main(): Promise<void> {
             command: ["bash", scriptPath, ...flags],
           });
           execFileSync("bash", [scriptPath, ...flags], { stdio: "inherit" });
-          if (flags.includes("--messages")) {
-            const db = openCuedDatabase();
-            try {
-              refreshMessagesAutomationVerification(db);
-            } finally {
-              db.close();
-            }
-          }
           return;
         }
         default:
           throw new Error(
-            "Usage: cued permissions doctor | status | request [--all|--contacts|--messages|--full-disk-access]",
+            "Usage: cued permissions doctor | status | request [--all|--contacts|--full-disk-access]",
           );
       }
     case "sql": {
@@ -1019,24 +1001,6 @@ async function main(): Promise<void> {
         break;
       }
       throw new Error("Usage: cued sync run [source] | cued sync resume");
-    case "send":
-      if (!isOutboundSendEnabled()) {
-        throw new Error(
-          `Outbound send is not enabled in v1. Set ${OUTBOUND_SEND_ENV}=1 for internal development.`,
-        );
-      }
-      if (!subcommand || !rest[0]) {
-        throw new Error("Usage: cued send <platform> <target> <text> [account]");
-      }
-      response = await sendDaemonRequest({
-        command: "message-send",
-        platform: subcommand,
-        target: rest[0],
-        text: rest[1] ?? "",
-        accountKey: rest[2],
-        threadId: rest[0],
-      });
-      break;
     case "contacts":
       if (subcommand === "memory" || subcommand === "memories") {
         const memoryCommand = rest[0];

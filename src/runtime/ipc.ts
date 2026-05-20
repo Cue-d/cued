@@ -38,15 +38,6 @@ export type DaemonRequest =
       conversationId?: string;
       limit?: number;
     }
-  | {
-      id: string;
-      command: "message-send";
-      platform: string;
-      target: string;
-      text: string;
-      accountKey?: string;
-      threadId?: string;
-    }
   | { id: string; command: "sync-run"; source?: string }
   | { id: string; command: "sync-resume" }
   | { id: string; command: "shutdown-for-update" }

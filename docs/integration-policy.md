@@ -10,7 +10,6 @@ Every integration must define:
 - auth method
 - where credentials are stored
 - what data is synced
-- whether send is supported
 - whether realtime ingest is supported
 - historical sync completeness limits
 - auth invalidation behavior

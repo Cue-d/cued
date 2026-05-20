@@ -131,7 +131,7 @@ cued integrations capabilities
 
 LinkedIn history is currently partial: Cued imports inbox-visible threads and bounded per-conversation backfill, but not every archived or non-inbox thread.
 
-Discord currently runs in DM-only mode: it discovers direct messages, hydrates up to 50 recent messages in the 5 most recent unproven DMs during sync, uses per-DM message cursors plus snowflake-based pagination to fetch newer messages on later syncs, and continues incomplete historical `messages` proofs with bounded `before` pagination. It sends only to known DMs and stores the captured Discord account token locally in the Keychain. On Discord auth invalidation such as `401` responses or forced password resets, Cued blocks the integration and stops reconnect attempts until you reconnect manually.
+Discord currently runs in DM-only mode: it discovers direct messages, hydrates up to 50 recent messages in the 5 most recent unproven DMs during sync, uses per-DM message cursors plus snowflake-based pagination to fetch newer messages on later syncs, and continues incomplete historical `messages` proofs with bounded `before` pagination. It stores the captured Discord account token locally in the Keychain. On Discord auth invalidation such as `401` responses or forced password resets, Cued blocks the integration and stops reconnect attempts until you reconnect manually.
 
 Gmail sync is available in official builds. While Google OAuth review is pending, Google may show an unverified-app warning during sign-in; choose the advanced option to continue if you trust the local Cued app. Gmail is read-only and stores account tokens in Keychain.
 
@@ -169,7 +169,7 @@ What each step does:
 | `swift build --package-path native/macos/CuedNative -c release` | Builds the native macOS host/helper used for permissions, menu bar control, and native windows. |
 | `GOWORK=off go build -C native/helpers/whatsapp-go -o .build/cued-whatsapp-helper` | Builds the local WhatsApp helper in a path Cued can actually discover during development. |
 | `pnpm dev -- install` | Uses the source CLI to build or refresh `Cued.app`, copy it into `/Applications/Cued.app`, and write the `~/.local/bin/cued` symlink for future invocations. |
-| `pnpm dev -- permissions request --all` | Triggers Contacts and Messages automation prompts and opens Full Disk Access settings for the manual step macOS requires. |
+| `pnpm dev -- permissions request --all` | Triggers the Contacts prompt and opens Full Disk Access settings for the manual step macOS requires. |
 | `pnpm dev -- setup` | Opens the interactive setup flow so you can verify permissions, install state, and next actions from one place. |
 
 Once `pnpm dev -- install` has completed, you can switch to the installed `cued` command. If `~/.local/bin` is not already on your `PATH`, add it before relying on that symlink.

@@ -120,26 +120,6 @@ func installerPermissionDescriptor(for key: String) -> InstallerPermissionDescri
         "Return to Cued after macOS finishes updating access.",
       ]
     )
-  case "messages_automation":
-    return InstallerPermissionDescriptor(
-      key: key,
-      title: "Messages automation",
-      subtitle: "Required only for AppleScript send and control flows in Messages. Passive sync does not use this.",
-      systemImage: "paperplane.circle.fill",
-      accentColor: Color(red: 0.15, green: 0.46, blue: 0.98),
-      settingsLabel: "Automation",
-      walkthroughTitle: "Allow Cued to control Messages",
-      walkthroughBody: "After the Apple Events prompt appears, approve it. If you already denied it, open Automation in Settings and turn Cued back on for Messages.",
-      requestButtonTitle: "Request access",
-      supportsDirectRequest: true,
-      supportsGuidedSettings: true,
-      needsDragAndDrop: false,
-      steps: [
-        "Request the Messages automation prompt.",
-        "Approve the Cued to Messages automation request.",
-        "If it was denied, reopen Automation in Settings and toggle Cued on.",
-      ]
-    )
   default:
     return InstallerPermissionDescriptor(
       key: key,

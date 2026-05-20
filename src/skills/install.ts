@@ -7,6 +7,7 @@ import { getCurrentAppPath } from "../macos/install.js";
 
 const CUED_SKILL_NAME = "cued";
 const GLOBAL_SKILL_AGENT = "*";
+const SKILL_COMMAND_TIMEOUT_MS = 15_000;
 
 export interface GlobalCuedSkillInstallResult {
   ok: boolean;
@@ -281,6 +282,7 @@ export function installGlobalCuedSkill(): GlobalCuedSkillInstallResult {
         encoding: "utf8",
         stdio: ["ignore", "pipe", "pipe"],
         env: buildSkillsCommandEnv(npxPath),
+        timeout: SKILL_COMMAND_TIMEOUT_MS,
       },
     );
 

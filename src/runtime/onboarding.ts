@@ -1,7 +1,7 @@
 import type { CuedDatabase } from "../db/database.js";
 import { refreshManagedIntegrationStates } from "../platforms/core/state/refresh.js";
 import { buildIntegrationStatus } from "../platforms/core/state/status.js";
-import { getGlobalCuedSkillStatus } from "../skills/install.js";
+import { getGlobalCuedSkillStatus, installGlobalCuedSkill } from "../skills/install.js";
 import { buildPermissionStatus } from "./doctor.js";
 
 export interface OnboardingSnapshot {
@@ -17,6 +17,7 @@ export async function buildOnboardingSnapshot(
   options: {
     refreshManagedIntegrations?: boolean;
     refreshPermissions?: boolean;
+    installGlobalSkill?: boolean;
   } = {},
 ): Promise<OnboardingSnapshot> {
   if (options.refreshManagedIntegrations) {
@@ -32,13 +33,22 @@ export async function buildOnboardingSnapshot(
     mode: options.refreshPermissions ? "active" : "passive",
     db,
   });
-  const globalSkill = getGlobalCuedSkillStatus();
+  let globalSkill = getGlobalCuedSkillStatus();
+  if (options.installGlobalSkill ?? true) {
+    if (!globalSkill.installed && globalSkill.status === "needs_action" && globalSkill.sourcePath) {
+      const install = installGlobalCuedSkill();
+      globalSkill = install.ok
+        ? getGlobalCuedSkillStatus()
+        : {
+            ...globalSkill,
+            error: install.stderr || install.error || globalSkill.error,
+          };
+    }
+  }
   const integrations = buildIntegrationStatus(db, { includeDiagnostics: true });
 
   return {
-    permissions: permissions.permissions.filter(
-      (permission) => permission.key !== "messages_automation",
-    ),
+    permissions: permissions.permissions,
     globalSkill,
     ...integrations,
   };

@@ -19,12 +19,12 @@ final class PermissionGuidanceUITests: XCTestCase {
     )
   }
 
-  func testPermissionActionFallsBackToGuideAfterPromptNeedsAttention() {
+  func testPermissionActionFallsBackToGuideForUnknownPermission() {
     let permission = InstallerPermissionStatus(
-      key: "messages_automation",
+      key: "unknown_permission",
       status: "needs_action",
-      summary: "Messages automation needs attention.",
-      requestFlags: ["--messages"]
+      summary: "Permission needs attention.",
+      requestFlags: []
     )
 
     XCTAssertEqual(

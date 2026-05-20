@@ -16,7 +16,7 @@ vi.mock("node:child_process", async (importOriginal) => {
 });
 
 import { CuedDatabase } from "../db/database.js";
-import { buildPermissionStatus, refreshMessagesAutomationVerification } from "./doctor.js";
+import { buildPermissionStatus } from "./doctor.js";
 
 const itDarwin = process.platform === "darwin" ? it : it.skip;
 
@@ -43,14 +43,8 @@ describe("permission status modes", () => {
     return db;
   }
 
-  itDarwin("uses cached automation verification in passive mode without osascript", async () => {
+  itDarwin("omits removed permission checks in passive mode", async () => {
     const db = createDb();
-    db.setMessagesAutomationVerification({
-      status: "granted",
-      checkedAt: 123,
-      verifiedAt: 123,
-      summary: "Apple Events automation access for Messages is available",
-    });
     process.env.CUED_CONTACTS_NATIVE_BINARY = "/tmp/cued-native-helper";
     process.env.CUED_IMESSAGE_NATIVE_BINARY = "/tmp/cued-native-helper";
 
@@ -69,41 +63,11 @@ describe("permission status modes", () => {
       db,
     });
 
-    expect(
-      status.permissions.find((permission) => permission.key === "messages_automation"),
-    ).toEqual(
-      expect.objectContaining({
-        status: "granted",
-      }),
-    );
+    expect(status.permissions.map((permission) => permission.key)).toEqual([
+      "contacts",
+      "full_disk_access",
+    ]);
     expect(execFileSyncMock.mock.calls.some(([command]) => command === "osascript")).toBe(false);
-
-    db.close();
-  });
-
-  itDarwin("updates the cached automation verification on explicit checks", () => {
-    const db = createDb();
-
-    execFileSyncMock.mockReturnValueOnce("");
-    const granted = refreshMessagesAutomationVerification(db);
-    expect(granted.status).toBe("ok");
-    expect(db.getMessagesAutomationVerification()).toEqual(
-      expect.objectContaining({
-        status: "granted",
-      }),
-    );
-
-    execFileSyncMock.mockImplementationOnce(() => {
-      throw new Error("automation denied");
-    });
-    const unknown = refreshMessagesAutomationVerification(db);
-    expect(unknown.status).toBe("warning");
-    expect(db.getMessagesAutomationVerification()).toEqual(
-      expect.objectContaining({
-        status: "unknown",
-        verifiedAt: null,
-      }),
-    );
 
     db.close();
   });

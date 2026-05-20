@@ -5,7 +5,6 @@ import Foundation
 enum PermissionGuidePanel {
   case contacts
   case fullDiskAccess
-  case messagesAutomation
 
   var settingsURL: URL {
     switch self {
@@ -13,8 +12,6 @@ enum PermissionGuidePanel {
       return URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Contacts")!
     case .fullDiskAccess:
       return URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles")!
-    case .messagesAutomation:
-      return URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Automation")!
     }
   }
 
@@ -24,8 +21,6 @@ enum PermissionGuidePanel {
       return "Contacts"
     case .fullDiskAccess:
       return "Full Disk Access"
-    case .messagesAutomation:
-      return "Messages automation"
     }
   }
 
@@ -40,8 +35,6 @@ func onboardingGuidePanel(for permissionKey: String) -> PermissionGuidePanel? {
     return .contacts
   case "full_disk_access":
     return .fullDiskAccess
-  case "messages_automation":
-    return .messagesAutomation
   default:
     return nil
   }
