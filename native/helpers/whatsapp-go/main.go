@@ -38,7 +38,7 @@ const pairConnectGracePeriod = 20 * time.Second
 const defaultResyncLimit = 1000
 const fullHistorySyncDaysLimit = 3650
 const fullHistorySyncSizeMBLimit = 102400
-const pairHistorySyncCaptureGracePeriod = 5 * time.Second
+const pairHistorySyncCaptureGracePeriod = 10 * time.Minute
 const historySyncRetryDelay = 1 * time.Second
 
 type helperMetadata struct {
@@ -962,6 +962,15 @@ func (r *helperRuntime) enqueueHistorySyncNotification(notification *waProto.His
 	r.state.updateMetadata(func(metadata *helperMetadata) {
 		metadata.LastHistoryNotificationAt = nowMillis()
 	})
+	r.emitEvent("history_sync_notification", map[string]interface{}{
+		"syncType":              notification.GetSyncType().String(),
+		"chunkOrder":            notification.GetChunkOrder(),
+		"progress":              notification.GetProgress(),
+		"hasInlinePayload":      len(notification.GetInitialHistBootstrapInlinePayload()) > 0,
+		"hasDirectPath":         strings.TrimSpace(notification.GetDirectPath()) != "",
+		"originalMessageID":     emptyToNil(notification.GetOriginalMessageID()),
+		"peerDataRequestSessID": emptyToNil(notification.GetPeerDataRequestSessionID()),
+	})
 	select {
 	case r.historySyncWake <- struct{}{}:
 	default:
@@ -1084,33 +1093,14 @@ func main() {
 }
 
 func configureClientPayload() {
-	store.SetOSInfo("macOS", [3]uint32{14, 4, 0})
-	store.BaseClientPayload.UserAgent.Platform = waWa6.ClientPayload_UserAgent_MACOS.Enum()
-	store.BaseClientPayload.UserAgent.Manufacturer = proto.String("Apple")
-	store.BaseClientPayload.UserAgent.Device = proto.String("Desktop")
-	store.BaseClientPayload.WebInfo.WebSubPlatform = waWa6.ClientPayload_WebInfo_DARWIN.Enum()
-	store.DeviceProps.Os = proto.String("macOS")
+	store.SetOSInfo("Cued", [3]uint32{0, 1, 0})
+	store.BaseClientPayload.UserAgent.Platform = waWa6.ClientPayload_UserAgent_WEB.Enum()
+	store.BaseClientPayload.UserAgent.Manufacturer = proto.String("Cued")
+	store.BaseClientPayload.UserAgent.Device = proto.String("Cued")
+	store.BaseClientPayload.WebInfo.WebSubPlatform = waWa6.ClientPayload_WebInfo_WEB_BROWSER.Enum()
+	store.DeviceProps.Os = proto.String("Cued")
 	store.DeviceProps.PlatformType = waCompanionReg.DeviceProps_DESKTOP.Enum()
-	store.DeviceProps.RequireFullSync = proto.Bool(true)
-	store.DeviceProps.HistorySyncConfig = &waCompanionReg.DeviceProps_HistorySyncConfig{
-		FullSyncDaysLimit:                        proto.Uint32(fullHistorySyncDaysLimit),
-		FullSyncSizeMbLimit:                      proto.Uint32(fullHistorySyncSizeMBLimit),
-		StorageQuotaMb:                           proto.Uint32(10240),
-		InlineInitialPayloadInE2EeMsg:            proto.Bool(true),
-		RecentSyncDaysLimit:                      proto.Uint32(fullHistorySyncDaysLimit),
-		SupportCallLogHistory:                    proto.Bool(false),
-		SupportBotUserAgentChatHistory:           proto.Bool(true),
-		SupportCagReactionsAndPolls:              proto.Bool(true),
-		SupportBizHostedMsg:                      proto.Bool(true),
-		SupportRecentSyncChunkMessageCountTuning: proto.Bool(true),
-		SupportHostedGroupMsg:                    proto.Bool(true),
-		SupportFbidBotChatHistory:                proto.Bool(true),
-		SupportMessageAssociation:                proto.Bool(true),
-		SupportGroupHistory:                      proto.Bool(true),
-		OnDemandReady:                            proto.Bool(true),
-		CompleteOnDemandReady:                    proto.Bool(true),
-		ThumbnailSyncDaysLimit:                   proto.Uint32(fullHistorySyncDaysLimit),
-	}
+	store.DeviceProps.RequireFullSync = proto.Bool(false)
 }
 
 func runStatus(args []string) error {
@@ -1486,7 +1476,16 @@ func (r *helperRuntime) handleEvent(evt interface{}) {
 	case *events.Connected:
 		r.setConnected(true)
 		metadata := r.state.updateMetadata(func(metadata *helperMetadata) {
-			metadata.AccountJID = jidString(r.client.Store.ID)
+			accountJID := jidString(r.client.Store.ID)
+			if metadata.AccountJID != "" && metadata.AccountJID != accountJID {
+				metadata.LastHistorySyncAt = 0
+				metadata.LastHistorySyncType = ""
+				metadata.LastHistoryChunkOrder = 0
+				metadata.LastHistoryProgress = 0
+				metadata.LastHistorySyncError = ""
+				metadata.LastHistoryNotificationAt = 0
+			}
+			metadata.AccountJID = accountJID
 			metadata.PushName = emptyString(r.client.Store.PushName)
 		})
 		r.emitEvent("connected", map[string]interface{}{
