@@ -28,7 +28,7 @@ Recommended setup: install `Cued.dmg`, open the app, finish setup, then configur
 2. Download the latest `Cued.dmg`.
 3. Drag `Cued.app` into `/Applications`.
 4. Open `Cued.app`.
-5. Complete onboarding and grant the requested macOS permissions.
+5. Complete setup and grant the requested macOS permissions.
 
 What this does:
 
