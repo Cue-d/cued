@@ -9,6 +9,7 @@ let package = Package(
   ],
   products: [
     .library(name: "CuedNativeUI", type: .dynamic, targets: ["CuedNativeUI"]),
+    .executable(name: "onboarding-preview", targets: ["Preview"]),
     .executable(name: "CuedNative", targets: ["CuedNative"]),
   ],
   targets: [
@@ -33,9 +34,23 @@ let package = Package(
         .linkedLibrary("sqlite3"),
       ]
     ),
+    .target(
+      name: "PreviewSupport",
+      dependencies: ["CuedNativeUI"],
+      path: "tools/onboarding-preview/support",
+      linkerSettings: [
+        .linkedFramework("AppKit"),
+        .linkedFramework("SwiftUI"),
+      ]
+    ),
+    .executableTarget(
+      name: "Preview",
+      dependencies: ["PreviewSupport"],
+      path: "tools/onboarding-preview/source"
+    ),
     .testTarget(
       name: "CuedNativeTests",
-      dependencies: ["CuedNative", "CuedNativeUI"],
+      dependencies: ["CuedNative", "CuedNativeUI", "PreviewSupport"],
       path: "Tests/CuedNativeTests"
     ),
   ]
