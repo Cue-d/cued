@@ -201,7 +201,11 @@ public final class RootViewModel: ObservableObject {
 
   public let pageWidth: CGFloat = RootViewModel.windowWidth
 
-  public var pageCount: Int { 2 }
+  public var pageCount: Int { RootPage.allCases.count }
+
+  public var currentPageTitle: String {
+    rootPage(for: currentPage).title
+  }
 
   public var grantedPermissionCount: Int {
     permissionStatuses.filter { $0.status == "granted" }.count
@@ -216,7 +220,7 @@ public final class RootViewModel: ObservableObject {
   }
 
   public var buttonTitle: String {
-    if currentPage == 0 && !allPermissionsGranted {
+    if rootPage(for: currentPage) == .permissions && !allPermissionsGranted {
       return "Skip for now"
     }
     return currentPage == pageCount - 1 ? "Finish" : "Continue"
@@ -337,6 +341,47 @@ public final class RootViewModel: ObservableObject {
   }
 }
 
+private enum RootPage: Int, CaseIterable {
+  case welcome
+  case permissions
+  case platforms
+  case automaticBugfixing
+  case useCases
+  case application
+
+  var title: String {
+    switch self {
+    case .welcome:
+      return "Welcome"
+    case .permissions:
+      return "Permissions"
+    case .platforms:
+      return "Platforms"
+    case .automaticBugfixing:
+      return "Automatic bugfixing"
+    case .useCases:
+      return "Use cases"
+    case .application:
+      return "Cued Application"
+    }
+  }
+
+  var shortTitle: String {
+    switch self {
+    case .automaticBugfixing:
+      return "Debug"
+    case .application:
+      return "App"
+    default:
+      return title
+    }
+  }
+}
+
+private func rootPage(for index: Int) -> RootPage {
+  RootPage(rawValue: index) ?? .welcome
+}
+
 public struct RootView: View {
   @ObservedObject var viewModel: RootViewModel
 
@@ -426,7 +471,7 @@ public struct RootView: View {
       }
     }
     .onChange(of: viewModel.currentPage) { page in
-      guard page != 0 else {
+      guard rootPage(for: page) != .permissions else {
         return
       }
       activePermissionGuideKey = nil
@@ -485,13 +530,19 @@ public struct RootView: View {
 
   @ViewBuilder
   private func page(for pageIndex: Int) -> some View {
-    switch pageIndex {
-    case 0:
+    switch rootPage(for: pageIndex) {
+    case .welcome:
+      welcomePage
+    case .permissions:
       permissionsPage
-    case 1:
+    case .platforms:
       platformsPage
-    default:
-      EmptyView()
+    case .automaticBugfixing:
+      automaticBugfixingPage
+    case .useCases:
+      useCasesPage
+    case .application:
+      applicationPage
     }
   }
 
@@ -533,18 +584,25 @@ public struct RootView: View {
 
       Spacer()
 
-      HStack(spacing: 8) {
-        ForEach(0..<viewModel.pageCount, id: \.self) { index in
-          Button {
-            withAnimation {
-              viewModel.currentPage = index
+      VStack(spacing: 8) {
+        Text(viewModel.currentPageTitle)
+          .font(.caption.weight(.semibold))
+          .foregroundStyle(.secondary)
+
+        HStack(spacing: 7) {
+          ForEach(0..<viewModel.pageCount, id: \.self) { index in
+            Button {
+              withAnimation {
+                viewModel.currentPage = index
+              }
+            } label: {
+              Capsule(style: .continuous)
+                .fill(index == viewModel.currentPage ? Color.accentColor : Color.gray.opacity(0.28))
+                .frame(width: index == viewModel.currentPage ? 18 : 7, height: 7)
             }
-          } label: {
-            Circle()
-              .fill(index == viewModel.currentPage ? Color.accentColor : Color.gray.opacity(0.3))
-              .frame(width: 8, height: 8)
+            .buttonStyle(.plain)
+            .help(rootPage(for: index).title)
           }
-          .buttonStyle(.plain)
         }
       }
 
@@ -606,6 +664,49 @@ public struct RootView: View {
         .fill(Color(NSColor.controlBackgroundColor))
         .shadow(color: .black.opacity(0.06), radius: 8, y: 3)
     )
+  }
+
+  private var welcomePage: some View {
+    pageContainer {
+      VStack(spacing: 10) {
+        Image(systemName: "tray.and.arrow.down.fill")
+          .font(.system(size: 34, weight: .semibold))
+          .foregroundStyle(Color.accentColor)
+          .frame(width: 62, height: 62)
+          .background(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+              .fill(Color.accentColor.opacity(0.12))
+          )
+
+        Text("Welcome to Cued")
+          .font(.largeTitle.weight(.semibold))
+
+        Text("Local context for your agents.")
+          .font(.body)
+          .foregroundStyle(.secondary)
+      }
+      .frame(maxWidth: .infinity)
+      .padding(.top, 62)
+
+      VStack(spacing: 10) {
+        workflowRow(
+          icon: "lock.laptopcomputer",
+          title: "Grant local access",
+          detail: "Contacts and messages stay on this Mac."
+        )
+        workflowRow(
+          icon: "arrow.triangle.2.circlepath",
+          title: "Connect sources",
+          detail: "Cued indexes into a local database."
+        )
+        workflowRow(
+          icon: "terminal",
+          title: "Use with agents",
+          detail: "Codex and Claude Code can read the context you choose."
+        )
+      }
+      .padding(.top, 22)
+    }
   }
 
   private var permissionsPage: some View {
@@ -678,6 +779,236 @@ public struct RootView: View {
         }
       }
     }
+  }
+
+  private var automaticBugfixingPage: some View {
+    pageContainer {
+      Text("Automatic bugfixing")
+        .font(.largeTitle.weight(.semibold))
+
+      Text("Experimental. Use at your own risk.")
+        .font(.headline)
+        .foregroundStyle(.red)
+
+      card(spacing: 14) {
+        workflowRow(
+          icon: "exclamationmark.triangle.fill",
+          title: "Syncs can be brittle",
+          detail: "Local context depends on permissions, helpers, and source apps."
+        )
+        workflowRow(
+          icon: "shippingbox.fill",
+          title: "Debug Bundle",
+          detail: "Collect logs, source state, and a redacted local DB summary."
+        )
+        workflowRow(
+          icon: "arrow.branch",
+          title: "Draft PR",
+          detail: "Let Codex or Claude Code inspect, patch, test, and propose a branch."
+        )
+      }
+
+      HStack(spacing: 10) {
+        debugAgentChoice(title: "Codex", icon: "chevron.left.forwardslash.chevron.right")
+        debugAgentChoice(title: "Claude Code", icon: "sparkles")
+      }
+
+      Toggle("I understand this can edit a local branch", isOn: .constant(false))
+        .toggleStyle(.checkbox)
+        .font(.subheadline)
+        .foregroundStyle(.secondary)
+
+      Button("Create draft PR") {}
+        .buttonStyle(
+          PermissionActionButtonStyle(
+            variant: .prominent,
+            size: .regular
+          )
+        )
+        .disabled(true)
+        .frame(maxWidth: .infinity, alignment: .trailing)
+    }
+  }
+
+  private var useCasesPage: some View {
+    pageContainer {
+      Text("Use cases")
+        .font(.largeTitle.weight(.semibold))
+
+      Text("Choose where Cued context should show up.")
+        .font(.body)
+        .foregroundStyle(.secondary)
+
+      LazyVGrid(
+        columns: [
+          GridItem(.flexible(), spacing: 12),
+          GridItem(.flexible(), spacing: 12),
+        ],
+        spacing: 12
+      ) {
+        useCaseTile(icon: "terminal", title: "Open in Codex", detail: "Debug sync or query context.")
+        useCaseTile(icon: "sparkles", title: "Open in Claude Code", detail: "Investigate repo issues locally.")
+        useCaseTile(icon: "command", title: "Use from CLI", detail: "Run focused local queries.")
+        useCaseTile(icon: "clock.arrow.circlepath", title: "Follow-up queue", detail: "Find stale or unanswered threads.")
+      }
+      .padding(.top, 10)
+    }
+  }
+
+  private var applicationPage: some View {
+    pageContainer {
+      Text("Cued Application")
+        .font(.largeTitle.weight(.semibold))
+
+      Text("Your local sync and relationship context surface.")
+        .font(.body)
+        .foregroundStyle(.secondary)
+
+      card(spacing: 14) {
+        appSummaryRow(
+          label: "Local DB",
+          value: localDatabaseSummary,
+          status: "Ready"
+        )
+        Divider()
+        appSummaryRow(
+          label: "Sources",
+          value: sourceSummary,
+          status: "\(connectedPlatformCount)/\(max(viewModel.platformConfigurations.count, 1))"
+        )
+        Divider()
+        appSummaryRow(
+          label: "Sync Health",
+          value: syncHealthSummary,
+          status: syncHealthStatus
+        )
+      }
+
+      card(spacing: 10) {
+        Text("Relationship context")
+          .font(.headline)
+        Text("Recent people, stale threads, unanswered messages, and agent-ready context will live here after setup.")
+          .font(.subheadline)
+          .foregroundStyle(.secondary)
+          .fixedSize(horizontal: false, vertical: true)
+      }
+    }
+  }
+
+  private func workflowRow(icon: String, title: String, detail: String) -> some View {
+    HStack(spacing: 12) {
+      Image(systemName: icon)
+        .font(.system(size: 15, weight: .semibold))
+        .foregroundStyle(.secondary)
+        .frame(width: 40, height: 40)
+        .background(
+          RoundedRectangle(cornerRadius: 12, style: .continuous)
+            .fill(Color(NSColor.controlBackgroundColor))
+        )
+
+      VStack(alignment: .leading, spacing: 3) {
+        Text(title)
+          .font(.headline)
+        Text(detail)
+          .font(.subheadline)
+          .foregroundStyle(.secondary)
+          .fixedSize(horizontal: false, vertical: true)
+      }
+      .frame(maxWidth: .infinity, alignment: .leading)
+    }
+    .padding(.horizontal, 16)
+    .padding(.vertical, 14)
+    .frame(maxWidth: .infinity, alignment: .leading)
+    .background(rowBackground(cornerRadius: 14))
+  }
+
+  private func debugAgentChoice(title: String, icon: String) -> some View {
+    HStack(spacing: 10) {
+      Image(systemName: icon)
+        .font(.system(size: 14, weight: .semibold))
+        .foregroundStyle(.secondary)
+      Text(title)
+        .font(.subheadline.weight(.semibold))
+      Spacer(minLength: 0)
+      Circle()
+        .strokeBorder(Color(NSColor.separatorColor), lineWidth: 1)
+        .frame(width: 16, height: 16)
+    }
+    .padding(14)
+    .frame(maxWidth: .infinity, minHeight: 54, alignment: .leading)
+    .background(rowBackground(cornerRadius: 14))
+  }
+
+  private func useCaseTile(icon: String, title: String, detail: String) -> some View {
+    VStack(alignment: .leading, spacing: 10) {
+      Image(systemName: icon)
+        .font(.system(size: 18, weight: .semibold))
+        .foregroundStyle(.secondary)
+        .frame(width: 28, height: 28, alignment: .leading)
+
+      VStack(alignment: .leading, spacing: 4) {
+        Text(title)
+          .font(.headline)
+        Text(detail)
+          .font(.subheadline)
+          .foregroundStyle(.secondary)
+          .fixedSize(horizontal: false, vertical: true)
+      }
+      Spacer(minLength: 0)
+    }
+    .padding(16)
+    .frame(maxWidth: .infinity, minHeight: 146, alignment: .topLeading)
+    .background(rowBackground(cornerRadius: 14))
+  }
+
+  private func appSummaryRow(label: String, value: String, status: String) -> some View {
+    HStack(spacing: 12) {
+      VStack(alignment: .leading, spacing: 3) {
+        Text(label)
+          .font(.headline)
+        Text(value)
+          .font(.subheadline)
+          .foregroundStyle(.secondary)
+          .fixedSize(horizontal: false, vertical: true)
+      }
+      .frame(maxWidth: .infinity, alignment: .leading)
+
+      Text(status)
+        .font(.caption.weight(.semibold))
+        .fontDesign(.monospaced)
+        .foregroundStyle(.secondary)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 5)
+        .background(
+          Capsule(style: .continuous)
+            .fill(Color(NSColor.controlBackgroundColor))
+        )
+    }
+  }
+
+  private var connectedPlatformCount: Int {
+    viewModel.platformConfigurations.filter(isPlatformComplete).count
+  }
+
+  private var sourceSummary: String {
+    if viewModel.platformConfigurations.isEmpty {
+      return "Sources appear after the daemon reports supported integrations."
+    }
+    return "Connected, pending, and paused source state in one place."
+  }
+
+  private var syncHealthStatus: String {
+    connectedPlatformCount > 0 ? "OK" : "Setup"
+  }
+
+  private var syncHealthSummary: String {
+    connectedPlatformCount > 0
+      ? "Recent runs, retries, throttling, and source errors will be summarized here."
+      : "Complete access and sources before sync health becomes useful."
+  }
+
+  private var localDatabaseSummary: String {
+    "~/.cued/local.db"
   }
 
   private func permissionRow(_ permission: PermissionStatus) -> some View {
@@ -817,11 +1148,11 @@ public struct RootView: View {
     .frame(width: 40, height: 40)
   }
 
-  private func rowBackground() -> some View {
-    RoundedRectangle(cornerRadius: 20, style: .continuous)
+  private func rowBackground(cornerRadius: CGFloat = 20) -> some View {
+    RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
       .fill(Color(NSColor.controlBackgroundColor))
       .overlay(
-        RoundedRectangle(cornerRadius: 20, style: .continuous)
+        RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
           .strokeBorder(Color(NSColor.separatorColor).opacity(0.32), lineWidth: 1)
       )
   }
@@ -1006,7 +1337,7 @@ public struct RootView: View {
         "Fix permissions",
         {
           withAnimation {
-            viewModel.currentPage = 0
+            viewModel.currentPage = RootPage.permissions.rawValue
           }
         }
       )
@@ -1095,7 +1426,7 @@ public struct RootView: View {
         "Fix permissions",
         {
           withAnimation {
-            viewModel.currentPage = 0
+            viewModel.currentPage = RootPage.permissions.rawValue
           }
         }
       )
@@ -1938,7 +2269,7 @@ private struct RootPreview: View {
 @available(macOS 14.0, *)
 #Preview("Permissions · Partial Access") {
   RootPreview(
-    page: 0,
+    page: 1,
     permissions: [
       PermissionStatus(
         key: "contacts",
@@ -1979,7 +2310,7 @@ private struct RootPreview: View {
 @available(macOS 14.0, *)
 #Preview("Platforms · No Accounts") {
   RootPreview(
-    page: 1,
+    page: 2,
     permissions: defaultPermissionStatuses(),
     globalSkill: defaultSkillStatus(),
     allIntegrations: [
@@ -2056,7 +2387,7 @@ private struct RootPreview: View {
 @available(macOS 14.0, *)
 #Preview("Platforms · Slack Multi-Workspace") {
   RootPreview(
-    page: 1,
+    page: 2,
     permissions: defaultPermissionStatuses(),
     globalSkill: defaultSkillStatus(),
     allIntegrations: [
@@ -2157,7 +2488,7 @@ private struct RootPreview: View {
 @available(macOS 14.0, *)
 #Preview("Platforms · Helpers Missing") {
   RootPreview(
-    page: 1,
+    page: 2,
     permissions: defaultPermissionStatuses(),
     globalSkill: defaultSkillStatus(),
     allIntegrations: [

@@ -8,10 +8,14 @@ final class PreviewTests: XCTestCase {
     XCTAssertEqual(
       Preview.cases.map(\.name),
       [
+        "welcome",
         "permissions-missing",
         "permissions-granted",
         "platforms-fresh",
         "platforms-mixed",
+        "automatic-bugfixing",
+        "use-cases",
+        "application-home",
       ]
     )
     XCTAssertEqual(Set(Preview.cases.map(\.name)).count, Preview.cases.count)
@@ -27,7 +31,7 @@ final class PreviewTests: XCTestCase {
     )
 
     XCTAssertEqual(previewCase.name, "platforms-mixed")
-    XCTAssertEqual(previewCase.page, 1)
+    XCTAssertEqual(previewCase.page, 2)
     XCTAssertEqual(previewCase.size, CGSize(width: 700, height: 800))
   }
 
