@@ -60,13 +60,38 @@ describe("platform capability resolver", () => {
     );
   });
 
-  it("marks helper-driven connectors as requiring helpers when missing", () => {
+  it("keeps Signal setup placeholders connectable before helper diagnostics exist", () => {
     expect(
       summarizePlatformCapability(
         "signal",
         {
           platform: "signal",
           authState: "missing",
+          metadata: {
+            helper: "cued-signal-cli",
+          },
+        },
+        "macos",
+      ),
+    ).toEqual(
+      expect.objectContaining({
+        availability: "available",
+        helperRequirements: ["signal_cli"],
+      }),
+    );
+  });
+
+  it("marks Signal as requiring a helper when diagnostics show it is unavailable", () => {
+    expect(
+      summarizePlatformCapability(
+        "signal",
+        {
+          platform: "signal",
+          authState: "missing",
+          metadata: {
+            signalCliPath: null,
+            signalVersionSupported: false,
+          },
         },
         "macos",
       ),
