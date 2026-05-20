@@ -33,7 +33,7 @@ public struct PreviewMetrics: Sendable {
   public let nonBackgroundSampleCount: Int
 
   public var isVisuallyNonBlank: Bool {
-    byteCount > 1_000 && distinctSampledColors >= 8 && nonBackgroundSampleCount >= 40
+    byteCount > 1_000 && distinctSampledColors >= 8 && nonBackgroundSampleCount >= 20
   }
 }
 

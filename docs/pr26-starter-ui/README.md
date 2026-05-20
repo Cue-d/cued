@@ -1,6 +1,6 @@
 # Cued Starter UI Flow
 
-This folder captures the workflow image iterations and the SwiftUI preview renders for the starter app flow stacked on PR 25.
+This folder captures the workflow image iterations and the SwiftUI preview renders for the starter app flow.
 
 ## Imagegen Workflow Concepts
 

@@ -471,7 +471,7 @@ public struct RootView: View {
       }
     }
     .onChange(of: viewModel.currentPage) { page in
-      guard page != 0 else {
+      guard rootPage(for: page) != .permissions else {
         return
       }
       activePermissionGuideKey = nil
@@ -1337,7 +1337,7 @@ public struct RootView: View {
         "Fix permissions",
         {
           withAnimation {
-            viewModel.currentPage = 0
+            viewModel.currentPage = RootPage.permissions.rawValue
           }
         }
       )
@@ -1426,7 +1426,7 @@ public struct RootView: View {
         "Fix permissions",
         {
           withAnimation {
-            viewModel.currentPage = 0
+            viewModel.currentPage = RootPage.permissions.rawValue
           }
         }
       )
