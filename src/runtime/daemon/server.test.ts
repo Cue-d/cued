@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildSqliteBusyRunRetry,
   buildSyncResumeTargets,
   getAdaptiveProjectionBatchSize,
   getAdaptiveProjectionContinueDelayMs,
   getAutoSyncTargets,
   isDisconnectedSocketError,
+  SerialTaskQueue,
   shouldDeferContinuationProjection,
   shouldDrainOutboundQueue,
   shouldProjectIngestRunInline,
@@ -158,6 +160,85 @@ describe("daemon socket errors", () => {
     error.code = "EACCES";
     expect(isDisconnectedSocketError(error)).toBe(false);
     expect(isDisconnectedSocketError("EPIPE")).toBe(false);
+  });
+});
+
+describe("SQLite busy run retry", () => {
+  it("adds bounded exponential backoff while preserving run details", () => {
+    expect(
+      buildSqliteBusyRunRetry({
+        details: { source: "slack", accountKey: "T1" },
+        errorMessage: "database is locked",
+        nowMs: 1_000,
+        baseDelayMs: 100,
+        maxDelayMs: 1_000,
+      }),
+    ).toEqual({
+      attempt: 1,
+      delayMs: 100,
+      scheduledAt: 1_100,
+      details: {
+        source: "slack",
+        accountKey: "T1",
+        sqliteBusyRetryAttempt: 1,
+        sqliteBusyLastError: "database is locked",
+        sqliteBusyLastRetriedAt: 1_000,
+      },
+    });
+
+    expect(
+      buildSqliteBusyRunRetry({
+        details: { sqliteBusyRetryAttempt: 4 },
+        errorMessage: "SQLITE_BUSY",
+        nowMs: 1_000,
+        baseDelayMs: 100,
+        maxDelayMs: 1_000,
+      }),
+    ).toMatchObject({
+      attempt: 5,
+      delayMs: 1_000,
+      scheduledAt: 2_000,
+    });
+  });
+});
+
+describe("serial task queue", () => {
+  it("runs async tasks one at a time in submission order", async () => {
+    const queue = new SerialTaskQueue();
+    const events: string[] = [];
+
+    const first = queue.run(async () => {
+      events.push("first:start");
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      events.push("first:end");
+      return 1;
+    });
+    const second = queue.run(async () => {
+      events.push("second:start");
+      events.push("second:end");
+      return 2;
+    });
+
+    await expect(Promise.all([first, second])).resolves.toEqual([1, 2]);
+    expect(events).toEqual(["first:start", "first:end", "second:start", "second:end"]);
+  });
+
+  it("continues after a failed task", async () => {
+    const queue = new SerialTaskQueue();
+    const events: string[] = [];
+
+    const failed = queue.run(async () => {
+      events.push("failed:start");
+      throw new Error("boom");
+    });
+    const next = queue.run(async () => {
+      events.push("next:start");
+      return "ok";
+    });
+
+    await expect(failed).rejects.toThrow("boom");
+    await expect(next).resolves.toBe("ok");
+    expect(events).toEqual(["failed:start", "next:start"]);
   });
 });
 

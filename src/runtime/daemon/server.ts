@@ -34,6 +34,7 @@ import {
   type Platform,
   type ProviderRawEventInput,
   type RawEventAcquisitionMode,
+  type SyncProofInput,
 } from "../../core/types/provider.js";
 import { safeParseJsonRecord, safeParseJsonStringArray } from "../../db/codecs.js";
 import { type CuedDatabase, type OutboundMessageRow, openCuedDatabase } from "../../db/database.js";
@@ -180,6 +181,9 @@ const DEFAULT_CONTINUATION_PROJECTION_BACKLOG_EVENTS = 500;
 const NATIVE_WATCH_DEBOUNCE_MS = 1_500;
 const DEFAULT_AUTOSYNC_SCHEDULER_TICK_MS = 15_000;
 const DEFAULT_SYNC_CONTINUE_DELAY_MS = 15_000;
+const SQLITE_BUSY_RUN_RETRY_BASE_DELAY_MS = 2_000;
+const SQLITE_BUSY_RUN_RETRY_MAX_DELAY_MS = 30_000;
+const SQLITE_BUSY_RUN_RETRY_MAX_ATTEMPTS = 6;
 const DEFAULT_SIGNAL_RECONNECT_SYNC_COOLDOWN_MS = 5 * 60_000;
 const DAEMON_STATUS_BUSY_TIMEOUT_MS = 100;
 const MENU_BAR_STATUS_WRITE_INTERVAL_MS = 15_000;
@@ -539,6 +543,53 @@ function getAutoSyncSchedulerTickMs(): number {
 function isSqliteBusyError(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error);
   return /sqlite_(busy|locked)|database is locked|database is busy/i.test(message);
+}
+
+export class SerialTaskQueue {
+  private tail: Promise<void> = Promise.resolve();
+
+  run<T>(task: () => T | Promise<T>): Promise<T> {
+    const run = this.tail.then(task, task);
+    this.tail = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    return run;
+  }
+}
+
+function getSqliteBusyRunRetryAttempt(details: Record<string, unknown> | null): number {
+  const value = details?.sqliteBusyRetryAttempt;
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? Math.trunc(value) : 0;
+}
+
+export function buildSqliteBusyRunRetry(input: {
+  details: Record<string, unknown> | null;
+  errorMessage: string;
+  nowMs: number;
+  baseDelayMs?: number;
+  maxDelayMs?: number;
+}): {
+  attempt: number;
+  delayMs: number;
+  scheduledAt: number;
+  details: Record<string, unknown>;
+} {
+  const attempt = getSqliteBusyRunRetryAttempt(input.details) + 1;
+  const baseDelayMs = input.baseDelayMs ?? SQLITE_BUSY_RUN_RETRY_BASE_DELAY_MS;
+  const maxDelayMs = input.maxDelayMs ?? SQLITE_BUSY_RUN_RETRY_MAX_DELAY_MS;
+  const delayMs = Math.min(maxDelayMs, baseDelayMs * 2 ** Math.max(0, attempt - 1));
+  return {
+    attempt,
+    delayMs,
+    scheduledAt: input.nowMs + delayMs,
+    details: {
+      ...(input.details ?? {}),
+      sqliteBusyRetryAttempt: attempt,
+      sqliteBusyLastError: input.errorMessage,
+      sqliteBusyLastRetriedAt: input.nowMs,
+    },
+  };
 }
 
 function getIngestConcurrency(): number {
@@ -1727,6 +1778,7 @@ export async function runDaemon(): Promise<void> {
     { child: ChildProcess; platform: Platform; accountKey: string }
   >();
   const activeIngestRuns = new Map<string, Promise<void>>();
+  const ingestCommitQueue = new SerialTaskQueue();
   let activeOutboundSend: Promise<void> | null = null;
   let isProcessingProjection = false;
   let isProcessingSearchIndex = false;
@@ -3718,6 +3770,7 @@ export async function runDaemon(): Promise<void> {
 
       const platform = currentRun.platform;
       const accountKey = currentRun.account_key ?? getDefaultAccountKeyForPlatform(platform);
+      const runType = currentRun.run_type as "sync" | "sync_resume";
       const runDetails = safeParseJsonRecord(
         currentRun.details_json ?? null,
         "sync_runs.details_json",
@@ -3759,6 +3812,8 @@ export async function runDaemon(): Promise<void> {
         accountKey: string;
         displayName?: string | null;
       }> = [];
+      let rawEventsToInsert: ProviderRawEventInput[] = [];
+      let syncProofsToUpsert: SyncProofInput[] = [];
       let insertResult: ReturnType<typeof db.insertRawEvents> = {
         insertedCount: 0,
         insertedEvents: [],
@@ -3838,26 +3893,7 @@ export async function runDaemon(): Promise<void> {
           hasMore = page.hasMore;
           cursor = page.nextCursor ?? null;
 
-          const pageInsertStartedAt = now();
-          const pageInsertResult = db.insertRawEvents(rawEvents);
-          rawEventInsertMs += now() - pageInsertStartedAt;
-          insertResult = {
-            insertedCount: insertResult.insertedCount + pageInsertResult.insertedCount,
-            insertedEvents: [...insertResult.insertedEvents, ...pageInsertResult.insertedEvents],
-            insertedRows: [...insertResult.insertedRows, ...pageInsertResult.insertedRows],
-            firstInsertedRowId:
-              insertResult.firstInsertedRowId == null
-                ? pageInsertResult.firstInsertedRowId
-                : pageInsertResult.firstInsertedRowId == null
-                  ? insertResult.firstInsertedRowId
-                  : Math.min(insertResult.firstInsertedRowId, pageInsertResult.firstInsertedRowId),
-            lastInsertedRowId:
-              insertResult.lastInsertedRowId == null
-                ? pageInsertResult.lastInsertedRowId
-                : pageInsertResult.lastInsertedRowId == null
-                  ? insertResult.lastInsertedRowId
-                  : Math.max(insertResult.lastInsertedRowId, pageInsertResult.lastInsertedRowId),
-          };
+          rawEventsToInsert = [...rawEventsToInsert, ...rawEvents];
         } while (hasMore && pageCount < pageBudget);
 
         bundleHasMore = hasMore;
@@ -3891,10 +3927,8 @@ export async function runDaemon(): Promise<void> {
         checkpointLastSuccessAt = hasMore
           ? (checkpoint?.last_success_at ?? lastCompletedAt)
           : lastCompletedAt;
-        db.upsertSyncProof({
-          platform,
-          accountKey,
-          proof: buildWhatsAppMessagesProof({
+        syncProofsToUpsert = [
+          buildWhatsAppMessagesProof({
             accountKey,
             syncMode: bundleSyncMode,
             observedAt: now(),
@@ -3906,7 +3940,7 @@ export async function runDaemon(): Promise<void> {
             stats: resyncStats,
             coverage: resyncCoverage,
           }),
-        });
+        ];
       } else {
         const bundle =
           platform === "signal"
@@ -3927,17 +3961,8 @@ export async function runDaemon(): Promise<void> {
             ? bundle.diagnostics
             : null;
         ingestedCount = bundle.rawEvents.length;
-        const rawEventInsertStartedAt = now();
-        insertResult = db.insertRawEvents(withRawEventAcquisitionMode(bundle.rawEvents, "sync"));
-        rawEventInsertMs = now() - rawEventInsertStartedAt;
-        const bundleProofs = Array.isArray(bundle.proofs) ? bundle.proofs : [];
-        for (const proof of bundleProofs) {
-          db.upsertSyncProof({
-            platform,
-            accountKey,
-            proof,
-          });
-        }
+        rawEventsToInsert = withRawEventAcquisitionMode(bundle.rawEvents, "sync");
+        syncProofsToUpsert = Array.isArray(bundle.proofs) ? bundle.proofs : [];
         if (platform === "discord") {
           const discordHydration =
             bundleDiagnostics &&
@@ -3958,164 +3983,180 @@ export async function runDaemon(): Promise<void> {
         runDiagnostics = bundleDiagnostics;
       }
 
-      db.upsertSourceAccounts(sourceAccounts);
-      const realtimeProjectionStartedAt = now();
-      if (
-        shouldProjectIngestRunInline({
-          platform,
-          runType: currentRun.run_type,
-          realtimeProjectionEnabled,
-          firstInsertedRowId: insertResult.firstInsertedRowId,
-          lastInsertedRowId: insertResult.lastInsertedRowId,
-          insertedRawEvents: insertResult.insertedCount,
-        })
-      ) {
-        projectRealtimeRange(db, {
-          startRowId: insertResult.firstInsertedRowId!,
-          endRowId: insertResult.lastInsertedRowId!,
-          batchSize: realtimeProjectionBatchSize,
-          includeOverview: false,
-        });
-        scheduleSearchIndexDrain();
-      }
-      const afterRealtimeProjection = now();
-      const inboundMessages = collectInboundMessageHookPayloads(
-        currentRun.id,
-        insertResult.insertedRows,
-        isInboundMessageEvent,
-      );
-      queueMessageReceivedHooks(
-        insertResult.firstInsertedRowId != null && insertResult.lastInsertedRowId != null
-          ? {
-              startRowId: insertResult.firstInsertedRowId,
-              endRowId: insertResult.lastInsertedRowId,
-            }
-          : null,
-        inboundMessages,
-      );
-      if (platform === "signal") {
-        for (const rawEvent of insertResult.insertedEvents) {
-          if (rawEvent.entityKind !== "message" || rawEvent.eventKind !== "created") {
-            continue;
-          }
-          const payload = rawEvent.payload as Record<string, unknown>;
-          if (payload.isFromMe !== true || typeof payload.content !== "string") {
-            continue;
-          }
-          const sourceConversationKey =
-            typeof payload.sourceConversationKey === "string"
-              ? payload.sourceConversationKey.replace(/^signal:/, "")
-              : null;
-          const sentAt = typeof payload.sentAt === "number" ? payload.sentAt : 0;
-          clearSignalSendEcho(accountKey, (echo) => {
-            const sameThread = !echo.threadId || echo.threadId === sourceConversationKey;
-            const sameText = echo.text.trim() === payload.content;
-            const nearTimestamp = sentAt > 0 ? Math.abs(echo.timestamp - sentAt) < 30_000 : true;
-            return sameThread && sameText && nearTimestamp;
-          });
-        }
-      }
-
-      const projection = db.getProjectionBacklog();
-      const checkpointSyncMode = resolveCheckpointSyncMode(
-        currentRun.run_type,
-        checkpoint?.sync_mode,
-        bundleSyncMode,
-        bundleHasMore,
-      );
-      const checkpointStartedAt = now();
-      db.upsertCheckpoint({
-        platform: currentRun.platform,
-        accountKey,
-        syncMode: checkpointSyncMode,
-        sourceCursor: bundleSourceCursor,
-        rawIngestWatermark: projection.max_raw_event_rowid,
-        lastSuccessAt: checkpointLastSuccessAt,
-      });
-      const afterCheckpoint = now();
-      const timings: IngestTiming = {
-        adapterFetchMs,
-        rawEventInsertMs,
-        realtimeProjectionMs: afterRealtimeProjection - realtimeProjectionStartedAt,
-        checkpointUpdateMs: afterCheckpoint - checkpointStartedAt,
-        webhookReadyMs: afterCheckpoint - ingestStartedAt,
-        totalMs: afterCheckpoint - ingestStartedAt,
-        insertedRawEvents: insertResult.insertedCount,
-      };
-
-      let projectionQueued = false;
-      if (projection.pending_raw_events > 0) {
-        const continuationProjectionKey = `${currentRun.platform}:${accountKey}`;
-        const lastContinuationProjectionAt =
-          lastContinuationProjectionQueuedAt.get(continuationProjectionKey) ?? 0;
-        const projectionDecisionAt = now();
-        const shouldDeferProjection = shouldDeferContinuationProjection({
-          hasMore: bundleHasMore,
-          pendingRawEvents: projection.pending_raw_events,
-          lastProjectionQueuedAt: lastContinuationProjectionAt,
-          nowMs: projectionDecisionAt,
-          intervalMs: continuationProjectionIntervalMs,
-          backlogEvents: continuationProjectionBacklogEvents,
-        });
-
-        if (shouldDeferProjection) {
-          daemonLogger.info("projection deferred during continuation sync", {
-            runId: currentRun.id,
-            platform: currentRun.platform,
+      const { timings } = await ingestCommitQueue.run(async () => {
+        const rawEventInsertStartedAt = now();
+        insertResult = db.insertRawEvents(rawEventsToInsert);
+        rawEventInsertMs = now() - rawEventInsertStartedAt;
+        for (const proof of syncProofsToUpsert) {
+          db.upsertSyncProof({
+            platform,
             accountKey,
-            pendingRawEvents: projection.pending_raw_events,
-            continuationProjectionIntervalMs,
-            continuationProjectionBacklogEvents,
+            proof,
           });
-        } else {
-          queueProjectionRun(`ingest:${currentRun.platform}:${accountKey}`, undefined, {
-            delayMs: deferredProjectionCoalesceMs,
-          });
-          if (bundleHasMore) {
-            lastContinuationProjectionQueuedAt.set(continuationProjectionKey, projectionDecisionAt);
-          } else {
-            lastContinuationProjectionQueuedAt.delete(continuationProjectionKey);
-          }
-          projectionQueued = true;
         }
-      } else if (
-        insertResult.firstInsertedRowId != null &&
-        insertResult.lastInsertedRowId != null
-      ) {
-        await releaseMessageReceivedHooksForRange({
-          startRowId: insertResult.firstInsertedRowId,
-          endRowId: insertResult.lastInsertedRowId,
+        db.upsertSourceAccounts(sourceAccounts);
+        const realtimeProjectionStartedAt = now();
+        if (
+          shouldProjectIngestRunInline({
+            platform,
+            runType,
+            realtimeProjectionEnabled,
+            firstInsertedRowId: insertResult.firstInsertedRowId,
+            lastInsertedRowId: insertResult.lastInsertedRowId,
+            insertedRawEvents: insertResult.insertedCount,
+          })
+        ) {
+          projectRealtimeRange(db, {
+            startRowId: insertResult.firstInsertedRowId!,
+            endRowId: insertResult.lastInsertedRowId!,
+            batchSize: realtimeProjectionBatchSize,
+            includeOverview: false,
+          });
+          scheduleSearchIndexDrain();
+        }
+        const afterRealtimeProjection = now();
+        const inboundMessages = collectInboundMessageHookPayloads(
+          currentRun.id,
+          insertResult.insertedRows,
+          isInboundMessageEvent,
+        );
+        queueMessageReceivedHooks(
+          insertResult.firstInsertedRowId != null && insertResult.lastInsertedRowId != null
+            ? {
+                startRowId: insertResult.firstInsertedRowId,
+                endRowId: insertResult.lastInsertedRowId,
+              }
+            : null,
+          inboundMessages,
+        );
+        if (platform === "signal") {
+          for (const rawEvent of insertResult.insertedEvents) {
+            if (rawEvent.entityKind !== "message" || rawEvent.eventKind !== "created") {
+              continue;
+            }
+            const payload = rawEvent.payload as Record<string, unknown>;
+            if (payload.isFromMe !== true || typeof payload.content !== "string") {
+              continue;
+            }
+            const sourceConversationKey =
+              typeof payload.sourceConversationKey === "string"
+                ? payload.sourceConversationKey.replace(/^signal:/, "")
+                : null;
+            const sentAt = typeof payload.sentAt === "number" ? payload.sentAt : 0;
+            clearSignalSendEcho(accountKey, (echo) => {
+              const sameThread = !echo.threadId || echo.threadId === sourceConversationKey;
+              const sameText = echo.text.trim() === payload.content;
+              const nearTimestamp = sentAt > 0 ? Math.abs(echo.timestamp - sentAt) < 30_000 : true;
+              return sameThread && sameText && nearTimestamp;
+            });
+          }
+        }
+
+        const projection = db.getProjectionBacklog();
+        const checkpointSyncMode = resolveCheckpointSyncMode(
+          runType,
+          checkpoint?.sync_mode,
+          bundleSyncMode,
+          bundleHasMore,
+        );
+        const checkpointStartedAt = now();
+        db.upsertCheckpoint({
+          platform,
+          accountKey,
+          syncMode: checkpointSyncMode,
+          sourceCursor: bundleSourceCursor,
+          rawIngestWatermark: projection.max_raw_event_rowid,
+          lastSuccessAt: checkpointLastSuccessAt,
         });
-      }
-      db.finishRun(currentRun.id, {
-        ingested: ingestedCount,
-        insertedRawEvents: insertResult.insertedCount,
-        projectionQueued,
-        hasMore: bundleHasMore,
-        syncMode: checkpointSyncMode,
-        timings,
-        ...(bundleContinuation ? { continuation: bundleContinuation } : {}),
-        ...(runDiagnostics ? { diagnostics: runDiagnostics } : {}),
+        const afterCheckpoint = now();
+        const timings: IngestTiming = {
+          adapterFetchMs,
+          rawEventInsertMs,
+          realtimeProjectionMs: afterRealtimeProjection - realtimeProjectionStartedAt,
+          checkpointUpdateMs: afterCheckpoint - checkpointStartedAt,
+          webhookReadyMs: afterCheckpoint - ingestStartedAt,
+          totalMs: afterCheckpoint - ingestStartedAt,
+          insertedRawEvents: insertResult.insertedCount,
+        };
+
+        let projectionQueued = false;
+        if (projection.pending_raw_events > 0) {
+          const continuationProjectionKey = `${platform}:${accountKey}`;
+          const lastContinuationProjectionAt =
+            lastContinuationProjectionQueuedAt.get(continuationProjectionKey) ?? 0;
+          const projectionDecisionAt = now();
+          const shouldDeferProjection = shouldDeferContinuationProjection({
+            hasMore: bundleHasMore,
+            pendingRawEvents: projection.pending_raw_events,
+            lastProjectionQueuedAt: lastContinuationProjectionAt,
+            nowMs: projectionDecisionAt,
+            intervalMs: continuationProjectionIntervalMs,
+            backlogEvents: continuationProjectionBacklogEvents,
+          });
+
+          if (shouldDeferProjection) {
+            daemonLogger.info("projection deferred during continuation sync", {
+              runId: currentRun.id,
+              platform,
+              accountKey,
+              pendingRawEvents: projection.pending_raw_events,
+              continuationProjectionIntervalMs,
+              continuationProjectionBacklogEvents,
+            });
+          } else {
+            queueProjectionRun(`ingest:${platform}:${accountKey}`, undefined, {
+              delayMs: deferredProjectionCoalesceMs,
+            });
+            if (bundleHasMore) {
+              lastContinuationProjectionQueuedAt.set(
+                continuationProjectionKey,
+                projectionDecisionAt,
+              );
+            } else {
+              lastContinuationProjectionQueuedAt.delete(continuationProjectionKey);
+            }
+            projectionQueued = true;
+          }
+        } else if (
+          insertResult.firstInsertedRowId != null &&
+          insertResult.lastInsertedRowId != null
+        ) {
+          await releaseMessageReceivedHooksForRange({
+            startRowId: insertResult.firstInsertedRowId,
+            endRowId: insertResult.lastInsertedRowId,
+          });
+        }
+        db.finishRun(currentRun.id, {
+          ingested: ingestedCount,
+          insertedRawEvents: insertResult.insertedCount,
+          projectionQueued,
+          hasMore: bundleHasMore,
+          syncMode: checkpointSyncMode,
+          timings,
+          ...(bundleContinuation ? { continuation: bundleContinuation } : {}),
+          ...(runDiagnostics ? { diagnostics: runDiagnostics } : {}),
+        });
+        if (bundleHasMore && !db.hasQueuedOrRunningRun(platform, accountKey)) {
+          const continuationDelayMs = getSyncContinueDelayMsForPlatform(platform);
+          db.queueSyncRun({
+            platform,
+            accountKey,
+            runType: "sync_resume",
+            trigger: "ingest_continue",
+            delayMs: continuationDelayMs,
+            details: {
+              source: platform,
+              accountKey,
+              trigger: "ingest_continue",
+              ...(bundleContinuation ? { continuation: bundleContinuation } : {}),
+            },
+          });
+          schedulers.wakeIngest(continuationDelayMs);
+        }
+        return { timings };
       });
       if (platform === "signal") {
         requestSignalRealtimeReconcile();
-      }
-      if (bundleHasMore && !db.hasQueuedOrRunningRun(currentRun.platform, accountKey)) {
-        const continuationDelayMs = getSyncContinueDelayMsForPlatform(currentRun.platform);
-        db.queueSyncRun({
-          platform: currentRun.platform,
-          accountKey,
-          runType: "sync_resume",
-          trigger: "ingest_continue",
-          delayMs: continuationDelayMs,
-          details: {
-            source: currentRun.platform,
-            accountKey,
-            trigger: "ingest_continue",
-            ...(bundleContinuation ? { continuation: bundleContinuation } : {}),
-          },
-        });
-        schedulers.wakeIngest(continuationDelayMs);
       }
       if (!bundleHasMore) {
         requestMenuBarStatusWrite("ingest_completed");
@@ -4141,6 +4182,31 @@ export async function runDaemon(): Promise<void> {
       });
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
+      const failureRunDetails = safeParseJsonRecord(
+        currentRun.details_json ?? null,
+        "sync_runs.details_json",
+      );
+      if (
+        isSqliteBusyError(error) &&
+        getSqliteBusyRunRetryAttempt(failureRunDetails) < SQLITE_BUSY_RUN_RETRY_MAX_ATTEMPTS
+      ) {
+        const retry = buildSqliteBusyRunRetry({
+          details: failureRunDetails,
+          errorMessage,
+          nowMs: now(),
+        });
+        db.rescheduleRun(currentRun.id, retry.scheduledAt, retry.details);
+        schedulers.wakeIngest(retry.delayMs);
+        daemonLogger.warn("ingest run deferred because SQLite is busy", {
+          runId: currentRun.id,
+          platform: currentRun.platform,
+          accountKey: currentRun.account_key,
+          retryAttempt: retry.attempt,
+          delayMs: retry.delayMs,
+          error: errorMessage,
+        });
+        return;
+      }
       daemonLogger.error("ingest run failed", {
         runId: currentRun.id,
         platform: currentRun.platform,

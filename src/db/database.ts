@@ -85,7 +85,7 @@ const APP_SETTING_KEYS = {
   updatePendingRollback: "update_pending_rollback_json",
   updateReleaseState: "update_release_state_json",
 } as const;
-const DEFAULT_SQLITE_BUSY_TIMEOUT_MS = 5_000;
+const DEFAULT_SQLITE_BUSY_TIMEOUT_MS = 30_000;
 
 export interface DaemonStatusRow {
   singleton_key: "daemon";
@@ -4451,14 +4451,30 @@ export class CuedDatabase {
       .run();
   }
 
-  rescheduleRun(runId: string, scheduledAt: number): void {
-    this.db
-      .update(syncRuns)
-      .set({
-        scheduledAt: Math.max(0, Math.trunc(scheduledAt)),
-      })
-      .where(eq(syncRuns.id, runId))
-      .run();
+  rescheduleRun(runId: string, scheduledAt: number, details?: unknown): void {
+    const values: {
+      status: SyncRunStatus;
+      scheduledAt: number;
+      startedAt: null;
+      finishedAt: null;
+      detailsJson?: string | null;
+    } =
+      details === undefined
+        ? {
+            status: "queued",
+            scheduledAt: Math.max(0, Math.trunc(scheduledAt)),
+            startedAt: null,
+            finishedAt: null,
+          }
+        : {
+            status: "queued",
+            scheduledAt: Math.max(0, Math.trunc(scheduledAt)),
+            startedAt: null,
+            finishedAt: null,
+            detailsJson: safeStringifyJson(details),
+          };
+
+    this.db.update(syncRuns).set(values).where(eq(syncRuns.id, runId)).run();
   }
 
   listProjectedContactSourceMap(): Array<{
