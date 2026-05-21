@@ -116,6 +116,8 @@ import {
 } from "../../platforms/whatsapp/sync/proof.js";
 import type {
   WhatsAppHelperEventEnvelope,
+  WhatsAppHistoryBackfillAnchor,
+  WhatsAppHistoryBackfillResult,
   WhatsAppReceiptSnapshot,
   WhatsAppSnapshot,
 } from "../../platforms/whatsapp/types.js";
@@ -465,6 +467,48 @@ export function buildSyncResumeTargets(
       )
       .map((target) => ({ platform: target.platform, accountKey: target.account_key })),
   ];
+}
+
+export async function requestWhatsAppHistoryBackfillOnce(input: {
+  anchors: WhatsAppHistoryBackfillAnchor[];
+  request: (input: {
+    anchors: WhatsAppHistoryBackfillAnchor[];
+    limit: number;
+    waitMs: number;
+  }) => Promise<WhatsAppHistoryBackfillResult>;
+  nowMs?: () => number;
+}): Promise<{
+  historyBackfillRequestedAt: number | null;
+  diagnostics: Record<string, unknown>;
+}> {
+  const requestedAt = input.nowMs?.() ?? now();
+  try {
+    const backfill = await input.request({
+      anchors: input.anchors,
+      limit: 50,
+      waitMs: 10_000,
+    });
+    return {
+      historyBackfillRequestedAt: requestedAt,
+      diagnostics: {
+        requested: backfill.requested,
+        failed: backfill.failed,
+        queuedHistorySyncCount: backfill.queuedHistorySyncCount,
+        lastHistorySyncAt: backfill.lastHistorySyncAt ?? null,
+        lastHistoryNotificationAt: backfill.lastHistoryNotificationAt ?? null,
+        errors: backfill.errors?.slice(0, 5) ?? [],
+      },
+    };
+  } catch (error) {
+    return {
+      historyBackfillRequestedAt: null,
+      diagnostics: {
+        requested: 0,
+        failed: input.anchors.length,
+        error: error instanceof Error ? error.message : String(error),
+      },
+    };
+  }
 }
 
 function getAutoSyncIntervalMs(platform?: AdapterPlatform): number {
@@ -3846,6 +3890,30 @@ export async function runDaemon(): Promise<void> {
           oldestMessageAt: null,
           newestMessageAt: null,
         };
+        let historyBackfillRequestedAt = whatsappCursor.historyBackfillRequestedAt;
+        if (!cursor && historyBackfillRequestedAt == null) {
+          const anchors = db.listWhatsAppHistoryBackfillAnchors(accountKey, 25);
+          if (anchors.length > 0) {
+            const backfill = await requestWhatsAppHistoryBackfillOnce({
+              anchors,
+              request: (request) => session.requestHistoryBackfill(request),
+            });
+            historyBackfillRequestedAt = backfill.historyBackfillRequestedAt ?? undefined;
+            runDiagnostics = {
+              ...(runDiagnostics ?? {}),
+              historyBackfill: backfill.diagnostics,
+            };
+            if (backfill.historyBackfillRequestedAt == null) {
+              whatsAppLogger.warn("history backfill request failed", {
+                accountKey,
+                error:
+                  typeof backfill.diagnostics.error === "string"
+                    ? backfill.diagnostics.error
+                    : "unknown",
+              });
+            }
+          }
+        }
         let hasMore = false;
         let lastCompletedAt = now();
         do {
@@ -3917,6 +3985,7 @@ export async function runDaemon(): Promise<void> {
           : null;
         bundleSourceCursor = {
           ...(whatsappCursor.desktopDb ? { desktopDb: whatsappCursor.desktopDb } : {}),
+          ...(historyBackfillRequestedAt != null ? { historyBackfillRequestedAt } : {}),
           lastSyncAt: hasMore
             ? (whatsappCursor.lastSyncAt ?? checkpoint?.last_success_at)
             : lastCompletedAt,

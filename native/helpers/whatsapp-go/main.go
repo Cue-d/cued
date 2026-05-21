@@ -38,7 +38,7 @@ const pairConnectGracePeriod = 20 * time.Second
 const defaultResyncLimit = 1000
 const fullHistorySyncDaysLimit = 3650
 const fullHistorySyncSizeMBLimit = 102400
-const pairHistorySyncCaptureGracePeriod = 5 * time.Second
+const pairHistorySyncCaptureGracePeriod = 10 * time.Minute
 const historySyncRetryDelay = 1 * time.Second
 
 type helperMetadata struct {
@@ -130,16 +130,35 @@ type eventEnvelope struct {
 }
 
 type commandEnvelope struct {
-	ID              int    `json:"id"`
-	Command         string `json:"command"`
-	Target          string `json:"target,omitempty"`
-	Text            string `json:"text,omitempty"`
-	Cursor          string `json:"cursor,omitempty"`
-	SinceMS         *int64 `json:"sinceMs,omitempty"`
-	Limit           int    `json:"limit,omitempty"`
-	ChatJID         string `json:"chatJID,omitempty"`
-	MessageID       string `json:"messageID,omitempty"`
-	AttachmentIndex int    `json:"attachmentIndex,omitempty"`
+	ID              int                     `json:"id"`
+	Command         string                  `json:"command"`
+	Target          string                  `json:"target,omitempty"`
+	Text            string                  `json:"text,omitempty"`
+	Cursor          string                  `json:"cursor,omitempty"`
+	SinceMS         *int64                  `json:"sinceMs,omitempty"`
+	Limit           int                     `json:"limit,omitempty"`
+	ChatJID         string                  `json:"chatJID,omitempty"`
+	MessageID       string                  `json:"messageID,omitempty"`
+	AttachmentIndex int                     `json:"attachmentIndex,omitempty"`
+	Anchors         []historyBackfillAnchor `json:"anchors,omitempty"`
+	WaitMS          int                     `json:"waitMs,omitempty"`
+}
+
+type historyBackfillAnchor struct {
+	ChatJID   string `json:"chatJID"`
+	MessageID string `json:"messageID"`
+	Timestamp int64  `json:"timestamp"`
+	FromMe    bool   `json:"fromMe"`
+	Count     int    `json:"count,omitempty"`
+}
+
+type historyBackfillResult struct {
+	Requested                 int      `json:"requested"`
+	Failed                    int      `json:"failed"`
+	Errors                    []string `json:"errors,omitempty"`
+	LastHistorySyncAt         *int64   `json:"lastHistorySyncAt,omitempty"`
+	LastHistoryNotificationAt *int64   `json:"lastHistoryNotificationAt,omitempty"`
+	QueuedHistorySyncCount    int      `json:"queuedHistorySyncCount"`
 }
 
 type helperState struct {
@@ -962,6 +981,15 @@ func (r *helperRuntime) enqueueHistorySyncNotification(notification *waProto.His
 	r.state.updateMetadata(func(metadata *helperMetadata) {
 		metadata.LastHistoryNotificationAt = nowMillis()
 	})
+	r.emitEvent("history_sync_notification", map[string]interface{}{
+		"syncType":              notification.GetSyncType().String(),
+		"chunkOrder":            notification.GetChunkOrder(),
+		"progress":              notification.GetProgress(),
+		"hasInlinePayload":      len(notification.GetInitialHistBootstrapInlinePayload()) > 0,
+		"hasDirectPath":         strings.TrimSpace(notification.GetDirectPath()) != "",
+		"originalMessageID":     emptyToNil(notification.GetOriginalMessageID()),
+		"peerDataRequestSessID": emptyToNil(notification.GetPeerDataRequestSessionID()),
+	})
 	select {
 	case r.historySyncWake <- struct{}{}:
 	default:
@@ -1084,33 +1112,14 @@ func main() {
 }
 
 func configureClientPayload() {
-	store.SetOSInfo("macOS", [3]uint32{14, 4, 0})
-	store.BaseClientPayload.UserAgent.Platform = waWa6.ClientPayload_UserAgent_MACOS.Enum()
-	store.BaseClientPayload.UserAgent.Manufacturer = proto.String("Apple")
-	store.BaseClientPayload.UserAgent.Device = proto.String("Desktop")
-	store.BaseClientPayload.WebInfo.WebSubPlatform = waWa6.ClientPayload_WebInfo_DARWIN.Enum()
-	store.DeviceProps.Os = proto.String("macOS")
+	store.SetOSInfo("Cued", [3]uint32{0, 1, 0})
+	store.BaseClientPayload.UserAgent.Platform = waWa6.ClientPayload_UserAgent_WEB.Enum()
+	store.BaseClientPayload.UserAgent.Manufacturer = proto.String("Cued")
+	store.BaseClientPayload.UserAgent.Device = proto.String("Cued")
+	store.BaseClientPayload.WebInfo.WebSubPlatform = waWa6.ClientPayload_WebInfo_WEB_BROWSER.Enum()
+	store.DeviceProps.Os = proto.String("Cued")
 	store.DeviceProps.PlatformType = waCompanionReg.DeviceProps_DESKTOP.Enum()
-	store.DeviceProps.RequireFullSync = proto.Bool(true)
-	store.DeviceProps.HistorySyncConfig = &waCompanionReg.DeviceProps_HistorySyncConfig{
-		FullSyncDaysLimit:                        proto.Uint32(fullHistorySyncDaysLimit),
-		FullSyncSizeMbLimit:                      proto.Uint32(fullHistorySyncSizeMBLimit),
-		StorageQuotaMb:                           proto.Uint32(10240),
-		InlineInitialPayloadInE2EeMsg:            proto.Bool(true),
-		RecentSyncDaysLimit:                      proto.Uint32(fullHistorySyncDaysLimit),
-		SupportCallLogHistory:                    proto.Bool(false),
-		SupportBotUserAgentChatHistory:           proto.Bool(true),
-		SupportCagReactionsAndPolls:              proto.Bool(true),
-		SupportBizHostedMsg:                      proto.Bool(true),
-		SupportRecentSyncChunkMessageCountTuning: proto.Bool(true),
-		SupportHostedGroupMsg:                    proto.Bool(true),
-		SupportFbidBotChatHistory:                proto.Bool(true),
-		SupportMessageAssociation:                proto.Bool(true),
-		SupportGroupHistory:                      proto.Bool(true),
-		OnDemandReady:                            proto.Bool(true),
-		CompleteOnDemandReady:                    proto.Bool(true),
-		ThumbnailSyncDaysLimit:                   proto.Uint32(fullHistorySyncDaysLimit),
-	}
+	store.DeviceProps.RequireFullSync = proto.Bool(false)
 }
 
 func runStatus(args []string) error {
@@ -1390,6 +1399,9 @@ func (r *helperRuntime) readCommands(ctx context.Context, errs chan<- error) {
 		case "resync":
 			page, err := r.state.getResyncPage(command.SinceMS, command.Cursor, command.Limit)
 			r.writeResponse(command.ID, err == nil, page, err)
+		case "requestHistoryBackfill":
+			result, err := r.requestHistoryBackfill(ctx, command.Anchors, command.Limit, command.WaitMS)
+			r.writeResponse(command.ID, err == nil, result, err)
 		case "downloadMedia":
 			result, err := r.downloadMedia(ctx, command.ChatJID, command.MessageID, command.AttachmentIndex)
 			r.writeResponse(command.ID, err == nil, result, err)
@@ -1402,6 +1414,98 @@ func (r *helperRuntime) readCommands(ctx context.Context, errs chan<- error) {
 	}
 
 	errs <- scanner.Err()
+}
+
+func (r *helperRuntime) requestHistoryBackfill(
+	ctx context.Context,
+	anchors []historyBackfillAnchor,
+	defaultCount int,
+	waitMS int,
+) (historyBackfillResult, error) {
+	if len(anchors) == 0 {
+		return historyBackfillResult{}, errors.New("at least one history backfill anchor is required")
+	}
+	if defaultCount <= 0 {
+		defaultCount = 50
+	}
+	if defaultCount > 500 {
+		defaultCount = 500
+	}
+
+	startMetadata := r.state.getMetadata()
+	result := historyBackfillResult{}
+	for _, anchor := range anchors {
+		chatJID, err := types.ParseJID(anchor.ChatJID)
+		if err != nil {
+			result.Failed++
+			result.Errors = append(result.Errors, fmt.Sprintf("%s: invalid chat JID: %v", anchor.ChatJID, err))
+			continue
+		}
+		messageID := strings.TrimSpace(anchor.MessageID)
+		if messageID == "" {
+			result.Failed++
+			result.Errors = append(result.Errors, fmt.Sprintf("%s: missing message ID", anchor.ChatJID))
+			continue
+		}
+		if anchor.Timestamp <= 0 {
+			result.Failed++
+			result.Errors = append(result.Errors, fmt.Sprintf("%s:%s: missing timestamp", anchor.ChatJID, messageID))
+			continue
+		}
+		count := anchor.Count
+		if count <= 0 {
+			count = defaultCount
+		}
+		if count > 500 {
+			count = 500
+		}
+		info := &types.MessageInfo{
+			MessageSource: types.MessageSource{
+				Chat:     chatJID,
+				IsFromMe: anchor.FromMe,
+				IsGroup:  chatJID.Server == types.GroupServer,
+			},
+			ID:        types.MessageID(messageID),
+			Timestamp: time.UnixMilli(anchor.Timestamp),
+		}
+		if _, err := r.client.SendPeerMessage(ctx, r.client.BuildHistorySyncRequest(info, count)); err != nil {
+			result.Failed++
+			result.Errors = append(result.Errors, fmt.Sprintf("%s:%s: %v", anchor.ChatJID, messageID, err))
+			continue
+		}
+		result.Requested++
+	}
+
+	if waitMS > 0 && result.Requested > 0 {
+		waitDeadline := time.NewTimer(time.Duration(waitMS) * time.Millisecond)
+		defer waitDeadline.Stop()
+		ticker := time.NewTicker(250 * time.Millisecond)
+		defer ticker.Stop()
+		for {
+			metadata := r.state.getMetadata()
+			if metadata.LastHistorySyncAt > startMetadata.LastHistorySyncAt ||
+				metadata.LastHistoryNotificationAt > startMetadata.LastHistoryNotificationAt {
+				break
+			}
+			select {
+			case <-ctx.Done():
+				return result, ctx.Err()
+			case <-waitDeadline.C:
+				goto doneWaiting
+			case <-ticker.C:
+			}
+		}
+	}
+
+doneWaiting:
+	metadata := r.state.getMetadata()
+	result.LastHistorySyncAt = int64PtrOrNil(metadata.LastHistorySyncAt)
+	result.LastHistoryNotificationAt = int64PtrOrNil(metadata.LastHistoryNotificationAt)
+	result.QueuedHistorySyncCount = r.historySyncQueueCount()
+	if result.Requested == 0 && result.Failed > 0 {
+		return result, errors.New("all history backfill requests failed")
+	}
+	return result, nil
 }
 
 func (r *helperRuntime) sendText(ctx context.Context, target string, text string) (map[string]interface{}, error) {
@@ -1486,7 +1590,16 @@ func (r *helperRuntime) handleEvent(evt interface{}) {
 	case *events.Connected:
 		r.setConnected(true)
 		metadata := r.state.updateMetadata(func(metadata *helperMetadata) {
-			metadata.AccountJID = jidString(r.client.Store.ID)
+			accountJID := jidString(r.client.Store.ID)
+			if metadata.AccountJID != "" && metadata.AccountJID != accountJID {
+				metadata.LastHistorySyncAt = 0
+				metadata.LastHistorySyncType = ""
+				metadata.LastHistoryChunkOrder = 0
+				metadata.LastHistoryProgress = 0
+				metadata.LastHistorySyncError = ""
+				metadata.LastHistoryNotificationAt = 0
+			}
+			metadata.AccountJID = accountJID
 			metadata.PushName = emptyString(r.client.Store.PushName)
 		})
 		r.emitEvent("connected", map[string]interface{}{

@@ -11,6 +11,7 @@ import {
 } from "../../discord/sync/events.js";
 import { importLinkedInStoredAuth } from "../../linkedin/auth/keychain-import.js";
 import { storeSlackSession } from "../../slack/auth/session-store.js";
+import { startQrNativeAuthSession } from "../auth/qr-native.js";
 import { refreshLocalIntegrationStates } from "./local-refresh.js";
 import {
   completeAuthSession,
@@ -1688,6 +1689,53 @@ process.exit(44);
       ]),
     );
 
+    db.close();
+  });
+
+  it("keeps QR native auth sessions active while their runtime sentinel is alive", async () => {
+    const helperPath = join(createTempDir("cued-whatsapp-helper-bin-"), "cued-whatsapp-helper");
+    writeFileSync(
+      helperPath,
+      `#!/bin/sh
+if [ "$1" = "version" ]; then
+  echo '{"version":"0.1.0"}'
+  exit 0
+fi
+if [ "$1" = "status" ]; then
+  echo '{"authenticated":false,"accountJid":null,"pushName":null,"helperVersion":"0.1.0"}'
+  exit 0
+fi
+if [ "$1" = "pair" ]; then
+  echo '{"event":"qr","data":{"code":"whatsapp-test-qr"}}'
+  sleep 1
+  exit 1
+fi
+exit 1
+`,
+    );
+    chmodSync(helperPath, 0o755);
+    process.env.CUED_WHATSAPP_HELPER_BINARY = helperPath;
+
+    const nativePath = join(createTempDir("cued-native-qr-bin-"), "CuedNative");
+    writeFileSync(nativePath, "#!/bin/sh\nsleep 30\n");
+    chmodSync(nativePath, 0o755);
+    process.env.CUED_AUTH_NATIVE_BINARY = nativePath;
+
+    const db = createDb();
+    const requested = requestIntegrationAccess(db, "whatsapp");
+    const handle = startQrNativeAuthSession(db, requested.authSession, requested.integration);
+    const running = markAuthSessionInProgress(
+      db,
+      requested.authSession.id,
+      handle.child.pid ?? process.pid,
+    );
+
+    expect(running.nativePid).toBe(handle.child.pid);
+    expect(reconcileAbandonedAuthSessions(db)).toBe(0);
+    expect(db.getAuthSession(requested.authSession.id)?.state).toBe("in_progress");
+
+    handle.child.kill("SIGTERM");
+    await handle.completion.catch(() => {});
     db.close();
   });
 

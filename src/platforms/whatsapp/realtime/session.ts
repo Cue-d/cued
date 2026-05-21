@@ -7,6 +7,8 @@ import type {
   WhatsAppHelperEventEnvelope,
   WhatsAppHelperResponseEnvelope,
   WhatsAppHelperSendResult,
+  WhatsAppHistoryBackfillAnchor,
+  WhatsAppHistoryBackfillResult,
   WhatsAppResyncPage,
 } from "../types.js";
 
@@ -76,6 +78,11 @@ export interface WhatsAppRealtimeSessionLike {
     sinceMs?: number | null;
     limit?: number;
   }): Promise<WhatsAppResyncPage>;
+  requestHistoryBackfill(input: {
+    anchors: WhatsAppHistoryBackfillAnchor[];
+    limit?: number;
+    waitMs?: number;
+  }): Promise<WhatsAppHistoryBackfillResult>;
 }
 
 export interface WhatsAppRealtimeSupervisorSessionInput {
@@ -263,6 +270,20 @@ export class WhatsAppRealtimeSession implements WhatsAppRealtimeSessionLike {
       cursor: input.cursor ?? undefined,
       sinceMs: input.sinceMs ?? undefined,
       limit: input.limit,
+    });
+  }
+
+  async requestHistoryBackfill(input: {
+    anchors: WhatsAppHistoryBackfillAnchor[];
+    limit?: number;
+    waitMs?: number;
+  }): Promise<WhatsAppHistoryBackfillResult> {
+    return await this.request<WhatsAppHistoryBackfillResult>({
+      id: this.nextRequestId++,
+      command: "requestHistoryBackfill",
+      anchors: input.anchors,
+      limit: input.limit,
+      waitMs: input.waitMs,
     });
   }
 

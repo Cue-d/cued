@@ -16,6 +16,7 @@ import (
 	"go.mau.fi/whatsmeow/proto/waCompanionReg"
 	"go.mau.fi/whatsmeow/proto/waE2E"
 	"go.mau.fi/whatsmeow/proto/waHistorySync"
+	"go.mau.fi/whatsmeow/proto/waWa6"
 	waWeb "go.mau.fi/whatsmeow/proto/waWeb"
 	"go.mau.fi/whatsmeow/store"
 	"go.mau.fi/whatsmeow/types"
@@ -435,34 +436,28 @@ func TestHandleHistorySyncEventPersistsMetadata(t *testing.T) {
 	}
 }
 
-func TestConfigureClientPayloadRequestsFullHistory(t *testing.T) {
+func TestConfigureClientPayloadMatchesWebDesktopCompanion(t *testing.T) {
 	configureClientPayload()
 
-	if store.DeviceProps.GetRequireFullSync() != true {
-		t.Fatalf("expected helper to require full history sync")
+	if store.DeviceProps.GetRequireFullSync() != false {
+		t.Fatalf("expected helper to use the default bootstrap history request")
 	}
 
 	config := store.DeviceProps.GetHistorySyncConfig()
 	if config == nil {
 		t.Fatalf("expected history sync config to be configured")
 	}
-	if got := config.GetFullSyncDaysLimit(); got != fullHistorySyncDaysLimit {
-		t.Fatalf("unexpected full sync days limit: %d", got)
-	}
-	if got := config.GetRecentSyncDaysLimit(); got != fullHistorySyncDaysLimit {
-		t.Fatalf("unexpected recent sync days limit: %d", got)
-	}
 	if got := config.GetSupportGroupHistory(); got != true {
 		t.Fatalf("expected group history support to be enabled")
 	}
-	if got := config.GetOnDemandReady(); got != true {
-		t.Fatalf("expected on-demand history sync to be enabled")
-	}
-	if got := config.GetCompleteOnDemandReady(); got != true {
-		t.Fatalf("expected complete on-demand history sync to be enabled")
-	}
 	if got := store.DeviceProps.GetPlatformType(); got != waCompanionReg.DeviceProps_DESKTOP {
 		t.Fatalf("unexpected platform type: %v", got)
+	}
+	if got := store.BaseClientPayload.GetUserAgent().GetPlatform(); got != waWa6.ClientPayload_UserAgent_WEB {
+		t.Fatalf("unexpected user agent platform: %v", got)
+	}
+	if got := store.BaseClientPayload.GetWebInfo().GetWebSubPlatform(); got != waWa6.ClientPayload_WebInfo_WEB_BROWSER {
+		t.Fatalf("unexpected web sub-platform: %v", got)
 	}
 }
 
@@ -635,6 +630,49 @@ func TestConnectedEventPreservesHistorySyncMetadata(t *testing.T) {
 	}
 	if metadata.LastHistoryChunkOrder != 2 || metadata.LastHistoryProgress != 100 {
 		t.Fatalf("expected history sync chunk/progress to survive connect, got %+v", metadata)
+	}
+}
+
+func TestConnectedEventClearsHistorySyncMetadataForChangedDevice(t *testing.T) {
+	storeDir := t.TempDir()
+	state, err := newHelperState(storeDir)
+	if err != nil {
+		t.Fatalf("newHelperState failed: %v", err)
+	}
+	defer state.close()
+
+	state.setMetadata(helperMetadata{
+		AccountJID:                "15550101000@s.whatsapp.net",
+		LastHistorySyncAt:         123,
+		LastHistorySyncType:       "FULL",
+		LastHistoryChunkOrder:     2,
+		LastHistoryProgress:       100,
+		LastHistorySyncError:      "old error",
+		LastHistoryNotificationAt: 122,
+	})
+
+	client := whatsmeow.NewClient(&store.Device{
+		PushName: "Avery Example",
+		ID: &types.JID{
+			User:   "15550101000:2",
+			Server: types.DefaultUserServer,
+		},
+	}, nil)
+	runtime := newHelperRuntime(client, state, json.NewEncoder(io.Discard))
+	runtime.handleEvent(&events.Connected{})
+
+	metadata := state.getMetadata()
+	if metadata.AccountJID != "15550101000:2@s.whatsapp.net" {
+		t.Fatalf("unexpected account jid: %q", metadata.AccountJID)
+	}
+	if metadata.LastHistorySyncAt != 0 || metadata.LastHistorySyncType != "" {
+		t.Fatalf("expected changed device to clear stale history metadata, got %+v", metadata)
+	}
+	if metadata.LastHistoryChunkOrder != 0 || metadata.LastHistoryProgress != 0 {
+		t.Fatalf("expected changed device to clear chunk/progress, got %+v", metadata)
+	}
+	if metadata.LastHistorySyncError != "" || metadata.LastHistoryNotificationAt != 0 {
+		t.Fatalf("expected changed device to clear history error/notification, got %+v", metadata)
 	}
 }
 

@@ -5,6 +5,7 @@ import {
   getAdaptiveProjectionContinueDelayMs,
   getAutoSyncTargets,
   isDisconnectedSocketError,
+  requestWhatsAppHistoryBackfillOnce,
   shouldDeferContinuationProjection,
   shouldDrainOutboundQueue,
   shouldProjectIngestRunInline,
@@ -293,5 +294,61 @@ describe("sync resume targets", () => {
         listCheckpointTargets: () => [],
       }),
     ).toEqual([]);
+  });
+});
+
+describe("WhatsApp history backfill", () => {
+  const anchors = [
+    {
+      chatJID: "15550100001@s.whatsapp.net",
+      messageID: "wamid-1",
+      timestamp: 1_700_000_000_000,
+      fromMe: false,
+    },
+  ];
+
+  it("records the backfill marker only after a helper request succeeds", async () => {
+    await expect(
+      requestWhatsAppHistoryBackfillOnce({
+        anchors,
+        nowMs: () => 123,
+        request: async () => ({
+          requested: 1,
+          failed: 0,
+          queuedHistorySyncCount: 1,
+          lastHistorySyncAt: null,
+          lastHistoryNotificationAt: 122,
+        }),
+      }),
+    ).resolves.toEqual({
+      historyBackfillRequestedAt: 123,
+      diagnostics: {
+        requested: 1,
+        failed: 0,
+        queuedHistorySyncCount: 1,
+        lastHistorySyncAt: null,
+        lastHistoryNotificationAt: 122,
+        errors: [],
+      },
+    });
+  });
+
+  it("leaves the backfill marker unset when the helper request fails", async () => {
+    await expect(
+      requestWhatsAppHistoryBackfillOnce({
+        anchors,
+        nowMs: () => 123,
+        request: async () => {
+          throw new Error("helper timed out");
+        },
+      }),
+    ).resolves.toEqual({
+      historyBackfillRequestedAt: null,
+      diagnostics: {
+        requested: 0,
+        failed: 1,
+        error: "helper timed out",
+      },
+    });
   });
 });

@@ -317,6 +317,9 @@ describe("whatsapp realtime", () => {
         async resync() {
           return { contacts: [], chats: [], messages: [], hasMore: false, completedAt: 1 };
         },
+        async requestHistoryBackfill() {
+          return { requested: 0, failed: 0, queuedHistorySyncCount: 0 };
+        },
       }),
     });
 

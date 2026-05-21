@@ -35,6 +35,23 @@ export interface QrNativeAuthHandle {
   completion: Promise<QrNativeAuthResult>;
 }
 
+function startAuthSentinelProcess(): ChildProcess {
+  return spawn(process.execPath, ["-e", "setInterval(() => {}, 2147483647)"], {
+    stdio: "ignore",
+  });
+}
+
+function keepSentinelUntilComplete(
+  child: ChildProcess,
+  completion: Promise<QrNativeAuthResult>,
+): Promise<QrNativeAuthResult> {
+  return completion.finally(() => {
+    if (!child.killed) {
+      child.kill("SIGTERM");
+    }
+  });
+}
+
 function resolveNativeQrBinary(): string {
   const binary = resolveMacOSNativeBinary(
     process.env.CUED_AUTH_NATIVE_BINARY ?? process.env.CUED_CONTACTS_NATIVE_BINARY,
@@ -53,7 +70,7 @@ function isDurableWhatsAppAuthStatus(
 
 async function waitForDurableWhatsAppAuthStatus(
   storeDir: string,
-  timeoutMs = 15_000,
+  timeoutMs = 30_000,
 ): Promise<WhatsAppHelperStatus & { accountJid: string }> {
   const startedAt = Date.now();
   let lastStatus: WhatsAppHelperStatus | null = null;
@@ -69,7 +86,7 @@ async function waitForDurableWhatsAppAuthStatus(
       lastError = error;
     }
 
-    await new Promise((resolve) => setTimeout(resolve, 500));
+    await new Promise((resolve) => setTimeout(resolve, 1_000));
   }
 
   const statusDetail = lastStatus
@@ -77,7 +94,7 @@ async function waitForDurableWhatsAppAuthStatus(
     : lastError instanceof Error
       ? lastError.message
       : String(lastError ?? "no helper status");
-  throw new Error(`WhatsApp linking did not produce durable helper status (${statusDetail})`);
+  throw new Error(`WhatsApp linking did not produce a durable linked account (${statusDetail})`);
 }
 
 function buildWhatsAppAuthenticatedResult(input: {
@@ -102,6 +119,9 @@ function buildWhatsAppAuthenticatedResult(input: {
       accountJid: input.status.accountJid,
       pushName: input.status.pushName ?? null,
       durableStatusVerified: true,
+      historySyncPending: typeof input.status.lastHistorySyncAt !== "number",
+      lastHistorySyncAt: input.status.lastHistorySyncAt ?? null,
+      lastHistoryNotificationAt: input.status.lastHistoryNotificationAt ?? null,
     },
     errorSummary: null,
   };
@@ -160,7 +180,7 @@ export function startQrNativeAuthSession(
       typeof integration.metadata?.configDir === "string"
         ? integration.metadata.configDir
         : getSignalConfigDir(session.accountKey);
-    const child = spawn("sh", ["-lc", "exit 0"], { stdio: "ignore" });
+    const child = startAuthSentinelProcess();
     const completion = (async (): Promise<QrNativeAuthResult> => {
       const inspected = await inspectSignalCli();
       if (!inspected.cliPath) {
@@ -285,7 +305,7 @@ export function startQrNativeAuthSession(
 
     return {
       child,
-      completion,
+      completion: keepSentinelUntilComplete(child, completion),
     };
   }
 
@@ -294,7 +314,7 @@ export function startQrNativeAuthSession(
       typeof integration.metadata?.storeDir === "string"
         ? integration.metadata.storeDir
         : getWhatsAppStoreDir(session.accountKey);
-    const child = spawn("sh", ["-lc", "exit 0"], { stdio: "ignore" });
+    const child = startAuthSentinelProcess();
     const completion = (async (): Promise<QrNativeAuthResult> => {
       const inspected = inspectWhatsAppHelper();
       if (!inspected.helperPath) {
@@ -403,7 +423,7 @@ export function startQrNativeAuthSession(
 
     return {
       child,
-      completion,
+      completion: keepSentinelUntilComplete(child, completion),
     };
   }
 

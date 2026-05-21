@@ -32,6 +32,7 @@ export type WhatsAppSourceCursor = {
   resyncSyncMode?: SyncMode;
   resyncStats?: WhatsAppResyncStats;
   resyncCoverage?: WhatsAppResyncCoverage;
+  historyBackfillRequestedAt?: number;
   desktopDb?: WhatsAppDesktopCursor;
 };
 
@@ -108,6 +109,7 @@ export function parseWhatsAppSourceCursor(
         : undefined,
     resyncStats: parseStats(raw?.resyncStats),
     resyncCoverage: parseCoverage(raw?.resyncCoverage),
+    historyBackfillRequestedAt: optionalPositiveNumber(raw?.historyBackfillRequestedAt),
     desktopDb: parseDesktopCursor(raw?.desktopDb),
   };
 }
