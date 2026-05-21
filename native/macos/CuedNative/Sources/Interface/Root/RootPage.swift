@@ -1,6 +1,6 @@
 import Foundation
 
-enum RootPage: Int, CaseIterable {
+public enum RootPage: Int, CaseIterable {
   case welcome
   case permissions
   case platforms

@@ -2,6 +2,17 @@ import AppKit
 import Combine
 import SwiftUI
 
+private let onboardingLastPageUserDefaultsKey = "so.cued.onboarding.lastPage"
+
+public func savedOnboardingPage(maxPage: Int) -> Int {
+  let saved = UserDefaults.standard.integer(forKey: onboardingLastPageUserDefaultsKey)
+  return min(max(saved, 0), max(0, maxPage))
+}
+
+public func saveOnboardingPage(_ page: Int) {
+  UserDefaults.standard.set(max(0, page), forKey: onboardingLastPageUserDefaultsKey)
+}
+
 public struct RootView: View {
   @ObservedObject var viewModel: RootViewModel
 
@@ -94,6 +105,7 @@ public struct RootView: View {
       }
     }
     .onChange(of: viewModel.currentPage) { page in
+      saveOnboardingPage(page)
       guard rootPage(for: page) != .permissions else {
         return
       }

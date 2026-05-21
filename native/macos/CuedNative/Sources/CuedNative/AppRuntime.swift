@@ -2,6 +2,7 @@ import AppKit
 import Contacts
 import Darwin
 import Foundation
+import Interface
 import SQLite3
 
 private let appDaemonHeartbeatGraceMs = 120_000
@@ -464,20 +465,22 @@ struct AppStatusSnapshot {
 
 enum LaunchPresentation: Equatable {
   case none
-  case onboarding(forceActivePermissionRefresh: Bool, resetToFirstPage: Bool)
+  case onboarding(forceActivePermissionRefresh: Bool, initialPage: Int)
 }
 
 func launchPresentationForCuedOpen(
   onboardingCompletedVersion: String?,
   currentVersion: String?,
-  hasPermissionRelaunchSetupIntent: Bool
+  hasPermissionRelaunchSetupIntent: Bool,
+  savedOnboardingPage: Int,
+  permissionsPage: Int
 ) -> LaunchPresentation {
   if hasPermissionRelaunchSetupIntent {
-    return .onboarding(forceActivePermissionRefresh: true, resetToFirstPage: true)
+    return .onboarding(forceActivePermissionRefresh: true, initialPage: permissionsPage)
   }
 
   guard onboardingCompletedVersion == currentVersion else {
-    return .onboarding(forceActivePermissionRefresh: false, resetToFirstPage: true)
+    return .onboarding(forceActivePermissionRefresh: false, initialPage: savedOnboardingPage)
   }
 
   return .none
@@ -1558,14 +1561,16 @@ final class MenuBarAppController: NSObject, NSApplicationDelegate {
     let presentation = launchPresentationForCuedOpen(
       onboardingCompletedVersion: snapshot.setupCompletedVersion,
       currentVersion: currentVersion,
-      hasPermissionRelaunchSetupIntent: consumePermissionRelaunchSetupIntent()
+      hasPermissionRelaunchSetupIntent: consumePermissionRelaunchSetupIntent(),
+      savedOnboardingPage: savedOnboardingPage(maxPage: RootPage.allCases.count - 1),
+      permissionsPage: RootPage.permissions.rawValue
     )
 
     switch presentation {
-    case let .onboarding(forceActivePermissionRefresh, resetToFirstPage):
+    case let .onboarding(forceActivePermissionRefresh, initialPage):
       rootWindowController.showAndRefresh(
         forceActivePermissionRefresh: forceActivePermissionRefresh,
-        resetToFirstPage: resetToFirstPage
+        initialPage: initialPage
       )
     case .none:
       guard showWhenComplete else {

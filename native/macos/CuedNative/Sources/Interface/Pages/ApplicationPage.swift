@@ -232,7 +232,7 @@ extension RootView {
   }
 
   func agentDebugButtonVariant(for target: AgentTarget, status: AgentTargetStatus) -> ActionButtonVariant {
-    target == .codexApp && status.readiness == .ready ? .prominent : .secondary
+    .secondary
   }
 
   func agentDebugButtonIcon(for target: AgentTarget, status: AgentTargetStatus) -> String {

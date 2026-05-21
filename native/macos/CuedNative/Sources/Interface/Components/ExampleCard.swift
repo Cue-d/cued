@@ -156,7 +156,7 @@ struct ExampleCard: View {
   }
 
   private func buttonVariant(for target: AgentTarget, status: AgentTargetStatus) -> ActionButtonVariant {
-    target == .codexApp && status.readiness == .ready ? .prominent : .secondary
+    .secondary
   }
 
   private func buttonIcon(for target: AgentTarget, status: AgentTargetStatus) -> String {

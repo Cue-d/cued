@@ -90,9 +90,12 @@ final class RootWindowController: NSWindowController {
   func showAndRefresh(
     forceActivePermissionRefresh: Bool = false,
     resetToFirstPage: Bool = false,
-    defaultToLastPage: Bool = false
+    defaultToLastPage: Bool = false,
+    initialPage: Int? = nil
   ) {
-    if resetToFirstPage {
+    if let initialPage {
+      viewModel.currentPage = min(max(initialPage, 0), max(0, viewModel.pageCount - 1))
+    } else if resetToFirstPage {
       viewModel.currentPage = 0
     } else if defaultToLastPage {
       viewModel.currentPage = max(0, viewModel.pageCount - 1)
