@@ -57,7 +57,7 @@ export interface AuthDiagnostic {
 }
 
 export type PermissionStatusKey = "contacts" | "full_disk_access" | "diagnostics";
-export type PermissionStatusState = "granted" | "needs_action" | "unknown";
+export type PermissionStatusState = "granted" | "needs_action" | "unknown" | "disabled";
 
 export interface PermissionStatusSummary {
   key: PermissionStatusKey;
