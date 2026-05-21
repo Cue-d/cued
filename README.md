@@ -6,7 +6,7 @@
 
 Local-only message and contact sync for agents.
 
-[Releases](https://github.com/Cue-d/cued/releases) · [Installing](docs/installing.md) · [Development](docs/development.md) · [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md) · [Privacy](PRIVACY.md)
+[Releases](https://github.com/Cue-d/cued/releases) · [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md) · [Privacy](PRIVACY.md)
 
 ## Project Status
 
@@ -82,7 +82,7 @@ Expected local state after a successful install:
 - `~/.cued/` exists for runtime state, logs, browser sessions, attachments, and hooks
 - `~/.cued/local.db` is the canonical local SQLite database
 
-More detail: [docs/installing.md](docs/installing.md)
+For source builds and contributor commands, see the development section below.
 
 ## Runtime
 
@@ -230,7 +230,7 @@ CUED_AUTOSYNC_INTERVAL_WHATSAPP_MS=300000
 6. Rebuild the packaged app with `pnpm build:app:macos` when changing packaging, permissions, or bundled runtime behavior.
 7. Run `pnpm test` for root runtime changes, and also run the Swift build check when native code changed.
 
-More detail: [docs/development.md](docs/development.md)
+For script-level packaging details, see [scripts/README.md](scripts/README.md).
 
 ## Project Structure
 
