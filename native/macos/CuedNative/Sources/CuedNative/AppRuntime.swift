@@ -434,6 +434,7 @@ struct AppIntegrationStatus {
   let displayName: String?
   let authState: String
   let enabled: Bool
+  let projectionStats: ProjectionStats?
 }
 
 struct AppPlatformMessageCount {
@@ -666,9 +667,32 @@ final class AppStatusStore: @unchecked Sendable {
         accountKey: accountKey,
         displayName: stringValue(row["displayName"]),
         authState: authState,
-        enabled: boolValue(row["enabled"]) ?? false
+        enabled: boolValue(row["enabled"]) ?? false,
+        projectionStats: parseProjectionStats(row["projectionStats"])
       )
     }
+  }
+
+  private func parseProjectionStats(_ value: Any?) -> ProjectionStats? {
+    guard let payload = value as? [String: Any] else {
+      return nil
+    }
+
+    let rawEventsBySchemaPayload = payload["rawEventsBySchema"] as? [String: Any] ?? [:]
+    let rawEventsBySchema = rawEventsBySchemaPayload.reduce(into: [String: Int]()) { result, entry in
+      guard let value = intValue(entry.value) else {
+        return
+      }
+      result[entry.key] = value
+    }
+
+    return ProjectionStats(
+      rawEvents: intValue(payload["rawEvents"]) ?? 0,
+      rawEventsBySchema: rawEventsBySchema,
+      projectedContacts: intValue(payload["projectedContacts"]) ?? 0,
+      projectedConversations: intValue(payload["projectedConversations"]) ?? 0,
+      projectedMessages: intValue(payload["projectedMessages"]) ?? 0
+    )
   }
 
   private func parseUpdateSummary(_ value: Any?) -> AppUpdateSummary? {
@@ -823,7 +847,8 @@ final class AppStatusStore: @unchecked Sendable {
           accountKey: String(cString: sqlite3_column_text(statement, 1)),
           displayName: sqlite3_column_type(statement, 4) == SQLITE_NULL ? nil : String(cString: sqlite3_column_text(statement, 4)),
           authState: String(cString: sqlite3_column_text(statement, 2)),
-          enabled: sqlite3_column_int(statement, 3) == 1
+          enabled: sqlite3_column_int(statement, 3) == 1,
+          projectionStats: nil
         )
       )
     }
@@ -893,7 +918,8 @@ final class AppStatusStore: @unchecked Sendable {
       accountKey: accountKey,
       displayName: existing?.displayName ?? displayName,
       authState: authState,
-      enabled: existing?.enabled ?? true
+      enabled: existing?.enabled ?? true,
+      projectionStats: existing?.projectionStats
     )
   }
 
@@ -1426,6 +1452,7 @@ final class MenuBarAppController: NSObject, NSApplicationDelegate {
   private let daemonSupervisor: DaemonSupervisor
   private lazy var rootWindowController = RootWindowController(
     daemonSupervisor: daemonSupervisor,
+    statusStore: statusStore,
     onRefresh: { [weak self] in
       self?.refreshStatus()
     }

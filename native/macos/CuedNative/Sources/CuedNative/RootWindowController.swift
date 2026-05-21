@@ -20,6 +20,7 @@ private let liveRefreshPermissionKeys: Set<String> = ["messages_automation", "fu
 @MainActor
 final class RootWindowController: NSWindowController {
   private let daemonSupervisor: DaemonSupervisor
+  private let statusStore: AppStatusStore
   private let onRefresh: () -> Void
   private let viewModel = RootViewModel()
   private var cachedAllIntegrations: [IntegrationStatus] = []
@@ -33,8 +34,13 @@ final class RootWindowController: NSWindowController {
   private var pendingRefreshAfterCurrent = false
   private var pendingForceActivePermissionRefreshAfterCurrent = false
 
-  init(daemonSupervisor: DaemonSupervisor, onRefresh: @escaping () -> Void) {
+  init(
+    daemonSupervisor: DaemonSupervisor,
+    statusStore: AppStatusStore,
+    onRefresh: @escaping () -> Void
+  ) {
     self.daemonSupervisor = daemonSupervisor
+    self.statusStore = statusStore
     self.onRefresh = onRefresh
 
     let window = NSWindow(
@@ -132,12 +138,27 @@ final class RootWindowController: NSWindowController {
     viewModel.beginRefresh()
 
     let daemonSupervisor = self.daemonSupervisor
+    let statusStore = self.statusStore
     let shouldEnsurePrerequisites = consumePrerequisiteSetupIntent()
     let shouldRefreshPermissions = forceActivePermissionRefresh || shouldRefreshLivePermissions()
 
-    Task.detached(priority: .userInitiated) { [daemonSupervisor] in
+    Task.detached(priority: .userInitiated) { [daemonSupervisor, statusStore] in
       if shouldEnsurePrerequisites {
         Self.ensurePrerequisites(daemonSupervisor: daemonSupervisor)
+      }
+
+      let fastSnapshot = Self.fastRootSnapshot(from: statusStore.readSnapshot())
+      if fastSnapshot.hasLocalData {
+        await MainActor.run {
+          self.viewModel.apply(
+            permissions: self.viewModel.permissionStatuses,
+            globalSkill: self.viewModel.globalSkillStatus,
+            relationshipSummary: fastSnapshot.relationshipSummary,
+            allIntegrations: fastSnapshot.integrations,
+            integrations: fastSnapshot.integrations
+          )
+          self.viewModel.isRefreshing = true
+        }
       }
 
       let snapshot = Self.decodeJSON(
@@ -231,6 +252,60 @@ final class RootWindowController: NSWindowController {
       return nil
     }
     return try? JSONDecoder().decode(type, from: data)
+  }
+
+  private nonisolated static func fastRootSnapshot(
+    from snapshot: AppStatusSnapshot
+  ) -> (relationshipSummary: RelationshipSummary, integrations: [IntegrationStatus], hasLocalData: Bool) {
+    let messageBreakdown = Dictionary(uniqueKeysWithValues: snapshot.messageBreakdown.map {
+      ($0.platform, $0.messages)
+    })
+    var didUseCachedMessageBreakdown = Set<String>()
+    let integrations = snapshot.integrations.map { integration in
+      let cachedProjectedMessages: Int
+      if integration.projectionStats == nil,
+         !didUseCachedMessageBreakdown.contains(integration.platform) {
+        cachedProjectedMessages = messageBreakdown[integration.platform] ?? 0
+        didUseCachedMessageBreakdown.insert(integration.platform)
+      } else {
+        cachedProjectedMessages = 0
+      }
+      let projectedMessages = integration.projectionStats?.projectedMessages ?? cachedProjectedMessages
+      let projectionStats = ProjectionStats(
+        rawEvents: integration.projectionStats?.rawEvents ?? 0,
+        rawEventsBySchema: integration.projectionStats?.rawEventsBySchema ?? [:],
+        projectedContacts: integration.projectionStats?.projectedContacts ?? 0,
+        projectedConversations: integration.projectionStats?.projectedConversations ?? 0,
+        projectedMessages: projectedMessages
+      )
+
+      return IntegrationStatus(
+        platform: integration.platform,
+        accountKey: integration.accountKey,
+        displayName: integration.displayName,
+        authState: integration.authState,
+        enabled: integration.enabled,
+        projectionStats: projectionStats,
+        capability: CapabilityStatus(availability: "available", setupVisible: true)
+      )
+    }
+    let relationshipSummary = RelationshipSummary(
+      messages: snapshot.messages > 0 ? snapshot.messages : snapshot.projectedMessages,
+      contacts: snapshot.contacts,
+      phoneCalls: snapshot.integrations.reduce(0) { total, integration in
+        total + (integration.projectionStats?.rawEventsBySchema["call.observed@1"] ?? 0)
+      },
+      pendingProjectionEvents: snapshot.pendingProjectionEvents,
+      lastUpdatedAt: nil,
+      source: "menu_bar_cache"
+    )
+    let hasLocalData =
+      relationshipSummary.messages > 0
+      || relationshipSummary.contacts > 0
+      || relationshipSummary.phoneCalls > 0
+      || !integrations.isEmpty
+
+    return (relationshipSummary, integrations, hasLocalData)
   }
 
   private func runCLICommands(_ argumentsList: [[String]]) {
