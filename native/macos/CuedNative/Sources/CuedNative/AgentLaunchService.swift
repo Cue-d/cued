@@ -1,4 +1,3 @@
-import ApplicationServices
 import AppKit
 import Foundation
 import Interface
@@ -36,14 +35,12 @@ enum AgentLaunchService {
     case .codexCLI:
       return launchTerminalAgent(
         title: "Opened Codex CLI",
-        command: "cd \(shellEscape(repoPath)) && codex",
-        pasteDelay: 1.8
+        command: "cd \(shellEscape(repoPath)) && codex \(shellEscape(prompt))"
       )
     case .claudeCode:
       return launchTerminalAgent(
         title: "Opened Claude Code",
-        command: "cd \(shellEscape(repoPath)) && claude",
-        pasteDelay: 2.2
+        command: "cd \(shellEscape(repoPath)) && claude \(shellEscape(prompt))"
       )
     }
   }
@@ -206,28 +203,12 @@ enum AgentLaunchService {
   @MainActor
   private static func launchTerminalAgent(
     title: String,
-    command: String,
-    pasteDelay: Double
+    command: String
   ) -> AgentLaunchFeedback {
-    guard isAccessibilityTrusted() else {
-      requestAccessibilityPermission()
-      return AgentLaunchFeedback(
-        title: "Accessibility permission needed",
-        detail: "Cued asked macOS for Accessibility access. Enable Cued in Privacy & Security > Accessibility, then click the agent button again.",
-        isError: true
-      )
-    }
-
     let script = """
       tell application "Terminal"
         activate
         do script \(appleScriptString(command))
-      end tell
-      delay \(pasteDelay)
-      tell application "System Events"
-        keystroke "v" using command down
-        delay 0.2
-        key code 36
       end tell
       """
 
@@ -244,26 +225,15 @@ enum AgentLaunchService {
     if let message = error?[NSAppleScript.errorMessage] as? String {
       return AgentLaunchFeedback(
         title: "Terminal automation permission needed",
-        detail: "\(message). Allow Cued to control Terminal in Privacy & Security > Automation. The prompt is copied, so you can paste it manually.",
+        detail: "\(message). Allow Cued to control Terminal in Privacy & Security > Automation. The prompt is copied as a fallback.",
         isError: true
       )
     }
 
     return AgentLaunchFeedback(
       title: title,
-      detail: "Terminal is running the agent in the Cued repo with the copied example prompt."
+      detail: "Terminal is running the agent in the Cued repo with the example prompt."
     )
-  }
-
-  private nonisolated static func isAccessibilityTrusted() -> Bool {
-    AXIsProcessTrusted()
-  }
-
-  private nonisolated static func requestAccessibilityPermission() {
-    let options = [
-      "AXTrustedCheckOptionPrompt": true,
-    ] as CFDictionary
-    _ = AXIsProcessTrustedWithOptions(options)
   }
 
   private nonisolated static func resolveRepoPath() -> String {
@@ -273,12 +243,23 @@ enum AgentLaunchService {
       return configured
     }
 
-    var candidates = [FileManager.default.currentDirectoryPath]
-    candidates.append(Bundle.main.bundleURL.path)
-    candidates.append("\(NSHomeDirectory())/Documents/personal/cued")
+    let home = NSHomeDirectory()
+    var candidates = [
+      FileManager.default.currentDirectoryPath,
+      Bundle.main.bundleURL.path,
+      "\(home)/Documents/Development/cued",
+      "\(home)/Documents/personal/cued",
+    ]
+    if let configuredCodexHome = trimmedEnvironmentPath(environment, name: "CODEX_HOME") {
+      candidates.append("\(configuredCodexHome)/worktrees")
+    }
+    candidates.append("\(home)/.codex/worktrees")
 
     for candidate in candidates {
       if let repoPath = firstCuedRepo(atOrAbove: candidate) {
+        return repoPath
+      }
+      if let repoPath = firstCuedRepoChild(in: candidate) {
         return repoPath
       }
     }
@@ -297,6 +278,27 @@ enum AgentLaunchService {
         return url.path
       }
       url.deleteLastPathComponent()
+    }
+    return nil
+  }
+
+  private nonisolated static func firstCuedRepoChild(in path: String) -> String? {
+    let url = URL(fileURLWithPath: path)
+    guard let children = try? FileManager.default.contentsOfDirectory(
+      at: url,
+      includingPropertiesForKeys: [.isDirectoryKey],
+      options: [.skipsHiddenFiles]
+    ) else {
+      return nil
+    }
+
+    for child in children.sorted(by: { $0.lastPathComponent < $1.lastPathComponent }) {
+      guard (try? child.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true else {
+        continue
+      }
+      if isCuedRepo(child.path) {
+        return child.path
+      }
     }
     return nil
   }
@@ -400,37 +402,55 @@ private func prompt(for exampleID: AgentExampleID, repoPath: String) -> String {
     return """
       \(header)
 
-      Goal: catch me up on what changed recently across my local Cued sources.
+      Goal: prove where local context changes the answer.
 
-      Use Cued read-only context to identify messages, conversations, and people that likely need attention. Prioritize concrete open loops: unanswered asks, time-sensitive messages, relationship follow-ups, and context I should know before replying.
+      Use Cued read-only context to pick one recent question, thread, or relationship where a generic model would miss important context. Compare:
+      - what an agent would say with no local history
+      - what changes after reading relevant Cued messages, contacts, calls, and source metadata
+      - what action becomes possible because of the context
 
-      Return a compact list grouped by person or thread. For each item include why it matters, the source channel, the last relevant context, and a suggested reply or next action. If Cued itself is unhealthy, repair the local runtime first using the ladder above.
+      Return a compact before/after analysis with citations to local source types, not private message dumps. End with the smallest product improvement that would make this context easier for future agents to use. If Cued itself is unhealthy, repair the local runtime first using the ladder above.
       """
   case .followUps:
     return """
       \(header)
 
-      Goal: use local Cued context to find stale or unanswered conversations and draft a compact follow-up list.
+      Goal: find a real workflow where Cued turns messages into useful work.
 
-      Keep this read-only unless a local Cued operational issue blocks the query. If Cued itself is unhealthy, repair the local runtime first using the ladder above, then return the follow-up candidates with source context and suggested next action.
+      Search recent local context for a concrete workflow: follow-up drafting, meeting prep, recruiting, sales/customer development, school/project coordination, or another repeated task visible in the data. Avoid generic summaries.
+
+      Return:
+      - the workflow you found
+      - the local evidence that makes it real
+      - the exact output an agent should produce
+      - how to measure whether it created value
+
+      Keep this read-only unless a local Cued operational issue blocks the query. If Cued itself is unhealthy, repair the local runtime first using the ladder above.
       """
   case .prepPerson:
     return """
       \(header)
 
-      Goal: prepare a compact brief for a person using local Cued context.
+      Goal: turn repeated local context into accumulated understanding.
 
-      If the person is ambiguous, ask for the person or infer likely matches from local contacts. Summarize recent context, open loops, relevant source channels, and a practical next reply or meeting prep note. Keep the work local and read-only unless Cued needs operational repair first.
+      Pick a person, project, or recurring topic from local Cued context. Build a durable brief that would still be useful next week: stable facts, open loops, preferences, unresolved questions, recent changes, and what an agent should remember before acting.
+
+      Explain which parts came from replayable history versus one-off recent messages. Do not dump private messages; synthesize. Keep the work local and read-only unless Cued needs operational repair first.
       """
   case .findWarmIntros:
     return """
       \(header)
 
-      Goal: find the strongest warm intro paths from my local Cued context.
+      Goal: design explicit intent and triggers for an always-on Cued agent.
 
-      Ask for the company, role, person, or topic if it is not already clear. Search local contacts and conversation history for people connected to that target or adjacent context. Rank paths by relationship strength, recency, and evidence from prior messages.
+      Use local context to identify where a background agent would create value and where it would be noisy. Pick one candidate workflow and define:
+      - the user intent it serves
+      - the trigger conditions that should wake the agent up
+      - the context it needs before acting
+      - the action it may take
+      - the cases where it should stay silent or ask first
 
-      Return the best intro paths with why each person is relevant, the confidence level, and a short draft ask. Keep the work read-only unless Cued needs operational repair first.
+      Return a small trigger spec that could be implemented or evaluated. Keep the work read-only unless Cued needs operational repair first.
       """
   }
 }

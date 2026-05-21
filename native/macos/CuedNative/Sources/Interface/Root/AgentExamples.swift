@@ -98,31 +98,31 @@ public struct AgentLaunchFeedback: Identifiable, Sendable {
 public let agentExamples: [AgentExample] = [
   AgentExample(
     id: .catchUp,
-    icon: "tray.full",
-    title: "Catch Up",
-    detail: "Summarize what changed across recent messages and call out the open loops.",
-    promptPreview: "Catch me up on what I should respond to"
+    icon: "point.3.connected.trianglepath.dotted",
+    title: "Context Use",
+    detail: "Find where local context changes what the agent should do.",
+    promptPreview: "Show where context changes the answer"
   ),
   AgentExample(
     id: .followUps,
-    icon: "clock.arrow.circlepath",
-    title: "Draft Follow-Ups",
-    detail: "Find stale or unanswered threads and propose next actions.",
-    promptPreview: "Use Cued context to build a follow-up list"
+    icon: "rectangle.3.group.bubble.left",
+    title: "Workflow Value",
+    detail: "Turn recent messages into useful work, not a generic summary.",
+    promptPreview: "Find a real workflow Cued can improve"
   ),
   AgentExample(
     id: .prepPerson,
-    icon: "person.text.rectangle",
-    title: "Prep For A Person",
-    detail: "Summarize recent relationship context before a reply or meeting.",
-    promptPreview: "Write a compact person brief from local history"
+    icon: "arrow.trianglehead.clockwise",
+    title: "Accumulated Understanding",
+    detail: "Build a durable brief from replayable local history.",
+    promptPreview: "Turn repeated context into understanding"
   ),
   AgentExample(
     id: .findWarmIntros,
-    icon: "person.2.wave.2",
-    title: "Find Warm Intros",
-    detail: "Search local context for people who could help with a company, role, or topic.",
-    promptPreview: "Find the strongest warm intro paths"
+    icon: "scope",
+    title: "Intent And Triggers",
+    detail: "Decide when an always-on agent should act or stay quiet.",
+    promptPreview: "Design explicit triggers from local context"
   ),
 ]
 
