@@ -1572,7 +1572,8 @@ final class MenuBarAppController: NSObject, NSApplicationDelegate {
         return
       }
       rootWindowController.showAndRefresh(
-        forceActivePermissionRefresh: forceActivePermissionRefreshWhenComplete
+        forceActivePermissionRefresh: forceActivePermissionRefreshWhenComplete,
+        defaultToLastPage: true
       )
     }
   }

@@ -9,12 +9,21 @@ func statusIcon(
   StatusIcon(systemImage: systemImage, tint: tint)
 }
 
-func rowBackground(cornerRadius: CGFloat = 20) -> some View {
+func rowBackground(cornerRadius: CGFloat = 10, emphasized: Bool = false) -> some View {
   RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-    .fill(Color(NSColor.controlBackgroundColor))
+    .fill(
+      emphasized
+        ? Color.accentColor.opacity(0.1)
+        : Color(NSColor.controlBackgroundColor)
+    )
     .overlay(
       RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-        .strokeBorder(Color(NSColor.separatorColor).opacity(0.32), lineWidth: 1)
+        .strokeBorder(
+          emphasized
+            ? Color.accentColor.opacity(0.68)
+            : Color(NSColor.separatorColor).opacity(0.62),
+          lineWidth: 1
+        )
     )
 }
 

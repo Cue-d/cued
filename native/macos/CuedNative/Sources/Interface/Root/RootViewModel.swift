@@ -21,20 +21,42 @@ public struct CapabilityStatus: Decodable, Sendable {
 
 public struct ProjectionStats: Decodable, Sendable {
   public let rawEvents: Int
+  public let rawEventsBySchema: [String: Int]
   public let projectedContacts: Int
   public let projectedConversations: Int
   public let projectedMessages: Int
 
+  private enum CodingKeys: String, CodingKey {
+    case rawEvents
+    case rawEventsBySchema
+    case projectedContacts
+    case projectedConversations
+    case projectedMessages
+  }
+
   public init(
     rawEvents: Int = 0,
+    rawEventsBySchema: [String: Int] = [:],
     projectedContacts: Int = 0,
     projectedConversations: Int = 0,
     projectedMessages: Int = 0
   ) {
     self.rawEvents = rawEvents
+    self.rawEventsBySchema = rawEventsBySchema
     self.projectedContacts = projectedContacts
     self.projectedConversations = projectedConversations
     self.projectedMessages = projectedMessages
+  }
+
+  public init(from decoder: Decoder) throws {
+    let container = try decoder.container(keyedBy: CodingKeys.self)
+    rawEvents = try container.decodeIfPresent(Int.self, forKey: .rawEvents) ?? 0
+    rawEventsBySchema =
+      try container.decodeIfPresent([String: Int].self, forKey: .rawEventsBySchema) ?? [:]
+    projectedContacts = try container.decodeIfPresent(Int.self, forKey: .projectedContacts) ?? 0
+    projectedConversations =
+      try container.decodeIfPresent(Int.self, forKey: .projectedConversations) ?? 0
+    projectedMessages = try container.decodeIfPresent(Int.self, forKey: .projectedMessages) ?? 0
   }
 }
 
@@ -108,6 +130,31 @@ public struct SkillStatus: Decodable, Sendable {
     self.installed = installed
     self.status = status
     self.summary = summary
+  }
+}
+
+public struct RelationshipSummary: Decodable, Sendable {
+  public let messages: Int
+  public let contacts: Int
+  public let phoneCalls: Int
+  public let pendingProjectionEvents: Int
+  public let lastUpdatedAt: Double?
+  public let source: String
+
+  public init(
+    messages: Int = 0,
+    contacts: Int = 0,
+    phoneCalls: Int = 0,
+    pendingProjectionEvents: Int = 0,
+    lastUpdatedAt: Double? = nil,
+    source: String = "database"
+  ) {
+    self.messages = messages
+    self.contacts = contacts
+    self.phoneCalls = phoneCalls
+    self.pendingProjectionEvents = pendingProjectionEvents
+    self.lastUpdatedAt = lastUpdatedAt
+    self.source = source
   }
 }
 
@@ -197,6 +244,7 @@ public final class RootViewModel: ObservableObject {
   @Published public var platformConfigurations: [PlatformConfig] = []
   @Published public var permissionStatuses: [PermissionStatus] = defaultPermissionStatuses()
   @Published public var globalSkillStatus = defaultSkillStatus()
+  @Published public var relationshipSummary = RelationshipSummary()
   @Published public var agentTargetStatuses = defaultAgentTargetStatuses()
   @Published public var agentLaunchFeedback: AgentLaunchFeedback?
   @Published public private(set) var refreshSequence = 0
@@ -241,12 +289,14 @@ public final class RootViewModel: ObservableObject {
   public func apply(
     permissions: [PermissionStatus],
     globalSkill: SkillStatus,
+    relationshipSummary: RelationshipSummary,
     allIntegrations: [IntegrationStatus],
     integrations: [IntegrationStatus]
   ) {
     let normalizedPermissions = buildPermissionStatuses(permissions)
     permissionStatuses = normalizedPermissions
     globalSkillStatus = globalSkill
+    self.relationshipSummary = relationshipSummary
     platformConfigurations = buildPlatformConfigurations(
       permissions: normalizedPermissions,
       allIntegrations: allIntegrations,

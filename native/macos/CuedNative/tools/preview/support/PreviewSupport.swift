@@ -113,6 +113,7 @@ public enum Preview {
     viewModel.apply(
       permissions: fixture.permissions,
       globalSkill: fixture.globalSkill,
+      relationshipSummary: RelationshipSummary(),
       allIntegrations: fixture.integrations,
       integrations: fixture.setupIntegrations
     )

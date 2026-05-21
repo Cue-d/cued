@@ -241,8 +241,9 @@ public struct RootView: View {
       )
     }
     .padding(.horizontal, 28)
+    .padding(.top, 10)
     .padding(.bottom, 13)
-    .frame(minHeight: 60, alignment: .bottom)
+    .frame(minHeight: 68, alignment: .bottom)
   }
 
   func handleNext() {
@@ -263,7 +264,7 @@ public struct RootView: View {
       }
       .frame(maxWidth: .infinity, alignment: .top)
       .padding(.top, 24)
-      .padding(.bottom, 8)
+      .padding(.bottom, 88)
     }
     .scrollIndicators(.never)
     .padding(.horizontal, 28)
@@ -281,7 +282,7 @@ public struct RootView: View {
     .padding(padding)
     .frame(maxWidth: .infinity, alignment: .leading)
     .background(
-      RoundedRectangle(cornerRadius: 16, style: .continuous)
+      RoundedRectangle(cornerRadius: 10, style: .continuous)
         .fill(Color(NSColor.controlBackgroundColor))
         .shadow(color: .black.opacity(0.06), radius: 8, y: 3)
     )

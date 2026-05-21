@@ -16,6 +16,7 @@ func previewModel(
   viewModel.apply(
     permissions: permissions,
     globalSkill: globalSkill,
+    relationshipSummary: RelationshipSummary(),
     allIntegrations: allIntegrations,
     integrations: setupIntegrations
   )

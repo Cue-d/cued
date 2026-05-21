@@ -6,17 +6,23 @@ struct WorkflowRow: View {
   let icon: String
   let title: String
   let detail: String
+  let tint: Color
+
+  init(
+    icon: String,
+    title: String,
+    detail: String,
+    tint: Color = .secondary
+  ) {
+    self.icon = icon
+    self.title = title
+    self.detail = detail
+    self.tint = tint
+  }
 
   var body: some View {
     HStack(spacing: 12) {
-      Image(systemName: icon)
-        .font(.system(size: 15, weight: .semibold))
-        .foregroundStyle(.secondary)
-        .frame(width: 40, height: 40)
-        .background(
-          RoundedRectangle(cornerRadius: 12, style: .continuous)
-            .fill(Color(NSColor.controlBackgroundColor))
-        )
+      statusIcon(systemImage: icon, tint: tint)
 
       VStack(alignment: .leading, spacing: 3) {
         Text(title)
@@ -31,6 +37,6 @@ struct WorkflowRow: View {
     .padding(.horizontal, 16)
     .padding(.vertical, 14)
     .frame(maxWidth: .infinity, alignment: .leading)
-    .background(rowBackground(cornerRadius: 14))
+    .background(rowBackground(cornerRadius: 10))
   }
 }

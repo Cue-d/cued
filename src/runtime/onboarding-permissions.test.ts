@@ -28,6 +28,13 @@ vi.mock("../skills/install.js", () => ({
 import { buildOnboardingSnapshot } from "./onboarding.js";
 
 describe("onboarding permission refresh", () => {
+  const db = {
+    dbPath: "/tmp/cued-test/local.db",
+    getMenuBarOverview: () => ({ messages: 0, contacts: 0 }),
+    getProjectionBacklog: () => ({ pending_raw_events: 0 }),
+    getIntegrationProjectionStats: () => ({ rawEventsBySchema: {} }),
+  };
+
   afterEach(() => {
     vi.clearAllMocks();
   });
@@ -48,11 +55,11 @@ describe("onboarding permission refresh", () => {
       installedPath: null,
     });
 
-    await buildOnboardingSnapshot({} as never);
+    await buildOnboardingSnapshot(db as never);
 
     expect(buildPermissionStatusMock).toHaveBeenCalledWith({
       mode: "passive",
-      db: {} as never,
+      db: db as never,
     });
   });
 
@@ -72,11 +79,11 @@ describe("onboarding permission refresh", () => {
       installedPath: null,
     });
 
-    await buildOnboardingSnapshot({} as never, { refreshPermissions: true });
+    await buildOnboardingSnapshot(db as never, { refreshPermissions: true });
 
     expect(buildPermissionStatusMock).toHaveBeenCalledWith({
       mode: "active",
-      db: {} as never,
+      db: db as never,
     });
   });
 
@@ -106,7 +113,7 @@ describe("onboarding permission refresh", () => {
       });
     installGlobalCuedSkillMock.mockReturnValue({ ok: true });
 
-    const snapshot = await buildOnboardingSnapshot({} as never);
+    const snapshot = await buildOnboardingSnapshot(db as never);
 
     expect(installGlobalCuedSkillMock).toHaveBeenCalledTimes(1);
     expect(snapshot.globalSkill.installed).toBe(true);
@@ -128,7 +135,7 @@ describe("onboarding permission refresh", () => {
       installedPath: null,
     });
 
-    await buildOnboardingSnapshot({} as never, { installGlobalSkill: false });
+    await buildOnboardingSnapshot(db as never, { installGlobalSkill: false });
 
     expect(installGlobalCuedSkillMock).not.toHaveBeenCalled();
   });

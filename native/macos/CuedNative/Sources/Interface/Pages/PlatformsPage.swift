@@ -5,10 +5,10 @@ import SwiftUI
 extension RootView {
   var platformsPage: some View {
     pageContainer {
-      Text("Platforms")
+      Text("Sources")
         .font(.largeTitle.weight(.semibold))
 
-      Text("Connect sources to sync. Large message histories can take some time.")
+      Text("Choose what Cued keeps current. Indexed history stays local on this Mac.")
         .font(.body)
         .foregroundStyle(.secondary)
         .multilineTextAlignment(.center)
@@ -23,9 +23,9 @@ extension RootView {
                 .foregroundStyle(.secondary)
                 .frame(width: 26)
               VStack(alignment: .leading, spacing: 4) {
-                Text("No platforms are available yet")
+                Text("No sources are available yet")
                   .font(.headline)
-                Text("Platforms appear here as soon as the daemon reports supported integrations for this Mac.")
+                Text("Sources appear here as soon as the daemon reports supported integrations for this Mac.")
                   .font(.subheadline)
                   .foregroundStyle(.secondary)
               }

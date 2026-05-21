@@ -10,6 +10,7 @@ struct SkillInstallResponse: Decodable {
 struct RootSnapshotResponse: Decodable {
   let permissions: [PermissionStatus]
   let globalSkill: SkillStatus
+  let relationshipSummary: RelationshipSummary?
   let integrations: [IntegrationStatus]?
   let setupIntegrations: [IntegrationStatus]
 }
@@ -86,9 +87,15 @@ final class RootWindowController: NSWindowController {
     fatalError("init(coder:) has not been implemented")
   }
 
-  func showAndRefresh(forceActivePermissionRefresh: Bool = false, resetToFirstPage: Bool = false) {
+  func showAndRefresh(
+    forceActivePermissionRefresh: Bool = false,
+    resetToFirstPage: Bool = false,
+    defaultToLastPage: Bool = false
+  ) {
     if resetToFirstPage {
       viewModel.currentPage = 0
+    } else if defaultToLastPage {
+      viewModel.currentPage = max(0, viewModel.pageCount - 1)
     }
     NSRunningApplication.current.activate(options: [.activateIgnoringOtherApps, .activateAllWindows])
     showWindow(nil)
@@ -154,6 +161,7 @@ final class RootWindowController: NSWindowController {
         self.viewModel.apply(
           permissions: snapshot?.permissions ?? [],
           globalSkill: globalSkill,
+          relationshipSummary: snapshot?.relationshipSummary ?? RelationshipSummary(),
           allIntegrations: self.cachedAllIntegrations,
           integrations: setupIntegrations
         )
@@ -205,8 +213,10 @@ final class RootWindowController: NSWindowController {
     _ type: T.Type,
     arguments: [String]
   ) -> T? {
-    guard let result = daemonSupervisor.runCLI(arguments: arguments),
-          result.status == 0,
+    guard let result = daemonSupervisor.runCLI(arguments: arguments) else {
+      return nil
+    }
+    guard result.status == 0,
           let data = result.stdout.data(using: .utf8) else {
       return nil
     }
