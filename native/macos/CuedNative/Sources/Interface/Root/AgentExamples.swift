@@ -19,6 +19,17 @@ public enum AgentTarget: String, CaseIterable, Identifiable, Sendable {
       return "Claude Code"
     }
   }
+
+  public var shortTitle: String {
+    switch self {
+    case .codexApp:
+      return "Codex"
+    case .codexCLI:
+      return "CLI"
+    case .claudeCode:
+      return "Claude"
+    }
+  }
 }
 
 public enum AgentTargetReadiness: String, Sendable {
@@ -133,13 +144,6 @@ public let agentDebugExamples: [AgentExample] = [
     title: "Repair Cued",
     detail: "Inspect status, doctor output, logs, and local DB state before touching code.",
     promptPreview: "Investigate and repair Cued locally"
-  ),
-  AgentExample(
-    id: .debugSync,
-    icon: "arrow.triangle.2.circlepath",
-    title: "Debug Sync",
-    detail: "Find why a source is not producing useful local context.",
-    promptPreview: "Check permissions, integration state, and recent syncs"
   ),
 ]
 

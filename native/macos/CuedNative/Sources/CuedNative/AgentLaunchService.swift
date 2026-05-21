@@ -369,13 +369,13 @@ private func prompt(for exampleID: AgentExampleID, repoPath: String) -> String {
     Treat Cued as an on-device self-repair system, not an auto PR generator. Use local state first: daemon status, doctor output, logs, permissions, integration state, ~/.cued/local.db, sync/rebuild/reset flows, and the cued CLI.
 
     Repair ladder:
-    Level 0: observe
+    Level 0: observe status, doctor output, recent logs, integration state, and active sync/ingestion work
     Level 1: local CLI repair
     Level 2: verify
     Level 3: code escalation
     Level 4: branch repair
 
-    Record a short repair timeline as you work. Only inspect or edit source code if local repair fails or proves a code defect. If escalation is required, carry evidence: repro command, doctor/log excerpts, bad state, expected vs actual, and suggested tests.
+    Record a short repair timeline as you work. If Cued is stuck, inspect logs and local state before interrupting work; use CLI repair commands first, and only kill sync or ingestion processes/runs when evidence shows they are wedged or blocking database access. Only inspect or edit source code if local repair fails or proves a code defect. If escalation is required, carry evidence: repro command, doctor/log excerpts, bad state, expected vs actual, and suggested tests.
     """
 
   switch exampleID {
@@ -389,6 +389,7 @@ private func prompt(for exampleID: AgentExampleID, repoPath: String) -> String {
       - cued status
       - cued doctor
       - cued logs
+      - cued integrations status
       - inspect ~/.cued/local.db read-only if the failure points at stored state
 
       Try operational repair before code:
@@ -397,6 +398,7 @@ private func prompt(for exampleID: AgentExampleID, repoPath: String) -> String {
       - cued sync resume
       - cued rebuild
       - cued skill install-global
+      - inspect or stop wedged sync/ingestion work only after logs or database state show it is blocking repair
 
       Verify the issue is gone before calling the task complete.
       """

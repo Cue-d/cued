@@ -50,7 +50,7 @@ extension RootView {
       }
 
       card(spacing: 14) {
-        Text("Debug")
+        Text("Repair")
           .font(.headline)
 
         ForEach(agentDebugExamples) { example in
@@ -189,8 +189,8 @@ extension RootView {
       }
       .frame(maxWidth: .infinity, alignment: .leading)
 
-      VStack(alignment: .trailing, spacing: 7) {
-        ForEach(AgentTarget.allCases) { target in
+      HStack(spacing: 7) {
+        ForEach(preferredAgentTargets) { target in
           let status = viewModel.agentTargetStatuses[target] ?? .unknown
           Button {
             viewModel.clearAgentLaunchFeedback()
@@ -199,28 +199,40 @@ extension RootView {
             Label(agentDebugButtonTitle(for: target, status: status), systemImage: agentDebugButtonIcon(for: target, status: status))
               .labelStyle(.titleAndIcon)
               .lineLimit(1)
+              .frame(maxWidth: .infinity)
           }
-          .buttonStyle(PermissionActionButtonStyle(variant: .secondary, size: .compact))
+          .buttonStyle(PermissionActionButtonStyle(variant: agentDebugButtonVariant(for: target, status: status), size: .compact))
           .disabled(status.readiness == .unknown)
           .help(agentDebugHelp(for: status))
         }
       }
-      .frame(width: 158)
+      .frame(width: 250)
     }
     .padding(.vertical, 4)
+  }
+
+  var preferredAgentTargets: [AgentTarget] {
+    if viewModel.agentTargetStatuses[.codexApp]?.readiness != .missing {
+      return [.codexApp, .claudeCode]
+    }
+    return [.codexCLI, .claudeCode]
   }
 
   func agentDebugButtonTitle(for target: AgentTarget, status: AgentTargetStatus) -> String {
     switch status.readiness {
     case .ready:
-      return target.title
+      return target.shortTitle
     case .unknown:
-      return "Checking"
+      return "..."
     case .missing:
       return "Unavailable"
     case .notLoggedIn:
       return "Auth needed"
     }
+  }
+
+  func agentDebugButtonVariant(for target: AgentTarget, status: AgentTargetStatus) -> ActionButtonVariant {
+    target == .codexApp && status.readiness == .ready ? .prominent : .secondary
   }
 
   func agentDebugButtonIcon(for target: AgentTarget, status: AgentTargetStatus) -> String {

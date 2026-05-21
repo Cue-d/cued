@@ -66,7 +66,7 @@ struct ExampleCard: View {
       }
     }
     .padding(14)
-    .frame(maxWidth: .infinity, minHeight: onLaunch == nil ? 124 : 214, alignment: .topLeading)
+    .frame(maxWidth: .infinity, minHeight: onLaunch == nil ? 124 : 176, alignment: .topLeading)
     .background(rowBackground(cornerRadius: 12))
   }
 
@@ -107,8 +107,8 @@ struct ExampleCard: View {
   }
 
   private var targetButtons: some View {
-    VStack(alignment: .leading, spacing: 7) {
-      ForEach(AgentTarget.allCases) { target in
+    HStack(spacing: 7) {
+      ForEach(preferredAgentTargets) { target in
         let status = targetStatuses[target] ?? .unknown
         Button {
           onLaunch?(target)
@@ -119,12 +119,12 @@ struct ExampleCard: View {
               .frame(width: 14)
             Text(buttonTitle(for: target, status: status))
               .lineLimit(1)
-              .frame(maxWidth: .infinity, alignment: .leading)
           }
+          .frame(maxWidth: .infinity)
         }
         .buttonStyle(
           PermissionActionButtonStyle(
-            variant: .secondary,
+            variant: buttonVariant(for: target, status: status),
             size: .compact
           )
         )
@@ -132,19 +132,31 @@ struct ExampleCard: View {
         .help(helpText(for: target, status: status))
       }
     }
+    .frame(maxWidth: .infinity)
+  }
+
+  private var preferredAgentTargets: [AgentTarget] {
+    if targetStatuses[.codexApp]?.readiness != .missing {
+      return [.codexApp, .claudeCode]
+    }
+    return [.codexCLI, .claudeCode]
   }
 
   private func buttonTitle(for target: AgentTarget, status: AgentTargetStatus) -> String {
     switch status.readiness {
     case .ready:
-      return target.title
+      return target.shortTitle
     case .unknown:
-      return "Checking \(target.title)"
+      return "..."
     case .missing:
-      return "\(target.title) unavailable"
+      return "Missing"
     case .notLoggedIn:
-      return "\(target.title) auth needed"
+      return "Auth"
     }
+  }
+
+  private func buttonVariant(for target: AgentTarget, status: AgentTargetStatus) -> ActionButtonVariant {
+    target == .codexApp && status.readiness == .ready ? .prominent : .secondary
   }
 
   private func buttonIcon(for target: AgentTarget, status: AgentTargetStatus) -> String {
