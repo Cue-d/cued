@@ -45,6 +45,7 @@ for executable_path in \
 done
 
 for forbidden_path in \
+  "$RESOURCES_PATH/runtime/chromium" \
   "$RUNTIME_PATH/scripts" \
   "$RUNTIME_PATH/src" \
   "$RUNTIME_PATH/native" \

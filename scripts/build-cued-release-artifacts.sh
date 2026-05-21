@@ -33,21 +33,14 @@ runtime_entitlements_for_binary() {
       printf '%s\n' "$APP_PERMISSIONS_ENTITLEMENTS"
       ;;
     "$APP_BUNDLE/Contents/Resources/runtime/node/bin/node"|\
-    "$APP_BUNDLE/Contents/Resources/helpers/signal-cli/jre/Contents/Home/bin/java"|\
-    "$APP_BUNDLE/Contents/Resources/runtime/chromium"/*)
+    "$APP_BUNDLE/Contents/Resources/helpers/signal-cli/jre/Contents/Home/bin/java")
       printf '%s\n' "$JIT_RUNTIME_ENTITLEMENTS"
       ;;
   esac
 }
 
 runtime_entitlements_for_bundle() {
-  local target="$1"
-
-  case "$target" in
-    "$APP_BUNDLE/Contents/Resources/runtime/chromium"/*)
-      printf '%s\n' "$JIT_RUNTIME_ENTITLEMENTS"
-      ;;
-  esac
+  :
 }
 
 sign_macos_binary() {
