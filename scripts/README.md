@@ -14,7 +14,6 @@ Local build, packaging, and macOS permission helpers for the packaged Cued runti
 | `install-cued-release.sh` | Install the latest GitHub release from the terminal. |
 | `request-macos-access.sh` | Trigger or open the relevant macOS privacy prompts and panes. |
 | `fetch-node-runtime-macos.sh` | Fetch the Node runtime bundled into the app. |
-| `fetch-playwright-chromium-macos.sh` | Fetch the Chromium payload bundled into the app. |
 | `fetch-signal-cli-macos.sh` | Fetch the Signal helper payload bundled into the app. |
 
 ## App bundle build
@@ -28,7 +27,7 @@ This script builds the packaged development app at `native/macos/dist/Cued.app`.
 - rebuilds the root TypeScript runtime
 - rebuilds the native Swift host
 - stages production Node dependencies
-- bundles the Node runtime and Chromium payload
+- bundles the Node runtime
 - bundles helper binaries such as the native macOS helper, Signal helper, and WhatsApp helper
 - signs the app bundle for local execution
 

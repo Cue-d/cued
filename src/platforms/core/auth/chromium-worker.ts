@@ -2,6 +2,11 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync } from "node:fs";
 import { type BrowserContext, type Cookie, chromium, type Page, type Request } from "playwright";
 import { cuedAuthKeychainService } from "../../../core/identity.js";
+import {
+  type BrowserCandidate,
+  formatMissingChromiumAuthBrowserError,
+  listInstalledChromiumAuthBrowsers,
+} from "./browser-resolver.js";
 
 declare const localStorage: {
   getItem(key: string): string | null;
@@ -74,15 +79,11 @@ function getTimeoutMs(): number {
   return Number.isFinite(configured) && configured > 0 ? configured : 15 * 60_000;
 }
 
-function getExecutablePath(): string | undefined {
-  return process.env.CUED_CHROMIUM_EXECUTABLE_PATH || undefined;
-}
-
-function bringAuthBrowserToFront(): void {
+function bringAuthBrowserToFront(browser: BrowserCandidate): void {
   try {
     execFileSync(
       "osascript",
-      ["-e", 'tell application id "com.google.chrome.for.testing" to activate'],
+      ["-e", `tell application id "${browser.appBundleIdentifier}" to activate`],
       {
         stdio: ["ignore", "ignore", "ignore"],
       },
@@ -475,21 +476,42 @@ async function run(): Promise<void> {
   }
 
   mkdirSync(args.profileDir, { recursive: true });
+  const browsers = listInstalledChromiumAuthBrowsers();
+  if (browsers.length === 0) {
+    throw new Error(formatMissingChromiumAuthBrowserError());
+  }
+
   let context: BrowserContext | null = null;
+  let browser: BrowserCandidate | null = null;
+  const launchErrors: string[] = [];
   try {
-    context = await chromium.launchPersistentContext(args.profileDir, {
-      headless: false,
-      executablePath: getExecutablePath(),
-      args: ["--disable-blink-features=AutomationControlled"],
-      viewport: { width: 1280, height: 900 },
-    });
+    for (const candidate of browsers) {
+      try {
+        context = await chromium.launchPersistentContext(args.profileDir, {
+          headless: false,
+          executablePath: candidate.executablePath,
+          args: ["--disable-blink-features=AutomationControlled"],
+          viewport: { width: 1280, height: 900 },
+        });
+        browser = candidate;
+        break;
+      } catch (error) {
+        launchErrors.push(
+          `${candidate.name}: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    }
+
+    if (!context || !browser) {
+      throw new Error(`Could not launch a supported browser. ${launchErrors.join(" ")}`);
+    }
 
     let page = firstOpenPage(context) ?? (await context.newPage());
     if (!page.url() || page.url() === "about:blank") {
       await page.goto(args.launchTarget, { waitUntil: "domcontentloaded" });
     }
     await page.bringToFront().catch(() => {});
-    bringAuthBrowserToFront();
+    bringAuthBrowserToFront(browser);
 
     const deadline = Date.now() + getTimeoutMs();
     let lastObservedUrls: string[] = [];
