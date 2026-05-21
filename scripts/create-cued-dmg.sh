@@ -9,21 +9,17 @@ fi
 
 APP_BUNDLE="$1"
 DMG_PATH="$2"
-APP_NAME="$(basename "$APP_BUNDLE")"
+APP_BUNDLE="$(cd "$(dirname "$APP_BUNDLE")" && pwd)/$(basename "$APP_BUNDLE")"
 VOLUME_NAME="Cued"
 DMG_DIR="$(dirname "$DMG_PATH")"
-STAGING_DIR="$(mktemp -d "${TMPDIR:-/tmp}/cued-dmg-staging.XXXXXX")"
-RW_DMG="$(mktemp "${TMPDIR:-/tmp}/cued-dmg.XXXXXX").dmg"
-MOUNT_DIR=""
-BACKGROUND_RELATIVE_PATH=".background/background.png"
+mkdir -p "$DMG_DIR"
+DMG_PATH="$(cd "$DMG_DIR" && pwd)/$(basename "$DMG_PATH")"
+CONFIG_JSON="$(mktemp "${TMPDIR:-/tmp}/cued-dmg-config.XXXXXX").json"
+BACKGROUND_PATH="$(mktemp "${TMPDIR:-/tmp}/cued-dmg-background.XXXXXX").png"
 BACKGROUND_SWIFT="$(mktemp "${TMPDIR:-/tmp}/cued-dmg-background.XXXXXX").swift"
 
 cleanup() {
-  if [[ -n "$MOUNT_DIR" && -d "$MOUNT_DIR" ]]; then
-    hdiutil detach "$MOUNT_DIR" -quiet || true
-    rmdir "$MOUNT_DIR" 2>/dev/null || true
-  fi
-  rm -rf "$STAGING_DIR" "$RW_DMG" "$BACKGROUND_SWIFT"
+  rm -f "$CONFIG_JSON" "$BACKGROUND_PATH" "$BACKGROUND_SWIFT"
 }
 trap cleanup EXIT
 
@@ -33,9 +29,6 @@ if [[ ! -d "$APP_BUNDLE" ]]; then
 fi
 
 mkdir -p "$DMG_DIR"
-cp -R "$APP_BUNDLE" "$STAGING_DIR/"
-ln -s /Applications "$STAGING_DIR/Applications"
-mkdir -p "$STAGING_DIR/.background"
 
 cat >"$BACKGROUND_SWIFT" <<'SWIFT'
 import AppKit
@@ -103,49 +96,47 @@ else {
 try png.write(to: URL(fileURLWithPath: outputPath))
 SWIFT
 
-swift "$BACKGROUND_SWIFT" "$STAGING_DIR/$BACKGROUND_RELATIVE_PATH" >/dev/null
+swift "$BACKGROUND_SWIFT" "$BACKGROUND_PATH" >/dev/null
 
-hdiutil create \
-  -volname "$VOLUME_NAME" \
-  -srcfolder "$STAGING_DIR" \
-  -ov \
-  -format UDRW \
-  "$RW_DMG" >/dev/null
+node --input-type=module - "$CONFIG_JSON" "$APP_BUNDLE" "$BACKGROUND_PATH" "$VOLUME_NAME" <<'NODE'
+import { writeFileSync } from "node:fs";
 
-MOUNT_DIR="$(mktemp -d "${TMPDIR:-/tmp}/cued-dmg-mount.XXXXXX")"
-hdiutil attach "$RW_DMG" -mountpoint "$MOUNT_DIR" -nobrowse -quiet
-BACKGROUND_MOUNT_PATH="$MOUNT_DIR/$BACKGROUND_RELATIVE_PATH"
+const [configPath, appBundle, backgroundPath, volumeName] = process.argv.slice(2);
+writeFileSync(
+  configPath,
+  JSON.stringify(
+    {
+      title: volumeName,
+      background: backgroundPath,
+      "icon-size": 124,
+      window: {
+        size: {
+          width: 760,
+          height: 400,
+        },
+      },
+      contents: [
+        {
+          x: 190,
+          y: 205,
+          type: "file",
+          path: appBundle,
+        },
+        {
+          x: 570,
+          y: 205,
+          type: "link",
+          path: "/Applications",
+        },
+      ],
+    },
+    null,
+    2,
+  ),
+);
+NODE
 
-osascript <<APPLESCRIPT >/dev/null
-tell application "Finder"
-  set volumeFolder to POSIX file "$MOUNT_DIR" as alias
-  set backgroundImage to POSIX file "$BACKGROUND_MOUNT_PATH" as alias
-  tell folder volumeFolder
-    open
-    set current view of container window to icon view
-    set toolbar visible of container window to false
-    set statusbar visible of container window to false
-    set bounds of container window to {190, 145, 950, 545}
-    set arrangement of icon view options of container window to not arranged
-    set icon size of icon view options of container window to 124
-    set text size of icon view options of container window to 16
-    set background picture of icon view options of container window to backgroundImage
-    set position of item "$APP_NAME" of container window to {190, 205}
-    set position of item "Applications" of container window to {570, 205}
-    close
-  end tell
-end tell
-APPLESCRIPT
-
-sync
-hdiutil detach "$MOUNT_DIR" -quiet
-rmdir "$MOUNT_DIR" 2>/dev/null || true
-MOUNT_DIR=""
-
-hdiutil convert "$RW_DMG" \
-  -format UDZO \
-  -imagekey zlib-level=9 \
-  -ov \
-  -o "$DMG_PATH" >/dev/null
+rm -f "$DMG_PATH"
+env npm_config_ignore_scripts=false npx -y appdmg "$CONFIG_JSON" "$DMG_PATH" >/dev/null
 
 echo "$DMG_PATH"

@@ -257,7 +257,8 @@ chmod +x "$MACOS_DIR/$APP_EXECUTABLE_NAME"
 ditto --noextattr --norsrc "$SWIFT_BINARY" "$HELPERS_DIR/$HELPER_NAME"
 chmod +x "$HELPERS_DIR/$HELPER_NAME"
 for resource_bundle in "${SWIFT_RESOURCE_BUNDLES[@]}"; do
-  cp -R "$resource_bundle" "$RESOURCES_DIR/$(basename "$resource_bundle")"
+  bundle_name="$(basename "$resource_bundle")"
+  cp -R "$resource_bundle" "$RESOURCES_DIR/$bundle_name"
 done
 cp "$NODE_RUNTIME_SOURCE_DIR/bin/node" "$RUNTIME_NODE_BIN_DIR/node"
 cp -R "$NODE_RUNTIME_SOURCE_DIR/lib" "$RUNTIME_NODE_ROOT/lib"

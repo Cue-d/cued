@@ -2,6 +2,14 @@ export type DaemonRequest =
   | { id: string; command: "ping" }
   | { id: string; command: "status" }
   | { id: string; command: "doctor" }
+  | { id: string; command: "onboarding-status" }
+  | { id: string; command: "onboarding-complete" }
+  | {
+      id: string;
+      command: "onboarding-snapshot";
+      refreshManagedIntegrations?: boolean;
+      refreshPermissions?: boolean;
+    }
   | { id: string; command: "permissions-status" }
   | { id: string; command: "sql"; query: string }
   | { id: string; command: "integrations-list" }

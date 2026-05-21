@@ -118,11 +118,9 @@ func platformAccentColor(for platform: String) -> Color {
 
 func interfaceResourceURL(named assetName: String, withExtension fileExtension: String) -> URL? {
   let bundles: [Bundle] = [
-    Bundle(url: Bundle.main.bundleURL.appendingPathComponent("CuedNative_Interface.bundle")),
     Bundle.main.resourceURL.flatMap { Bundle(url: $0.appendingPathComponent("CuedNative_Interface.bundle")) },
     Bundle(for: BundleAnchor.self),
     Bundle.main,
-    Bundle.module,
   ].compactMap { $0 }
   for bundle in bundles {
     if let url = bundle.url(forResource: assetName, withExtension: fileExtension) {
