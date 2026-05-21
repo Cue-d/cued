@@ -128,4 +128,23 @@ describe("telemetry client", () => {
       db.close();
     }
   });
+
+  it("skips sends under Vitest unless an endpoint is explicitly configured", async () => {
+    const db = openTempDb();
+    try {
+      const result = await sendTelemetryEvent(
+        db,
+        "app_launched",
+        {},
+        {
+          fetchImpl: (() => {
+            throw new Error("should_not_fetch");
+          }) as typeof fetch,
+        },
+      );
+      expect(result).toEqual({ sent: false, skipped: true });
+    } finally {
+      db.close();
+    }
+  });
 });

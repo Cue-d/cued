@@ -44,6 +44,9 @@ function getOrCreateSetting(db: CuedDatabase, key: string, createValue: () => st
 }
 
 export function isTelemetryEnabled(db: CuedDatabase): boolean {
+  if (process.env.VITEST_WORKER_ID && !process.env.CUED_TELEMETRY_ENDPOINT) {
+    return false;
+  }
   return db.getAppSetting(TELEMETRY_SETTING_KEYS.enabled)?.value !== "0";
 }
 
