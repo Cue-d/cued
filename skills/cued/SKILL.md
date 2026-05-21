@@ -25,6 +25,7 @@ Do not use `sqlite3 ~/.cued/local.db` unless the user explicitly asks to debug r
 
 ## Rules
 
+- On load, make Cued usable before doing the user task. Run a quick health gate with `cued status`, `cued doctor`, and, when synced sources or current data matter, `cued integrations status`. If the gate shows a blocked daemon, failed permissions, failed integrations, stale queued work, database contention, or missing local access needed for the request, pause the user-facing task and unblock Cued first using the self-repair workflow below. Continue the user task only after Cued is healthy enough for that task, or after recording the exact blocker. Do not ask the user to debug Cued manually unless the next required step is a system permission or account login only they can grant.
 - Prefer SQL over bash parsing.
 - Always limit result size unless the user asks for exhaustive output.
 - Start broad, then drill down.
@@ -170,4 +171,4 @@ Do not update canonical contact fields from web search unless identity is determ
 
 ## Self-Repair And Unblocking
 
-When the user asks an agent to repair or unblock Cued itself, start with operational evidence before editing source code. Inspect `cued status`, `cued doctor`, `cued logs --tail 200`, `cued integrations status`, and targeted read-only SQL for active, failed, or wedged sync/projection state. Use the Cued CLI first: resume queued work, run a targeted source sync, refresh integrations, rebuild projections, reset a specific source, or cancel stuck sync/ingestion work when the CLI exposes that control. If a run is blocking local progress, read the logs and database state before stopping or restarting anything, record what was active, then restart Cued and verify the counts/state changed. Escalate to source edits only after local repair fails or proves a code defect.
+This is mandatory whenever this skill is loaded, not only when the user explicitly asks for repair. Start with operational evidence before editing source code. Inspect `cued status`, `cued doctor`, `cued logs --tail 200`, `cued integrations status`, and targeted read-only SQL for active, failed, or wedged sync/projection state. Use the Cued CLI first: resume queued work, run a targeted source sync, refresh integrations, rebuild projections, reset a specific source, or cancel stuck sync/ingestion work when the CLI exposes that control. If a run is blocking local progress, read the logs and database state before stopping or restarting anything, record what was active, then restart Cued and verify the counts/state changed. Escalate to source edits only after local repair fails or proves a code defect.
