@@ -10,6 +10,7 @@ struct SkillInstallResponse: Decodable {
 struct RootSnapshotResponse: Decodable {
   let permissions: [PermissionStatus]
   let globalSkill: SkillStatus
+  let relationshipSummary: RelationshipSummary?
   let integrations: [IntegrationStatus]?
   let setupIntegrations: [IntegrationStatus]
 }
@@ -19,6 +20,7 @@ private let liveRefreshPermissionKeys: Set<String> = ["messages_automation", "fu
 @MainActor
 final class RootWindowController: NSWindowController {
   private let daemonSupervisor: DaemonSupervisor
+  private let statusStore: AppStatusStore
   private let onRefresh: () -> Void
   private let viewModel = RootViewModel()
   private var cachedAllIntegrations: [IntegrationStatus] = []
@@ -32,8 +34,13 @@ final class RootWindowController: NSWindowController {
   private var pendingRefreshAfterCurrent = false
   private var pendingForceActivePermissionRefreshAfterCurrent = false
 
-  init(daemonSupervisor: DaemonSupervisor, onRefresh: @escaping () -> Void) {
+  init(
+    daemonSupervisor: DaemonSupervisor,
+    statusStore: AppStatusStore,
+    onRefresh: @escaping () -> Void
+  ) {
     self.daemonSupervisor = daemonSupervisor
+    self.statusStore = statusStore
     self.onRefresh = onRefresh
 
     let window = NSWindow(
@@ -72,6 +79,9 @@ final class RootWindowController: NSWindowController {
         onConnectIntegration: { [weak self] platform, accountKey in
           self?.connectIntegration(platform: platform, accountKey: accountKey)
         },
+        onLaunchAgentExample: { [weak self] exampleID, target in
+          self?.launchAgentExample(exampleID: exampleID, target: target)
+        },
         onFinish: { [weak self] in self?.finishSetup() }
       )
     )
@@ -83,9 +93,18 @@ final class RootWindowController: NSWindowController {
     fatalError("init(coder:) has not been implemented")
   }
 
-  func showAndRefresh(forceActivePermissionRefresh: Bool = false, resetToFirstPage: Bool = false) {
-    if resetToFirstPage {
+  func showAndRefresh(
+    forceActivePermissionRefresh: Bool = false,
+    resetToFirstPage: Bool = false,
+    defaultToLastPage: Bool = false,
+    initialPage: Int? = nil
+  ) {
+    if let initialPage {
+      viewModel.currentPage = min(max(initialPage, 0), max(0, viewModel.pageCount - 1))
+    } else if resetToFirstPage {
       viewModel.currentPage = 0
+    } else if defaultToLastPage {
+      viewModel.currentPage = max(0, viewModel.pageCount - 1)
     }
     NSRunningApplication.current.activate(options: [.activateIgnoringOtherApps, .activateAllWindows])
     showWindow(nil)
@@ -107,6 +126,8 @@ final class RootWindowController: NSWindowController {
   }
 
   func refresh(forceActivePermissionRefresh: Bool = false) {
+    refreshAgentTargets()
+
     guard !isRefreshing else {
       pendingRefreshAfterCurrent = true
       pendingForceActivePermissionRefreshAfterCurrent =
@@ -117,12 +138,27 @@ final class RootWindowController: NSWindowController {
     viewModel.beginRefresh()
 
     let daemonSupervisor = self.daemonSupervisor
+    let statusStore = self.statusStore
     let shouldEnsurePrerequisites = consumePrerequisiteSetupIntent()
     let shouldRefreshPermissions = forceActivePermissionRefresh || shouldRefreshLivePermissions()
 
-    Task.detached(priority: .userInitiated) { [daemonSupervisor] in
+    Task.detached(priority: .userInitiated) { [daemonSupervisor, statusStore] in
       if shouldEnsurePrerequisites {
         Self.ensurePrerequisites(daemonSupervisor: daemonSupervisor)
+      }
+
+      let fastSnapshot = Self.fastRootSnapshot(from: statusStore.readSnapshot())
+      if fastSnapshot.hasLocalData {
+        await MainActor.run {
+          self.viewModel.apply(
+            permissions: self.viewModel.permissionStatuses,
+            globalSkill: self.viewModel.globalSkillStatus,
+            relationshipSummary: fastSnapshot.relationshipSummary,
+            allIntegrations: fastSnapshot.integrations,
+            integrations: fastSnapshot.integrations
+          )
+          self.viewModel.isRefreshing = true
+        }
       }
 
       let snapshot = Self.decodeJSON(
@@ -130,26 +166,34 @@ final class RootWindowController: NSWindowController {
         RootSnapshotResponse.self,
         arguments: ["onboarding", "snapshot"] + (shouldRefreshPermissions ? ["--refresh-permissions"] : [])
       )
+
+      guard let snapshot else {
+        await MainActor.run {
+          self.isRefreshing = false
+          self.viewModel.finishRefreshWithoutSnapshot()
+          self.schedulePermissionRefresh()
+          self.runPendingRefreshIfNeeded()
+        }
+        return
+      }
+
       let globalSkill = Self.decodeJSON(
         daemonSupervisor: daemonSupervisor,
         SkillStatus.self,
         arguments: ["skill", "status"]
-      ) ?? snapshot?.globalSkill ?? SkillStatus(
-        installed: false,
-        status: "unknown",
-        summary: "Checks whether the global Cued skill is available to your agents."
-      )
-      let setupIntegrations = (snapshot?.setupIntegrations ?? []).filter {
+      ) ?? snapshot.globalSkill
+      let setupIntegrations = snapshot.setupIntegrations.filter {
         $0.capability.setupVisible
       }
 
       await MainActor.run {
-        self.cachedAllIntegrations = snapshot?.integrations ?? []
-        self.clearGrantedLivePermissions(using: snapshot?.permissions ?? [])
+        self.cachedAllIntegrations = snapshot.integrations ?? []
+        self.clearGrantedLivePermissions(using: snapshot.permissions)
         self.isRefreshing = false
         self.viewModel.apply(
-          permissions: snapshot?.permissions ?? [],
+          permissions: snapshot.permissions,
           globalSkill: globalSkill,
+          relationshipSummary: snapshot.relationshipSummary ?? RelationshipSummary(),
           allIntegrations: self.cachedAllIntegrations,
           integrations: setupIntegrations
         )
@@ -200,12 +244,70 @@ final class RootWindowController: NSWindowController {
     _ type: T.Type,
     arguments: [String]
   ) -> T? {
-    guard let result = daemonSupervisor.runCLI(arguments: arguments),
-          result.status == 0,
+    guard let result = daemonSupervisor.runCLI(arguments: arguments) else {
+      return nil
+    }
+    guard result.status == 0,
           let data = result.stdout.data(using: .utf8) else {
       return nil
     }
     return try? JSONDecoder().decode(type, from: data)
+  }
+
+  private nonisolated static func fastRootSnapshot(
+    from snapshot: AppStatusSnapshot
+  ) -> (relationshipSummary: RelationshipSummary, integrations: [IntegrationStatus], hasLocalData: Bool) {
+    let messageBreakdown = Dictionary(uniqueKeysWithValues: snapshot.messageBreakdown.map {
+      ($0.platform, $0.messages)
+    })
+    var didUseCachedMessageBreakdown = Set<String>()
+    let integrations = snapshot.integrations.map { integration in
+      let cachedProjectedMessages: Int
+      if integration.projectionStats == nil,
+         !didUseCachedMessageBreakdown.contains(integration.platform) {
+        cachedProjectedMessages = messageBreakdown[integration.platform] ?? 0
+        didUseCachedMessageBreakdown.insert(integration.platform)
+      } else {
+        cachedProjectedMessages = 0
+      }
+      let projectedMessages = integration.projectionStats?.projectedMessages ?? cachedProjectedMessages
+      let projectionStats = ProjectionStats(
+        rawEvents: integration.projectionStats?.rawEvents ?? 0,
+        rawEventsBySchema: integration.projectionStats?.rawEventsBySchema ?? [:],
+        projectedContacts: integration.projectionStats?.projectedContacts ?? 0,
+        projectedConversations: integration.projectionStats?.projectedConversations ?? 0,
+        projectedMessages: projectedMessages
+      )
+
+      return IntegrationStatus(
+        platform: integration.platform,
+        accountKey: integration.accountKey,
+        displayName: integration.displayName,
+        authState: integration.authState,
+        enabled: integration.enabled,
+        projectionStats: projectionStats,
+        capability: integration.capability ?? CapabilityStatus(availability: "available", setupVisible: true)
+      )
+    }
+    let relationshipSummary = RelationshipSummary(
+      messages: snapshot.messages > 0 ? snapshot.messages : snapshot.projectedMessages,
+      contacts: snapshot.contacts,
+      phoneCalls: snapshot.phoneCalls > 0
+        ? snapshot.phoneCalls
+        : snapshot.integrations.reduce(0) { total, integration in
+          total + (integration.projectionStats?.rawEventsBySchema["call.observed@1"] ?? 0)
+        },
+      pendingProjectionEvents: snapshot.pendingProjectionEvents,
+      lastUpdatedAt: nil,
+      source: "menu_bar_cache"
+    )
+    let hasLocalData =
+      relationshipSummary.messages > 0
+      || relationshipSummary.contacts > 0
+      || relationshipSummary.phoneCalls > 0
+      || !integrations.isEmpty
+
+    return (relationshipSummary, integrations, hasLocalData)
   }
 
   private func runCLICommands(_ argumentsList: [[String]]) {
@@ -306,6 +408,70 @@ final class RootWindowController: NSWindowController {
         alert.runModal()
       }
     }
+  }
+
+  private func launchAgentExample(exampleID: AgentExampleID, target: AgentTarget) {
+    viewModel.showAgentLaunchFeedback(
+      AgentLaunchFeedback(
+        title: "Preparing \(target.title)",
+        detail: "Checking auth, installing the Cued skill if needed, and preparing the example prompt."
+      )
+    )
+
+    let daemonSupervisor = self.daemonSupervisor
+    let skillAlreadyInstalled = viewModel.globalSkillStatus.installed
+    Task { [daemonSupervisor, skillAlreadyInstalled] in
+      if let installError = await Self.installGlobalSkillIfNeeded(
+        daemonSupervisor: daemonSupervisor,
+        alreadyInstalled: skillAlreadyInstalled
+      ) {
+        viewModel.showAgentLaunchFeedback(
+          AgentLaunchFeedback(
+            title: "Cued skill install failed",
+            detail: installError,
+            isError: true
+          )
+        )
+        refreshAgentTargets()
+        return
+      }
+
+      let feedback = AgentLaunchService.launch(exampleID: exampleID, target: target)
+      viewModel.showAgentLaunchFeedback(feedback)
+      refreshAgentTargets()
+    }
+  }
+
+  private func refreshAgentTargets() {
+    Task.detached(priority: .utility) {
+      let statuses = AgentLaunchService.targetStatuses()
+      await MainActor.run {
+        self.viewModel.applyAgentTargetStatuses(statuses)
+      }
+    }
+  }
+
+  private nonisolated static func installGlobalSkillIfNeeded(
+    daemonSupervisor: DaemonSupervisor,
+    alreadyInstalled: Bool
+  ) async -> String? {
+    guard !alreadyInstalled else {
+      return nil
+    }
+
+    let result = await Task.detached(priority: .userInitiated) {
+      daemonSupervisor.runCLI(arguments: ["skill", "install-global"])
+    }.value
+
+    guard result?.status == 0 else {
+      let stderr = result?.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
+      if stderr?.isEmpty == false {
+        return stderr
+      }
+      return "Run `cued skill install-global` from Terminal, then retry the example."
+    }
+
+    return nil
   }
 
   private func finishSetup() {

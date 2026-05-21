@@ -5,12 +5,8 @@ import SwiftUI
 extension RootView {
   var applicationPage: some View {
     pageContainer {
-      Text("Cued Application")
+      Text("Status")
         .font(.largeTitle.weight(.semibold))
-
-      Text("Your local sync and relationship context surface.")
-        .font(.body)
-        .foregroundStyle(.secondary)
 
       card(spacing: 14) {
         appSummaryRow(
@@ -24,79 +20,48 @@ extension RootView {
           value: sourceSummary,
           status: "\(connectedPlatformCount)/\(max(viewModel.platformConfigurations.count, 1))"
         )
-        Divider()
-        appSummaryRow(
-          label: "Sync Health",
-          value: syncHealthSummary,
-          status: syncHealthStatus
-        )
-        Divider()
-        appSummaryRow(
-          label: "Notes",
-          value: applicationNotes,
-          status: applicationNotesStatus
-        )
       }
 
-      card(spacing: 10) {
-        Text("Relationship context")
-          .font(.headline)
-        Text("Recent people, stale threads, unanswered messages, and agent-ready context will live here after setup.")
-          .font(.subheadline)
-          .foregroundStyle(.secondary)
-          .fixedSize(horizontal: false, vertical: true)
-      }
-
-      card(spacing: 14) {
-        workflowRow(
-          icon: "shippingbox.fill",
-          title: "Debug bundle",
-          detail: "Collect logs, source state, and a redacted local DB summary."
-        )
-        workflowRow(
-          icon: "arrow.branch",
-          title: "Draft repair PR",
-          detail: "Let an agent inspect, patch, test, and propose a local branch."
-        )
-      }
-
-      LazyVGrid(
-        columns: [
-          GridItem(.flexible(), spacing: 12),
-          GridItem(.flexible(), spacing: 12),
-        ],
-        spacing: 12
-      ) {
-        ExampleCard(
-          icon: "chevron.left.forwardslash.chevron.right",
-          title: "Open in Codex",
-          detail: "Start a local repair agent with the current app context."
-        )
-        ExampleCard(
-          icon: "sparkles",
-          title: "Open in Claude Code",
-          detail: "Hand the debug bundle to Claude Code for a patch proposal."
-        )
-      }
-
-      Button("Create draft repair PR") {}
-        .buttonStyle(
-          PermissionActionButtonStyle(
-            variant: .prominent,
-            size: .regular
+      card(spacing: 12) {
+        LazyVGrid(
+          columns: [
+            GridItem(.flexible(), spacing: 10),
+            GridItem(.flexible(), spacing: 10),
+            GridItem(.flexible(), spacing: 10),
+          ],
+          spacing: 10
+        ) {
+          metricTile(
+            label: "Messages",
+            value: statusMetricValue(viewModel.relationshipSummary.messages),
+            breakdown: platformBreakdown(for: .messages)
           )
-        )
-        .disabled(true)
-        .frame(maxWidth: .infinity, alignment: .trailing)
+          metricTile(
+            label: "Contacts",
+            value: statusMetricValue(viewModel.relationshipSummary.contacts),
+            breakdown: platformBreakdown(for: .contacts)
+          )
+          metricTile(
+            label: "Phone calls",
+            value: statusMetricValue(viewModel.relationshipSummary.phoneCalls),
+            breakdown: platformBreakdown(for: .phoneCalls)
+          )
+        }
+      }
+
+      if let feedback = viewModel.agentLaunchFeedback {
+        agentLaunchFeedback(feedback)
+      }
     }
   }
 
-  func workflowRow(icon: String, title: String, detail: String) -> some View {
-    WorkflowRow(icon: icon, title: title, detail: detail)
-  }
-
-  func useCaseTile(icon: String, title: String, detail: String) -> some View {
-    ExampleCard(icon: icon, title: title, detail: detail)
+  func workflowRow(
+    icon: String,
+    title: String,
+    detail: String,
+    tint: Color = .secondary
+  ) -> some View {
+    WorkflowRow(icon: icon, title: title, detail: detail, tint: tint)
   }
 
   func appSummaryRow(label: String, value: String, status: String) -> some View {
@@ -124,49 +89,166 @@ extension RootView {
     }
   }
 
+  func metricTile(
+    label: String,
+    value: String,
+    breakdown: [PlatformMetricBreakdown]
+  ) -> some View {
+    VStack(alignment: .leading, spacing: 10) {
+      AnimatedMetricValue(value: value)
+      Text(label)
+        .font(.subheadline.weight(.semibold))
+        .foregroundStyle(.primary)
+
+      VStack(alignment: .leading, spacing: 7) {
+        ForEach(breakdown.prefix(3)) { item in
+          platformMetricRow(item)
+        }
+      }
+      .frame(minHeight: 77, alignment: .top)
+    }
+    .padding(14)
+    .frame(maxWidth: .infinity, alignment: .leading)
+    .background(rowBackground(cornerRadius: 10))
+  }
+
+  func platformMetricRow(_ item: PlatformMetricBreakdown) -> some View {
+    HStack(spacing: 7) {
+      MiniPlatformIcon(platform: item.platform)
+      Text(item.title)
+        .font(.caption.weight(.medium))
+        .lineLimit(1)
+      Spacer(minLength: 4)
+      Text(formatCount(item.value))
+        .font(.caption.weight(.semibold))
+        .fontDesign(.rounded)
+        .monospacedDigit()
+        .foregroundStyle(.secondary)
+    }
+  }
+
+  func platformBreakdown(for metric: RelationshipMetric) -> [PlatformMetricBreakdown] {
+    viewModel.platformConfigurations.compactMap { configuration in
+      let value = configuration.knownAccounts.reduce(0) { total, integration in
+        guard let stats = integration.projectionStats else {
+          return total
+        }
+        switch metric {
+        case .messages:
+          return total + stats.projectedMessages
+        case .contacts:
+          return total + stats.projectedContacts
+        case .phoneCalls:
+          let observedCalls = stats.rawEventsBySchema["call.observed@1"] ?? 0
+          return total + observedCalls
+        }
+      }
+      guard value > 0 else {
+        return nil
+      }
+      return PlatformMetricBreakdown(
+        platform: configuration.platform,
+        title: configuration.title,
+        value: value
+      )
+    }
+    .sorted { lhs, rhs in
+      if lhs.value == rhs.value {
+        return lhs.title < rhs.title
+      }
+      return lhs.value > rhs.value
+    }
+  }
+
+  func statusMetricValue(_ value: Int) -> String {
+    if !viewModel.hasLoadedSnapshot {
+      return "..."
+    }
+    return formatCount(value)
+  }
+
   var connectedPlatformCount: Int {
     viewModel.platformConfigurations.filter(isPlatformComplete).count
   }
 
   var sourceSummary: String {
     if viewModel.platformConfigurations.isEmpty {
+      if !viewModel.hasLoadedSnapshot {
+        return "Loading the local Cued snapshot from this Mac."
+      }
       return "Sources appear after the daemon reports supported integrations."
     }
     return "Connected, pending, and paused source state in one place."
-  }
-
-  var syncHealthStatus: String {
-    connectedPlatformCount > 0 ? "OK" : "Setup"
-  }
-
-  var syncHealthSummary: String {
-    connectedPlatformCount > 0
-      ? "Recent runs, retries, throttling, and source errors will be summarized here."
-      : "Complete access and sources before sync health becomes useful."
-  }
-
-  var applicationNotesStatus: String {
-    if !viewModel.allPermissionsGranted {
-      return "Action"
-    }
-    if connectedPlatformCount == 0 {
-      return "Setup"
-    }
-    return "Clear"
-  }
-
-  var applicationNotes: String {
-    if !viewModel.allPermissionsGranted {
-      return "Some local permissions still need attention before Cued can sync fully."
-    }
-    if connectedPlatformCount == 0 {
-      return "No source is connected yet. Connect a platform before asking an agent to debug sync health."
-    }
-    return "No active application issues are reported from setup state."
   }
 
   var localDatabaseSummary: String {
     "~/.cued/local.db"
   }
 
+}
+
+enum RelationshipMetric {
+  case messages
+  case contacts
+  case phoneCalls
+}
+
+struct PlatformMetricBreakdown: Identifiable {
+  let platform: String
+  let title: String
+  let value: Int
+
+  var id: String { "\(platform):\(title)" }
+}
+
+struct AnimatedMetricValue: View {
+  let value: String
+
+  @State private var displayedValue: String
+  @State private var isTicking = false
+
+  init(value: String) {
+    self.value = value
+    _displayedValue = State(initialValue: value)
+  }
+
+  var body: some View {
+    Text(displayedValue)
+      .font(.system(size: 30, weight: .semibold, design: .rounded))
+      .minimumScaleFactor(0.74)
+      .lineLimit(1)
+      .monospacedDigit()
+      .blur(radius: isTicking ? 2.4 : 0)
+      .opacity(isTicking ? 0.58 : 1)
+      .offset(y: isTicking ? -1.5 : 0)
+      .frame(maxWidth: .infinity, alignment: .leading)
+      .animation(.easeOut(duration: 0.14), value: isTicking)
+      .onChange(of: value) { nextValue in
+        guard nextValue != displayedValue else {
+          return
+        }
+        isTicking = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.11) {
+          displayedValue = nextValue
+          isTicking = false
+        }
+      }
+  }
+}
+
+struct MiniPlatformIcon: View {
+  let platform: String
+
+  var body: some View {
+    ZStack {
+      Circle()
+        .fill(platformAccentColor(for: platform).opacity(0.18))
+      Circle()
+        .strokeBorder(platformAccentColor(for: platform).opacity(0.38), lineWidth: 0.75)
+      PlatformIcon(platform: platform)
+        .frame(width: 16, height: 16)
+        .scaleEffect(0.4)
+    }
+    .frame(width: 18, height: 18)
+  }
 }

@@ -175,4 +175,20 @@ describe("onboarding snapshot", () => {
 
     db.close();
   });
+
+  it("includes a relationship summary for the onboarding application page", async () => {
+    const db = createDb();
+    const snapshot = await buildOnboardingSnapshot(db);
+
+    expect(snapshot.relationshipSummary).toEqual({
+      messages: 0,
+      contacts: 0,
+      phoneCalls: 0,
+      pendingProjectionEvents: 0,
+      lastUpdatedAt: null,
+      source: "database",
+    });
+
+    db.close();
+  });
 });

@@ -1,6 +1,6 @@
 import Foundation
 
-enum RootPage: Int, CaseIterable {
+public enum RootPage: Int, CaseIterable {
   case welcome
   case permissions
   case platforms
@@ -14,18 +14,18 @@ enum RootPage: Int, CaseIterable {
     case .permissions:
       return "Permissions"
     case .platforms:
-      return "Platforms"
+      return "Sources"
     case .useCases:
-      return "Use cases"
+      return "Examples"
     case .application:
-      return "Cued Application"
+      return "Status"
     }
   }
 
   var shortTitle: String {
     switch self {
     case .application:
-      return "App"
+      return "Status"
     default:
       return title
     }

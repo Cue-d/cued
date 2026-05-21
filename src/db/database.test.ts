@@ -25,6 +25,51 @@ describe("CuedDatabase", () => {
     return db;
   }
 
+  it("counts observed phone calls with a targeted raw event query", () => {
+    const db = createDb();
+
+    db.insertRawEvent({
+      id: randomUUID(),
+      platform: "imessage",
+      accountKey: "local",
+      entityKind: "call",
+      eventKind: "observed",
+      observedAt: 1,
+      dedupeKey: "imessage:call:1",
+      payload: {
+        sourceCallKey: "call-1",
+        sourceConversationKey: "conversation-1",
+        provider: "facetime",
+        direction: "incoming",
+        medium: "audio",
+        status: "missed",
+        startedAt: 1,
+      },
+      sourceVersion: "imessage-v1",
+    });
+    db.insertRawEvent({
+      id: randomUUID(),
+      platform: "slack",
+      accountKey: "workspace",
+      entityKind: "message",
+      eventKind: "created",
+      observedAt: 2,
+      dedupeKey: "slack:message:1",
+      payload: {
+        sourceMessageKey: "message-1",
+        sourceConversationKey: "channel-1",
+        sender: { sourceContactKey: "user-1", displayName: "Ava" },
+        sentAt: 2,
+        text: "Not a call",
+      },
+      sourceVersion: "slack-v1",
+    });
+
+    expect(db.countObservedPhoneCalls()).toBe(1);
+
+    db.close();
+  });
+
   function insertContact(
     db: CuedDatabase,
     input: {

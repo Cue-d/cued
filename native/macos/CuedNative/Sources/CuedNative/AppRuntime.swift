@@ -2,6 +2,7 @@ import AppKit
 import Contacts
 import Darwin
 import Foundation
+import Interface
 import SQLite3
 
 private let appDaemonHeartbeatGraceMs = 120_000
@@ -433,6 +434,8 @@ struct AppIntegrationStatus {
   let displayName: String?
   let authState: String
   let enabled: Bool
+  let projectionStats: ProjectionStats?
+  let capability: CapabilityStatus?
 }
 
 struct AppPlatformMessageCount {
@@ -451,6 +454,7 @@ struct AppStatusSnapshot {
   let contacts: Int
   let conversations: Int
   let messages: Int
+  var phoneCalls: Int
   let capturedRawEvents: Int
   let projectedMessages: Int
   let pendingProjectionEvents: Int
@@ -464,20 +468,22 @@ struct AppStatusSnapshot {
 
 enum LaunchPresentation: Equatable {
   case none
-  case onboarding(forceActivePermissionRefresh: Bool, resetToFirstPage: Bool)
+  case onboarding(forceActivePermissionRefresh: Bool, initialPage: Int)
 }
 
 func launchPresentationForCuedOpen(
   onboardingCompletedVersion: String?,
   currentVersion: String?,
-  hasPermissionRelaunchSetupIntent: Bool
+  hasPermissionRelaunchSetupIntent: Bool,
+  savedOnboardingPage: Int,
+  permissionsPage: Int
 ) -> LaunchPresentation {
   if hasPermissionRelaunchSetupIntent {
-    return .onboarding(forceActivePermissionRefresh: true, resetToFirstPage: true)
+    return .onboarding(forceActivePermissionRefresh: true, initialPage: permissionsPage)
   }
 
   guard onboardingCompletedVersion == currentVersion else {
-    return .onboarding(forceActivePermissionRefresh: false, resetToFirstPage: true)
+    return .onboarding(forceActivePermissionRefresh: false, initialPage: savedOnboardingPage)
   }
 
   return .none
@@ -499,6 +505,7 @@ final class AppStatusStore: @unchecked Sendable {
         contacts: 0,
         conversations: 0,
         messages: 0,
+        phoneCalls: 0,
         capturedRawEvents: 0,
         projectedMessages: 0,
         pendingProjectionEvents: 0,
@@ -525,6 +532,7 @@ final class AppStatusStore: @unchecked Sendable {
         contacts: 0,
         conversations: 0,
         messages: 0,
+        phoneCalls: 0,
         capturedRawEvents: 0,
         projectedMessages: 0,
         pendingProjectionEvents: 0,
@@ -559,6 +567,7 @@ final class AppStatusStore: @unchecked Sendable {
       contacts: counts[0],
       conversations: counts[1],
       messages: counts[2],
+      phoneCalls: queryPhoneCalls(db: db),
       capturedRawEvents: counts[3],
       projectedMessages: counts[2],
       pendingProjectionEvents: 0,
@@ -582,7 +591,15 @@ final class AppStatusStore: @unchecked Sendable {
     else {
       return nil
     }
-    return parseStatusPayload(payload, daemonLockState: daemonLockState)
+    guard stringValue(payload["dbPath"]) == dbPath else {
+      return nil
+    }
+    var snapshot = parseStatusPayload(payload, daemonLockState: daemonLockState)
+    let relationshipSummary = payload["relationshipSummary"] as? [String: Any] ?? [:]
+    if relationshipSummary["phoneCalls"] == nil {
+      snapshot.phoneCalls = readPhoneCallsFromDatabase()
+    }
+    return snapshot
   }
 
   private func parseStatusPayload(
@@ -590,6 +607,7 @@ final class AppStatusStore: @unchecked Sendable {
     daemonLockState: (running: Bool, pid: Int?, updatedAt: Int?)
   ) -> AppStatusSnapshot {
     let overview = payload["overview"] as? [String: Any] ?? [:]
+    let relationshipSummary = payload["relationshipSummary"] as? [String: Any] ?? [:]
     let dataStatus = payload["dataStatus"] as? [String: Any] ?? [:]
     let integrations = parseIntegrations(payload["integrations"])
     let app = payload["app"] as? [String: Any] ?? [:]
@@ -616,6 +634,7 @@ final class AppStatusStore: @unchecked Sendable {
       contacts: intValue(overview["contacts"]) ?? 0,
       conversations: intValue(overview["conversations"]) ?? 0,
       messages: intValue(overview["messages"]) ?? 0,
+      phoneCalls: intValue(relationshipSummary["phoneCalls"]) ?? 0,
       capturedRawEvents: intValue(dataStatus["capturedRawEvents"]) ?? intValue(overview["rawEvents"]) ?? 0,
       projectedMessages: intValue(dataStatus["projectedMessages"]) ?? intValue(overview["messages"]) ?? 0,
       pendingProjectionEvents: intValue(dataStatus["pendingProjectionEvents"]) ?? 0,
@@ -663,9 +682,45 @@ final class AppStatusStore: @unchecked Sendable {
         accountKey: accountKey,
         displayName: stringValue(row["displayName"]),
         authState: authState,
-        enabled: boolValue(row["enabled"]) ?? false
+        enabled: boolValue(row["enabled"]) ?? false,
+        projectionStats: parseProjectionStats(row["projectionStats"]),
+        capability: parseCapability(row["capability"])
       )
     }
+  }
+
+  private func parseCapability(_ value: Any?) -> CapabilityStatus? {
+    guard let payload = value as? [String: Any],
+          let availability = stringValue(payload["availability"]) else {
+      return nil
+    }
+
+    return CapabilityStatus(
+      availability: availability,
+      setupVisible: boolValue(payload["onboardingVisible"]) ?? true
+    )
+  }
+
+  private func parseProjectionStats(_ value: Any?) -> ProjectionStats? {
+    guard let payload = value as? [String: Any] else {
+      return nil
+    }
+
+    let rawEventsBySchemaPayload = payload["rawEventsBySchema"] as? [String: Any] ?? [:]
+    let rawEventsBySchema = rawEventsBySchemaPayload.reduce(into: [String: Int]()) { result, entry in
+      guard let value = intValue(entry.value) else {
+        return
+      }
+      result[entry.key] = value
+    }
+
+    return ProjectionStats(
+      rawEvents: intValue(payload["rawEvents"]) ?? 0,
+      rawEventsBySchema: rawEventsBySchema,
+      projectedContacts: intValue(payload["projectedContacts"]) ?? 0,
+      projectedConversations: intValue(payload["projectedConversations"]) ?? 0,
+      projectedMessages: intValue(payload["projectedMessages"]) ?? 0
+    )
   }
 
   private func parseUpdateSummary(_ value: Any?) -> AppUpdateSummary? {
@@ -756,6 +811,38 @@ final class AppStatusStore: @unchecked Sendable {
     return Int(sqlite3_column_int64(statement, 0))
   }
 
+  private func queryPhoneCalls(db: OpaquePointer) -> Int {
+    let sql = """
+      SELECT COUNT(*)
+      FROM raw_events
+      WHERE platform = 'imessage'
+        AND account_key = 'local'
+        AND COALESCE(normalized_schema, entity_kind || '.' || event_kind || '@1') = 'call.observed@1'
+    """
+
+    var statement: OpaquePointer?
+    guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK, let statement else {
+      return 0
+    }
+    defer { sqlite3_finalize(statement) }
+    guard sqlite3_step(statement) == SQLITE_ROW else {
+      return 0
+    }
+    return Int(sqlite3_column_int64(statement, 0))
+  }
+
+  private func readPhoneCallsFromDatabase() -> Int {
+    var db: OpaquePointer?
+    guard sqlite3_open_v2(dbPath, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK, let db else {
+      if let db {
+        sqlite3_close(db)
+      }
+      return 0
+    }
+    defer { sqlite3_close(db) }
+    return queryPhoneCalls(db: db)
+  }
+
   private func queryMessageCountsByPlatform(db: OpaquePointer) -> [AppPlatformMessageCount] {
     let sql = """
       SELECT platform, COUNT(*)
@@ -820,7 +907,9 @@ final class AppStatusStore: @unchecked Sendable {
           accountKey: String(cString: sqlite3_column_text(statement, 1)),
           displayName: sqlite3_column_type(statement, 4) == SQLITE_NULL ? nil : String(cString: sqlite3_column_text(statement, 4)),
           authState: String(cString: sqlite3_column_text(statement, 2)),
-          enabled: sqlite3_column_int(statement, 3) == 1
+          enabled: sqlite3_column_int(statement, 3) == 1,
+          projectionStats: nil,
+          capability: nil
         )
       )
     }
@@ -890,7 +979,9 @@ final class AppStatusStore: @unchecked Sendable {
       accountKey: accountKey,
       displayName: existing?.displayName ?? displayName,
       authState: authState,
-      enabled: existing?.enabled ?? true
+      enabled: existing?.enabled ?? true,
+      projectionStats: existing?.projectionStats,
+      capability: existing?.capability
     )
   }
 
@@ -1423,6 +1514,7 @@ final class MenuBarAppController: NSObject, NSApplicationDelegate {
   private let daemonSupervisor: DaemonSupervisor
   private lazy var rootWindowController = RootWindowController(
     daemonSupervisor: daemonSupervisor,
+    statusStore: statusStore,
     onRefresh: { [weak self] in
       self?.refreshStatus()
     }
@@ -1558,21 +1650,24 @@ final class MenuBarAppController: NSObject, NSApplicationDelegate {
     let presentation = launchPresentationForCuedOpen(
       onboardingCompletedVersion: snapshot.setupCompletedVersion,
       currentVersion: currentVersion,
-      hasPermissionRelaunchSetupIntent: consumePermissionRelaunchSetupIntent()
+      hasPermissionRelaunchSetupIntent: consumePermissionRelaunchSetupIntent(),
+      savedOnboardingPage: savedOnboardingPage(maxPage: RootPage.allCases.count - 1),
+      permissionsPage: RootPage.permissions.rawValue
     )
 
     switch presentation {
-    case let .onboarding(forceActivePermissionRefresh, resetToFirstPage):
+    case let .onboarding(forceActivePermissionRefresh, initialPage):
       rootWindowController.showAndRefresh(
         forceActivePermissionRefresh: forceActivePermissionRefresh,
-        resetToFirstPage: resetToFirstPage
+        initialPage: initialPage
       )
     case .none:
       guard showWhenComplete else {
         return
       }
       rootWindowController.showAndRefresh(
-        forceActivePermissionRefresh: forceActivePermissionRefreshWhenComplete
+        forceActivePermissionRefresh: forceActivePermissionRefreshWhenComplete,
+        defaultToLastPage: true
       )
     }
   }

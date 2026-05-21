@@ -7,18 +7,22 @@ final class LaunchPresentationTests: XCTestCase {
       launchPresentationForCuedOpen(
         onboardingCompletedVersion: nil,
         currentVersion: "0.1.36",
-        hasPermissionRelaunchSetupIntent: false
+        hasPermissionRelaunchSetupIntent: false,
+        savedOnboardingPage: 3,
+        permissionsPage: 1
       ),
-      .onboarding(forceActivePermissionRefresh: false, resetToFirstPage: true)
+      .onboarding(forceActivePermissionRefresh: false, initialPage: 3)
     )
 
     XCTAssertEqual(
       launchPresentationForCuedOpen(
         onboardingCompletedVersion: "0.1.35",
         currentVersion: "0.1.36",
-        hasPermissionRelaunchSetupIntent: false
+        hasPermissionRelaunchSetupIntent: false,
+        savedOnboardingPage: 2,
+        permissionsPage: 1
       ),
-      .onboarding(forceActivePermissionRefresh: false, resetToFirstPage: true)
+      .onboarding(forceActivePermissionRefresh: false, initialPage: 2)
     )
   }
 
@@ -27,7 +31,9 @@ final class LaunchPresentationTests: XCTestCase {
       launchPresentationForCuedOpen(
         onboardingCompletedVersion: "0.1.36",
         currentVersion: "0.1.36",
-        hasPermissionRelaunchSetupIntent: false
+        hasPermissionRelaunchSetupIntent: false,
+        savedOnboardingPage: 4,
+        permissionsPage: 1
       ),
       .none
     )
@@ -38,9 +44,11 @@ final class LaunchPresentationTests: XCTestCase {
       launchPresentationForCuedOpen(
         onboardingCompletedVersion: "0.1.36",
         currentVersion: "0.1.36",
-        hasPermissionRelaunchSetupIntent: true
+        hasPermissionRelaunchSetupIntent: true,
+        savedOnboardingPage: 4,
+        permissionsPage: 1
       ),
-      .onboarding(forceActivePermissionRefresh: true, resetToFirstPage: true)
+      .onboarding(forceActivePermissionRefresh: true, initialPage: 1)
     )
   }
 }

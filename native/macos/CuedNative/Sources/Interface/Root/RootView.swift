@@ -2,6 +2,17 @@ import AppKit
 import Combine
 import SwiftUI
 
+private let onboardingLastPageUserDefaultsKey = "so.cued.onboarding.lastPage"
+
+public func savedOnboardingPage(maxPage: Int) -> Int {
+  let saved = UserDefaults.standard.integer(forKey: onboardingLastPageUserDefaultsKey)
+  return min(max(saved, 0), max(0, maxPage))
+}
+
+public func saveOnboardingPage(_ page: Int) {
+  UserDefaults.standard.set(max(0, page), forKey: onboardingLastPageUserDefaultsKey)
+}
+
 public struct RootView: View {
   @ObservedObject var viewModel: RootViewModel
 
@@ -13,6 +24,7 @@ public struct RootView: View {
   let onEnableIntegration: (String, String) -> Void
   let onRemoveIntegration: (String, String) -> Void
   let onConnectIntegration: (String, String) -> Void
+  let onLaunchAgentExample: (AgentExampleID, AgentTarget) -> Void
   let onFinish: () -> Void
 
   @State var addAccountPrompt: AddAccountPrompt?
@@ -32,6 +44,7 @@ public struct RootView: View {
     onEnableIntegration: @escaping (String, String) -> Void,
     onRemoveIntegration: @escaping (String, String) -> Void,
     onConnectIntegration: @escaping (String, String) -> Void,
+    onLaunchAgentExample: @escaping (AgentExampleID, AgentTarget) -> Void,
     onFinish: @escaping () -> Void
   ) {
     self.viewModel = viewModel
@@ -43,6 +56,7 @@ public struct RootView: View {
     self.onEnableIntegration = onEnableIntegration
     self.onRemoveIntegration = onRemoveIntegration
     self.onConnectIntegration = onConnectIntegration
+    self.onLaunchAgentExample = onLaunchAgentExample
     self.onFinish = onFinish
   }
 
@@ -91,6 +105,7 @@ public struct RootView: View {
       }
     }
     .onChange(of: viewModel.currentPage) { page in
+      saveOnboardingPage(page)
       guard rootPage(for: page) != .permissions else {
         return
       }
@@ -238,8 +253,9 @@ public struct RootView: View {
       )
     }
     .padding(.horizontal, 28)
+    .padding(.top, 10)
     .padding(.bottom, 13)
-    .frame(minHeight: 60, alignment: .bottom)
+    .frame(minHeight: 68, alignment: .bottom)
   }
 
   func handleNext() {
@@ -260,7 +276,7 @@ public struct RootView: View {
       }
       .frame(maxWidth: .infinity, alignment: .top)
       .padding(.top, 24)
-      .padding(.bottom, 8)
+      .padding(.bottom, 88)
     }
     .scrollIndicators(.never)
     .padding(.horizontal, 28)
@@ -278,7 +294,7 @@ public struct RootView: View {
     .padding(padding)
     .frame(maxWidth: .infinity, alignment: .leading)
     .background(
-      RoundedRectangle(cornerRadius: 16, style: .continuous)
+      RoundedRectangle(cornerRadius: 10, style: .continuous)
         .fill(Color(NSColor.controlBackgroundColor))
         .shadow(color: .black.opacity(0.06), radius: 8, y: 3)
     )

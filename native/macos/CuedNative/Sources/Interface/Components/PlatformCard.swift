@@ -24,7 +24,9 @@ extension RootView {
 
         Spacer(minLength: 12)
 
-        if isFullyConnected {
+        if configuration.needsPermission {
+          attentionBadge(title: "Needs access")
+        } else if isFullyConnected {
           Image(systemName: "checkmark.circle.fill")
             .font(.title3.weight(.semibold))
             .foregroundStyle(.green)
@@ -180,7 +182,7 @@ extension RootView {
     }
     if configuration.needsPermission {
       return (
-        "Fix permissions",
+        "Open permissions",
         {
           withAnimation {
             viewModel.currentPage = RootPage.permissions.rawValue
@@ -269,7 +271,7 @@ extension RootView {
     }
     if configuration.needsPermission {
       return (
-        "Fix permissions",
+        "Open permissions",
         {
           withAnimation {
             viewModel.currentPage = RootPage.permissions.rawValue
@@ -357,6 +359,9 @@ extension RootView {
     if !integration.enabled && isConnectedAuthState(integration.authState) {
       parts.append("turned off")
     }
+    if configuration.needsPermission {
+      parts[0] = "Needs Full Disk Access"
+    }
     if normalizedTitle(accountTitle(for: configuration, integration: integration))
       != normalizedTitle(integration.accountKey),
        !hidesAccountKey(platform: integration.platform, accountKey: integration.accountKey) {
@@ -389,6 +394,9 @@ extension RootView {
   }
 
   func isPlatformComplete(_ configuration: PlatformConfig) -> Bool {
+    if configuration.needsPermission {
+      return false
+    }
     if configuration.platform == "phone_calls" {
       return true
     }
@@ -397,5 +405,17 @@ extension RootView {
       return false
     }
     return accounts.allSatisfy { showsCompletionCheckmark(for: configuration, integration: $0) }
+  }
+
+  func attentionBadge(title: String) -> some View {
+    Text(title)
+      .font(.caption.weight(.semibold))
+      .foregroundStyle(.orange)
+      .padding(.horizontal, 8)
+      .padding(.vertical, 5)
+      .background(
+        Capsule(style: .continuous)
+          .fill(Color.orange.opacity(0.13))
+      )
   }
 }

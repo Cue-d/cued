@@ -74,6 +74,7 @@ public enum Preview {
       onEnableIntegration: { _, _ in },
       onRemoveIntegration: { _, _ in },
       onConnectIntegration: { _, _ in },
+      onLaunchAgentExample: { _, _ in },
       onFinish: {}
     )
     .frame(width: previewCase.size.width, height: previewCase.size.height)
@@ -112,9 +113,11 @@ public enum Preview {
     viewModel.apply(
       permissions: fixture.permissions,
       globalSkill: fixture.globalSkill,
+      relationshipSummary: fixture.relationshipSummary,
       allIntegrations: fixture.integrations,
       integrations: fixture.setupIntegrations
     )
+    viewModel.applyAgentTargetStatuses(fixture.agentTargetStatuses)
     return viewModel
   }
 }
@@ -152,7 +155,7 @@ private struct PreviewFixture {
 
   var integrations: [IntegrationStatus] {
     switch name {
-    case "platforms-mixed":
+    case "platforms-mixed", "application-home":
       return [
         integration("contacts", "local", "Contacts.app", "authorized", true, contactsStats),
         integration("imessage", "local", "Messages", "authorized", true, messagesStats),
@@ -162,6 +165,21 @@ private struct PreviewFixture {
       ]
     default:
       return []
+    }
+  }
+
+  var relationshipSummary: RelationshipSummary {
+    switch name {
+    case "application-home":
+      return RelationshipSummary(
+        messages: 35_853,
+        contacts: 2_319,
+        phoneCalls: 214,
+        pendingProjectionEvents: 0,
+        source: "menu_bar_cache"
+      )
+    default:
+      return RelationshipSummary()
     }
   }
 
@@ -177,6 +195,20 @@ private struct PreviewFixture {
       firstActual("whatsapp", actual) ?? integration("whatsapp", "default", "WhatsApp", "missing", true, nil),
       firstActual("signal", actual) ?? integration("signal", "default", "Signal", "missing", true, nil),
     ]
+  }
+
+  var agentTargetStatuses: [AgentTarget: AgentTargetStatus] {
+    Dictionary(
+      uniqueKeysWithValues: AgentTarget.allCases.map { target in
+        (
+          target,
+          AgentTargetStatus(
+            readiness: .ready,
+            detail: "\(target.title) is ready for preview."
+          )
+        )
+      }
+    )
   }
 
   private var contactsStats: ProjectionStats {
