@@ -313,6 +313,26 @@ public final class RootViewModel: ObservableObject {
     refreshSequence += 1
   }
 
+  public func setPermissionStatus(
+    key: String,
+    status: String,
+    summary: String,
+    requestFlags: [String]
+  ) {
+    let replacement = PermissionStatus(
+      key: key,
+      status: status,
+      summary: summary,
+      requestFlags: requestFlags
+    )
+    if let index = permissionStatuses.firstIndex(where: { $0.key == key }) {
+      permissionStatuses[index] = replacement
+    } else {
+      permissionStatuses.append(replacement)
+      permissionStatuses = buildPermissionStatuses(permissionStatuses)
+    }
+  }
+
   public func configuration(for platform: String) -> PlatformConfig? {
     platformConfigurations.first { $0.platform == platform }
   }

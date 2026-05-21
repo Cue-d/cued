@@ -148,4 +148,21 @@ final class RootViewTests: XCTestCase {
       )
     )
   }
+
+  @MainActor
+  func testPermissionStatusCanBeUpdatedOptimistically() {
+    let viewModel = RootViewModel()
+
+    viewModel.setPermissionStatus(
+      key: "diagnostics",
+      status: "needs_action",
+      summary: "Redacted diagnostic reporting is disabled",
+      requestFlags: ["--telemetry-disable"]
+    )
+
+    let diagnostics = viewModel.permissionStatuses.first { $0.key == "diagnostics" }
+    XCTAssertEqual(diagnostics?.status, "needs_action")
+    XCTAssertEqual(diagnostics?.summary, "Redacted diagnostic reporting is disabled")
+    XCTAssertEqual(diagnostics?.requestFlags, ["--telemetry-disable"])
+  }
 }

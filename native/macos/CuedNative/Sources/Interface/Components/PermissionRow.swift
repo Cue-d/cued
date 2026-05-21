@@ -10,6 +10,14 @@ extension RootView {
       isGranted: permission.status == "granted",
       onToggle: permission.key == "diagnostics"
         ? { enabled in
+          viewModel.setPermissionStatus(
+            key: "diagnostics",
+            status: enabled ? "granted" : "needs_action",
+            summary: enabled
+              ? "Redacted diagnostic reporting is enabled"
+              : "Redacted diagnostic reporting is disabled",
+            requestFlags: [enabled ? "--telemetry-enable" : "--telemetry-disable"]
+          )
           onRequestPermission([enabled ? "--telemetry-enable" : "--telemetry-disable"])
         }
         : nil,
