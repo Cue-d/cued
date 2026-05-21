@@ -33,6 +33,8 @@ final class RootWindowController: NSWindowController {
   private var pendingLivePermissionDeadline: Date?
   private var pendingRefreshAfterCurrent = false
   private var pendingForceActivePermissionRefreshAfterCurrent = false
+  private var pendingTelemetryEnabled: Bool?
+  private var isApplyingTelemetryToggle = false
 
   init(
     daemonSupervisor: DaemonSupervisor,
@@ -86,6 +88,7 @@ final class RootWindowController: NSWindowController {
       )
     )
     window.contentViewController = hosting
+    reportAppLaunch()
   }
 
   @available(*, unavailable)
@@ -123,6 +126,13 @@ final class RootWindowController: NSWindowController {
       NSApp.activate(ignoringOtherApps: true)
     }
     refresh(forceActivePermissionRefresh: forceActivePermissionRefresh)
+  }
+
+  private func reportAppLaunch() {
+    let daemonSupervisor = self.daemonSupervisor
+    Task.detached(priority: .utility) { [daemonSupervisor] in
+      _ = daemonSupervisor.runCLI(arguments: ["telemetry", "app-launched"])
+    }
   }
 
   func refresh(forceActivePermissionRefresh: Bool = false) {
@@ -324,13 +334,52 @@ final class RootWindowController: NSWindowController {
     }
   }
 
+  private func setTelemetryEnabledFromOnboarding(_ enabled: Bool) {
+    viewModel.beginRefresh()
+    pendingTelemetryEnabled = enabled
+    guard !isApplyingTelemetryToggle else {
+      return
+    }
+    isApplyingTelemetryToggle = true
+    applyPendingTelemetryToggle()
+  }
+
+  private func applyPendingTelemetryToggle() {
+    guard let enabled = pendingTelemetryEnabled else {
+      isApplyingTelemetryToggle = false
+      onRefresh()
+      refresh()
+      return
+    }
+    pendingTelemetryEnabled = nil
+
+    let daemonSupervisor = self.daemonSupervisor
+    Task.detached(priority: .userInitiated) { [daemonSupervisor, enabled] in
+      _ = daemonSupervisor.runCLI(arguments: ["telemetry", enabled ? "enable" : "disable"])
+      await MainActor.run {
+        self.applyPendingTelemetryToggle()
+      }
+    }
+  }
+
   private func requestPermission(flags: [String]) {
+    if flags.contains("--telemetry-enable") {
+      setTelemetryEnabledFromOnboarding(true)
+      return
+    }
+    if flags.contains("--telemetry-disable") {
+      setTelemetryEnabledFromOnboarding(false)
+      return
+    }
     if permissionKeys(for: flags).contains("full_disk_access") {
       markPermissionRelaunchSetupIntent()
     }
+    let permissionTelemetry = permissionKeys(for: flags).map {
+      ["telemetry", "permission-requested", "--kind", $0]
+    }
     trackLivePermissionRequests(flags: flags)
     runPermissionCommands(
-      [["permissions", "request"] + flags],
+      permissionTelemetry + [["permissions", "request"] + flags],
       forceActiveRefreshAfter: shouldActivelyRefreshPermissions(for: flags)
     )
   }

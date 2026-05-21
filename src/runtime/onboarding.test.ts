@@ -76,6 +76,7 @@ describe("onboarding snapshot", () => {
     expect(snapshot.permissions.map((permission) => permission.key)).toEqual([
       "contacts",
       "full_disk_access",
+      "diagnostics",
     ]);
     expect(snapshot.globalSkill).toEqual(
       expect.objectContaining({
@@ -86,6 +87,12 @@ describe("onboarding snapshot", () => {
     expect(snapshot.permissions.find((permission) => permission.key === "contacts")).toEqual(
       expect.objectContaining({
         status: process.platform === "darwin" ? "granted" : "unknown",
+      }),
+    );
+    expect(snapshot.permissions.find((permission) => permission.key === "diagnostics")).toEqual(
+      expect.objectContaining({
+        status: "disabled",
+        summary: "Redacted diagnostic reporting is disabled",
       }),
     );
     expect(snapshot.integrations).toEqual(

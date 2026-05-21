@@ -73,6 +73,12 @@ import {
 } from "./runtime/updater/service.js";
 import { runSetupTUI } from "./setup.js";
 import { getGlobalCuedSkillStatus, installGlobalCuedSkill } from "./skills/install.js";
+import { getTelemetryStatus, sendTelemetryEvent, setTelemetryEnabled } from "./telemetry/client.js";
+import {
+  durationBucket,
+  errorTelemetryProperties,
+  sendTelemetryEventSafe,
+} from "./telemetry/context.js";
 
 const DIST_ROOT = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(DIST_ROOT, "..");
@@ -135,6 +141,7 @@ Usage:
   cued cli install|status
   cued login-item enable|disable|status
   cued onboarding complete|snapshot|status [--refresh-managed] [--refresh-permissions]
+  cued telemetry status|enable|disable|smoke
   cued skill install-global|status
   cued permissions doctor|status|request [--all|--contacts|--full-disk-access]
   cued sql <query>
@@ -727,9 +734,19 @@ async function main(): Promise<void> {
         switch (subcommand) {
           case "complete":
             db.markOnboardingCompleted(getCurrentAppVersion());
+            await sendTelemetryEventSafe(db, "onboarding_completed", {
+              component: "onboarding",
+              operation: "complete",
+              stage: "complete",
+            });
             printJson(db.getAppMetadata());
             return;
           case "snapshot":
+            await sendTelemetryEventSafe(db, "onboarding_started", {
+              component: "onboarding",
+              operation: "snapshot",
+              stage: refreshPermissions ? "permissions" : refreshManaged ? "managed" : "status",
+            });
             printJson(
               await buildOnboardingSnapshot(db, {
                 refreshManagedIntegrations: refreshManaged,
@@ -760,6 +777,82 @@ async function main(): Promise<void> {
         default:
           throw new Error("Usage: cued skill install-global | status");
       }
+    case "telemetry": {
+      const db = openCuedDatabase();
+      try {
+        switch (subcommand) {
+          case "status":
+            printJson(getTelemetryStatus(db));
+            return;
+          case "enable":
+            setTelemetryEnabled(db, true);
+            await sendTelemetryEventSafe(db, "diagnostics_opt_in_changed", {
+              component: "telemetry",
+              operation: "set_enabled",
+              enabled: true,
+            });
+            printJson(getTelemetryStatus(db));
+            return;
+          case "disable":
+            setTelemetryEnabled(db, false);
+            printJson(getTelemetryStatus(db));
+            return;
+          case "app-launched":
+            await sendTelemetryEventSafe(db, "app_launched", {
+              component: "native_app",
+              operation: "launch",
+            });
+            printJson({ ok: true });
+            return;
+          case "permission-requested": {
+            const permissionKind = parseFlagValue(rest, "--kind") ?? "unknown";
+            await sendTelemetryEventSafe(db, "permission_requested", {
+              component: "permissions",
+              operation: "request",
+              permission_kind: permissionKind,
+            });
+            printJson({ ok: true });
+            return;
+          }
+          case "rollback-started":
+          case "rollback-completed":
+          case "rollback-failed": {
+            const eventName =
+              subcommand === "rollback-started"
+                ? "rollback_started"
+                : subcommand === "rollback-completed"
+                  ? "rollback_completed"
+                  : "rollback_failed";
+            await sendTelemetryEventSafe(db, eventName, {
+              component: "updater",
+              operation: "rollback",
+              update_stage: subcommand.replace("rollback-", ""),
+              target_version: parseFlagValue(rest, "--target-version") ?? getCurrentAppVersion(),
+            });
+            printJson({ ok: true });
+            return;
+          }
+          case "smoke":
+            printJson(
+              await sendTelemetryEvent(db, "sync_failed", {
+                platform: "imessage",
+                subsystem: "sync",
+                error_code: "cli_smoke",
+                fingerprint: "0123456789abcdef0123456789abcdef",
+                test_event: true,
+                message_count: 1,
+              }),
+            );
+            return;
+          default:
+            throw new Error(
+              "Usage: cued telemetry status | enable | disable | app-launched | permission-requested --kind KIND | rollback-started|rollback-completed|rollback-failed [--target-version VERSION] | smoke",
+            );
+        }
+      } finally {
+        db.close();
+      }
+    }
     case "login-item":
       switch (subcommand) {
         case "enable":
@@ -779,10 +872,33 @@ async function main(): Promise<void> {
         case "doctor":
           {
             const db = openCuedDatabase();
+            const startedAt = Date.now();
             try {
+              const doctor = await buildDoctorReport(db);
+              const checks = Array.isArray(doctor.checks) ? doctor.checks : [];
+              await sendTelemetryEventSafe(db, "doctor_started", {
+                component: "doctor",
+                operation: "permissions",
+              });
+              for (const check of checks) {
+                const record = check as { id?: unknown; status?: unknown };
+                if (record.status === "error") {
+                  await sendTelemetryEventSafe(db, "doctor_check_failed", {
+                    component: "doctor",
+                    operation: "permissions",
+                    doctor_check_id: String(record.id ?? "unknown"),
+                    ...errorTelemetryProperties("doctor check failed", "doctor_check_failed"),
+                  });
+                }
+              }
+              await sendTelemetryEventSafe(db, "doctor_completed", {
+                component: "doctor",
+                operation: "permissions",
+                duration_bucket: durationBucket(Date.now() - startedAt),
+              });
               printJson({
                 app: getAppBundleInfo(),
-                doctor: await buildDoctorReport(db),
+                doctor,
               });
             } finally {
               db.close();

@@ -121,6 +121,11 @@ import type {
   WhatsAppReceiptSnapshot,
   WhatsAppSnapshot,
 } from "../../platforms/whatsapp/types.js";
+import {
+  durationBucket,
+  errorTelemetryProperties,
+  sendTelemetryEventSafe,
+} from "../../telemetry/context.js";
 import { fetchAttachment, listAttachments, searchAttachments } from "../attachments.js";
 import { buildPermissionStatus } from "../doctor.js";
 import { emitHookEvent } from "../hooks.js";
@@ -1780,6 +1785,10 @@ export async function runDaemon(): Promise<void> {
   const db = openedDb;
   const startedAt = now();
   const runOwnerId = `daemon:${process.pid}:${startedAt}`;
+  await sendTelemetryEventSafe(db, "daemon_started", {
+    component: "daemon",
+    operation: "start",
+  });
   const ingestConcurrency = getIngestConcurrency();
   const messageFtsIndexBatchSize = getMessageFtsIndexBatchSize();
   const realtimeProjectionEnabled = getRealtimeProjectionEnabled();
@@ -3777,6 +3786,15 @@ export async function runDaemon(): Promise<void> {
       trigger: currentRun.trigger,
       runType: currentRun.run_type,
     });
+    await sendTelemetryEventSafe(db, "sync_started", {
+      component: "sync",
+      operation: "ingest",
+      stage: "ingest",
+      run_id: currentRun.id,
+      platform: currentRun.platform ?? "all",
+      run_type: currentRun.run_type,
+      trigger: currentRun.trigger,
+    });
     try {
       if (
         (currentRun.run_type !== "sync" && currentRun.run_type !== "sync_resume") ||
@@ -3799,6 +3817,16 @@ export async function runDaemon(): Promise<void> {
           null,
           runClaim,
         );
+        await sendTelemetryEventSafe(db, "sync_failed", {
+          component: "sync",
+          operation: "ingest",
+          stage: "validation",
+          run_id: currentRun.id,
+          platform: currentRun.platform,
+          run_type: currentRun.run_type,
+          trigger: currentRun.trigger,
+          ...errorTelemetryProperties("No adapter registered", "adapter_missing"),
+        });
         return;
       }
 
@@ -3852,6 +3880,15 @@ export async function runDaemon(): Promise<void> {
         firstInsertedRowId: null,
         lastInsertedRowId: null,
       };
+      await sendTelemetryEventSafe(db, "helper_started", {
+        component: "sync",
+        operation: "adapter",
+        stage: "adapter",
+        run_id: currentRun.id,
+        platform,
+        run_type: currentRun.run_type,
+        helper_kind: platform,
+      });
 
       if (platform === "whatsapp" && runDetails?.source !== "whatsapp_desktop") {
         const session =
@@ -4249,6 +4286,16 @@ export async function runDaemon(): Promise<void> {
         insertedRawEvents: insertResult.insertedCount,
         timings,
       });
+      await sendTelemetryEventSafe(db, "sync_completed", {
+        component: "sync",
+        operation: "ingest",
+        stage: "ingest",
+        run_id: currentRun.id,
+        platform,
+        run_type: currentRun.run_type,
+        trigger: currentRun.trigger,
+        duration_bucket: durationBucket(now() - ingestStartedAt),
+      });
       daemonLogger.info("ingest run completed", {
         runId: currentRun.id,
         platform,
@@ -4285,6 +4332,23 @@ export async function runDaemon(): Promise<void> {
       if (currentRun.platform === "signal") {
         requestSignalRealtimeReconcile();
       }
+      const failureProperties = {
+        component: "sync",
+        operation: "ingest",
+        stage: "ingest",
+        run_id: currentRun.id,
+        platform: currentRun.platform ?? "unknown",
+        run_type: currentRun.run_type,
+        trigger: currentRun.trigger,
+        duration_bucket: durationBucket(now() - ingestStartedAt),
+        ...errorTelemetryProperties(error, "sync_failed"),
+      };
+      await sendTelemetryEventSafe(db, "helper_failed", {
+        ...failureProperties,
+        operation: "adapter",
+        helper_kind: currentRun.platform ?? "unknown",
+      });
+      await sendTelemetryEventSafe(db, "sync_failed", failureProperties);
       await safeEmitHookEvent("sync.failed", {
         runId: currentRun.id,
         platform: currentRun.platform,
@@ -4312,6 +4376,15 @@ export async function runDaemon(): Promise<void> {
         runType: currentRun.run_type,
         pendingRawEvents: projectionBacklogBeforeRun.pending_raw_events,
         projectionBatchSize: adaptiveProjectionBatchSize,
+      });
+      db.updateRunProgress(currentRun.id, { leaseMs: PROJECTION_RUN_LEASE_MS, claim: runClaim });
+      await sendTelemetryEventSafe(db, "sync_started", {
+        component: "sync",
+        operation: "projection",
+        stage: "projection",
+        run_id: currentRun.id,
+        run_type: currentRun.run_type,
+        trigger: currentRun.trigger,
       });
       db.updateRunProgress(currentRun.id, { leaseMs: PROJECTION_RUN_LEASE_MS, claim: runClaim });
       const workerResult = await runProjectionWorkerProcess(
@@ -4379,6 +4452,15 @@ export async function runDaemon(): Promise<void> {
         projected,
         timings,
       });
+      await sendTelemetryEventSafe(db, "sync_completed", {
+        component: "sync",
+        operation: "projection",
+        stage: "projection",
+        run_id: currentRun.id,
+        run_type: currentRun.run_type,
+        trigger: currentRun.trigger,
+        duration_bucket: durationBucket(timings.totalMs),
+      });
       daemonLogger.info("projection run completed", {
         runId: currentRun.id,
         runType: currentRun.run_type,
@@ -4406,6 +4488,15 @@ export async function runDaemon(): Promise<void> {
         null,
         runClaim,
       );
+      await sendTelemetryEventSafe(db, "sync_failed", {
+        component: "sync",
+        operation: "projection",
+        stage: "projection",
+        run_id: currentRun.id,
+        run_type: currentRun.run_type,
+        trigger: currentRun.trigger,
+        ...errorTelemetryProperties(error, "projection_failed"),
+      });
       await safeEmitHookEvent("sync.failed", {
         runId: currentRun.id,
         platform: currentRun.platform,

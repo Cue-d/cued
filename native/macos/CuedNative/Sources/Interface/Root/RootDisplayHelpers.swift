@@ -5,11 +5,13 @@ import SwiftUI
 let permissionOrder = [
   "contacts",
   "full_disk_access",
+  "diagnostics",
 ]
 
 let defaultPermissionOrder = [
   "contacts",
   "full_disk_access",
+  "diagnostics",
 ]
 
 let platformOrder = [
@@ -54,6 +56,13 @@ func defaultPermissionStatus(
       status: "unknown",
       summary: "Full Disk Access has not been checked yet",
       requestFlags: ["--full-disk-access"]
+    )
+  case "diagnostics":
+    return PermissionStatus(
+      key: key,
+      status: "granted",
+      summary: "Redacted diagnostic reporting is enabled",
+      requestFlags: ["--telemetry-enable"]
     )
   case "messages_automation":
     guard includeFuturePermissions else {

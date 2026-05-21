@@ -33,6 +33,7 @@ describe("onboarding permission refresh", () => {
     getMenuBarOverview: () => ({ messages: 0, contacts: 0 }),
     getProjectionBacklog: () => ({ pending_raw_events: 0 }),
     getIntegrationProjectionStats: () => ({ rawEventsBySchema: {} }),
+    getAppSetting: vi.fn().mockReturnValue(null),
   };
 
   afterEach(() => {

@@ -259,7 +259,7 @@ public final class RootViewModel: ObservableObject {
   }
 
   public var grantedPermissionCount: Int {
-    permissionStatuses.filter { $0.status == "granted" }.count
+    permissionStatuses.filter(isCompletedPermission).count
   }
 
   public var totalPermissionCount: Int {
@@ -282,6 +282,10 @@ public final class RootViewModel: ObservableObject {
   }
 
   public init() {}
+
+  private func isCompletedPermission(_ permission: PermissionStatus) -> Bool {
+    permission.status == "granted" || (permission.key == "diagnostics" && permission.status == "disabled")
+  }
 
   public func beginRefresh() {
     isRefreshing = true
@@ -311,6 +315,26 @@ public final class RootViewModel: ObservableObject {
   public func finishRefreshWithoutSnapshot() {
     isRefreshing = false
     refreshSequence += 1
+  }
+
+  public func setPermissionStatus(
+    key: String,
+    status: String,
+    summary: String,
+    requestFlags: [String]
+  ) {
+    let replacement = PermissionStatus(
+      key: key,
+      status: status,
+      summary: summary,
+      requestFlags: requestFlags
+    )
+    if let index = permissionStatuses.firstIndex(where: { $0.key == key }) {
+      permissionStatuses[index] = replacement
+    } else {
+      permissionStatuses.append(replacement)
+      permissionStatuses = buildPermissionStatuses(permissionStatuses)
+    }
   }
 
   public func configuration(for platform: String) -> PlatformConfig? {

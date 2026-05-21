@@ -1,6 +1,7 @@
 import type { ChildProcess } from "node:child_process";
 import process from "node:process";
 import type { CuedDatabase } from "../../../db/database.js";
+import { errorTelemetryProperties, sendTelemetryEventSafe } from "../../../telemetry/context.js";
 import { importLinkedInStoredAuth } from "../../linkedin/auth/keychain-import.js";
 import { importSlackDesktopAuth } from "../../slack/auth/desktop-import.js";
 import { resolveIntegrationAccountKey } from "../account-keys.js";
@@ -93,6 +94,12 @@ export class IntegrationAuthService {
     }
 
     const requested = connectIntegration(this.db, platform, accountKey);
+    await sendTelemetryEventSafe(this.db, "integration_setup_started", {
+      component: "integration_auth",
+      operation: "connect_local",
+      stage: "start",
+      platform: requested.integration.platform,
+    });
     const running = markAuthSessionInProgress(this.db, requested.authSession.id, process.pid);
 
     try {
@@ -114,6 +121,13 @@ export class IntegrationAuthService {
         lifecycle,
       );
     } catch (error) {
+      await sendTelemetryEventSafe(this.db, "integration_setup_failed", {
+        component: "integration_auth",
+        operation: "connect_local",
+        stage: "runtime",
+        platform: requested.integration.platform,
+        ...errorTelemetryProperties(error, "integration_setup_failed"),
+      });
       return this.completeAndSchedule(
         running.id,
         {
@@ -149,6 +163,12 @@ export class IntegrationAuthService {
     }
 
     const requested = connectIntegration(this.db, platform, accountKey);
+    await sendTelemetryEventSafe(this.db, "integration_setup_started", {
+      component: "integration_auth",
+      operation: "connect_managed",
+      stage: "start",
+      platform: requested.integration.platform,
+    });
     const integration = getIntegrationSummary(
       this.db,
       requested.integration.platform,
@@ -183,6 +203,13 @@ export class IntegrationAuthService {
         lifecycle.onRuntimeStateChanged?.();
       })
       .catch(async (error) => {
+        await sendTelemetryEventSafe(this.db, "integration_setup_failed", {
+          component: "integration_auth",
+          operation: "connect_managed",
+          stage: "runtime",
+          platform: running.platform,
+          ...errorTelemetryProperties(error, "integration_setup_failed"),
+        });
         const latest = this.db.getAuthSession(running.id);
         if (latest?.state !== "cancelled") {
           await this.completeAndSchedule(
@@ -289,8 +316,25 @@ export class IntegrationAuthService {
     const completed = completeAuthSession(this.db, sessionId, input);
     let integration = completed.integration;
     if (integration?.authState === "authenticated") {
+      await sendTelemetryEventSafe(this.db, "integration_setup_completed", {
+        component: "integration_auth",
+        operation: "complete",
+        stage: "authenticated",
+        platform: integration.platform,
+      });
       refreshPersistedRequestableIntegrationStates(this.db);
       integration = getIntegrationSummary(this.db, integration.platform, integration.accountKey);
+    } else if (completed.authSession?.state === "failed") {
+      await sendTelemetryEventSafe(this.db, "integration_setup_failed", {
+        component: "integration_auth",
+        operation: "complete",
+        stage: "failed",
+        platform: completed.authSession.platform,
+        ...errorTelemetryProperties(
+          input.errorSummary ?? "auth failed",
+          "integration_setup_failed",
+        ),
+      });
     }
 
     if (

@@ -104,6 +104,16 @@ func permissionDescriptor(for key: String) -> PermissionDescriptor {
       supportsDirectRequest: true,
       supportsGuidedSettings: true
     )
+  case "diagnostics":
+    return PermissionDescriptor(
+      key: key,
+      title: "Help improve Cued",
+      subtitle: "Automatically send private, redacted crash and error reports so Cued can detect bugs, fix them, and ship updates faster.",
+      systemImage: "waveform.badge.magnifyingglass",
+      accentColor: Color(red: 0.32, green: 0.38, blue: 0.94),
+      supportsDirectRequest: true,
+      supportsGuidedSettings: false
+    )
   default:
     return PermissionDescriptor(
       key: key,
