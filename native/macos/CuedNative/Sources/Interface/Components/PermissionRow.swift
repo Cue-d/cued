@@ -8,6 +8,11 @@ extension RootView {
     return PermissionRow(
       descriptor: descriptor,
       isGranted: permission.status == "granted",
+      onToggle: permission.key == "diagnostics"
+        ? { enabled in
+          onRequestPermission([enabled ? "--telemetry-enable" : "--telemetry-disable"])
+        }
+        : nil,
       onAllow: {
         handlePermissionAction(for: permission, descriptor: descriptor)
       }
@@ -49,6 +54,7 @@ extension RootView {
 struct PermissionRow: View {
   let descriptor: PermissionDescriptor
   let isGranted: Bool
+  let onToggle: ((Bool) -> Void)?
   let onAllow: () -> Void
 
   var body: some View {
@@ -69,7 +75,15 @@ struct PermissionRow: View {
       }
       .frame(maxWidth: .infinity, alignment: .leading)
 
-      if isGranted {
+      if let onToggle {
+        Toggle("", isOn: Binding(
+          get: { isGranted },
+          set: { onToggle($0) }
+        ))
+        .toggleStyle(.switch)
+        .labelsHidden()
+        .accessibilityLabel(descriptor.title)
+      } else if isGranted {
         Image(systemName: "checkmark.circle.fill")
           .font(.title3.weight(.semibold))
           .foregroundStyle(.green)

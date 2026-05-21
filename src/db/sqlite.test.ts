@@ -115,4 +115,38 @@ describe("sqlite key loading", async () => {
       ),
     ).toBe(true);
   });
+
+  it("does not fail an opened database when current-service key migration collides", () => {
+    vi.stubEnv("VITEST_WORKER_ID", "");
+    vi.stubEnv("CUED_DB_KEY", "legacy-encryption-key");
+
+    const dir = mkdtempSync(join(tmpdir(), "cued-sqlite-keychain-collision-"));
+    tempDirs.push(dir);
+    const dbPath = join(dir, "local.db");
+    const sqlite = openSqliteDatabase(dbPath);
+    sqlite.prepare("CREATE TABLE t (id INTEGER PRIMARY KEY, value TEXT)").run();
+    sqlite.prepare("INSERT INTO t (value) VALUES (?)").run("legacy");
+    sqlite.close();
+
+    vi.stubEnv("CUED_DB_KEY", "");
+    execFileSyncMock.mockImplementation((_command: string, args: string[]) => {
+      if (args.includes("find-generic-password") && args.includes("so.cued.desktop.db")) {
+        return "stale-current-key\n";
+      }
+      if (args.includes("find-generic-password") && args.includes("dev.cued.db")) {
+        return "legacy-encryption-key\n";
+      }
+      if (args.includes("delete-generic-password")) {
+        return "";
+      }
+      if (args.includes("add-generic-password")) {
+        throw new Error("The specified item already exists in the keychain.");
+      }
+      throw new Error(`unexpected security command: ${args.join(" ")}`);
+    });
+
+    const reopened = openSqliteDatabase(dbPath);
+    expect(reopened.prepare("SELECT value FROM t").get()).toEqual({ value: "legacy" });
+    reopened.close();
+  });
 });

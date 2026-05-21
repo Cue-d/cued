@@ -43,6 +43,11 @@ import {
   isValidCuedAppBundle,
   resolveInstalledAppPath,
 } from "../../macos/install.js";
+import {
+  durationBucket,
+  errorTelemetryProperties,
+  sendTelemetryEventSafe,
+} from "../../telemetry/context.js";
 import type {
   PendingRollbackState,
   UpdateErrorState,
@@ -329,6 +334,7 @@ export async function checkForUpdates(
   db: CuedDatabase,
   options: CheckOptions = {},
 ): Promise<UpdateStatusSnapshot> {
+  const startedAt = now();
   const channel = getCurrentReleaseChannel();
   const currentVersion = getCurrentAppVersion();
   const cached = db.getUpdateReleaseState();
@@ -357,6 +363,13 @@ export async function checkForUpdates(
   const fetchImpl = options.fetchImpl ?? fetch;
 
   try {
+    await sendTelemetryEventSafe(db, "update_check_started", {
+      component: "updater",
+      operation: "check",
+      update_stage: "check",
+      current_version: currentVersion,
+      release_channel: channel,
+    });
     const { releases, etag, notModified } = await fetchReleases(db, fetchImpl);
     const selected = notModified
       ? cached
@@ -390,11 +403,31 @@ export async function checkForUpdates(
       availableVersion,
       channel,
     });
+    if (availableVersion) {
+      await sendTelemetryEventSafe(db, "update_available", {
+        component: "updater",
+        operation: "check",
+        update_stage: "available",
+        current_version: currentVersion,
+        target_version: availableVersion,
+        release_channel: channel,
+        duration_bucket: durationBucket(now() - startedAt),
+      });
+    }
     return toUpdateStatus(releaseState, db);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     updaterLogger.warn("release check failed", { error: message });
     setUpdateError(db, "check", message, null);
+    await sendTelemetryEventSafe(db, "update_check_failed", {
+      component: "updater",
+      operation: "check",
+      update_stage: "check",
+      current_version: currentVersion,
+      release_channel: channel,
+      duration_bucket: durationBucket(now() - startedAt),
+      ...errorTelemetryProperties(error, "update_check_failed"),
+    });
     return db.getUpdateStatus();
   }
 }
@@ -644,6 +677,7 @@ wait_for_old_app_exit() {
 }
 
 restore_previous() {
+  "$HELPER_CLI_PATH" telemetry rollback-started --target-version "$TARGET_VERSION" >/dev/null 2>&1 || true
   /usr/bin/pkill -TERM -f "$INSTALLED_APP_EXEC" >/dev/null 2>&1 || true
   sleep 2
   mkdir -p "$INSTALLED_APP_PATH"
@@ -654,6 +688,7 @@ restore_previous() {
     /bin/launchctl bootstrap "gui/$(id -u)" "$LAUNCH_AGENT_PLIST" >/dev/null 2>&1 || true
   fi
   /usr/bin/open "$INSTALLED_APP_PATH" >/dev/null 2>&1 || true
+  "$INSTALLED_CLI_PATH" telemetry rollback-completed --target-version "$TARGET_VERSION" >/dev/null 2>&1 || true
 }
 
 wait_for_health() {
@@ -738,11 +773,19 @@ function spawnUpdateHelper(
 }
 
 export async function installAvailableUpdate(db: CuedDatabase): Promise<InstallResult> {
+  const startedAt = now();
   ensureCuedDirs();
   const { installedAppPath } = assertInstalledContext();
   const prepared = await prepareReleaseInstall(db);
 
   try {
+    await sendTelemetryEventSafe(db, "update_install_started", {
+      component: "updater",
+      operation: "install",
+      update_stage: "install",
+      current_version: getCurrentAppVersion(),
+      target_version: prepared.version,
+    });
     db.setUpdateLastError(null);
     await requestShutdownForUpdate(db);
     bootoutLaunchAgent();
@@ -782,6 +825,14 @@ export async function installAvailableUpdate(db: CuedDatabase): Promise<InstallR
       targetVersion: prepared.version,
       installedAppPath,
     });
+    await sendTelemetryEventSafe(db, "update_install_completed", {
+      component: "updater",
+      operation: "install",
+      update_stage: "helper_spawned",
+      current_version: currentVersion,
+      target_version: prepared.version,
+      duration_bucket: durationBucket(now() - startedAt),
+    });
     return {
       started: true,
       targetVersion: prepared.version,
@@ -792,6 +843,15 @@ export async function installAvailableUpdate(db: CuedDatabase): Promise<InstallR
     db.setUpdatePendingRollback(null);
     const message = error instanceof Error ? error.message : String(error);
     setUpdateError(db, "install", message, prepared.version);
+    await sendTelemetryEventSafe(db, "update_install_failed", {
+      component: "updater",
+      operation: "install",
+      update_stage: "install",
+      current_version: getCurrentAppVersion(),
+      target_version: prepared.version,
+      duration_bucket: durationBucket(now() - startedAt),
+      ...errorTelemetryProperties(error, "update_install_failed"),
+    });
     throw error;
   }
 }

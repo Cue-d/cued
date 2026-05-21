@@ -95,21 +95,60 @@ function shouldUseKeychainBackedDatabaseKey(): boolean {
   return !process.env.CUED_DB_KEY?.trim() && !process.env.VITEST_WORKER_ID?.trim();
 }
 
+function loadDatabaseKeyFromService(service: string): string | null {
+  try {
+    const key = execFileSync(
+      "security",
+      ["find-generic-password", "-s", service, "-a", DB_KEYCHAIN_ACCOUNT, "-w"],
+      { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
+    ).trim();
+    return key.length > 0 ? key : null;
+  } catch {
+    return null;
+  }
+}
+
 function storeDatabaseKey(key: string): void {
-  execFileSync(
-    "security",
-    [
-      "add-generic-password",
-      "-U",
-      "-s",
-      CUED_DB_KEYCHAIN_SERVICE,
-      "-a",
-      DB_KEYCHAIN_ACCOUNT,
-      "-w",
-      key,
-    ],
-    { stdio: ["ignore", "ignore", "pipe"] },
-  );
+  const addArgs = [
+    "add-generic-password",
+    "-s",
+    CUED_DB_KEYCHAIN_SERVICE,
+    "-a",
+    DB_KEYCHAIN_ACCOUNT,
+    "-w",
+    key,
+  ];
+
+  try {
+    execFileSync("security", ["add-generic-password", "-U", ...addArgs.slice(1)], {
+      stdio: ["ignore", "ignore", "pipe"],
+    });
+    return;
+  } catch (error) {
+    if (loadDatabaseKeyFromService(CUED_DB_KEYCHAIN_SERVICE) === key) {
+      return;
+    }
+
+    try {
+      execFileSync(
+        "security",
+        ["delete-generic-password", "-s", CUED_DB_KEYCHAIN_SERVICE, "-a", DB_KEYCHAIN_ACCOUNT],
+        { stdio: ["ignore", "ignore", "pipe"] },
+      );
+    } catch {
+      // Missing or concurrently deleted; the add below will decide whether this is recoverable.
+    }
+
+    try {
+      execFileSync("security", addArgs, { stdio: ["ignore", "ignore", "pipe"] });
+      return;
+    } catch {
+      if (loadDatabaseKeyFromService(CUED_DB_KEYCHAIN_SERVICE) === key) {
+        return;
+      }
+      throw error;
+    }
+  }
 }
 
 function createAndStoreDatabaseKey(): string {
@@ -196,7 +235,11 @@ export function openSqliteDatabase(
       applyKey(sqlite, key);
       verifyReadable(sqlite);
       if (!options.readonly && shouldUseKeychainBackedDatabaseKey()) {
-        storeDatabaseKey(key);
+        try {
+          storeDatabaseKey(key);
+        } catch {
+          // The database is already readable with this key. Current-service Keychain migration is best effort.
+        }
       }
       hardenDbPaths(dbPath);
       return sqlite;

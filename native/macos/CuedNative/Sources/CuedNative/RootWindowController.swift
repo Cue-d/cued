@@ -86,6 +86,7 @@ final class RootWindowController: NSWindowController {
       )
     )
     window.contentViewController = hosting
+    reportAppLaunch()
   }
 
   @available(*, unavailable)
@@ -123,6 +124,13 @@ final class RootWindowController: NSWindowController {
       NSApp.activate(ignoringOtherApps: true)
     }
     refresh(forceActivePermissionRefresh: forceActivePermissionRefresh)
+  }
+
+  private func reportAppLaunch() {
+    let daemonSupervisor = self.daemonSupervisor
+    Task.detached(priority: .utility) { [daemonSupervisor] in
+      _ = daemonSupervisor.runCLI(arguments: ["telemetry", "app-launched"])
+    }
   }
 
   func refresh(forceActivePermissionRefresh: Bool = false) {
@@ -325,12 +333,23 @@ final class RootWindowController: NSWindowController {
   }
 
   private func requestPermission(flags: [String]) {
+    if flags.contains("--telemetry-enable") {
+      runCLICommands([["telemetry", "enable"]])
+      return
+    }
+    if flags.contains("--telemetry-disable") {
+      runCLICommands([["telemetry", "disable"]])
+      return
+    }
     if permissionKeys(for: flags).contains("full_disk_access") {
       markPermissionRelaunchSetupIntent()
     }
+    let permissionTelemetry = permissionKeys(for: flags).map {
+      ["telemetry", "permission-requested", "--kind", $0]
+    }
     trackLivePermissionRequests(flags: flags)
     runPermissionCommands(
-      [["permissions", "request"] + flags],
+      permissionTelemetry + [["permissions", "request"] + flags],
       forceActiveRefreshAfter: shouldActivelyRefreshPermissions(for: flags)
     )
   }

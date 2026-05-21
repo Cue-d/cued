@@ -4,6 +4,7 @@ import type { CuedDatabase } from "../db/database.js";
 import { refreshManagedIntegrationStates } from "../platforms/core/state/refresh.js";
 import { buildIntegrationStatus } from "../platforms/core/state/status.js";
 import { getGlobalCuedSkillStatus, installGlobalCuedSkill } from "../skills/install.js";
+import { isTelemetryEnabled } from "../telemetry/client.js";
 import { buildPermissionStatus } from "./doctor.js";
 
 export interface OnboardingSnapshot {
@@ -44,6 +45,14 @@ export async function buildOnboardingSnapshot(
   const permissions = await buildPermissionStatus({
     mode: options.refreshPermissions ? "active" : "passive",
     db,
+  });
+  permissions.permissions.push({
+    key: "diagnostics",
+    status: isTelemetryEnabled(db) ? "granted" : "needs_action",
+    summary: isTelemetryEnabled(db)
+      ? "Redacted diagnostic reporting is enabled"
+      : "Redacted diagnostic reporting is disabled",
+    requestFlags: ["--telemetry-enable"],
   });
   let globalSkill = getGlobalCuedSkillStatus();
   if (options.installGlobalSkill ?? true) {
