@@ -58,10 +58,19 @@ xml_escape() {
 }
 
 sign_app_bundle() {
+  strip_extended_attributes "$APP_BUNDLE"
   sign_nested_binaries
   sign_embedded_archives
   sign_nested_code_containers
   sign_macos_binary "$APP_BUNDLE" "$APP_PERMISSIONS_ENTITLEMENTS"
+}
+
+strip_extended_attributes() {
+  local target="$1"
+
+  if command -v xattr >/dev/null 2>&1; then
+    xattr -cr "$target" 2>/dev/null || true
+  fi
 }
 
 sign_macos_binary() {
@@ -72,6 +81,7 @@ sign_macos_binary() {
     if [[ -n "$entitlements" ]]; then
       codesign \
         --force \
+        --strip-disallowed-xattrs \
         --timestamp \
         --options runtime \
         --entitlements "$entitlements" \
@@ -82,6 +92,7 @@ sign_macos_binary() {
 
     codesign \
       --force \
+      --strip-disallowed-xattrs \
       --timestamp \
       --options runtime \
       --sign "$CUED_CODESIGN_IDENTITY" \
@@ -92,6 +103,7 @@ sign_macos_binary() {
   if [[ -n "$entitlements" ]]; then
     codesign \
       --force \
+      --strip-disallowed-xattrs \
       --entitlements "$entitlements" \
       --sign - \
       "$target" >/dev/null
@@ -100,6 +112,7 @@ sign_macos_binary() {
 
   codesign \
     --force \
+    --strip-disallowed-xattrs \
     --sign - \
     "$target" >/dev/null
 }
@@ -239,9 +252,9 @@ mkdir -p \
   "$PLAYWRIGHT_CHROMIUM_ROOT" \
   "$HELPERS_DIR"
 
-cp "$SWIFT_BINARY" "$MACOS_DIR/$APP_EXECUTABLE_NAME"
+ditto --noextattr --norsrc "$SWIFT_BINARY" "$MACOS_DIR/$APP_EXECUTABLE_NAME"
 chmod +x "$MACOS_DIR/$APP_EXECUTABLE_NAME"
-cp "$SWIFT_BINARY" "$HELPERS_DIR/$HELPER_NAME"
+ditto --noextattr --norsrc "$SWIFT_BINARY" "$HELPERS_DIR/$HELPER_NAME"
 chmod +x "$HELPERS_DIR/$HELPER_NAME"
 for resource_bundle in "${SWIFT_RESOURCE_BUNDLES[@]}"; do
   cp -R "$resource_bundle" "$RESOURCES_DIR/$(basename "$resource_bundle")"
@@ -249,7 +262,7 @@ done
 cp "$NODE_RUNTIME_SOURCE_DIR/bin/node" "$RUNTIME_NODE_BIN_DIR/node"
 cp -R "$NODE_RUNTIME_SOURCE_DIR/lib" "$RUNTIME_NODE_ROOT/lib"
 chmod +x "$RUNTIME_NODE_BIN_DIR/node"
-cp -R "$PLAYWRIGHT_CHROMIUM_SOURCE_DIR" "$PLAYWRIGHT_CHROMIUM_PAYLOAD_DIR"
+ditto --noextattr --norsrc "$PLAYWRIGHT_CHROMIUM_SOURCE_DIR" "$PLAYWRIGHT_CHROMIUM_PAYLOAD_DIR"
 cp -R "$DEPLOY_STAGING_DIR/." "$RUNTIME_DIR/"
 cp -R "$SIGNAL_HELPER_SOURCE_DIR" "$HELPERS_DIR/signal-cli"
 cp "$SLACK_HELPER_SOURCE" "$HELPERS_DIR/cued-slack-helper"

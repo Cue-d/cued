@@ -116,23 +116,25 @@ func platformAccentColor(for platform: String) -> Color {
   }
 }
 
-func platformIconURL(named assetName: String) -> URL? {
+func interfaceResourceURL(named assetName: String, withExtension fileExtension: String) -> URL? {
   let bundles: [Bundle] = [
-    Bundle.module,
     Bundle(url: Bundle.main.bundleURL.appendingPathComponent("CuedNative_Interface.bundle")),
     Bundle.main.resourceURL.flatMap { Bundle(url: $0.appendingPathComponent("CuedNative_Interface.bundle")) },
     Bundle(for: BundleAnchor.self),
     Bundle.main,
+    Bundle.module,
   ].compactMap { $0 }
   for bundle in bundles {
-    if let url = bundle.url(forResource: assetName, withExtension: "svg") {
-      return url
-    }
-    if let url = bundle.url(forResource: assetName, withExtension: "png") {
+    if let url = bundle.url(forResource: assetName, withExtension: fileExtension) {
       return url
     }
   }
   return nil
+}
+
+func platformIconURL(named assetName: String) -> URL? {
+  interfaceResourceURL(named: assetName, withExtension: "svg")
+    ?? interfaceResourceURL(named: assetName, withExtension: "png")
 }
 
 func fallbackIntegration(for platform: String) -> IntegrationStatus {
