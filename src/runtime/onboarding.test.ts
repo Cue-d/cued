@@ -76,6 +76,7 @@ describe("onboarding snapshot", () => {
     expect(snapshot.permissions.map((permission) => permission.key)).toEqual([
       "contacts",
       "full_disk_access",
+      "diagnostics",
     ]);
     expect(snapshot.globalSkill).toEqual(
       expect.objectContaining({

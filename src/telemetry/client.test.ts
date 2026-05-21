@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { openCuedDatabase } from "../db/database.js";
 import { buildTelemetryEnvelope, sendTelemetryEvent, setTelemetryEnabled } from "./client.js";
 import { durationBucket, errorTelemetryProperties } from "./context.js";
@@ -144,6 +144,36 @@ describe("telemetry client", () => {
       );
       expect(result).toEqual({ sent: false, skipped: true });
     } finally {
+      db.close();
+    }
+  });
+
+  it("aborts telemetry sends that exceed the timeout", async () => {
+    vi.stubEnv("CUED_TELEMETRY_ENDPOINT", "https://example.invalid/telemetry");
+    const db = openTempDb();
+    try {
+      await expect(
+        sendTelemetryEvent(
+          db,
+          "app_launched",
+          {},
+          {
+            fetchImpl: ((_input, init) =>
+              new Promise((_resolve, reject) => {
+                const signal = init?.signal;
+                if (!(signal instanceof AbortSignal)) {
+                  reject(new Error("missing_abort_signal"));
+                  return;
+                }
+                signal.addEventListener("abort", () =>
+                  reject(new DOMException("aborted", "AbortError")),
+                );
+              })) as typeof fetch,
+          },
+        ),
+      ).rejects.toThrow(/aborted/i);
+    } finally {
+      vi.unstubAllEnvs();
       db.close();
     }
   });

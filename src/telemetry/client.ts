@@ -13,6 +13,7 @@ import {
   type TelemetryProperties,
 } from "./events.js";
 
+const TELEMETRY_TIMEOUT_MS = 2_000;
 let sessionId: string | null = null;
 
 function getSessionId(): string {
@@ -113,11 +114,14 @@ export async function sendTelemetryEvent(
 
   const envelope = buildTelemetryEnvelope(db, eventName, properties);
   const fetchImpl = options.fetchImpl ?? fetch;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), TELEMETRY_TIMEOUT_MS);
   const response = await fetchImpl(TELEMETRY_ENDPOINT, {
     method: "POST",
     headers: { "content-type": "application/json" },
+    signal: controller.signal,
     body: JSON.stringify(envelope),
-  });
+  }).finally(() => clearTimeout(timeout));
 
   return {
     sent: response.ok,
