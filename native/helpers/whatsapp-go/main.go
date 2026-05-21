@@ -130,16 +130,35 @@ type eventEnvelope struct {
 }
 
 type commandEnvelope struct {
-	ID              int    `json:"id"`
-	Command         string `json:"command"`
-	Target          string `json:"target,omitempty"`
-	Text            string `json:"text,omitempty"`
-	Cursor          string `json:"cursor,omitempty"`
-	SinceMS         *int64 `json:"sinceMs,omitempty"`
-	Limit           int    `json:"limit,omitempty"`
-	ChatJID         string `json:"chatJID,omitempty"`
-	MessageID       string `json:"messageID,omitempty"`
-	AttachmentIndex int    `json:"attachmentIndex,omitempty"`
+	ID              int                     `json:"id"`
+	Command         string                  `json:"command"`
+	Target          string                  `json:"target,omitempty"`
+	Text            string                  `json:"text,omitempty"`
+	Cursor          string                  `json:"cursor,omitempty"`
+	SinceMS         *int64                  `json:"sinceMs,omitempty"`
+	Limit           int                     `json:"limit,omitempty"`
+	ChatJID         string                  `json:"chatJID,omitempty"`
+	MessageID       string                  `json:"messageID,omitempty"`
+	AttachmentIndex int                     `json:"attachmentIndex,omitempty"`
+	Anchors         []historyBackfillAnchor `json:"anchors,omitempty"`
+	WaitMS          int                     `json:"waitMs,omitempty"`
+}
+
+type historyBackfillAnchor struct {
+	ChatJID   string `json:"chatJID"`
+	MessageID string `json:"messageID"`
+	Timestamp int64  `json:"timestamp"`
+	FromMe    bool   `json:"fromMe"`
+	Count     int    `json:"count,omitempty"`
+}
+
+type historyBackfillResult struct {
+	Requested                 int      `json:"requested"`
+	Failed                    int      `json:"failed"`
+	Errors                    []string `json:"errors,omitempty"`
+	LastHistorySyncAt         *int64   `json:"lastHistorySyncAt,omitempty"`
+	LastHistoryNotificationAt *int64   `json:"lastHistoryNotificationAt,omitempty"`
+	QueuedHistorySyncCount    int      `json:"queuedHistorySyncCount"`
 }
 
 type helperState struct {
@@ -1380,6 +1399,9 @@ func (r *helperRuntime) readCommands(ctx context.Context, errs chan<- error) {
 		case "resync":
 			page, err := r.state.getResyncPage(command.SinceMS, command.Cursor, command.Limit)
 			r.writeResponse(command.ID, err == nil, page, err)
+		case "requestHistoryBackfill":
+			result, err := r.requestHistoryBackfill(ctx, command.Anchors, command.Limit, command.WaitMS)
+			r.writeResponse(command.ID, err == nil, result, err)
 		case "downloadMedia":
 			result, err := r.downloadMedia(ctx, command.ChatJID, command.MessageID, command.AttachmentIndex)
 			r.writeResponse(command.ID, err == nil, result, err)
@@ -1392,6 +1414,98 @@ func (r *helperRuntime) readCommands(ctx context.Context, errs chan<- error) {
 	}
 
 	errs <- scanner.Err()
+}
+
+func (r *helperRuntime) requestHistoryBackfill(
+	ctx context.Context,
+	anchors []historyBackfillAnchor,
+	defaultCount int,
+	waitMS int,
+) (historyBackfillResult, error) {
+	if len(anchors) == 0 {
+		return historyBackfillResult{}, errors.New("at least one history backfill anchor is required")
+	}
+	if defaultCount <= 0 {
+		defaultCount = 50
+	}
+	if defaultCount > 500 {
+		defaultCount = 500
+	}
+
+	startMetadata := r.state.getMetadata()
+	result := historyBackfillResult{}
+	for _, anchor := range anchors {
+		chatJID, err := types.ParseJID(anchor.ChatJID)
+		if err != nil {
+			result.Failed++
+			result.Errors = append(result.Errors, fmt.Sprintf("%s: invalid chat JID: %v", anchor.ChatJID, err))
+			continue
+		}
+		messageID := strings.TrimSpace(anchor.MessageID)
+		if messageID == "" {
+			result.Failed++
+			result.Errors = append(result.Errors, fmt.Sprintf("%s: missing message ID", anchor.ChatJID))
+			continue
+		}
+		if anchor.Timestamp <= 0 {
+			result.Failed++
+			result.Errors = append(result.Errors, fmt.Sprintf("%s:%s: missing timestamp", anchor.ChatJID, messageID))
+			continue
+		}
+		count := anchor.Count
+		if count <= 0 {
+			count = defaultCount
+		}
+		if count > 500 {
+			count = 500
+		}
+		info := &types.MessageInfo{
+			MessageSource: types.MessageSource{
+				Chat:     chatJID,
+				IsFromMe: anchor.FromMe,
+				IsGroup:  chatJID.Server == types.GroupServer,
+			},
+			ID:        types.MessageID(messageID),
+			Timestamp: time.UnixMilli(anchor.Timestamp),
+		}
+		if _, err := r.client.SendPeerMessage(ctx, r.client.BuildHistorySyncRequest(info, count)); err != nil {
+			result.Failed++
+			result.Errors = append(result.Errors, fmt.Sprintf("%s:%s: %v", anchor.ChatJID, messageID, err))
+			continue
+		}
+		result.Requested++
+	}
+
+	if waitMS > 0 && result.Requested > 0 {
+		waitDeadline := time.NewTimer(time.Duration(waitMS) * time.Millisecond)
+		defer waitDeadline.Stop()
+		ticker := time.NewTicker(250 * time.Millisecond)
+		defer ticker.Stop()
+		for {
+			metadata := r.state.getMetadata()
+			if metadata.LastHistorySyncAt > startMetadata.LastHistorySyncAt ||
+				metadata.LastHistoryNotificationAt > startMetadata.LastHistoryNotificationAt {
+				break
+			}
+			select {
+			case <-ctx.Done():
+				return result, ctx.Err()
+			case <-waitDeadline.C:
+				goto doneWaiting
+			case <-ticker.C:
+			}
+		}
+	}
+
+doneWaiting:
+	metadata := r.state.getMetadata()
+	result.LastHistorySyncAt = int64PtrOrNil(metadata.LastHistorySyncAt)
+	result.LastHistoryNotificationAt = int64PtrOrNil(metadata.LastHistoryNotificationAt)
+	result.QueuedHistorySyncCount = r.historySyncQueueCount()
+	if result.Requested == 0 && result.Failed > 0 {
+		return result, errors.New("all history backfill requests failed")
+	}
+	return result, nil
 }
 
 func (r *helperRuntime) sendText(ctx context.Context, target string, text string) (map[string]interface{}, error) {

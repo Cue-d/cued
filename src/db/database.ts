@@ -280,6 +280,13 @@ function buildSyncProofId(
 
 export type RawEventInput = ProviderRawEventInput;
 
+export interface WhatsAppHistoryBackfillAnchorRow {
+  chatJID: string;
+  messageID: string;
+  timestamp: number;
+  fromMe: boolean;
+}
+
 export interface IntegrationStateRow {
   id: string;
   platform: Platform;
@@ -4455,6 +4462,67 @@ export class CuedDatabase {
         },
       })
       .run();
+  }
+
+  listWhatsAppHistoryBackfillAnchors(
+    accountKey: string,
+    limit = 50,
+  ): WhatsAppHistoryBackfillAnchorRow[] {
+    const boundedLimit = Math.max(1, Math.min(Math.floor(limit), 500));
+    const scanLimit = Math.max(500, Math.min(boundedLimit * 100, 5_000));
+    const rows = this.sqlite
+      .prepare(
+        `
+        SELECT
+          external_entity_id,
+          conversation_external_id,
+          occurred_at,
+          payload_json
+        FROM raw_events
+        WHERE platform = 'whatsapp'
+          AND account_key = ?
+          AND entity_kind = 'message'
+          AND event_kind = 'created'
+          AND external_entity_id IS NOT NULL
+          AND conversation_external_id IS NOT NULL
+          AND occurred_at IS NOT NULL
+        ORDER BY occurred_at DESC, observed_at DESC
+        LIMIT ?
+      `,
+      )
+      .all(accountKey, scanLimit) as Array<{
+      external_entity_id: string | null;
+      conversation_external_id: string | null;
+      occurred_at: number | null;
+      payload_json: string;
+    }>;
+
+    const anchors = new Map<string, WhatsAppHistoryBackfillAnchorRow>();
+    for (const row of rows) {
+      const chatJID = row.conversation_external_id?.trim();
+      const messageID = row.external_entity_id?.trim();
+      const timestamp = row.occurred_at;
+      if (!chatJID || !messageID || typeof timestamp !== "number" || anchors.has(chatJID)) {
+        continue;
+      }
+      let fromMe = false;
+      try {
+        const payload = JSON.parse(row.payload_json) as { isFromMe?: unknown };
+        fromMe = payload.isFromMe === true;
+      } catch {
+        fromMe = false;
+      }
+      anchors.set(chatJID, {
+        chatJID,
+        messageID,
+        timestamp,
+        fromMe,
+      });
+      if (anchors.size >= boundedLimit) {
+        break;
+      }
+    }
+    return [...anchors.values()];
   }
 
   listRawEvents(): Array<{

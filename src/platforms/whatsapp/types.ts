@@ -48,6 +48,23 @@ export interface WhatsAppResyncPage extends WhatsAppSnapshot {
   completedAt: number;
 }
 
+export interface WhatsAppHistoryBackfillAnchor {
+  chatJID: string;
+  messageID: string;
+  timestamp: number;
+  fromMe: boolean;
+  count?: number;
+}
+
+export interface WhatsAppHistoryBackfillResult {
+  requested: number;
+  failed: number;
+  errors?: string[];
+  lastHistorySyncAt?: number | null;
+  lastHistoryNotificationAt?: number | null;
+  queuedHistorySyncCount: number;
+}
+
 export type WhatsAppHelperEventName =
   | "connected"
   | "contact_upsert"
@@ -105,6 +122,13 @@ export type WhatsAppHelperCommand =
       cursor?: string;
       sinceMs?: number | null;
       limit?: number;
+    }
+  | {
+      id: number;
+      command: "requestHistoryBackfill";
+      anchors: WhatsAppHistoryBackfillAnchor[];
+      limit?: number;
+      waitMs?: number;
     }
   | {
       id: number;
