@@ -74,9 +74,7 @@ private struct CuedMarkIcon: View {
 
   private func cuedMarkImage() -> NSImage? {
     let candidates = [
-      Bundle.module.url(forResource: "cued-mark", withExtension: "png"),
-      Bundle.main.url(forResource: "cued-mark", withExtension: "png"),
-      Bundle.main.resourceURL?.appendingPathComponent("cued-mark.png"),
+      interfaceResourceURL(named: "cued-mark", withExtension: "png"),
     ]
     for url in candidates.compactMap({ $0 }) {
       if let image = NSImage(contentsOf: url) {
