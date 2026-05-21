@@ -127,6 +127,7 @@ import { emitHookEvent } from "../hooks.js";
 import type { DaemonRequest, DaemonResponse } from "../ipc.js";
 import { collectInboundMessageHookPayloads } from "../message-hooks.js";
 import { resolveMacOSNativeBinary } from "../native-binary.js";
+import { buildOnboardingSnapshot } from "../onboarding.js";
 import { projectRealtimeRange } from "../projection/projector.js";
 import {
   buildProjectionMessageHookBatches,
@@ -4999,6 +5000,31 @@ async function dispatchRequest(
             buildPermissionStatus({
               mode: "passive",
               db,
+            }),
+          ),
+        };
+      case "onboarding-status":
+        return {
+          id: request.id,
+          ok: true,
+          result: db.getAppMetadata(),
+        };
+      case "onboarding-complete":
+        db.markOnboardingCompleted(getCurrentAppVersion());
+        refreshStatusCacheNow("onboarding_complete");
+        return {
+          id: request.id,
+          ok: true,
+          result: db.getAppMetadata(),
+        };
+      case "onboarding-snapshot":
+        return {
+          id: request.id,
+          ok: true,
+          result: await db.withBusyTimeout(DAEMON_STATUS_BUSY_TIMEOUT_MS, () =>
+            buildOnboardingSnapshot(db, {
+              refreshManagedIntegrations: request.refreshManagedIntegrations,
+              refreshPermissions: request.refreshPermissions,
             }),
           ),
         };

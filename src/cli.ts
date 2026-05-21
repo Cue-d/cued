@@ -691,6 +691,34 @@ async function main(): Promise<void> {
     case "onboarding": {
       const refreshManaged = rest.includes("--refresh-managed");
       const refreshPermissions = rest.includes("--refresh-permissions");
+      let daemonResponse: Awaited<ReturnType<typeof sendDaemonRequest>> | null = null;
+      try {
+        switch (subcommand) {
+          case "complete":
+            daemonResponse = await sendDaemonRequest({ command: "onboarding-complete" });
+            break;
+          case "snapshot":
+            daemonResponse = await sendDaemonRequest({
+              command: "onboarding-snapshot",
+              refreshManagedIntegrations: refreshManaged,
+              refreshPermissions,
+            });
+            break;
+          case "status":
+            daemonResponse = await sendDaemonRequest({ command: "onboarding-status" });
+            break;
+        }
+      } catch {
+        daemonResponse = null;
+      }
+      if (daemonResponse && !isUnsupportedDaemonCommand(daemonResponse)) {
+        if (!daemonResponse.ok) {
+          throw new Error(daemonResponse.error ?? "Daemon onboarding request failed");
+        }
+        printJson(daemonResponse.result ?? null);
+        return;
+      }
+
       const db =
         subcommand === "snapshot" && !refreshManaged && !refreshPermissions
           ? openCuedDatabaseReadOnly()

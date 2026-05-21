@@ -128,19 +128,31 @@ extension RootView {
   }
 
   func platformBreakdown(for metric: RelationshipMetric) -> [PlatformMetricBreakdown] {
-    viewModel.platformConfigurations.compactMap { configuration in
-      let value = configuration.knownAccounts.reduce(0) { total, integration in
+    if metric == .phoneCalls, viewModel.relationshipSummary.phoneCalls > 0 {
+      return [
+        PlatformMetricBreakdown(
+          platform: "phone_calls",
+          title: "Phone",
+          value: viewModel.relationshipSummary.phoneCalls
+        )
+      ]
+    }
+
+    let breakdowns: [PlatformMetricBreakdown] = viewModel.platformConfigurations.compactMap { configuration in
+      let value = configuration.knownAccounts.reduce(0) { (total: Int, integration) in
         guard let stats = integration.projectionStats else {
           return total
         }
         switch metric {
         case .messages:
+          guard configuration.platform != "contacts", configuration.platform != "phone_calls" else {
+            return total
+          }
           return total + stats.projectedMessages
         case .contacts:
           return total + stats.projectedContacts
         case .phoneCalls:
-          let observedCalls = stats.rawEventsBySchema["call.observed@1"] ?? 0
-          return total + observedCalls
+          return total
         }
       }
       guard value > 0 else {
@@ -148,15 +160,27 @@ extension RootView {
       }
       return PlatformMetricBreakdown(
         platform: configuration.platform,
-        title: configuration.title,
+        title: platformBreakdownTitle(for: configuration.platform, metric: metric),
         value: value
       )
     }
-    .sorted { lhs, rhs in
+
+    return breakdowns.sorted { (lhs: PlatformMetricBreakdown, rhs: PlatformMetricBreakdown) in
       if lhs.value == rhs.value {
         return lhs.title < rhs.title
       }
       return lhs.value > rhs.value
+    }
+  }
+
+  func platformBreakdownTitle(for platform: String, metric: RelationshipMetric) -> String {
+    switch (metric, platform) {
+    case (.contacts, "contacts"):
+      return "Contacts.app"
+    case (.phoneCalls, _):
+      return "Phone"
+    default:
+      return platformTitle(platform, fallback: nil)
     }
   }
 
