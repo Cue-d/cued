@@ -61,7 +61,6 @@ public struct AgentTargetStatus: Sendable {
 }
 
 public enum AgentExampleID: String, CaseIterable, Identifiable, Sendable {
-  case repairCued
   case debugSync
   case catchUp
   case followUps
@@ -134,16 +133,6 @@ public let agentExamples: [AgentExample] = [
     title: "Intent And Triggers",
     detail: "Decide when an always-on agent should act or stay quiet.",
     promptPreview: "Design explicit triggers from local context"
-  ),
-]
-
-public let agentDebugExamples: [AgentExample] = [
-  AgentExample(
-    id: .repairCued,
-    icon: "stethoscope",
-    title: "Repair Cued",
-    detail: "Inspect status, doctor output, logs, and local DB state before touching code.",
-    promptPreview: "Investigate and repair Cued locally"
   ),
 ]
 

@@ -49,18 +49,6 @@ extension RootView {
         }
       }
 
-      card(spacing: 14) {
-        Text("Repair")
-          .font(.headline)
-
-        ForEach(agentDebugExamples) { example in
-          agentDebugRow(example)
-          if example.id != agentDebugExamples.last?.id {
-            Divider()
-          }
-        }
-      }
-
       if let feedback = viewModel.agentLaunchFeedback {
         agentLaunchFeedback(feedback)
       }
@@ -177,96 +165,6 @@ extension RootView {
       return "..."
     }
     return formatCount(value)
-  }
-
-  func agentDebugRow(_ example: AgentExample) -> some View {
-    HStack(alignment: .top, spacing: 14) {
-      Image(systemName: example.icon)
-        .font(.system(size: 18, weight: .semibold))
-        .foregroundStyle(.secondary)
-        .frame(width: 26, height: 26)
-
-      VStack(alignment: .leading, spacing: 4) {
-        Text(example.title)
-          .font(.headline)
-        Text(example.detail)
-          .font(.subheadline)
-          .foregroundStyle(.secondary)
-          .fixedSize(horizontal: false, vertical: true)
-      }
-      .frame(maxWidth: .infinity, alignment: .leading)
-
-      HStack(spacing: 7) {
-        ForEach(preferredAgentTargets) { target in
-          let status = viewModel.agentTargetStatuses[target] ?? .unknown
-          Button {
-            viewModel.clearAgentLaunchFeedback()
-            onLaunchAgentExample(example.id, target)
-          } label: {
-            Label(agentDebugButtonTitle(for: target, status: status), systemImage: agentDebugButtonIcon(for: target, status: status))
-              .labelStyle(.titleAndIcon)
-              .lineLimit(1)
-              .frame(maxWidth: .infinity)
-          }
-          .buttonStyle(PermissionActionButtonStyle(variant: agentDebugButtonVariant(for: target, status: status), size: .compact))
-          .disabled(status.readiness == .unknown)
-          .help(agentDebugHelp(for: status))
-        }
-      }
-      .frame(width: 250)
-    }
-    .padding(.vertical, 4)
-  }
-
-  var preferredAgentTargets: [AgentTarget] {
-    if viewModel.agentTargetStatuses[.codexApp]?.readiness != .missing {
-      return [.codexApp, .claudeCode]
-    }
-    return [.codexCLI, .claudeCode]
-  }
-
-  func agentDebugButtonTitle(for target: AgentTarget, status: AgentTargetStatus) -> String {
-    switch status.readiness {
-    case .ready:
-      return target.shortTitle
-    case .unknown:
-      return "..."
-    case .missing:
-      return "Unavailable"
-    case .notLoggedIn:
-      return "Auth needed"
-    }
-  }
-
-  func agentDebugButtonVariant(for target: AgentTarget, status: AgentTargetStatus) -> ActionButtonVariant {
-    .secondary
-  }
-
-  func agentDebugButtonIcon(for target: AgentTarget, status: AgentTargetStatus) -> String {
-    switch status.readiness {
-    case .ready:
-      switch target {
-      case .codexApp:
-        return "app.badge"
-      case .codexCLI:
-        return "terminal"
-      case .claudeCode:
-        return "sparkles"
-      }
-    case .unknown:
-      return "hourglass"
-    case .missing:
-      return "exclamationmark.triangle"
-    case .notLoggedIn:
-      return "person.crop.circle.badge.exclamationmark"
-    }
-  }
-
-  func agentDebugHelp(for status: AgentTargetStatus) -> String {
-    if let remediation = status.remediation {
-      return "\(status.detail) \(remediation)"
-    }
-    return status.detail
   }
 
   var connectedPlatformCount: Int {

@@ -23,10 +23,6 @@ Do not use `sqlite3 ~/.cued/local.db` unless the user explicitly asks to debug r
 
 **Timestamps are Unix epoch MILLISECONDS.** To convert: `datetime(sent_at/1000, 'unixepoch', 'localtime')`. Current millis: `unixepoch('now') * 1000`. N days ago: `unixepoch('now', '-N days') * 1000`.
 
-## Repairing Cued
-
-When the user asks an agent to repair Cued itself, start operationally before editing code. Inspect `cued status`, `cued doctor`, `cued logs --tail 200`, `cued integrations status`, and targeted read-only SQL for active or failed sync/projection state. If the issue looks like a wedged sync or ingestion run, identify the source from logs and local state, then prefer CLI repair commands such as `cued integrations refresh`, `cued sync resume`, `cued sync run <source>`, `cued rebuild`, or `cued reset --source <source>` when the evidence points there. Only interrupt or kill sync/ingestion work after observing that it is stuck or blocking database access, and record what was running, what you stopped, and what changed afterward. Escalate to source edits only after local repair fails or proves a code defect.
-
 ## Rules
 
 - Prefer SQL over bash parsing.
@@ -171,3 +167,7 @@ Good enrichment memories are compact and claim-specific:
 - useful follow-up context, such as likely founder/investor/recruiting relevance.
 
 Do not update canonical contact fields from web search unless identity is deterministic and the field is directly supported. Prefer `cued contacts memory add ... --source web --evidence ...` for researched context. If two verified sources disagree, either supersede a stale memory with evidence or write nothing and report the conflict.
+
+## Self-Repair And Unblocking
+
+When the user asks an agent to repair or unblock Cued itself, start with operational evidence before editing source code. Inspect `cued status`, `cued doctor`, `cued logs --tail 200`, `cued integrations status`, and targeted read-only SQL for active, failed, or wedged sync/projection state. Use the Cued CLI first: resume queued work, run a targeted source sync, refresh integrations, rebuild projections, reset a specific source, or cancel stuck sync/ingestion work when the CLI exposes that control. If a run is blocking local progress, read the logs and database state before stopping or restarting anything, record what was active, then restart Cued and verify the counts/state changed. Escalate to source edits only after local repair fails or proves a code defect.

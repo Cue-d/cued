@@ -113,7 +113,7 @@ public enum Preview {
     viewModel.apply(
       permissions: fixture.permissions,
       globalSkill: fixture.globalSkill,
-      relationshipSummary: RelationshipSummary(),
+      relationshipSummary: fixture.relationshipSummary,
       allIntegrations: fixture.integrations,
       integrations: fixture.setupIntegrations
     )
@@ -155,7 +155,7 @@ private struct PreviewFixture {
 
   var integrations: [IntegrationStatus] {
     switch name {
-    case "platforms-mixed":
+    case "platforms-mixed", "application-home":
       return [
         integration("contacts", "local", "Contacts.app", "authorized", true, contactsStats),
         integration("imessage", "local", "Messages", "authorized", true, messagesStats),
@@ -165,6 +165,21 @@ private struct PreviewFixture {
       ]
     default:
       return []
+    }
+  }
+
+  var relationshipSummary: RelationshipSummary {
+    switch name {
+    case "application-home":
+      return RelationshipSummary(
+        messages: 35_853,
+        contacts: 2_319,
+        phoneCalls: 214,
+        pendingProjectionEvents: 0,
+        source: "menu_bar_cache"
+      )
+    default:
+      return RelationshipSummary()
     }
   }
 

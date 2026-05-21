@@ -1432,6 +1432,21 @@ export class CuedDatabase {
     }>;
   }
 
+  countObservedPhoneCalls(): number {
+    const row = this.sqlite
+      .prepare(
+        `
+        SELECT COUNT(*) AS calls
+        FROM raw_events
+        WHERE platform = 'imessage'
+          AND account_key = 'local'
+          AND COALESCE(normalized_schema, entity_kind || '.' || event_kind || '@1') = 'call.observed@1'
+      `,
+      )
+      .get() as { calls: number | null };
+    return Number(row.calls ?? 0);
+  }
+
   getProjectionState(options: { initialize?: boolean } = {}): ProjectionStateRow {
     const row = this.db
       .select({

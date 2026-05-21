@@ -286,7 +286,7 @@ final class RootWindowController: NSWindowController {
         authState: integration.authState,
         enabled: integration.enabled,
         projectionStats: projectionStats,
-        capability: CapabilityStatus(availability: "available", setupVisible: true)
+        capability: integration.capability ?? CapabilityStatus(availability: "available", setupVisible: true)
       )
     }
     let relationshipSummary = RelationshipSummary(

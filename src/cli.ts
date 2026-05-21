@@ -576,7 +576,7 @@ async function main(): Promise<void> {
     const db = openExistingCuedDatabase(undefined, { readonly: true });
     try {
       const overview = db.getMenuBarOverview();
-      const imessageStats = db.getIntegrationProjectionStats("imessage", "local");
+      const phoneCalls = db.countObservedPhoneCalls();
       printJson({
         app: getAppStatusMetadata(db),
         daemon: db.getDaemonState(),
@@ -584,7 +584,7 @@ async function main(): Promise<void> {
         relationshipSummary: {
           messages: overview.messages,
           contacts: overview.contacts,
-          phoneCalls: imessageStats.rawEventsBySchema["call.observed@1"] ?? 0,
+          phoneCalls,
           pendingProjectionEvents: 0,
           lastUpdatedAt: Date.now(),
           source: "menu_bar_cache",

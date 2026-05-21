@@ -131,7 +131,7 @@ export function buildMenuBarDaemonStatusSnapshot(
   const overview = db.getMenuBarOverview();
   const projection = db.getProjectionBacklog({ initializeProjectionState: false });
   const searchIndex = db.getMessageFtsIndexBacklog();
-  const imessageStats = db.getIntegrationProjectionStats("imessage", "local");
+  const phoneCalls = db.countObservedPhoneCalls();
   return {
     app: options.app,
     bootstrap: options.bootstrap,
@@ -150,7 +150,7 @@ export function buildMenuBarDaemonStatusSnapshot(
     relationshipSummary: {
       messages: overview.messages,
       contacts: overview.contacts,
-      phoneCalls: imessageStats.rawEventsBySchema["call.observed@1"] ?? 0,
+      phoneCalls,
       pendingProjectionEvents: projection.pending_raw_events,
       lastUpdatedAt: Date.now(),
       source: "menu_bar_cache",

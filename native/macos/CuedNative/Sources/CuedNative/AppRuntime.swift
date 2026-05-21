@@ -435,6 +435,7 @@ struct AppIntegrationStatus {
   let authState: String
   let enabled: Bool
   let projectionStats: ProjectionStats?
+  let capability: CapabilityStatus?
 }
 
 struct AppPlatformMessageCount {
@@ -590,6 +591,9 @@ final class AppStatusStore: @unchecked Sendable {
     else {
       return nil
     }
+    guard stringValue(payload["dbPath"]) == dbPath else {
+      return nil
+    }
     var snapshot = parseStatusPayload(payload, daemonLockState: daemonLockState)
     let relationshipSummary = payload["relationshipSummary"] as? [String: Any] ?? [:]
     if relationshipSummary["phoneCalls"] == nil {
@@ -679,9 +683,22 @@ final class AppStatusStore: @unchecked Sendable {
         displayName: stringValue(row["displayName"]),
         authState: authState,
         enabled: boolValue(row["enabled"]) ?? false,
-        projectionStats: parseProjectionStats(row["projectionStats"])
+        projectionStats: parseProjectionStats(row["projectionStats"]),
+        capability: parseCapability(row["capability"])
       )
     }
+  }
+
+  private func parseCapability(_ value: Any?) -> CapabilityStatus? {
+    guard let payload = value as? [String: Any],
+          let availability = stringValue(payload["availability"]) else {
+      return nil
+    }
+
+    return CapabilityStatus(
+      availability: availability,
+      setupVisible: boolValue(payload["onboardingVisible"]) ?? true
+    )
   }
 
   private func parseProjectionStats(_ value: Any?) -> ProjectionStats? {
@@ -800,7 +817,7 @@ final class AppStatusStore: @unchecked Sendable {
       FROM raw_events
       WHERE platform = 'imessage'
         AND account_key = 'local'
-        AND normalized_schema = 'call.observed@1'
+        AND COALESCE(normalized_schema, entity_kind || '.' || event_kind || '@1') = 'call.observed@1'
     """
 
     var statement: OpaquePointer?
@@ -891,7 +908,8 @@ final class AppStatusStore: @unchecked Sendable {
           displayName: sqlite3_column_type(statement, 4) == SQLITE_NULL ? nil : String(cString: sqlite3_column_text(statement, 4)),
           authState: String(cString: sqlite3_column_text(statement, 2)),
           enabled: sqlite3_column_int(statement, 3) == 1,
-          projectionStats: nil
+          projectionStats: nil,
+          capability: nil
         )
       )
     }
@@ -962,7 +980,8 @@ final class AppStatusStore: @unchecked Sendable {
       displayName: existing?.displayName ?? displayName,
       authState: authState,
       enabled: existing?.enabled ?? true,
-      projectionStats: existing?.projectionStats
+      projectionStats: existing?.projectionStats,
+      capability: existing?.capability
     )
   }
 
