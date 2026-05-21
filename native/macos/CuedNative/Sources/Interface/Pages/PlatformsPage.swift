@@ -18,14 +18,18 @@ extension RootView {
         if viewModel.platformConfigurations.isEmpty {
           VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 12) {
-              Image(systemName: "sparkle.magnifyingglass")
+              Image(systemName: viewModel.hasLoadedSnapshot ? "sparkle.magnifyingglass" : "arrow.triangle.2.circlepath")
                 .font(.title3.weight(.semibold))
                 .foregroundStyle(.secondary)
                 .frame(width: 26)
               VStack(alignment: .leading, spacing: 4) {
-                Text("No sources are available yet")
+                Text(viewModel.hasLoadedSnapshot ? "No sources are available yet" : "Loading local sources")
                   .font(.headline)
-                Text("Sources appear here as soon as the daemon reports supported integrations for this Mac.")
+                Text(
+                  viewModel.hasLoadedSnapshot
+                    ? "Sources appear here as soon as the daemon reports supported integrations for this Mac."
+                    : "Reading the local Cued snapshot from this Mac."
+                )
                   .font(.subheadline)
                   .foregroundStyle(.secondary)
               }

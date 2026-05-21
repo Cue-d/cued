@@ -247,6 +247,7 @@ public final class RootViewModel: ObservableObject {
   @Published public var relationshipSummary = RelationshipSummary()
   @Published public var agentTargetStatuses = defaultAgentTargetStatuses()
   @Published public var agentLaunchFeedback: AgentLaunchFeedback?
+  @Published public var hasLoadedSnapshot = false
   @Published public private(set) var refreshSequence = 0
 
   public let pageWidth: CGFloat = RootViewModel.windowWidth
@@ -302,6 +303,12 @@ public final class RootViewModel: ObservableObject {
       allIntegrations: allIntegrations,
       setupIntegrations: integrations
     )
+    hasLoadedSnapshot = true
+    isRefreshing = false
+    refreshSequence += 1
+  }
+
+  public func finishRefreshWithoutSnapshot() {
     isRefreshing = false
     refreshSequence += 1
   }

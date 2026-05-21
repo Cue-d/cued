@@ -145,27 +145,34 @@ final class RootWindowController: NSWindowController {
         RootSnapshotResponse.self,
         arguments: ["onboarding", "snapshot"] + (shouldRefreshPermissions ? ["--refresh-permissions"] : [])
       )
+
+      guard let snapshot else {
+        await MainActor.run {
+          self.isRefreshing = false
+          self.viewModel.finishRefreshWithoutSnapshot()
+          self.schedulePermissionRefresh()
+          self.runPendingRefreshIfNeeded()
+        }
+        return
+      }
+
       let globalSkill = Self.decodeJSON(
         daemonSupervisor: daemonSupervisor,
         SkillStatus.self,
         arguments: ["skill", "status"]
-      ) ?? snapshot?.globalSkill ?? SkillStatus(
-        installed: false,
-        status: "unknown",
-        summary: "Checks whether the global Cued skill is available to your agents."
-      )
-      let setupIntegrations = (snapshot?.setupIntegrations ?? []).filter {
+      ) ?? snapshot.globalSkill
+      let setupIntegrations = snapshot.setupIntegrations.filter {
         $0.capability.setupVisible
       }
 
       await MainActor.run {
-        self.cachedAllIntegrations = snapshot?.integrations ?? []
-        self.clearGrantedLivePermissions(using: snapshot?.permissions ?? [])
+        self.cachedAllIntegrations = snapshot.integrations ?? []
+        self.clearGrantedLivePermissions(using: snapshot.permissions)
         self.isRefreshing = false
         self.viewModel.apply(
-          permissions: snapshot?.permissions ?? [],
+          permissions: snapshot.permissions,
           globalSkill: globalSkill,
-          relationshipSummary: snapshot?.relationshipSummary ?? RelationshipSummary(),
+          relationshipSummary: snapshot.relationshipSummary ?? RelationshipSummary(),
           allIntegrations: self.cachedAllIntegrations,
           integrations: setupIntegrations
         )

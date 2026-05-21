@@ -33,17 +33,17 @@ extension RootView {
         ) {
           metricTile(
             label: "Messages",
-            value: formatCount(viewModel.relationshipSummary.messages),
+            value: statusMetricValue(viewModel.relationshipSummary.messages),
             breakdown: platformBreakdown(for: .messages)
           )
           metricTile(
             label: "Contacts",
-            value: formatCount(viewModel.relationshipSummary.contacts),
+            value: statusMetricValue(viewModel.relationshipSummary.contacts),
             breakdown: platformBreakdown(for: .contacts)
           )
           metricTile(
             label: "Phone calls",
-            value: formatCount(viewModel.relationshipSummary.phoneCalls),
+            value: statusMetricValue(viewModel.relationshipSummary.phoneCalls),
             breakdown: platformBreakdown(for: .phoneCalls)
           )
         }
@@ -172,6 +172,13 @@ extension RootView {
     }
   }
 
+  func statusMetricValue(_ value: Int) -> String {
+    if !viewModel.hasLoadedSnapshot {
+      return "..."
+    }
+    return formatCount(value)
+  }
+
   func agentDebugRow(_ example: AgentExample) -> some View {
     HStack(alignment: .top, spacing: 14) {
       Image(systemName: example.icon)
@@ -268,6 +275,9 @@ extension RootView {
 
   var sourceSummary: String {
     if viewModel.platformConfigurations.isEmpty {
+      if !viewModel.hasLoadedSnapshot {
+        return "Loading the local Cued snapshot from this Mac."
+      }
       return "Sources appear after the daemon reports supported integrations."
     }
     return "Connected, pending, and paused source state in one place."
