@@ -766,11 +766,6 @@ async function main(): Promise<void> {
             printJson(getTelemetryStatus(db));
             return;
           case "disable":
-            await sendTelemetryEventSafe(db, "diagnostics_opt_in_changed", {
-              component: "telemetry",
-              operation: "set_enabled",
-              enabled: false,
-            });
             setTelemetryEnabled(db, false);
             printJson(getTelemetryStatus(db));
             return;

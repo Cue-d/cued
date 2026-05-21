@@ -48,7 +48,7 @@ export async function buildOnboardingSnapshot(
   });
   permissions.permissions.push({
     key: "diagnostics",
-    status: isTelemetryEnabled(db) ? "granted" : "needs_action",
+    status: isTelemetryEnabled(db) ? "granted" : "disabled",
     summary: isTelemetryEnabled(db)
       ? "Redacted diagnostic reporting is enabled"
       : "Redacted diagnostic reporting is disabled",

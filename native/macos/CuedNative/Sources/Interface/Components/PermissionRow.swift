@@ -12,7 +12,7 @@ extension RootView {
         ? { enabled in
           viewModel.setPermissionStatus(
             key: "diagnostics",
-            status: enabled ? "granted" : "needs_action",
+            status: enabled ? "granted" : "disabled",
             summary: enabled
               ? "Redacted diagnostic reporting is enabled"
               : "Redacted diagnostic reporting is disabled",

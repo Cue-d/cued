@@ -89,6 +89,12 @@ describe("onboarding snapshot", () => {
         status: process.platform === "darwin" ? "granted" : "unknown",
       }),
     );
+    expect(snapshot.permissions.find((permission) => permission.key === "diagnostics")).toEqual(
+      expect.objectContaining({
+        status: "disabled",
+        summary: "Redacted diagnostic reporting is disabled",
+      }),
+    );
     expect(snapshot.integrations).toEqual(
       expect.arrayContaining([
         expect.objectContaining({

@@ -155,14 +155,49 @@ final class RootViewTests: XCTestCase {
 
     viewModel.setPermissionStatus(
       key: "diagnostics",
-      status: "needs_action",
+      status: "disabled",
       summary: "Redacted diagnostic reporting is disabled",
       requestFlags: ["--telemetry-disable"]
     )
 
     let diagnostics = viewModel.permissionStatuses.first { $0.key == "diagnostics" }
-    XCTAssertEqual(diagnostics?.status, "needs_action")
+    XCTAssertEqual(diagnostics?.status, "disabled")
     XCTAssertEqual(diagnostics?.summary, "Redacted diagnostic reporting is disabled")
     XCTAssertEqual(diagnostics?.requestFlags, ["--telemetry-disable"])
+  }
+
+  @MainActor
+  func testDisabledDiagnosticsDoNotBlockPermissionsFlow() {
+    let viewModel = RootViewModel()
+    viewModel.apply(
+      permissions: [
+        PermissionStatus(
+          key: "contacts",
+          status: "granted",
+          summary: "Contacts access is authorized",
+          requestFlags: ["--contacts"]
+        ),
+        PermissionStatus(
+          key: "full_disk_access",
+          status: "granted",
+          summary: "Full Disk Access is available",
+          requestFlags: ["--full-disk-access"]
+        ),
+        PermissionStatus(
+          key: "diagnostics",
+          status: "disabled",
+          summary: "Redacted diagnostic reporting is disabled",
+          requestFlags: ["--telemetry-enable"]
+        ),
+      ],
+      globalSkill: defaultSkillStatus(),
+      relationshipSummary: RelationshipSummary(),
+      allIntegrations: [],
+      integrations: []
+    )
+    viewModel.currentPage = RootPage.permissions.rawValue
+
+    XCTAssertTrue(viewModel.allPermissionsGranted)
+    XCTAssertEqual(viewModel.buttonTitle, "Continue")
   }
 }
