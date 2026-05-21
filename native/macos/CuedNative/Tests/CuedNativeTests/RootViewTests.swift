@@ -50,6 +50,15 @@ final class RootViewTests: XCTestCase {
     )
   }
 
+  func testAgentLaunchShellPathIncludesUserLocalBins() {
+    let path = AgentLaunchService.defaultShellPath("/custom/bin")
+
+    XCTAssertTrue(path.contains("/custom/bin"))
+    XCTAssertTrue(path.contains("\(NSHomeDirectory())/.local/bin"))
+    XCTAssertTrue(path.contains("\(NSHomeDirectory())/.claude/local"))
+    XCTAssertTrue(path.contains("\(NSHomeDirectory())/.npm-global/bin"))
+  }
+
   func testPermissionGuideURLsMatchExpectedSystemSettingsPanes() {
     XCTAssertEqual(
       permissionGuideURL(for: "contacts"),

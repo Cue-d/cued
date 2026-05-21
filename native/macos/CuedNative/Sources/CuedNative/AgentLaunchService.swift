@@ -327,7 +327,7 @@ enum AgentLaunchService {
   private nonisolated static func runShell(_ command: String) -> (status: Int32, stdout: String, stderr: String)? {
     let process = Process()
     process.executableURL = URL(fileURLWithPath: "/bin/zsh")
-    process.arguments = ["-lc", command]
+    process.arguments = ["-c", command]
     process.environment = shellEnvironment()
     let stdoutPipe = Pipe()
     let stderrPipe = Pipe()
@@ -335,7 +335,18 @@ enum AgentLaunchService {
     process.standardError = stderrPipe
     do {
       try process.run()
-      process.waitUntilExit()
+      let deadline = Date().addingTimeInterval(2.5)
+      while process.isRunning && Date() < deadline {
+        Thread.sleep(forTimeInterval: 0.03)
+      }
+      if process.isRunning {
+        process.terminate()
+        Thread.sleep(forTimeInterval: 0.1)
+        if process.isRunning {
+          process.interrupt()
+        }
+        return (124, "", "Timed out running launch readiness command.")
+      }
       let stdout = String(data: stdoutPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
       let stderr = String(data: stderrPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
       return (process.terminationStatus, stdout, stderr)
@@ -346,18 +357,24 @@ enum AgentLaunchService {
 
   private nonisolated static func shellEnvironment() -> [String: String] {
     var environment = ProcessInfo.processInfo.environment
-    let path = environment["PATH"] ?? ""
+    environment["PATH"] = defaultShellPath(environment["PATH"] ?? "")
+    return environment
+  }
+
+  nonisolated static func defaultShellPath(_ path: String) -> String {
     let defaults = [
       "/opt/homebrew/bin",
       "/usr/local/bin",
+      "\(NSHomeDirectory())/.local/bin",
+      "\(NSHomeDirectory())/.claude/local",
+      "\(NSHomeDirectory())/.npm-global/bin",
       "\(NSHomeDirectory())/.nvm/versions/node/v24.4.0/bin",
       "/usr/bin",
       "/bin",
       "/usr/sbin",
       "/sbin",
     ]
-    environment["PATH"] = ([path] + defaults).filter { !$0.isEmpty }.joined(separator: ":")
-    return environment
+    return ([path] + defaults).filter { !$0.isEmpty }.joined(separator: ":")
   }
 
 }

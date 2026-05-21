@@ -117,6 +117,8 @@ final class RootWindowController: NSWindowController {
   }
 
   func refresh(forceActivePermissionRefresh: Bool = false) {
+    refreshAgentTargets()
+
     guard !isRefreshing else {
       pendingRefreshAfterCurrent = true
       pendingForceActivePermissionRefreshAfterCurrent =
@@ -152,7 +154,6 @@ final class RootWindowController: NSWindowController {
       let setupIntegrations = (snapshot?.setupIntegrations ?? []).filter {
         $0.capability.setupVisible
       }
-      let agentTargetStatuses = AgentLaunchService.targetStatuses()
 
       await MainActor.run {
         self.cachedAllIntegrations = snapshot?.integrations ?? []
@@ -165,7 +166,6 @@ final class RootWindowController: NSWindowController {
           allIntegrations: self.cachedAllIntegrations,
           integrations: setupIntegrations
         )
-        self.viewModel.applyAgentTargetStatuses(agentTargetStatuses)
         self.schedulePermissionRefresh()
         self.schedulePendingAuthRefreshIfNeeded()
         self.runPendingRefreshIfNeeded()
