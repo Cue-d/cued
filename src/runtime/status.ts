@@ -131,6 +131,7 @@ export function buildMenuBarDaemonStatusSnapshot(
   const overview = db.getMenuBarOverview();
   const projection = db.getProjectionBacklog({ initializeProjectionState: false });
   const searchIndex = db.getMessageFtsIndexBacklog();
+  const imessageStats = db.getIntegrationProjectionStats("imessage", "local");
   return {
     app: options.app,
     bootstrap: options.bootstrap,
@@ -145,6 +146,14 @@ export function buildMenuBarDaemonStatusSnapshot(
       failedSearchIndexMessages: searchIndex.failed,
       projectionWatermark: projection.projection_watermark,
       maxRawEventRowid: projection.max_raw_event_rowid,
+    },
+    relationshipSummary: {
+      messages: overview.messages,
+      contacts: overview.contacts,
+      phoneCalls: imessageStats.rawEventsBySchema["call.observed@1"] ?? 0,
+      pendingProjectionEvents: projection.pending_raw_events,
+      lastUpdatedAt: Date.now(),
+      source: "menu_bar_cache",
     },
     integrations: listMenuBarIntegrationStates(db),
     discordRealtimeSessions: options.discordRealtime.getStatuses(),

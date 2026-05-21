@@ -575,10 +575,20 @@ async function main(): Promise<void> {
   if (command === "status" && [subcommand, ...rest].includes("--menu-bar")) {
     const db = openExistingCuedDatabase(undefined, { readonly: true });
     try {
+      const overview = db.getMenuBarOverview();
+      const imessageStats = db.getIntegrationProjectionStats("imessage", "local");
       printJson({
         app: getAppStatusMetadata(db),
         daemon: db.getDaemonState(),
-        overview: db.getMenuBarOverview(),
+        overview,
+        relationshipSummary: {
+          messages: overview.messages,
+          contacts: overview.contacts,
+          phoneCalls: imessageStats.rawEventsBySchema["call.observed@1"] ?? 0,
+          pendingProjectionEvents: 0,
+          lastUpdatedAt: Date.now(),
+          source: "menu_bar_cache",
+        },
         integrations: listMenuBarIntegrationStates(db),
         update: getUpdateStatus(db),
         socketRunning: existsSync(CUED_SOCKET_PATH),

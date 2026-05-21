@@ -453,6 +453,7 @@ struct AppStatusSnapshot {
   let contacts: Int
   let conversations: Int
   let messages: Int
+  var phoneCalls: Int
   let capturedRawEvents: Int
   let projectedMessages: Int
   let pendingProjectionEvents: Int
@@ -503,6 +504,7 @@ final class AppStatusStore: @unchecked Sendable {
         contacts: 0,
         conversations: 0,
         messages: 0,
+        phoneCalls: 0,
         capturedRawEvents: 0,
         projectedMessages: 0,
         pendingProjectionEvents: 0,
@@ -529,6 +531,7 @@ final class AppStatusStore: @unchecked Sendable {
         contacts: 0,
         conversations: 0,
         messages: 0,
+        phoneCalls: 0,
         capturedRawEvents: 0,
         projectedMessages: 0,
         pendingProjectionEvents: 0,
@@ -563,6 +566,7 @@ final class AppStatusStore: @unchecked Sendable {
       contacts: counts[0],
       conversations: counts[1],
       messages: counts[2],
+      phoneCalls: queryPhoneCalls(db: db),
       capturedRawEvents: counts[3],
       projectedMessages: counts[2],
       pendingProjectionEvents: 0,
@@ -586,7 +590,12 @@ final class AppStatusStore: @unchecked Sendable {
     else {
       return nil
     }
-    return parseStatusPayload(payload, daemonLockState: daemonLockState)
+    var snapshot = parseStatusPayload(payload, daemonLockState: daemonLockState)
+    let relationshipSummary = payload["relationshipSummary"] as? [String: Any] ?? [:]
+    if relationshipSummary["phoneCalls"] == nil {
+      snapshot.phoneCalls = readPhoneCallsFromDatabase()
+    }
+    return snapshot
   }
 
   private func parseStatusPayload(
@@ -594,6 +603,7 @@ final class AppStatusStore: @unchecked Sendable {
     daemonLockState: (running: Bool, pid: Int?, updatedAt: Int?)
   ) -> AppStatusSnapshot {
     let overview = payload["overview"] as? [String: Any] ?? [:]
+    let relationshipSummary = payload["relationshipSummary"] as? [String: Any] ?? [:]
     let dataStatus = payload["dataStatus"] as? [String: Any] ?? [:]
     let integrations = parseIntegrations(payload["integrations"])
     let app = payload["app"] as? [String: Any] ?? [:]
@@ -620,6 +630,7 @@ final class AppStatusStore: @unchecked Sendable {
       contacts: intValue(overview["contacts"]) ?? 0,
       conversations: intValue(overview["conversations"]) ?? 0,
       messages: intValue(overview["messages"]) ?? 0,
+      phoneCalls: intValue(relationshipSummary["phoneCalls"]) ?? 0,
       capturedRawEvents: intValue(dataStatus["capturedRawEvents"]) ?? intValue(overview["rawEvents"]) ?? 0,
       projectedMessages: intValue(dataStatus["projectedMessages"]) ?? intValue(overview["messages"]) ?? 0,
       pendingProjectionEvents: intValue(dataStatus["pendingProjectionEvents"]) ?? 0,
@@ -781,6 +792,38 @@ final class AppStatusStore: @unchecked Sendable {
       return 0
     }
     return Int(sqlite3_column_int64(statement, 0))
+  }
+
+  private func queryPhoneCalls(db: OpaquePointer) -> Int {
+    let sql = """
+      SELECT COUNT(*)
+      FROM raw_events
+      WHERE platform = 'imessage'
+        AND account_key = 'local'
+        AND normalized_schema = 'call.observed@1'
+    """
+
+    var statement: OpaquePointer?
+    guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK, let statement else {
+      return 0
+    }
+    defer { sqlite3_finalize(statement) }
+    guard sqlite3_step(statement) == SQLITE_ROW else {
+      return 0
+    }
+    return Int(sqlite3_column_int64(statement, 0))
+  }
+
+  private func readPhoneCallsFromDatabase() -> Int {
+    var db: OpaquePointer?
+    guard sqlite3_open_v2(dbPath, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK, let db else {
+      if let db {
+        sqlite3_close(db)
+      }
+      return 0
+    }
+    defer { sqlite3_close(db) }
+    return queryPhoneCalls(db: db)
   }
 
   private func queryMessageCountsByPlatform(db: OpaquePointer) -> [AppPlatformMessageCount] {

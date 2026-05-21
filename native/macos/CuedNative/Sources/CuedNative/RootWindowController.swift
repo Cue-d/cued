@@ -292,9 +292,11 @@ final class RootWindowController: NSWindowController {
     let relationshipSummary = RelationshipSummary(
       messages: snapshot.messages > 0 ? snapshot.messages : snapshot.projectedMessages,
       contacts: snapshot.contacts,
-      phoneCalls: snapshot.integrations.reduce(0) { total, integration in
-        total + (integration.projectionStats?.rawEventsBySchema["call.observed@1"] ?? 0)
-      },
+      phoneCalls: snapshot.phoneCalls > 0
+        ? snapshot.phoneCalls
+        : snapshot.integrations.reduce(0) { total, integration in
+          total + (integration.projectionStats?.rawEventsBySchema["call.observed@1"] ?? 0)
+        },
       pendingProjectionEvents: snapshot.pendingProjectionEvents,
       lastUpdatedAt: nil,
       source: "menu_bar_cache"
