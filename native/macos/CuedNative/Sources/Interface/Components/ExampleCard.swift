@@ -42,16 +42,17 @@ struct ExampleCard: View {
   }
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 12) {
-      iconTile
-
-      VStack(alignment: .leading, spacing: 4) {
-        Text(title)
-          .font(.headline)
-        Text(detail)
-          .font(.subheadline)
-          .foregroundStyle(.secondary)
-          .fixedSize(horizontal: false, vertical: true)
+    VStack(alignment: .leading, spacing: 10) {
+      HStack(alignment: .top, spacing: 10) {
+        iconTile
+        VStack(alignment: .leading, spacing: 3) {
+          Text(title)
+            .font(.headline)
+          Text(detail)
+            .font(.subheadline)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+        }
       }
 
       if let promptPreview {
@@ -64,36 +65,25 @@ struct ExampleCard: View {
         targetButtons
       }
     }
-    .padding(16)
-    .frame(maxWidth: .infinity, minHeight: onLaunch == nil ? 146 : 262, alignment: .topLeading)
-    .background(rowBackground(cornerRadius: 14))
+    .padding(14)
+    .frame(maxWidth: .infinity, minHeight: onLaunch == nil ? 124 : 214, alignment: .topLeading)
+    .background(rowBackground(cornerRadius: 12))
   }
 
   private var iconTile: some View {
     ZStack {
-      RoundedRectangle(cornerRadius: 16, style: .continuous)
-        .fill(
-          LinearGradient(
-            colors: [
-              Color.accentColor.opacity(0.92),
-              Color(red: 0.04, green: 0.76, blue: 0.86).opacity(0.82),
-              Color(red: 1.0, green: 0.70, blue: 0.84).opacity(0.88),
-            ],
-            startPoint: .topLeading,
-            endPoint: .bottomTrailing
-          )
-        )
+      RoundedRectangle(cornerRadius: 9, style: .continuous)
+        .fill(Color.accentColor.opacity(0.12))
         .overlay(
-          RoundedRectangle(cornerRadius: 16, style: .continuous)
-            .strokeBorder(Color.white.opacity(0.46), lineWidth: 1)
+          RoundedRectangle(cornerRadius: 9, style: .continuous)
+            .strokeBorder(Color.accentColor.opacity(0.22), lineWidth: 1)
         )
 
       Image(systemName: icon)
-        .font(.system(size: 22, weight: .semibold))
-        .foregroundStyle(.white)
-        .shadow(color: .black.opacity(0.18), radius: 5, y: 2)
+        .font(.system(size: 15, weight: .semibold))
+        .foregroundStyle(Color.accentColor)
     }
-    .frame(width: 54, height: 54)
+    .frame(width: 34, height: 34)
   }
 
   private func promptPill(_ text: String) -> some View {
@@ -108,7 +98,7 @@ struct ExampleCard: View {
         .fixedSize(horizontal: false, vertical: true)
     }
     .padding(.horizontal, 10)
-    .padding(.vertical, 8)
+    .padding(.vertical, 7)
     .frame(maxWidth: .infinity, alignment: .leading)
     .background(
       RoundedRectangle(cornerRadius: 10, style: .continuous)
@@ -117,7 +107,7 @@ struct ExampleCard: View {
   }
 
   private var targetButtons: some View {
-    VStack(alignment: .leading, spacing: 8) {
+    VStack(alignment: .leading, spacing: 7) {
       ForEach(AgentTarget.allCases) { target in
         let status = targetStatuses[target] ?? .unknown
         Button {

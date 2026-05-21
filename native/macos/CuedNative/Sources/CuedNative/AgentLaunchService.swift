@@ -1,3 +1,4 @@
+import ApplicationServices
 import AppKit
 import Foundation
 import Interface
@@ -181,6 +182,14 @@ enum AgentLaunchService {
     process.arguments = ["-b", codexBundleIdentifier, repoPath]
     do {
       try process.run()
+      process.waitUntilExit()
+      guard process.terminationStatus == 0 else {
+        return AgentLaunchFeedback(
+          title: "Codex App did not open",
+          detail: "The prompt is copied. Open Codex manually and paste it into a new session.",
+          isError: true
+        )
+      }
       return AgentLaunchFeedback(
         title: "Opened Codex App",
         detail: "The example prompt is copied. Paste it if Codex does not focus the composer automatically."
@@ -200,6 +209,15 @@ enum AgentLaunchService {
     command: String,
     pasteDelay: Double
   ) -> AgentLaunchFeedback {
+    guard isAccessibilityTrusted() else {
+      requestAccessibilityPermission()
+      return AgentLaunchFeedback(
+        title: "Accessibility permission needed",
+        detail: "Cued asked macOS for Accessibility access. Enable Cued in Privacy & Security > Accessibility, then click the agent button again.",
+        isError: true
+      )
+    }
+
     let script = """
       tell application "Terminal"
         activate
@@ -225,8 +243,8 @@ enum AgentLaunchService {
     appleScript.executeAndReturnError(&error)
     if let message = error?[NSAppleScript.errorMessage] as? String {
       return AgentLaunchFeedback(
-        title: "Terminal automation needs attention",
-        detail: "\(message). The prompt is copied, so you can paste it manually.",
+        title: "Terminal automation permission needed",
+        detail: "\(message). Allow Cued to control Terminal in Privacy & Security > Automation. The prompt is copied, so you can paste it manually.",
         isError: true
       )
     }
@@ -235,6 +253,17 @@ enum AgentLaunchService {
       title: title,
       detail: "Terminal is running the agent in the Cued repo with the copied example prompt."
     )
+  }
+
+  private nonisolated static func isAccessibilityTrusted() -> Bool {
+    AXIsProcessTrusted()
+  }
+
+  private nonisolated static func requestAccessibilityPermission() {
+    let options = [
+      "AXTrustedCheckOptionPrompt": true,
+    ] as CFDictionary
+    _ = AXIsProcessTrustedWithOptions(options)
   }
 
   private nonisolated static func resolveRepoPath() -> String {
