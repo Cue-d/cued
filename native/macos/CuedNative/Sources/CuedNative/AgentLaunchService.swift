@@ -31,14 +31,14 @@ enum AgentLaunchService {
 
     switch target {
     case .codexApp:
-      return launchCodexApp(repoPath: repoPath)
+      return launchCodexApp(repoPath: repoPath, prompt: prompt)
     case .codexCLI:
-      return launchTerminalAgent(
+      return launchCommandFileAgent(
         title: "Opened Codex CLI",
         command: "cd \(shellEscape(repoPath)) && codex \(shellEscape(prompt))"
       )
     case .claudeCode:
-      return launchTerminalAgent(
+      return launchCommandFileAgent(
         title: "Opened Claude Code",
         command: "cd \(shellEscape(repoPath)) && claude \(shellEscape(prompt))"
       )
@@ -173,67 +173,82 @@ enum AgentLaunchService {
   }
 
   @MainActor
-  private static func launchCodexApp(repoPath: String) -> AgentLaunchFeedback {
-    let process = Process()
-    process.executableURL = URL(fileURLWithPath: "/usr/bin/open")
-    process.arguments = ["-b", codexBundleIdentifier, repoPath]
+  private static func launchCodexApp(repoPath: String, prompt: String) -> AgentLaunchFeedback {
+    var components = URLComponents()
+    components.scheme = "codex"
+    components.host = "new"
+    components.queryItems = [
+      URLQueryItem(name: "path", value: repoPath),
+      URLQueryItem(name: "prompt", value: prompt),
+    ]
+
+    guard let url = components.url else {
+      return AgentLaunchFeedback(
+        title: "Codex App did not open",
+        detail: "Could not build the Codex deep link. The prompt is copied as a fallback.",
+        isError: true
+      )
+    }
+
+    if NSWorkspace.shared.open(url) {
+      return AgentLaunchFeedback(
+        title: "Opened Codex App",
+        detail: "Codex opened a new thread with the example prompt."
+      )
+    }
+
+    return AgentLaunchFeedback(
+      title: "Codex App did not open",
+      detail: "The prompt is copied. Open Codex manually and paste it into a new session.",
+      isError: true
+    )
+  }
+
+  @MainActor
+  private static func launchCommandFileAgent(
+    title: String,
+    command: String
+  ) -> AgentLaunchFeedback {
     do {
+      let scriptURL = try writeCommandFile(command: command)
+      let process = Process()
+      process.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+      process.arguments = ["-a", "Terminal", scriptURL.path]
       try process.run()
       process.waitUntilExit()
       guard process.terminationStatus == 0 else {
         return AgentLaunchFeedback(
-          title: "Codex App did not open",
-          detail: "The prompt is copied. Open Codex manually and paste it into a new session.",
+          title: "\(title) failed",
+          detail: "Terminal did not open the generated command file. The prompt is copied as a fallback.",
           isError: true
         )
       }
       return AgentLaunchFeedback(
-        title: "Opened Codex App",
-        detail: "The example prompt is copied. Paste it if Codex does not focus the composer automatically."
+        title: title,
+        detail: "Terminal is running the agent in the Cued repo with the example prompt."
       )
     } catch {
       return AgentLaunchFeedback(
-        title: "Codex App did not open",
-        detail: "Open Codex manually and paste the copied prompt.",
+        title: "\(title) failed",
+        detail: "Could not create the Terminal command file. The prompt is copied as a fallback.",
         isError: true
       )
     }
   }
 
-  @MainActor
-  private static func launchTerminalAgent(
-    title: String,
-    command: String
-  ) -> AgentLaunchFeedback {
+  private nonisolated static func writeCommandFile(command: String) throws -> URL {
+    let directory = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+      .appendingPathComponent("cued-agent-launches", isDirectory: true)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+
+    let fileURL = directory.appendingPathComponent("cued-agent-\(UUID().uuidString).command")
     let script = """
-      tell application "Terminal"
-        activate
-        do script \(appleScriptString(command))
-      end tell
+      #!/bin/zsh
+      \(command)
       """
-
-    guard let appleScript = NSAppleScript(source: script) else {
-      return AgentLaunchFeedback(
-        title: "\(title) failed",
-        detail: "Could not build the Terminal automation script.",
-        isError: true
-      )
-    }
-
-    var error: NSDictionary?
-    appleScript.executeAndReturnError(&error)
-    if let message = error?[NSAppleScript.errorMessage] as? String {
-      return AgentLaunchFeedback(
-        title: "Terminal automation permission needed",
-        detail: "\(message). Allow Cued to control Terminal in Privacy & Security > Automation. The prompt is copied as a fallback.",
-        isError: true
-      )
-    }
-
-    return AgentLaunchFeedback(
-      title: title,
-      detail: "Terminal is running the agent in the Cued repo with the example prompt."
-    )
+    try script.write(to: fileURL, atomically: true, encoding: .utf8)
+    try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: fileURL.path)
+    return fileURL
   }
 
   private nonisolated static func resolveRepoPath() -> String {
@@ -345,9 +360,6 @@ enum AgentLaunchService {
     return environment
   }
 
-  private nonisolated static func appleScriptString(_ value: String) -> String {
-    "\"\(value.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\""))\""
-  }
 }
 
 private func prompt(for exampleID: AgentExampleID, repoPath: String) -> String {
