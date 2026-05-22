@@ -16,6 +16,7 @@ import (
 	"go.mau.fi/whatsmeow/proto/waCompanionReg"
 	"go.mau.fi/whatsmeow/proto/waE2E"
 	"go.mau.fi/whatsmeow/proto/waHistorySync"
+	"go.mau.fi/whatsmeow/proto/waSyncAction"
 	"go.mau.fi/whatsmeow/proto/waWa6"
 	waWeb "go.mau.fi/whatsmeow/proto/waWeb"
 	"go.mau.fi/whatsmeow/store"
@@ -82,6 +83,59 @@ func TestResyncPagePaginatesFullHistory(t *testing.T) {
 	}
 	if len(secondPage.Messages) != 205 || secondPage.HasMore || secondPage.NextCursor != nil {
 		t.Fatalf("unexpected second page: %+v", secondPage)
+	}
+}
+
+func TestResyncPagePaginatesCallsAfterMessages(t *testing.T) {
+	storeDir := t.TempDir()
+	state, err := newHelperState(storeDir)
+	if err != nil {
+		t.Fatalf("newHelperState failed: %v", err)
+	}
+	defer state.close()
+
+	for index := 0; index < 3; index++ {
+		state.setMessage(messageSnapshot{
+			MessageID: "wamid-" + strconv.Itoa(index),
+			ChatJID:   "12016824050@s.whatsapp.net",
+			FromMe:    index%2 == 0,
+			Timestamp: int64(index + 1),
+			Text:      "hello",
+		})
+		if err := state.applySnapshot(stateSnapshot{Calls: []callSnapshot{{
+			CallID:    "call-" + strconv.Itoa(index),
+			ChatJID:   "12016824050@s.whatsapp.net",
+			FromMe:    index%2 == 0,
+			Timestamp: int64(index + 1),
+			Status:    "completed",
+			Medium:    "audio",
+		}}}); err != nil {
+			t.Fatalf("apply call snapshot failed: %v", err)
+		}
+	}
+
+	firstPage, err := state.getResyncPage(nil, "", 2)
+	if err != nil {
+		t.Fatalf("first resync page failed: %v", err)
+	}
+	if len(firstPage.Messages) != 2 || len(firstPage.Calls) != 0 || !firstPage.HasMore || firstPage.NextCursor == nil {
+		t.Fatalf("unexpected first page: %+v", firstPage)
+	}
+
+	secondPage, err := state.getResyncPage(nil, *firstPage.NextCursor, 2)
+	if err != nil {
+		t.Fatalf("second resync page failed: %v", err)
+	}
+	if len(secondPage.Messages) != 1 || len(secondPage.Calls) != 1 || secondPage.Calls[0].CallID != "call-0" || !secondPage.HasMore || secondPage.NextCursor == nil {
+		t.Fatalf("unexpected second page: %+v", secondPage)
+	}
+
+	thirdPage, err := state.getResyncPage(nil, *secondPage.NextCursor, 2)
+	if err != nil {
+		t.Fatalf("third resync page failed: %v", err)
+	}
+	if len(thirdPage.Messages) != 0 || len(thirdPage.Calls) != 2 || thirdPage.Calls[0].CallID != "call-1" || thirdPage.HasMore || thirdPage.NextCursor != nil {
+		t.Fatalf("unexpected third page: %+v", thirdPage)
 	}
 }
 
@@ -223,6 +277,53 @@ func TestHistorySyncBatchFromEventUsesHistoryPayload(t *testing.T) {
 	}
 	if len(snapshot.Chats) != 1 || snapshot.Chats[0].JID != "15551234567@s.whatsapp.net" {
 		t.Fatalf("expected chat in snapshot, got %+v", snapshot.Chats)
+	}
+}
+
+func TestHistorySyncBatchFromEventIncludesCallLogRecords(t *testing.T) {
+	self := types.NewJID("15550000001", types.DefaultUserServer)
+	peer := types.NewJID("15550000002", types.DefaultUserServer)
+	when := time.Date(2026, 5, 22, 10, 45, 0, 0, time.UTC)
+	result := waSyncAction.CallLogRecord_CONNECTED
+	callType := waSyncAction.CallLogRecord_REGULAR
+	client := whatsmeow.NewClient(&store.Device{ID: &self}, nil)
+
+	snapshot := historySyncBatchFromEvent(client, &events.HistorySync{
+		Data: &waHistorySync.HistorySync{
+			CallLogRecords: []*waSyncAction.CallLogRecord{{
+				CallID:         proto.String("call-history-1"),
+				CallCreatorJID: proto.String(self.String()),
+				Participants: []*waSyncAction.CallLogRecord_ParticipantInfo{{
+					UserJID: proto.String(peer.String()),
+				}},
+				CallResult: &result,
+				CallType:   &callType,
+				Duration:   proto.Int64(61),
+				StartTime:  proto.Int64(when.UnixMilli()),
+				IsIncoming: proto.Bool(false),
+				IsVideo:    proto.Bool(false),
+			}},
+		},
+	})
+
+	if len(snapshot.Calls) != 1 {
+		t.Fatalf("expected one call in snapshot, got %+v", snapshot.Calls)
+	}
+	call := snapshot.Calls[0]
+	if call.CallID != "call-history-1" || call.ChatJID != peer.String() || call.Timestamp != when.UnixMilli() {
+		t.Fatalf("unexpected call snapshot: %+v", call)
+	}
+	if !call.FromMe || call.Status != "completed" || call.Medium != "audio" {
+		t.Fatalf("unexpected call fields: %+v", call)
+	}
+	if call.DurationSeconds == nil || *call.DurationSeconds != 61 {
+		t.Fatalf("unexpected call duration: %+v", call.DurationSeconds)
+	}
+	if len(snapshot.Contacts) != 1 || snapshot.Contacts[0].JID != peer.String() {
+		t.Fatalf("expected peer contact from call, got %+v", snapshot.Contacts)
+	}
+	if len(snapshot.Chats) != 1 || snapshot.Chats[0].JID != peer.String() {
+		t.Fatalf("expected peer chat from call, got %+v", snapshot.Chats)
 	}
 }
 
@@ -450,6 +551,15 @@ func TestConfigureClientPayloadMatchesWebDesktopCompanion(t *testing.T) {
 	if got := config.GetSupportGroupHistory(); got != true {
 		t.Fatalf("expected group history support to be enabled")
 	}
+	if got := config.GetSupportCallLogHistory(); got != true {
+		t.Fatalf("expected call log history support to be enabled")
+	}
+	if got := config.GetOnDemandReady(); got != true {
+		t.Fatalf("expected on-demand history sync to be enabled")
+	}
+	if got := config.GetCompleteOnDemandReady(); got != true {
+		t.Fatalf("expected complete on-demand history sync to be enabled")
+	}
 	if got := store.DeviceProps.GetPlatformType(); got != waCompanionReg.DeviceProps_DESKTOP {
 		t.Fatalf("unexpected platform type: %v", got)
 	}
@@ -592,6 +702,119 @@ func TestApplyHistorySyncDataClearsHistorySyncError(t *testing.T) {
 	metadata := state.getMetadata()
 	if metadata.LastHistorySyncError != "" {
 		t.Fatalf("expected history sync error to clear after success, got %q", metadata.LastHistorySyncError)
+	}
+}
+
+func TestApplyHistorySyncDataPersistsCallLogRecords(t *testing.T) {
+	storeDir := t.TempDir()
+	state, err := newHelperState(storeDir)
+	if err != nil {
+		t.Fatalf("newHelperState failed: %v", err)
+	}
+	defer state.close()
+
+	self := types.NewJID("15550000001", types.DefaultUserServer)
+	peer := types.NewJID("15550000002", types.DefaultUserServer)
+	when := time.Date(2026, 5, 22, 10, 45, 0, 0, time.UTC)
+	result := waSyncAction.CallLogRecord_MISSED
+	callType := waSyncAction.CallLogRecord_REGULAR
+	client := whatsmeow.NewClient(&store.Device{ID: &self}, nil)
+	runtime := newHelperRuntime(client, state, json.NewEncoder(io.Discard))
+
+	err = runtime.applyHistorySyncData(&waHistorySync.HistorySync{
+		SyncType: waHistorySync.HistorySync_FULL.Enum(),
+		CallLogRecords: []*waSyncAction.CallLogRecord{{
+			CallID:         proto.String("call-apply-1"),
+			CallCreatorJID: proto.String(peer.String()),
+			Participants: []*waSyncAction.CallLogRecord_ParticipantInfo{{
+				UserJID: proto.String(self.String()),
+			}},
+			CallResult: &result,
+			CallType:   &callType,
+			StartTime:  proto.Int64(when.Unix()),
+			IsIncoming: proto.Bool(true),
+			IsVideo:    proto.Bool(true),
+		}},
+	})
+	if err != nil {
+		t.Fatalf("applyHistorySyncData failed: %v", err)
+	}
+
+	page, err := state.getResyncPage(nil, "", 100)
+	if err != nil {
+		t.Fatalf("getResyncPage failed: %v", err)
+	}
+	if len(page.Calls) != 1 {
+		t.Fatalf("expected one persisted call, got %+v", page.Calls)
+	}
+	call := page.Calls[0]
+	if call.CallID != "call-apply-1" || call.ChatJID != peer.String() || call.Timestamp != when.UnixMilli() {
+		t.Fatalf("unexpected persisted call: %+v", call)
+	}
+	if call.FromMe || call.Status != "missed" || call.Medium != "video" {
+		t.Fatalf("unexpected persisted call fields: %+v", call)
+	}
+}
+
+func TestHandleAppStateEventDeletesPeerCallLogRecords(t *testing.T) {
+	storeDir := t.TempDir()
+	state, err := newHelperState(storeDir)
+	if err != nil {
+		t.Fatalf("newHelperState failed: %v", err)
+	}
+	defer state.close()
+
+	self := types.NewJID("15550000001", types.DefaultUserServer)
+	peer := types.NewJID("15550000002", types.DefaultUserServer)
+	when := time.Date(2026, 5, 22, 10, 45, 0, 0, time.UTC)
+	result := waSyncAction.CallLogRecord_CONNECTED
+	callType := waSyncAction.CallLogRecord_REGULAR
+	client := whatsmeow.NewClient(&store.Device{ID: &self}, nil)
+	runtime := newHelperRuntime(client, state, json.NewEncoder(io.Discard))
+
+	runtime.handleAppStateEvent(&events.AppState{
+		SyncActionValue: &waSyncAction.SyncActionValue{
+			Timestamp: proto.Int64(when.UnixMilli()),
+			CallLogAction: &waSyncAction.CallLogAction{
+				CallLogRecord: &waSyncAction.CallLogRecord{
+					CallID:         proto.String("call-delete-1"),
+					CallCreatorJID: proto.String(self.String()),
+					Participants: []*waSyncAction.CallLogRecord_ParticipantInfo{{
+						UserJID: proto.String(peer.String()),
+					}},
+					CallResult: &result,
+					CallType:   &callType,
+					StartTime:  proto.Int64(when.UnixMilli()),
+					IsIncoming: proto.Bool(false),
+					IsVideo:    proto.Bool(false),
+				},
+			},
+		},
+	})
+
+	page, err := state.getResyncPage(nil, "", 100)
+	if err != nil {
+		t.Fatalf("getResyncPage after upsert failed: %v", err)
+	}
+	if len(page.Calls) != 1 || page.Calls[0].CallID != "call-delete-1" {
+		t.Fatalf("expected one app-state call before delete, got %+v", page.Calls)
+	}
+
+	runtime.handleAppStateEvent(&events.AppState{
+		SyncActionValue: &waSyncAction.SyncActionValue{
+			DeleteIndividualCallLog: &waSyncAction.DeleteIndividualCallLogAction{
+				PeerJID:    proto.String(peer.String()),
+				IsIncoming: proto.Bool(false),
+			},
+		},
+	})
+
+	page, err = state.getResyncPage(nil, "", 100)
+	if err != nil {
+		t.Fatalf("getResyncPage after delete failed: %v", err)
+	}
+	if len(page.Calls) != 0 {
+		t.Fatalf("expected peer call log delete to remove outbound calls, got %+v", page.Calls)
 	}
 }
 

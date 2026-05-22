@@ -25,6 +25,7 @@ import (
 	waProto "go.mau.fi/whatsmeow/binary/proto"
 	"go.mau.fi/whatsmeow/proto/waCompanionReg"
 	"go.mau.fi/whatsmeow/proto/waHistorySync"
+	"go.mau.fi/whatsmeow/proto/waSyncAction"
 	"go.mau.fi/whatsmeow/proto/waWa6"
 	"go.mau.fi/whatsmeow/store"
 	"go.mau.fi/whatsmeow/store/sqlstore"
@@ -111,10 +112,29 @@ type receiptSnapshot struct {
 	ReadAt      *int64  `json:"readAt,omitempty"`
 }
 
+type callSnapshot struct {
+	CallID          string  `json:"callID"`
+	ChatJID         string  `json:"chatJID"`
+	InitiatorJID    *string `json:"initiatorJID,omitempty"`
+	RemoteJID       *string `json:"remoteJID,omitempty"`
+	FromMe          bool    `json:"fromMe"`
+	Timestamp       int64   `json:"timestamp"`
+	DurationSeconds *int64  `json:"durationSeconds,omitempty"`
+	Status          string  `json:"status"`
+	Medium          string  `json:"medium"`
+	ProviderType    *string `json:"providerCallType,omitempty"`
+}
+
+type callDeleteSnapshot struct {
+	ChatJID string `json:"chatJID"`
+	FromMe  bool   `json:"fromMe"`
+}
+
 type stateSnapshot struct {
 	Contacts []contactSnapshot `json:"contacts,omitempty"`
 	Chats    []chatSnapshot    `json:"chats,omitempty"`
 	Messages []messageSnapshot `json:"messages,omitempty"`
+	Calls    []callSnapshot    `json:"calls,omitempty"`
 }
 
 type responseEnvelope struct {
@@ -176,6 +196,7 @@ type resyncPage struct {
 	Contacts    []contactSnapshot `json:"contacts,omitempty"`
 	Chats       []chatSnapshot    `json:"chats,omitempty"`
 	Messages    []messageSnapshot `json:"messages,omitempty"`
+	Calls       []callSnapshot    `json:"calls,omitempty"`
 	NextCursor  *string           `json:"nextCursor,omitempty"`
 	HasMore     bool              `json:"hasMore"`
 	CompletedAt int64             `json:"completedAt"`
@@ -183,6 +204,7 @@ type resyncPage struct {
 
 type resyncCursor struct {
 	SnapshotUpdatedAt int64  `json:"snapshotUpdatedAt"`
+	Phase             string `json:"phase,omitempty"`
 	Timestamp         int64  `json:"timestamp,omitempty"`
 	ChatJID           string `json:"chatJID,omitempty"`
 	MessageID         string `json:"messageID,omitempty"`
@@ -303,6 +325,10 @@ func (s *helperState) applyReceipt(receipt receiptSnapshot) {
 	_ = s.cache.applyReceipt(receipt)
 }
 
+func (s *helperState) deleteCallsForPeer(delete callDeleteSnapshot) {
+	_ = s.cache.deleteCallsForPeer(delete)
+}
+
 func (s *helperState) getSnapshot() stateSnapshot {
 	snapshot, err := s.cache.getSnapshot()
 	if err != nil {
@@ -382,6 +408,24 @@ func openSyncCache(storeDir string) (*syncCache, error) {
 			ON contacts(updated_at, jid)`,
 		`CREATE INDEX IF NOT EXISTS idx_chats_updated_at
 			ON chats(updated_at, jid)`,
+		`CREATE TABLE IF NOT EXISTS calls (
+			chat_jid TEXT NOT NULL,
+			call_id TEXT NOT NULL,
+			initiator_jid TEXT,
+			remote_jid TEXT,
+			from_me INTEGER NOT NULL,
+			timestamp INTEGER NOT NULL,
+			duration_seconds INTEGER,
+			status TEXT NOT NULL,
+			medium TEXT NOT NULL,
+			provider_call_type TEXT,
+			updated_at INTEGER NOT NULL,
+			PRIMARY KEY (chat_jid, call_id)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_calls_timestamp
+			ON calls(timestamp, chat_jid, call_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_calls_updated_at
+			ON calls(updated_at, timestamp, chat_jid, call_id)`,
 		`CREATE TABLE IF NOT EXISTS history_sync_notifications (
 			rowid INTEGER PRIMARY KEY AUTOINCREMENT,
 			notification_blob BLOB NOT NULL,
@@ -422,6 +466,11 @@ func (c *syncCache) applySnapshot(snapshot stateSnapshot) error {
 	}
 	for _, message := range snapshot.Messages {
 		if err := upsertMessageTx(tx, message, nowMillis()); err != nil {
+			return err
+		}
+	}
+	for _, call := range snapshot.Calls {
+		if err := upsertCallTx(tx, call, nowMillis()); err != nil {
 			return err
 		}
 	}
@@ -482,6 +531,18 @@ func (c *syncCache) applyReceipt(receipt receiptSnapshot) error {
 	return err
 }
 
+func (c *syncCache) deleteCallsForPeer(delete callDeleteSnapshot) error {
+	_, err := c.db.Exec(
+		`DELETE FROM calls
+		 WHERE from_me = ?
+		   AND (chat_jid = ? OR remote_jid = ?)`,
+		boolToInt(delete.FromMe),
+		normalizeJID(delete.ChatJID),
+		normalizeJID(delete.ChatJID),
+	)
+	return err
+}
+
 func (c *syncCache) getSnapshot() (stateSnapshot, error) {
 	snapshotUpdatedAt := nowMillis()
 	contacts, err := c.queryContacts(nil, snapshotUpdatedAt)
@@ -496,10 +557,15 @@ func (c *syncCache) getSnapshot() (stateSnapshot, error) {
 	if err != nil {
 		return stateSnapshot{}, err
 	}
+	calls, _, _, err := c.queryCalls(nil, &resyncCursor{SnapshotUpdatedAt: snapshotUpdatedAt, Phase: "calls"}, int(^uint(0)>>1))
+	if err != nil {
+		return stateSnapshot{}, err
+	}
 	return stateSnapshot{
 		Contacts: contacts,
 		Chats:    chats,
 		Messages: messages,
+		Calls:    calls,
 	}, nil
 }
 
@@ -564,7 +630,11 @@ func (c *syncCache) getResyncPage(sinceMS *int64, cursor string, limit int) (res
 	if parsedCursor == nil {
 		parsedCursor = &resyncCursor{
 			SnapshotUpdatedAt: nowMillis(),
+			Phase:             "messages",
 		}
+	}
+	if parsedCursor.Phase == "" {
+		parsedCursor.Phase = "messages"
 	}
 
 	page := resyncPage{
@@ -582,18 +652,63 @@ func (c *syncCache) getResyncPage(sinceMS *int64, cursor string, limit int) (res
 		}
 	}
 
-	messages, nextCursor, hasMore, err := c.queryMessages(sinceMS, parsedCursor, limit)
-	if err != nil {
-		return resyncPage{}, err
+	switch parsedCursor.Phase {
+	case "messages":
+		messages, nextCursor, hasMore, err := c.queryMessages(sinceMS, parsedCursor, limit)
+		if err != nil {
+			return resyncPage{}, err
+		}
+		page.Messages = messages
+		page.NextCursor = nextCursor
+		page.HasMore = hasMore
+		if !hasMore {
+			remaining := limit - len(messages)
+			if remaining <= 0 {
+				calls, _, _, err := c.queryCalls(sinceMS, parsedCursor, 1)
+				if err != nil {
+					return resyncPage{}, err
+				}
+				if len(calls) > 0 {
+					nextCursor, err := encodeResyncCursor(&resyncCursor{
+						SnapshotUpdatedAt: parsedCursor.SnapshotUpdatedAt,
+						Phase:             "calls",
+					})
+					if err != nil {
+						return resyncPage{}, err
+					}
+					page.NextCursor = &nextCursor
+					page.HasMore = true
+				}
+				return page, nil
+			}
+			calls, callNextCursor, callsHasMore, err := c.queryCalls(sinceMS, parsedCursor, remaining)
+			if err != nil {
+				return resyncPage{}, err
+			}
+			page.Calls = calls
+			page.NextCursor = callNextCursor
+			page.HasMore = callsHasMore
+		}
+	case "calls":
+		calls, nextCursor, hasMore, err := c.queryCalls(sinceMS, parsedCursor, limit)
+		if err != nil {
+			return resyncPage{}, err
+		}
+		page.Calls = calls
+		page.NextCursor = nextCursor
+		page.HasMore = hasMore
+	default:
+		return resyncPage{}, fmt.Errorf("invalid resync cursor phase: %q", parsedCursor.Phase)
 	}
-	page.Messages = messages
-	page.NextCursor = nextCursor
-	page.HasMore = hasMore
 	return page, nil
 }
 
 func (cursor *resyncCursor) hasPosition() bool {
 	return strings.TrimSpace(cursor.ChatJID) != "" && strings.TrimSpace(cursor.MessageID) != ""
+}
+
+func (cursor *resyncCursor) callPosition() (int64, string, string, bool) {
+	return cursor.Timestamp, cursor.ChatJID, cursor.MessageID, cursor.hasPosition()
 }
 
 func encodeResyncCursor(cursor *resyncCursor) (string, error) {
@@ -803,6 +918,100 @@ func (c *syncCache) queryMessages(
 	return messages, &nextCursor, true, nil
 }
 
+func (c *syncCache) queryCalls(
+	sinceMS *int64,
+	cursor *resyncCursor,
+	limit int,
+) ([]callSnapshot, *string, bool, error) {
+	query := `SELECT call_id, chat_jid, initiator_jid, remote_jid, from_me, timestamp, duration_seconds, status, medium, provider_call_type FROM calls`
+	args := []any{}
+	if cursor == nil || cursor.SnapshotUpdatedAt <= 0 {
+		return nil, nil, false, errors.New("invalid resync cursor")
+	}
+	clauses := []string{`updated_at <= ?`}
+	args = append(args, cursor.SnapshotUpdatedAt)
+	if sinceMS != nil {
+		clauses = append(clauses, `updated_at > ?`)
+		args = append(args, *sinceMS)
+	}
+	if cursor.Phase == "calls" {
+		timestamp, chatJID, callID, ok := cursor.callPosition()
+		if ok {
+			clauses = append(
+				clauses,
+				`(timestamp > ? OR (timestamp = ? AND chat_jid > ?) OR (timestamp = ? AND chat_jid = ? AND call_id > ?))`,
+			)
+			args = append(args, timestamp, timestamp, chatJID, timestamp, chatJID, callID)
+		}
+	}
+	if limit <= 0 {
+		return nil, nil, false, nil
+	}
+	query += ` WHERE ` + strings.Join(clauses, ` AND `)
+	query += ` ORDER BY timestamp, chat_jid, call_id LIMIT ?`
+	selectArgs := append(args, limit+1)
+	rows, err := c.db.Query(query, selectArgs...)
+	if err != nil {
+		return nil, nil, false, err
+	}
+	defer rows.Close()
+
+	var calls []callSnapshot
+	for rows.Next() {
+		var call callSnapshot
+		var initiatorJID, remoteJID, providerType sql.NullString
+		var fromMe int64
+		var durationSeconds sql.NullInt64
+		if err := rows.Scan(
+			&call.CallID,
+			&call.ChatJID,
+			&initiatorJID,
+			&remoteJID,
+			&fromMe,
+			&call.Timestamp,
+			&durationSeconds,
+			&call.Status,
+			&call.Medium,
+			&providerType,
+		); err != nil {
+			return nil, nil, false, err
+		}
+		if initiatorJID.Valid {
+			call.InitiatorJID = stringPtr(initiatorJID.String)
+		}
+		if remoteJID.Valid {
+			call.RemoteJID = stringPtr(remoteJID.String)
+		}
+		if durationSeconds.Valid {
+			call.DurationSeconds = int64Ptr(durationSeconds.Int64)
+		}
+		if providerType.Valid {
+			call.ProviderType = stringPtr(providerType.String)
+		}
+		call.FromMe = fromMe == 1
+		calls = append(calls, call)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, nil, false, err
+	}
+	hasMore := len(calls) > limit
+	if !hasMore {
+		return calls, nil, false, nil
+	}
+	nextCursor, err := encodeResyncCursor(&resyncCursor{
+		SnapshotUpdatedAt: cursor.SnapshotUpdatedAt,
+		Phase:             "calls",
+		Timestamp:         calls[limit-1].Timestamp,
+		ChatJID:           calls[limit-1].ChatJID,
+		MessageID:         calls[limit-1].CallID,
+	})
+	if err != nil {
+		return nil, nil, false, err
+	}
+	calls = calls[:limit]
+	return calls, &nextCursor, true, nil
+}
+
 func upsertContactTx(tx *sql.Tx, contact contactSnapshot, updatedAt int64) error {
 	_, err := tx.Exec(
 		`INSERT INTO contacts (jid, phone, name, push_name, updated_at)
@@ -871,6 +1080,37 @@ func upsertMessageTx(tx *sql.Tx, message messageSnapshot, updatedAt int64) error
 		nullableString(message.Status),
 		nullableInt64(message.DeliveredAt),
 		nullableInt64(message.ReadAt),
+		updatedAt,
+	)
+	return err
+}
+
+func upsertCallTx(tx *sql.Tx, call callSnapshot, updatedAt int64) error {
+	_, err := tx.Exec(
+		`INSERT INTO calls (
+		   chat_jid, call_id, initiator_jid, remote_jid, from_me, timestamp, duration_seconds,
+		   status, medium, provider_call_type, updated_at
+		 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		 ON CONFLICT(chat_jid, call_id) DO UPDATE SET
+		   initiator_jid = excluded.initiator_jid,
+		   remote_jid = excluded.remote_jid,
+		   from_me = excluded.from_me,
+		   timestamp = excluded.timestamp,
+		   duration_seconds = COALESCE(excluded.duration_seconds, calls.duration_seconds),
+		   status = excluded.status,
+		   medium = excluded.medium,
+		   provider_call_type = excluded.provider_call_type,
+		   updated_at = excluded.updated_at`,
+		normalizeJID(call.ChatJID),
+		call.CallID,
+		nullableString(call.InitiatorJID),
+		nullableString(call.RemoteJID),
+		boolToInt(call.FromMe),
+		call.Timestamp,
+		nullableInt64(call.DurationSeconds),
+		call.Status,
+		call.Medium,
+		nullableString(call.ProviderType),
 		updatedAt,
 	)
 	return err
@@ -1120,6 +1360,25 @@ func configureClientPayload() {
 	store.DeviceProps.Os = proto.String("Cued")
 	store.DeviceProps.PlatformType = waCompanionReg.DeviceProps_DESKTOP.Enum()
 	store.DeviceProps.RequireFullSync = proto.Bool(false)
+	store.DeviceProps.HistorySyncConfig = &waCompanionReg.DeviceProps_HistorySyncConfig{
+		FullSyncDaysLimit:                        proto.Uint32(fullHistorySyncDaysLimit),
+		FullSyncSizeMbLimit:                      proto.Uint32(fullHistorySyncSizeMBLimit),
+		StorageQuotaMb:                           proto.Uint32(10240),
+		InlineInitialPayloadInE2EeMsg:            proto.Bool(true),
+		RecentSyncDaysLimit:                      proto.Uint32(fullHistorySyncDaysLimit),
+		SupportCallLogHistory:                    proto.Bool(true),
+		SupportBotUserAgentChatHistory:           proto.Bool(true),
+		SupportCagReactionsAndPolls:              proto.Bool(true),
+		SupportBizHostedMsg:                      proto.Bool(true),
+		SupportRecentSyncChunkMessageCountTuning: proto.Bool(true),
+		SupportHostedGroupMsg:                    proto.Bool(true),
+		SupportFbidBotChatHistory:                proto.Bool(true),
+		SupportMessageAssociation:                proto.Bool(true),
+		SupportGroupHistory:                      proto.Bool(true),
+		OnDemandReady:                            proto.Bool(true),
+		CompleteOnDemandReady:                    proto.Bool(true),
+		ThumbnailSyncDaysLimit:                   proto.Uint32(fullHistorySyncDaysLimit),
+	}
 }
 
 func runStatus(args []string) error {
@@ -1629,6 +1888,8 @@ func (r *helperRuntime) handleEvent(evt interface{}) {
 		r.handleReceiptEvent(event)
 	case *events.HistorySync:
 		r.handleHistorySyncEvent(event)
+	case *events.AppState:
+		r.handleAppStateEvent(event)
 	}
 }
 
@@ -1690,6 +1951,43 @@ func (r *helperRuntime) handleHistorySyncEvent(event *events.HistorySync) {
 	}
 }
 
+func (r *helperRuntime) handleAppStateEvent(event *events.AppState) {
+	if event == nil || event.SyncActionValue == nil {
+		return
+	}
+	if deleteAction := event.GetDeleteIndividualCallLog(); deleteAction != nil {
+		delete := callDeleteSnapshot{
+			ChatJID: normalizeJID(deleteAction.GetPeerJID()),
+			FromMe:  !deleteAction.GetIsIncoming(),
+		}
+		if delete.ChatJID == "" {
+			return
+		}
+		r.state.deleteCallsForPeer(delete)
+		r.emitEvent("call_delete", delete)
+		return
+	}
+	if event.GetCallLogAction() == nil {
+		return
+	}
+	call, ok := callSnapshotFromRecord(r.client, event.GetCallLogAction().GetCallLogRecord(), time.UnixMilli(event.GetTimestamp()).UTC())
+	if !ok {
+		return
+	}
+	snapshot := stateSnapshot{
+		Contacts: contactsFromCall(call),
+		Chats:    []chatSnapshot{chatFromCall(call)},
+		Calls:    []callSnapshot{call},
+	}
+	if err := r.state.applySnapshot(snapshot); err != nil {
+		r.emitEvent("error", map[string]string{
+			"message": fmt.Sprintf("failed to persist call log: %v", err),
+		})
+		return
+	}
+	r.emitEvent("call_upsert", call)
+}
+
 func (r *helperRuntime) applyHistorySyncData(data *waHistorySync.HistorySync) error {
 	if data == nil {
 		return nil
@@ -1710,6 +2008,7 @@ func (r *helperRuntime) applyHistorySyncData(data *waHistorySync.HistorySync) er
 		"contacts":                  snapshot.Contacts,
 		"chats":                     snapshot.Chats,
 		"messages":                  snapshot.Messages,
+		"calls":                     snapshot.Calls,
 		"completedAt":               completedAt,
 		"syncType":                  emptyToNil(metadata.LastHistorySyncType),
 		"chunkOrder":                uint32PtrOrNil(metadata.LastHistoryChunkOrder),
@@ -1729,6 +2028,7 @@ func historySyncBatchFromEvent(client *whatsmeow.Client, event *events.HistorySy
 	contactsByJID := make(map[string]contactSnapshot)
 	chatsByJID := make(map[string]chatSnapshot)
 	messagesByKey := make(map[string]messageSnapshot)
+	callsByKey := make(map[string]callSnapshot)
 
 	for _, pushname := range event.Data.GetPushnames() {
 		contact := contactSnapshot{
@@ -1778,6 +2078,17 @@ func historySyncBatchFromEvent(client *whatsmeow.Client, event *events.HistorySy
 			mergeChatSnapshot(chatsByJID, chatFromMessage(snapshot))
 		}
 	}
+	for _, record := range event.Data.GetCallLogRecords() {
+		call, ok := callSnapshotFromRecord(client, record, time.Time{})
+		if !ok {
+			continue
+		}
+		callsByKey[call.ChatJID+"::"+call.CallID] = call
+		for _, contact := range contactsFromCall(call) {
+			mergeContactSnapshot(contactsByJID, contact)
+		}
+		mergeChatSnapshot(chatsByJID, chatFromCall(call))
+	}
 
 	contacts := make([]contactSnapshot, 0, len(contactsByJID))
 	for _, contact := range contactsByJID {
@@ -1790,6 +2101,10 @@ func historySyncBatchFromEvent(client *whatsmeow.Client, event *events.HistorySy
 	messages := make([]messageSnapshot, 0, len(messagesByKey))
 	for _, message := range messagesByKey {
 		messages = append(messages, message)
+	}
+	calls := make([]callSnapshot, 0, len(callsByKey))
+	for _, call := range callsByKey {
+		calls = append(calls, call)
 	}
 
 	sort.Slice(contacts, func(i, j int) bool {
@@ -1807,11 +2122,21 @@ func historySyncBatchFromEvent(client *whatsmeow.Client, event *events.HistorySy
 		}
 		return messages[i].MessageID < messages[j].MessageID
 	})
+	sort.Slice(calls, func(i, j int) bool {
+		if calls[i].Timestamp != calls[j].Timestamp {
+			return calls[i].Timestamp < calls[j].Timestamp
+		}
+		if calls[i].ChatJID != calls[j].ChatJID {
+			return calls[i].ChatJID < calls[j].ChatJID
+		}
+		return calls[i].CallID < calls[j].CallID
+	})
 
 	return stateSnapshot{
 		Contacts: contacts,
 		Chats:    chats,
 		Messages: messages,
+		Calls:    calls,
 	}
 }
 
@@ -1967,6 +2292,45 @@ func chatFromMessage(message messageSnapshot) chatSnapshot {
 		JID:          message.ChatJID,
 		Name:         message.PushName,
 		IsGroup:      isGroup,
+		Participants: participants,
+	}
+}
+
+func contactsFromCall(call callSnapshot) []contactSnapshot {
+	seen := make(map[string]struct{})
+	var contacts []contactSnapshot
+	add := func(jid *string) {
+		if jid == nil {
+			return
+		}
+		normalized := normalizeJID(*jid)
+		if normalized == "" {
+			return
+		}
+		if _, ok := seen[normalized]; ok {
+			return
+		}
+		seen[normalized] = struct{}{}
+		contacts = append(contacts, contactSnapshot{
+			JID:   normalized,
+			Phone: phoneFromJID(normalized),
+		})
+	}
+	add(call.RemoteJID)
+	if len(contacts) == 0 && !call.FromMe {
+		add(call.InitiatorJID)
+	}
+	return contacts
+}
+
+func chatFromCall(call callSnapshot) chatSnapshot {
+	participants := []string{}
+	if call.RemoteJID != nil {
+		participants = append(participants, normalizeJID(*call.RemoteJID))
+	}
+	return chatSnapshot{
+		JID:          call.ChatJID,
+		IsGroup:      strings.HasSuffix(normalizeJID(call.ChatJID), "@g.us"),
 		Participants: participants,
 	}
 }
@@ -2131,6 +2495,129 @@ func hasEncryptedWrapper(message *waProto.Message) bool {
 	return message.GetSecretEncryptedMessage() != nil ||
 		message.GetEncCommentMessage() != nil ||
 		message.GetEncReactionMessage() != nil
+}
+
+func callSnapshotFromRecord(client *whatsmeow.Client, record *waSyncAction.CallLogRecord, fallback time.Time) (callSnapshot, bool) {
+	if record == nil || strings.TrimSpace(record.GetCallID()) == "" {
+		return callSnapshot{}, false
+	}
+	selfIDs := selfJIDs(client)
+	chatJID, remoteJID := callChatAndRemoteJID(record, selfIDs)
+	if chatJID == "" {
+		return callSnapshot{}, false
+	}
+	initiatorJID := normalizeJID(record.GetCallCreatorJID())
+	timestamp := callLogTimestamp(record.GetStartTime(), fallback)
+	if timestamp.IsZero() {
+		return callSnapshot{}, false
+	}
+	return callSnapshot{
+		CallID:          record.GetCallID(),
+		ChatJID:         chatJID,
+		InitiatorJID:    stringPtr(initiatorJID),
+		RemoteJID:       stringPtr(remoteJID),
+		FromMe:          !record.GetIsIncoming(),
+		Timestamp:       timestamp.UnixMilli(),
+		DurationSeconds: int64PtrIfPositive(record.GetDuration()),
+		Status:          callStatus(record.GetCallResult()),
+		Medium:          callMedium(record.GetIsVideo()),
+		ProviderType:    stringPtr(strings.ToLower(record.GetCallType().String())),
+	}, true
+}
+
+func selfJIDs(client *whatsmeow.Client) map[string]struct{} {
+	self := make(map[string]struct{})
+	if client == nil || client.Store == nil {
+		return self
+	}
+	for _, jid := range []types.JID{client.Store.GetJID(), client.Store.GetLID()} {
+		if jid.IsEmpty() {
+			continue
+		}
+		self[normalizeJID(jid.ToNonAD().String())] = struct{}{}
+		self[normalizeJID(jid.String())] = struct{}{}
+	}
+	return self
+}
+
+func callChatAndRemoteJID(record *waSyncAction.CallLogRecord, self map[string]struct{}) (string, string) {
+	if group := normalizeJID(record.GetGroupJID()); strings.HasSuffix(group, "@g.us") {
+		return group, ""
+	}
+	creator := normalizeJID(record.GetCallCreatorJID())
+	if creator != "" && !isSelfJIDString(creator, self) {
+		return creator, creator
+	}
+	for _, participant := range record.GetParticipants() {
+		if participant == nil {
+			continue
+		}
+		jid := normalizeJID(participant.GetUserJID())
+		if jid == "" || isSelfJIDString(jid, self) {
+			continue
+		}
+		return jid, jid
+	}
+	if creator != "" {
+		return creator, creator
+	}
+	return "", ""
+}
+
+func isSelfJIDString(jid string, self map[string]struct{}) bool {
+	if len(self) == 0 {
+		return false
+	}
+	normalized := normalizeJID(jid)
+	if _, ok := self[normalized]; ok {
+		return true
+	}
+	parsed, err := types.ParseJID(normalized)
+	if err != nil {
+		return false
+	}
+	_, ok := self[normalizeJID(parsed.ToNonAD().String())]
+	return ok
+}
+
+func callLogTimestamp(raw int64, fallback time.Time) time.Time {
+	if raw <= 0 {
+		return fallback
+	}
+	switch {
+	case raw < 100_000_000_000:
+		return time.Unix(raw, 0).UTC()
+	case raw < 100_000_000_000_000:
+		return time.UnixMilli(raw).UTC()
+	default:
+		return time.UnixMicro(raw).UTC()
+	}
+}
+
+func callStatus(result waSyncAction.CallLogRecord_CallResult) string {
+	switch result {
+	case waSyncAction.CallLogRecord_CONNECTED:
+		return "completed"
+	case waSyncAction.CallLogRecord_REJECTED:
+		return "declined"
+	case waSyncAction.CallLogRecord_CANCELLED, waSyncAction.CallLogRecord_ABANDONED:
+		return "canceled"
+	case waSyncAction.CallLogRecord_MISSED, waSyncAction.CallLogRecord_UNAVAILABLE:
+		return "missed"
+	case waSyncAction.CallLogRecord_FAILED, waSyncAction.CallLogRecord_INVALID:
+		return "failed"
+	case waSyncAction.CallLogRecord_ONGOING, waSyncAction.CallLogRecord_UPCOMING:
+		return "ongoing"
+	default:
+		return "unknown"
+	}
+}
+
+func callMedium(isVideo bool) string {
+	if isVideo {
+		return "video"
+	}
+	return "audio"
 }
 
 func chatFromHistoryConversation(conversation *waHistorySync.Conversation) chatSnapshot {

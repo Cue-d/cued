@@ -125,6 +125,7 @@ describe("normalized raw event registry", () => {
   it("rejects non-canonical schemas for new writes", () => {
     expect(() => assertCanonicalNormalizedSchemaForWrite("message.created@1")).not.toThrow();
     expect(() => assertCanonicalNormalizedSchemaForWrite("call.observed@1")).not.toThrow();
+    expect(() => assertCanonicalNormalizedSchemaForWrite("call.deleted@1")).not.toThrow();
     expect(() =>
       assertCanonicalNormalizedSchemaForWrite("timeline_event.linkedin_system_message@1"),
     ).toThrowError(
@@ -169,6 +170,19 @@ describe("normalized raw event registry", () => {
       }),
     ).toThrow(
       "Raw event payload for 'call.observed@1' must include string field 'sourceConversationKey'.",
+    );
+
+    expect(() =>
+      assertCanonicalRawEventPayloadForWrite({
+        entityKind: "call",
+        eventKind: "deleted",
+        payload: {
+          provider: "whatsapp",
+          direction: "incoming",
+        },
+      }),
+    ).toThrow(
+      "Raw event payload for 'call.deleted@1' must include string field 'sourceConversationKey'.",
     );
   });
 

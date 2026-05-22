@@ -1875,6 +1875,39 @@ function projectCallEvent(
   changes.dirtyConversationSummaryIds.add(conversationId);
 }
 
+function projectCallDeleteEvent(
+  conn: LocalDbExecutor,
+  cache: ProjectionCache,
+  changes: ProjectionChangeSet,
+  event: ProjectableRawEvent,
+): void {
+  const payload = JSON.parse(event.payload_json) as Pick<
+    CallPayload,
+    "sourceConversationKey" | "provider" | "direction"
+  >;
+  const conversationId = ensureConversationStub(
+    conn,
+    cache,
+    event.platform,
+    event.account_key,
+    payload.sourceConversationKey,
+    event.observed_at,
+  );
+  const provider = typeof payload.provider === "string" ? payload.provider : null;
+  const direction = typeof payload.direction === "string" ? payload.direction : null;
+
+  conn.run(sql`
+    DELETE FROM timeline_events
+    WHERE conversation_id = ${conversationId}
+      AND system_kind = 'call'
+      ${provider ? sql`AND call_provider = ${provider}` : sql``}
+      ${direction ? sql`AND call_direction = ${direction}` : sql``}
+  `);
+
+  changes.dirtyConversationIds.add(conversationId);
+  changes.dirtyConversationSummaryIds.add(conversationId);
+}
+
 function refreshConversationSummariesForIds(
   conn: LocalDbExecutor,
   conversationIds: Set<string>,
@@ -2347,7 +2380,11 @@ function projectEventBatch(
         } else if (shapedEvent.entity_kind === "conversation") {
           projectConversationObservation(tx, eventCache, eventChanges, shapedEvent);
         } else if (shapedEvent.entity_kind === "call") {
-          projectCallEvent(tx, eventCache, eventChanges, shapedEvent);
+          if (shapedEvent.event_kind === "deleted") {
+            projectCallDeleteEvent(tx, eventCache, eventChanges, shapedEvent);
+          } else {
+            projectCallEvent(tx, eventCache, eventChanges, shapedEvent);
+          }
         } else if (shapedEvent.entity_kind === "message") {
           projectMessageEvent(tx, eventCache, eventChanges, shapedEvent);
         } else if (shapedEvent.entity_kind === "reaction") {

@@ -357,4 +357,83 @@ export const whatsappReplayFixtures: ProjectionReplayFixture[] = [
       }),
     ],
   },
+  {
+    name: "whatsapp-call-log-projects-to-timeline",
+    assert(snapshot) {
+      expect(snapshot.timelineEvents).toHaveLength(1);
+      expect(snapshot.timelineEvents[0]).toMatchObject({
+        sourceEventKey: `${irene}:call-1`,
+        subjectSourceKey: whatsappSourceEntityKey(irene),
+        text: "WhatsApp call • 1m 1s",
+      });
+      expect(snapshot.conversations[0]).toMatchObject({
+        lastMessagePreview: "WhatsApp call • 1m 1s",
+        lastMessageAt: 1_713_030_000_000,
+      });
+    },
+    events: [
+      fixtureEvent({
+        id: "whatsapp_call_contact",
+        platform: "whatsapp",
+        accountKey: "default",
+        entityKind: "contact",
+        eventKind: "observed",
+        observedAt: 1_713_030_000_000,
+        dedupeKey: "whatsapp:call:contact:irene",
+        payload: {
+          sourceEntityKey: whatsappSourceEntityKey(irene),
+          fields: {
+            display_name: "Irene",
+          },
+          handles: [
+            { type: "whatsapp_jid", value: irene, deterministic: true },
+            { type: "phone", value: "+14155550123", deterministic: true },
+          ],
+        },
+        sourceVersion: "whatsapp-v1",
+      }),
+      fixtureEvent({
+        id: "whatsapp_call_chat",
+        platform: "whatsapp",
+        accountKey: "default",
+        entityKind: "conversation",
+        eventKind: "observed",
+        observedAt: 1_713_030_000_001,
+        dedupeKey: "whatsapp:call:chat:irene",
+        payload: {
+          sourceConversationKey: whatsappSourceConversationKey(irene),
+          conversationType: "dm",
+          displayName: "Irene",
+          nativeConversationKey: irene,
+          service: "whatsapp",
+          participants: [{ sourceEntityKey: whatsappSourceEntityKey(irene) }],
+        },
+        sourceVersion: "whatsapp-v1",
+      }),
+      fixtureEvent({
+        id: "whatsapp_call",
+        platform: "whatsapp",
+        accountKey: "default",
+        entityKind: "call",
+        eventKind: "observed",
+        observedAt: 1_713_030_000_002,
+        dedupeKey: "whatsapp:call:irene:1",
+        payload: {
+          sourceCallKey: `${irene}:call-1`,
+          sourceConversationKey: whatsappSourceConversationKey(irene),
+          provider: "whatsapp",
+          providerCallType: "regular",
+          direction: "outgoing",
+          medium: "audio",
+          status: "completed",
+          startedAt: 1_713_030_000_000,
+          endedAt: 1_713_030_061_000,
+          durationSeconds: 61,
+          initiatorSourceKey: null,
+          primaryRemoteSourceKey: whatsappSourceEntityKey(irene),
+        },
+        sourceVersion: "whatsapp-v1",
+      }),
+    ],
+  },
 ];

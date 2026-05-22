@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildSyncResumeTargets,
+  buildWhatsAppRealtimeSnapshotFromEvent,
   getAdaptiveProjectionBatchSize,
   getAdaptiveProjectionContinueDelayMs,
   getAutoSyncTargets,
@@ -159,6 +160,39 @@ describe("daemon socket errors", () => {
     error.code = "EACCES";
     expect(isDisconnectedSocketError(error)).toBe(false);
     expect(isDisconnectedSocketError("EPIPE")).toBe(false);
+  });
+});
+
+describe("whatsapp realtime event routing", () => {
+  it("turns call_upsert events into ingestible realtime snapshots", () => {
+    expect(
+      buildWhatsAppRealtimeSnapshotFromEvent({
+        event: "call_upsert",
+        data: {
+          callID: "call-1",
+          chatJID: "12016824050@s.whatsapp.net",
+          remoteJID: "12016824050@s.whatsapp.net",
+          fromMe: true,
+          timestamp: 1_710_000_000_000,
+          durationSeconds: 61,
+          status: "completed",
+          medium: "audio",
+        },
+      }),
+    ).toEqual({
+      calls: [
+        {
+          callID: "call-1",
+          chatJID: "12016824050@s.whatsapp.net",
+          remoteJID: "12016824050@s.whatsapp.net",
+          fromMe: true,
+          timestamp: 1_710_000_000_000,
+          durationSeconds: 61,
+          status: "completed",
+          medium: "audio",
+        },
+      ],
+    });
   });
 });
 

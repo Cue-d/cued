@@ -847,6 +847,114 @@ describe("projector", () => {
     db.close();
   });
 
+  it("projects WhatsApp call delete events by peer and direction", () => {
+    const db = createDb();
+    const observedAt = 1_710_060_000_000;
+
+    db.insertRawEvents([
+      {
+        id: "whatsapp-conversation-call-delete",
+        platform: "whatsapp",
+        accountKey: "default",
+        entityKind: "conversation",
+        eventKind: "observed",
+        observedAt,
+        dedupeKey: "whatsapp:conversation:call-delete",
+        payload: {
+          sourceConversationKey: "whatsapp:12016824050@s.whatsapp.net",
+          conversationType: "dm",
+          displayName: null,
+          participants: [],
+        },
+        sourceVersion: "whatsapp-v1",
+      },
+      {
+        id: "whatsapp-call-delete-outgoing",
+        platform: "whatsapp",
+        accountKey: "default",
+        entityKind: "call",
+        eventKind: "observed",
+        observedAt: observedAt + 1,
+        dedupeKey: "whatsapp:call:outgoing",
+        payload: {
+          sourceCallKey: "12016824050@s.whatsapp.net:call-outgoing",
+          sourceConversationKey: "whatsapp:12016824050@s.whatsapp.net",
+          provider: "whatsapp",
+          direction: "outgoing",
+          medium: "audio",
+          status: "completed",
+          startedAt: observedAt + 10,
+          durationSeconds: 61,
+          primaryRemoteSourceKey: "whatsapp:12016824050@s.whatsapp.net",
+        },
+        sourceVersion: "whatsapp-v1",
+      },
+      {
+        id: "whatsapp-call-delete-incoming",
+        platform: "whatsapp",
+        accountKey: "default",
+        entityKind: "call",
+        eventKind: "observed",
+        observedAt: observedAt + 2,
+        dedupeKey: "whatsapp:call:incoming",
+        payload: {
+          sourceCallKey: "12016824050@s.whatsapp.net:call-incoming",
+          sourceConversationKey: "whatsapp:12016824050@s.whatsapp.net",
+          provider: "whatsapp",
+          direction: "incoming",
+          medium: "audio",
+          status: "missed",
+          startedAt: observedAt + 20,
+          primaryRemoteSourceKey: "whatsapp:12016824050@s.whatsapp.net",
+        },
+        sourceVersion: "whatsapp-v1",
+      },
+      {
+        id: "whatsapp-call-delete-event",
+        platform: "whatsapp",
+        accountKey: "default",
+        entityKind: "call",
+        eventKind: "deleted",
+        observedAt: observedAt + 3,
+        dedupeKey: "whatsapp:call:delete:outgoing",
+        payload: {
+          sourceConversationKey: "whatsapp:12016824050@s.whatsapp.net",
+          provider: "whatsapp",
+          direction: "outgoing",
+        },
+        sourceVersion: "whatsapp-v1",
+      },
+    ]);
+
+    projectPendingRawEvents(db);
+
+    const timelineRows = db.orm().all<{
+      source_event_key: string;
+      call_direction: string | null;
+    }>(sql`
+      SELECT source_event_key, call_direction
+      FROM timeline_events
+      ORDER BY source_event_key ASC
+    `);
+    expect(timelineRows).toEqual([
+      {
+        source_event_key: "12016824050@s.whatsapp.net:call-incoming",
+        call_direction: "incoming",
+      },
+    ]);
+
+    const conversationRow = db.orm().get<{ last_message_preview: string | null }>(sql`
+      SELECT last_message_preview
+      FROM conversations
+      WHERE source_conversation_key = 'whatsapp:12016824050@s.whatsapp.net'
+    `);
+    expect(conversationRow).toEqual({
+      last_message_preview: "Missed WhatsApp call",
+    });
+
+    db.close();
+  });
+
   it("renders unknown call providers without duplicating 'Call call'", () => {
     const db = createDb();
     const observedAt = 1_710_070_000_000;
