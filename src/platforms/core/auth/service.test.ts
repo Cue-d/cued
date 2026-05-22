@@ -355,4 +355,40 @@ describe("IntegrationAuthService", () => {
 
     db.close();
   });
+
+  it("persists privacy-safe WhatsApp QR auth failures", async () => {
+    const db = createDb();
+    runAuthSessionSyncMock.mockResolvedValue({
+      state: "failed",
+      keychainService: null,
+      keychainAccount: null,
+      resultSummary: {
+        runtime: "qr_native",
+        helper: "cued-whatsapp-helper",
+        helperAvailable: true,
+        helperVersion: "0.1.0",
+        errorCode: "helper_pair_failed",
+        phase: "start_pairing",
+      },
+      errorSummary: "WhatsApp QR pairing failed in the helper runtime.",
+    });
+
+    const service = new IntegrationAuthService(db);
+    const result = await service.connectLocally("whatsapp");
+
+    expect(result.integration?.platform).toBe("whatsapp");
+    expect(result.integration?.authState).toBe("failed");
+    const metadata = JSON.parse(
+      db.getIntegrationState("whatsapp", "default")?.metadata_json ?? "{}",
+    ) as Record<string, unknown>;
+    expect(metadata.lastAuthError).toBe("WhatsApp QR pairing failed in the helper runtime.");
+    expect(metadata.authResult).toMatchObject({
+      runtime: "qr_native",
+      helper: "cued-whatsapp-helper",
+      errorCode: "helper_pair_failed",
+    });
+    expect(JSON.stringify(metadata)).not.toMatch(/whatsapp\.net|whatsapp-test-qr|\/tmp\/private/);
+
+    db.close();
+  });
 });

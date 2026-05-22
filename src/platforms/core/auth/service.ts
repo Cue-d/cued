@@ -1,7 +1,11 @@
 import type { ChildProcess } from "node:child_process";
 import process from "node:process";
 import type { CuedDatabase } from "../../../db/database.js";
-import { errorTelemetryProperties, sendTelemetryEventSafe } from "../../../telemetry/context.js";
+import {
+  errorTelemetryProperties,
+  safeTelemetryValue,
+  sendTelemetryEventSafe,
+} from "../../../telemetry/context.js";
 import { importLinkedInStoredAuth } from "../../linkedin/auth/keychain-import.js";
 import { importSlackDesktopAuth } from "../../slack/auth/desktop-import.js";
 import { resolveIntegrationAccountKey } from "../account-keys.js";
@@ -339,6 +343,7 @@ export class IntegrationAuthService {
           input.errorSummary ?? `auth ${completed.authSession.state}`,
           "integration_setup_failed",
         ),
+        ...authResultErrorTelemetry(input.resultSummary),
       });
     }
 
@@ -484,4 +489,12 @@ export class IntegrationAuthService {
     const first = rows[0];
     return first ? getIntegrationSummary(this.db, first.platform, first.account_key) : null;
   }
+}
+
+function authResultErrorTelemetry(resultSummary: Record<string, unknown> | null | undefined) {
+  const errorCode =
+    typeof resultSummary?.errorCode === "string"
+      ? safeTelemetryValue(resultSummary.errorCode, "integration_setup_failed")
+      : null;
+  return errorCode ? { error_code: errorCode } : {};
 }

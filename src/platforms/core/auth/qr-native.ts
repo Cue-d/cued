@@ -68,6 +68,13 @@ function isDurableWhatsAppAuthStatus(
   return status?.authenticated === true && Boolean(status.accountJid?.trim());
 }
 
+type WhatsAppQrFailureCode =
+  | "helper_missing"
+  | "helper_pair_failed"
+  | "native_qr_unavailable"
+  | "qr_cancelled"
+  | "durable_status_timeout";
+
 async function waitForDurableWhatsAppAuthStatus(
   storeDir: string,
   timeoutMs = 30_000,
@@ -90,10 +97,12 @@ async function waitForDurableWhatsAppAuthStatus(
   }
 
   const statusDetail = lastStatus
-    ? `authenticated=${lastStatus.authenticated}, accountJid=${lastStatus.accountJid ?? ""}`
+    ? `authenticated=${lastStatus.authenticated}, accountJid=${lastStatus.accountJid ? "present" : "missing"}`
     : lastError instanceof Error
-      ? lastError.message
-      : String(lastError ?? "no helper status");
+      ? "helper status unavailable"
+      : lastError
+        ? "helper status unavailable"
+        : "no helper status";
   throw new Error(`WhatsApp linking did not produce a durable linked account (${statusDetail})`);
 }
 
@@ -125,6 +134,61 @@ function buildWhatsAppAuthenticatedResult(input: {
     },
     errorSummary: null,
   };
+}
+
+function buildWhatsAppFailedResult(input: {
+  session: AuthSessionSummary;
+  inspected: ReturnType<typeof inspectWhatsAppHelper>;
+  state?: Extract<AuthSessionState, "failed" | "cancelled">;
+  errorCode: WhatsAppQrFailureCode;
+  phase: string;
+}): QrNativeAuthResult {
+  const messageByCode: Record<WhatsAppQrFailureCode, string> = {
+    helper_missing:
+      "WhatsApp helper was not found. Build native/helpers/whatsapp-go first or set CUED_WHATSAPP_HELPER_BINARY.",
+    helper_pair_failed: "WhatsApp QR pairing failed in the helper runtime.",
+    native_qr_unavailable: "WhatsApp QR window could not be opened.",
+    qr_cancelled: "WhatsApp QR pairing cancelled.",
+    durable_status_timeout: "WhatsApp QR pairing did not produce a durable linked account.",
+  };
+  return {
+    sessionId: input.session.id,
+    platform: input.session.platform,
+    accountKey: input.session.accountKey,
+    state: input.state ?? "failed",
+    keychainService: null,
+    keychainAccount: null,
+    resultSummary: {
+      runtime: "qr_native",
+      helper: "cued-whatsapp-helper",
+      helperAvailable:
+        input.errorCode === "helper_missing" ? false : Boolean(input.inspected.helperPath),
+      helperVersion: input.inspected.version,
+      errorCode: input.errorCode,
+      phase: input.phase,
+    },
+    errorSummary: messageByCode[input.errorCode],
+  };
+}
+
+function classifyWhatsAppQrError(error: unknown): {
+  state: Extract<AuthSessionState, "failed" | "cancelled">;
+  errorCode: WhatsAppQrFailureCode;
+} {
+  const message = error instanceof Error ? error.message : String(error ?? "");
+  if (/cancelled/i.test(message)) {
+    return { state: "cancelled", errorCode: "qr_cancelled" };
+  }
+  if (/cuednative binary not found|qr window/i.test(message)) {
+    return { state: "failed", errorCode: "native_qr_unavailable" };
+  }
+  if (/enoent|not found|no such file/i.test(message)) {
+    return { state: "failed", errorCode: "helper_missing" };
+  }
+  if (/durable linked account/i.test(message)) {
+    return { state: "failed", errorCode: "durable_status_timeout" };
+  }
+  return { state: "failed", errorCode: "helper_pair_failed" };
 }
 
 function parseFakeResult(
@@ -318,19 +382,12 @@ export function startQrNativeAuthSession(
     const completion = (async (): Promise<QrNativeAuthResult> => {
       const inspected = inspectWhatsAppHelper();
       if (!inspected.helperPath) {
-        return {
-          sessionId: session.id,
-          platform: session.platform,
-          accountKey: session.accountKey,
-          state: "failed",
-          resultSummary: {
-            runtime: "qr_native",
-            helper: "cued-whatsapp-helper",
-            storeDir,
-          },
-          errorSummary:
-            "WhatsApp helper was not found. Build native/helpers/whatsapp-go first or set CUED_WHATSAPP_HELPER_BINARY.",
-        };
+        return buildWhatsAppFailedResult({
+          session,
+          inspected,
+          errorCode: "helper_missing",
+          phase: "inspect_helper",
+        });
       }
 
       const existingStatus = await readWhatsAppHelperStatus(storeDir).catch(() => null);
@@ -348,76 +405,77 @@ export function startQrNativeAuthSession(
         storeDir,
         deviceName: "Cued",
       });
-      const initial = await Promise.race([
-        pair.qrCode.then((value) => ({ type: "qr" as const, value })),
-        pair.completion.then((value) => ({ type: "authenticated" as const, value })),
-      ]);
-
-      if (initial.type === "authenticated") {
-        const status = await waitForDurableWhatsAppAuthStatus(storeDir);
-        return buildWhatsAppAuthenticatedResult({ session, inspected, storeDir, status });
-      }
-
-      const qrCode = initial.value;
-      const nativeBinary = resolveNativeQrBinary();
-      const qrWindow = spawn(
-        nativeBinary,
-        [
-          "auth",
-          "qr",
-          "--title",
-          "Connect WhatsApp",
-          "--subtitle",
-          "Scan this code in WhatsApp > Linked Devices",
-          "--uri",
-          qrCode,
-        ],
-        {
-          stdio: ["ignore", "pipe", "pipe"],
-        },
-      );
-
-      const qrClosed = new Promise<"cancelled">((resolve) => {
-        qrWindow.once("close", () => resolve("cancelled"));
-      });
+      let qrWindow: ChildProcess | null = null;
 
       try {
+        const initial = await Promise.race([
+          pair.qrCode.then((value) => ({ type: "qr" as const, value })),
+          pair.completion.then((value) => ({ type: "authenticated" as const, value })),
+        ]);
+
+        if (initial.type === "authenticated") {
+          const status = await waitForDurableWhatsAppAuthStatus(storeDir);
+          return buildWhatsAppAuthenticatedResult({ session, inspected, storeDir, status });
+        }
+
+        const qrCode = initial.value;
+        const nativeBinary = resolveNativeQrBinary();
+        qrWindow = spawn(
+          nativeBinary,
+          [
+            "auth",
+            "qr",
+            "--title",
+            "Connect WhatsApp",
+            "--subtitle",
+            "Scan this code in WhatsApp > Linked Devices",
+            "--uri",
+            qrCode,
+          ],
+          {
+            stdio: ["ignore", "pipe", "pipe"],
+          },
+        );
+
+        const qrClosed = new Promise<"cancelled">((resolve) => {
+          qrWindow?.once("close", () => resolve("cancelled"));
+        });
+        const qrFailed = new Promise<never>((_, reject) => {
+          qrWindow?.once("error", reject);
+        });
         const result = await Promise.race([
           pair.completion.then((value) => ({ type: "authenticated" as const, value })),
           qrClosed.then(() => ({ type: "cancelled" as const, value: null })),
+          qrFailed,
         ]);
         if (result.type === "cancelled") {
           pair.cancel();
           throw new Error("WhatsApp linking cancelled");
         }
 
-        if (!qrWindow.killed) {
+        if (qrWindow && !qrWindow.killed) {
           qrWindow.kill("SIGTERM");
         }
 
         const status = await waitForDurableWhatsAppAuthStatus(storeDir);
         return buildWhatsAppAuthenticatedResult({ session, inspected, storeDir, status });
       } catch (error) {
-        if (!qrWindow.killed) {
+        if (qrWindow && !qrWindow.killed) {
           qrWindow.kill("SIGTERM");
         }
-        return {
-          sessionId: session.id,
-          platform: session.platform,
-          accountKey: session.accountKey,
-          state:
-            error instanceof Error && error.message === "WhatsApp linking cancelled"
-              ? "cancelled"
-              : "failed",
-          resultSummary: {
-            runtime: "qr_native",
-            helper: "cued-whatsapp-helper",
-            helperPath: inspected.helperPath,
-            helperVersion: inspected.version,
-            storeDir,
-          },
-          errorSummary: error instanceof Error ? error.message : String(error),
-        };
+        pair.cancel();
+        const classified = classifyWhatsAppQrError(error);
+        const errorCode =
+          qrWindow && classified.errorCode === "helper_missing"
+            ? "native_qr_unavailable"
+            : classified.errorCode;
+        return buildWhatsAppFailedResult({
+          session,
+          inspected,
+          state: classified.state,
+          errorCode,
+          phase: qrWindow ? "pairing" : "start_pairing",
+        });
       }
     })();
 

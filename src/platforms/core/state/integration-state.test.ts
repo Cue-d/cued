@@ -41,6 +41,7 @@ describe("integration state management", () => {
     delete process.env.CUED_SIGNAL_CLI_PATH;
     delete process.env.CUED_SLACK_APP_BINARY;
     delete process.env.CUED_SLACK_HELPER_BINARY;
+    delete process.env.CUED_AUTH_NATIVE_BINARY;
     delete process.env.CUED_APP_PATH;
     delete process.env.CUED_WHATSAPP_HELPER_BINARY;
 
@@ -1736,6 +1737,188 @@ exit 1
 
     handle.child.kill("SIGTERM");
     await handle.completion.catch(() => {});
+    db.close();
+  });
+
+  it("returns privacy-safe WhatsApp QR missing helper failures", async () => {
+    process.env.CUED_WHATSAPP_HELPER_BINARY = join(
+      createTempDir("cued-missing-whatsapp-helper-"),
+      "cued-whatsapp-helper",
+    );
+
+    const db = createDb();
+    const requested = requestIntegrationAccess(db, "whatsapp");
+    const handle = startQrNativeAuthSession(db, requested.authSession, requested.integration);
+    const result = await handle.completion;
+
+    expect(result).toMatchObject({
+      platform: "whatsapp",
+      accountKey: "default",
+      state: "failed",
+      errorSummary:
+        "WhatsApp helper was not found. Build native/helpers/whatsapp-go first or set CUED_WHATSAPP_HELPER_BINARY.",
+      resultSummary: {
+        runtime: "qr_native",
+        helper: "cued-whatsapp-helper",
+        helperAvailable: false,
+        errorCode: "helper_missing",
+        phase: "start_pairing",
+      },
+    });
+    expect(JSON.stringify(result)).not.toMatch(
+      /storeDir|helperPath|whatsapp\.net|whatsapp-test-qr/,
+    );
+    db.close();
+  });
+
+  it("sanitizes WhatsApp QR helper runtime failures", async () => {
+    const helperPath = join(createTempDir("cued-whatsapp-helper-bin-"), "cued-whatsapp-helper");
+    writeFileSync(
+      helperPath,
+      `#!/bin/sh
+if [ "$1" = "version" ]; then
+  echo '{"version":"0.1.0"}'
+  exit 0
+fi
+if [ "$1" = "status" ]; then
+  echo '{"authenticated":false,"accountJid":null,"pushName":null,"helperVersion":"0.1.0"}'
+  exit 0
+fi
+if [ "$1" = "pair" ]; then
+  echo '{"event":"error","data":{"message":"pair failed for 15551234567@s.whatsapp.net at /tmp/private with qr whatsapp-test-qr"}}'
+  exit 1
+fi
+exit 1
+`,
+    );
+    chmodSync(helperPath, 0o755);
+    process.env.CUED_WHATSAPP_HELPER_BINARY = helperPath;
+
+    const db = createDb();
+    const requested = requestIntegrationAccess(db, "whatsapp");
+    const handle = startQrNativeAuthSession(db, requested.authSession, requested.integration);
+    const result = await handle.completion;
+
+    expect(result).toMatchObject({
+      platform: "whatsapp",
+      accountKey: "default",
+      state: "failed",
+      errorSummary: "WhatsApp QR pairing failed in the helper runtime.",
+      resultSummary: {
+        runtime: "qr_native",
+        helper: "cued-whatsapp-helper",
+        helperAvailable: true,
+        helperVersion: "0.1.0",
+        errorCode: "helper_pair_failed",
+        phase: "start_pairing",
+      },
+    });
+    expect(JSON.stringify(result)).not.toMatch(
+      /15551234567|whatsapp\.net|\/tmp\/private|whatsapp-test-qr|storeDir|helperPath/,
+    );
+    db.close();
+  });
+
+  it("marks closed WhatsApp QR windows as privacy-safe cancellations", async () => {
+    const helperPath = join(createTempDir("cued-whatsapp-helper-bin-"), "cued-whatsapp-helper");
+    writeFileSync(
+      helperPath,
+      `#!/bin/sh
+if [ "$1" = "version" ]; then
+  echo '{"version":"0.1.0"}'
+  exit 0
+fi
+if [ "$1" = "status" ]; then
+  echo '{"authenticated":false,"accountJid":null,"pushName":null,"helperVersion":"0.1.0"}'
+  exit 0
+fi
+if [ "$1" = "pair" ]; then
+  echo '{"event":"qr","data":{"code":"whatsapp-test-qr"}}'
+  sleep 30
+  exit 1
+fi
+exit 1
+`,
+    );
+    chmodSync(helperPath, 0o755);
+    process.env.CUED_WHATSAPP_HELPER_BINARY = helperPath;
+
+    const nativePath = join(createTempDir("cued-native-qr-bin-"), "CuedNative");
+    writeFileSync(nativePath, "#!/bin/sh\nexit 0\n");
+    chmodSync(nativePath, 0o755);
+    process.env.CUED_AUTH_NATIVE_BINARY = nativePath;
+
+    const db = createDb();
+    const requested = requestIntegrationAccess(db, "whatsapp");
+    const handle = startQrNativeAuthSession(db, requested.authSession, requested.integration);
+    const result = await handle.completion;
+
+    expect(result).toMatchObject({
+      platform: "whatsapp",
+      accountKey: "default",
+      state: "cancelled",
+      errorSummary: "WhatsApp QR pairing cancelled.",
+      resultSummary: {
+        runtime: "qr_native",
+        helper: "cued-whatsapp-helper",
+        helperAvailable: true,
+        helperVersion: "0.1.0",
+        errorCode: "qr_cancelled",
+        phase: "pairing",
+      },
+    });
+    expect(JSON.stringify(result)).not.toMatch(/whatsapp-test-qr|storeDir|helperPath/);
+    db.close();
+  });
+
+  it("distinguishes missing native QR window binaries from missing WhatsApp helpers", async () => {
+    const helperPath = join(createTempDir("cued-whatsapp-helper-bin-"), "cued-whatsapp-helper");
+    writeFileSync(
+      helperPath,
+      `#!/bin/sh
+if [ "$1" = "version" ]; then
+  echo '{"version":"0.1.0"}'
+  exit 0
+fi
+if [ "$1" = "status" ]; then
+  echo '{"authenticated":false,"accountJid":null,"pushName":null,"helperVersion":"0.1.0"}'
+  exit 0
+fi
+if [ "$1" = "pair" ]; then
+  echo '{"event":"qr","data":{"code":"whatsapp-test-qr"}}'
+  sleep 30
+  exit 1
+fi
+exit 1
+`,
+    );
+    chmodSync(helperPath, 0o755);
+    process.env.CUED_WHATSAPP_HELPER_BINARY = helperPath;
+    process.env.CUED_AUTH_NATIVE_BINARY = join(
+      createTempDir("cued-missing-native-qr-bin-"),
+      "CuedNative",
+    );
+
+    const db = createDb();
+    const requested = requestIntegrationAccess(db, "whatsapp");
+    const handle = startQrNativeAuthSession(db, requested.authSession, requested.integration);
+    const result = await handle.completion;
+
+    expect(result).toMatchObject({
+      platform: "whatsapp",
+      accountKey: "default",
+      state: "failed",
+      errorSummary: "WhatsApp QR window could not be opened.",
+      resultSummary: {
+        runtime: "qr_native",
+        helper: "cued-whatsapp-helper",
+        helperAvailable: true,
+        helperVersion: "0.1.0",
+        errorCode: "native_qr_unavailable",
+        phase: "pairing",
+      },
+    });
+    expect(JSON.stringify(result)).not.toMatch(/whatsapp-test-qr|storeDir|helperPath/);
     db.close();
   });
 
