@@ -2,6 +2,10 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync } from "node:fs";
 import { type BrowserContext, type Cookie, chromium, type Page, type Request } from "playwright";
 import { cuedAuthKeychainService } from "../../../core/identity.js";
+import {
+  type ChromiumAuthFailureCode,
+  classifyChromiumAuthWaitFailure,
+} from "./chromium-failure.js";
 
 declare const localStorage: {
   getItem(key: string): string | null;
@@ -35,6 +39,63 @@ type ExtractedAuth = {
   secret: Record<string, unknown>;
   resultSummary: Record<string, unknown>;
 };
+
+function runtimeKind(): string {
+  return "chromium";
+}
+
+function summarizeChromiumPageState(platform: Platform, url: string): string {
+  if (!url || url === "about:blank") {
+    return "blank";
+  }
+  if (platform === "linkedin") {
+    if (isLinkedInAuthPage(url)) return "auth_page";
+    if (isLinkedInMessagingUrl(url)) return "messaging_page";
+    if (/linkedin\.com/i.test(url)) return "linkedin_page";
+  }
+  if (platform === "slack" && /slack\.com/i.test(url)) return "provider_page";
+  if (platform === "discord" && /discord\.com/i.test(url)) return "provider_page";
+  return "other";
+}
+
+function summarizeOpenPages(platform: Platform, pages: Page[]): Record<string, unknown> {
+  const states = pages.map((page) => summarizeChromiumPageState(platform, page.url()));
+  return {
+    pageCount: pages.length,
+    pageStates: [...new Set(states)].sort(),
+  };
+}
+
+function buildChromiumFailureResult(input: {
+  args: WorkerArgs;
+  state?: Extract<AuthState, "failed" | "cancelled">;
+  errorCode: ChromiumAuthFailureCode;
+  stage: string;
+  pageSummary?: Record<string, unknown>;
+}): WorkerResult {
+  const errorSummaryByCode: Record<ChromiumAuthFailureCode, string> = {
+    auth_window_closed: `${input.args.platform} login window closed before authentication completed`,
+    auth_timeout: `${input.args.platform} authentication timed out`,
+    auth_extraction_failed: `${input.args.platform} authentication data could not be extracted`,
+    browser_runtime_failed: `${input.args.platform} browser auth runtime failed`,
+  };
+  return {
+    sessionId: input.args.sessionId,
+    platform: input.args.platform,
+    accountKey: input.args.accountKey,
+    state: input.state ?? "failed",
+    keychainService: null,
+    keychainAccount: null,
+    resultSummary: {
+      provider: input.args.platform,
+      runtime: runtimeKind(),
+      errorCode: input.errorCode,
+      stage: input.stage,
+      ...input.pageSummary,
+    },
+    errorSummary: errorSummaryByCode[input.errorCode],
+  };
+}
 
 const REQUIRED_ARGS = new Set([
   "--platform",
@@ -361,8 +422,8 @@ async function extractLinkedInAuth(
     },
     resultSummary: {
       provider: "linkedin",
+      runtime: runtimeKind(),
       cookieCount: cookies.length,
-      currentUrl: page.url(),
       realtimeReady,
       pageInstanceCaptured: Boolean(captured.pageInstance),
       xLiTrackCaptured: Boolean(captured.xLiTrack),
@@ -495,21 +556,21 @@ async function run(): Promise<void> {
     let lastObservedUrls: string[] = [];
     let lastExtractionError: string | null = null;
     while (Date.now() < deadline) {
+      lastExtractionError = null;
       const openPages = listOpenPages(context);
       page = firstOpenPage(context) ?? page;
       lastObservedUrls = openPages.map((openPage) => openPage.url());
       if (openPages.length === 0 || !page || page.isClosed()) {
-        const cancelled: WorkerResult = {
-          sessionId: args.sessionId,
-          platform: args.platform,
-          accountKey: args.accountKey,
-          state: "cancelled",
-          keychainService: null,
-          keychainAccount: null,
-          resultSummary: null,
-          errorSummary: "Login window closed before authentication completed",
-        };
-        process.stdout.write(JSON.stringify(cancelled));
+        process.stdout.write(
+          JSON.stringify(
+            buildChromiumFailureResult({
+              args,
+              state: "cancelled",
+              errorCode: "auth_window_closed",
+              stage: "browser_closed",
+            }),
+          ),
+        );
         return;
       }
 
@@ -532,7 +593,6 @@ async function run(): Promise<void> {
             keychainAccount: extracted.keychainAccount,
             resultSummary: {
               ...extracted.resultSummary,
-              profileDir: args.profileDir,
             },
             errorSummary: null,
           };
@@ -547,22 +607,19 @@ async function run(): Promise<void> {
       await page.waitForTimeout(1000);
     }
 
-    const failed: WorkerResult = {
-      sessionId: args.sessionId,
-      platform: args.platform,
-      accountKey: args.accountKey,
-      state: "failed",
-      keychainService: null,
-      keychainAccount: null,
-      resultSummary: {
-        provider: args.platform,
-        profileDir: args.profileDir,
-        pageUrls: lastObservedUrls,
-      },
-      errorSummary:
-        `Timed out waiting for ${args.platform} authentication` +
-        (lastExtractionError ? ` (${lastExtractionError})` : ""),
+    const pageSummary = {
+      ...summarizeOpenPages(args.platform, listOpenPages(context)),
+      lastPageStates: [
+        ...new Set(lastObservedUrls.map((url) => summarizeChromiumPageState(args.platform, url))),
+      ].sort(),
     };
+    const failure = classifyChromiumAuthWaitFailure(lastExtractionError);
+    const failed = buildChromiumFailureResult({
+      args,
+      errorCode: failure.errorCode,
+      stage: failure.stage,
+      pageSummary,
+    });
     process.stdout.write(JSON.stringify(failed));
   } finally {
     await context?.close().catch(() => {});
