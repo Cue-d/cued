@@ -73,6 +73,7 @@ extension RootView {
           .font(.subheadline)
           .foregroundStyle(.secondary)
           .fixedSize(horizontal: false, vertical: true)
+          .textSelection(.enabled)
       }
       .frame(maxWidth: .infinity, alignment: .leading)
 

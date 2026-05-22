@@ -49,6 +49,7 @@ extension RootView {
           .font(.caption)
           .foregroundStyle(.secondary)
           .fixedSize(horizontal: false, vertical: true)
+          .textSelection(.enabled)
       }
       Spacer(minLength: 0)
     }

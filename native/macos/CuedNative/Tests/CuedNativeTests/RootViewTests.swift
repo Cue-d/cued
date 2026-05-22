@@ -30,6 +30,17 @@ final class RootViewTests: XCTestCase {
     XCTAssertTrue(shouldActivelyRefreshPermissions(for: ["--all"]))
   }
 
+  func testActivePermissionSnapshotRefreshAlsoRefreshesManagedIntegrations() {
+    XCTAssertEqual(
+      onboardingSnapshotArguments(refreshPermissions: true),
+      ["onboarding", "snapshot", "--refresh-managed", "--refresh-permissions"]
+    )
+    XCTAssertEqual(
+      onboardingSnapshotArguments(refreshPermissions: false),
+      ["onboarding", "snapshot"]
+    )
+  }
+
   func testFastContactsPermissionStatusMapping() {
     XCTAssertEqual(
       RootWindowController.fastContactsPermissionStatus(authorizationStatus: .authorized).status,

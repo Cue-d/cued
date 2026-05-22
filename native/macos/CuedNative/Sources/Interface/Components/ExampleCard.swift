@@ -96,6 +96,7 @@ struct ExampleCard: View {
         .foregroundStyle(.primary)
         .lineLimit(2)
         .fixedSize(horizontal: false, vertical: true)
+        .textSelection(.enabled)
     }
     .padding(.horizontal, 10)
     .padding(.vertical, 7)
@@ -149,7 +150,7 @@ struct ExampleCard: View {
     case .unknown:
       return "..."
     case .missing:
-      return "Missing"
+      return target.shortTitle
     case .notLoggedIn:
       return "Auth"
     }
