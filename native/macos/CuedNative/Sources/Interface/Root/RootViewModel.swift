@@ -337,6 +337,15 @@ public final class RootViewModel: ObservableObject {
     }
   }
 
+  public func setPermissionStatus(_ permission: PermissionStatus) {
+    setPermissionStatus(
+      key: permission.key,
+      status: permission.status,
+      summary: permission.summary,
+      requestFlags: permission.requestFlags
+    )
+  }
+
   public func configuration(for platform: String) -> PlatformConfig? {
     platformConfigurations.first { $0.platform == platform }
   }
