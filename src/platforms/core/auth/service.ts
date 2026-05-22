@@ -324,14 +324,19 @@ export class IntegrationAuthService {
       });
       refreshPersistedRequestableIntegrationStates(this.db);
       integration = getIntegrationSummary(this.db, integration.platform, integration.accountKey);
-    } else if (completed.authSession?.state === "failed") {
+    } else if (
+      completed.authSession?.state === "failed" ||
+      completed.authSession?.state === "cancelled"
+    ) {
       await sendTelemetryEventSafe(this.db, "integration_setup_failed", {
         component: "integration_auth",
         operation: "complete",
-        stage: "failed",
+        stage: completed.authSession.state,
         platform: completed.authSession.platform,
+        result: completed.authSession.state,
+        runtime_kind: integration?.runtimeKind,
         ...errorTelemetryProperties(
-          input.errorSummary ?? "auth failed",
+          input.errorSummary ?? `auth ${completed.authSession.state}`,
           "integration_setup_failed",
         ),
       });

@@ -181,6 +181,9 @@ struct ExampleCard: View {
   }
 
   private func helpText(for target: AgentTarget, status: AgentTargetStatus) -> String {
+    if status.readiness == .missing, status.remediation == nil {
+      return "Install \(target.title) to launch this example."
+    }
     if let remediation = status.remediation {
       return "\(status.detail) \(remediation)"
     }

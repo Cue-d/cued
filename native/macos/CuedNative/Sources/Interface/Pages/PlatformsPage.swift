@@ -13,6 +13,7 @@ extension RootView {
         .foregroundStyle(.secondary)
         .multilineTextAlignment(.center)
         .frame(maxWidth: 540)
+        .textSelection(.enabled)
 
       card {
         if viewModel.platformConfigurations.isEmpty {
@@ -32,6 +33,7 @@ extension RootView {
                 )
                   .font(.subheadline)
                   .foregroundStyle(.secondary)
+                  .textSelection(.enabled)
               }
             }
           }
