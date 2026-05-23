@@ -10,7 +10,7 @@ private let appSingletonLockStaleMs = 15_000
 private let singletonLockSlotBytes = 1_024
 private let singletonLockSlotCount = 2
 private let menuBarReopenNotificationName = Notification.Name("so.cued.desktop.menuBar.reopen")
-private let appMessagesDBPath =
+let appMessagesDBPath =
   FileManager.default.homeDirectoryForCurrentUser
   .appendingPathComponent("Library/Messages/chat.db").path
 

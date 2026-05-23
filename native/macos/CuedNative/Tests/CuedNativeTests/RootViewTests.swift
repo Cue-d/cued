@@ -6,18 +6,56 @@ final class RootViewTests: XCTestCase {
   func testPermissionKeyMappingMatchesExpectedFlags() {
     XCTAssertEqual(permissionKeys(for: ["--contacts"]), ["contacts"])
     XCTAssertEqual(permissionKeys(for: ["--full-disk-access"]), ["full_disk_access"])
-    XCTAssertEqual(permissionKeys(for: ["--messages"]), ["messages_automation"])
     XCTAssertEqual(
       permissionKeys(for: ["--all"]),
       ["contacts", "full_disk_access"]
     )
   }
 
+  func testPermissionRequestFlagsExcludeSwiftContacts() {
+    XCTAssertEqual(permissionRequestFlagsExcludingSwiftContacts(for: ["contacts"]), [])
+    XCTAssertEqual(
+      permissionRequestFlagsExcludingSwiftContacts(for: ["contacts", "full_disk_access"]),
+      ["--full-disk-access"]
+    )
+    XCTAssertEqual(
+      permissionRequestFlagsExcludingSwiftContacts(for: ["full_disk_access"]),
+      ["--full-disk-access"]
+    )
+  }
+
   func testActivePermissionRefreshIsForcedForLiveVerifiableRequests() {
-    XCTAssertFalse(shouldActivelyRefreshPermissions(for: ["--contacts"]))
+    XCTAssertTrue(shouldActivelyRefreshPermissions(for: ["--contacts"]))
     XCTAssertTrue(shouldActivelyRefreshPermissions(for: ["--full-disk-access"]))
-    XCTAssertTrue(shouldActivelyRefreshPermissions(for: ["--messages"]))
     XCTAssertTrue(shouldActivelyRefreshPermissions(for: ["--all"]))
+  }
+
+  func testFastContactsPermissionStatusMapping() {
+    XCTAssertEqual(
+      RootWindowController.fastContactsPermissionStatus(authorizationStatus: .authorized).status,
+      "granted"
+    )
+    XCTAssertEqual(
+      RootWindowController.fastContactsPermissionStatus(authorizationStatus: .notDetermined).status,
+      "unknown"
+    )
+    XCTAssertEqual(
+      RootWindowController.fastContactsPermissionStatus(authorizationStatus: .denied).status,
+      "needs_action"
+    )
+    XCTAssertEqual(
+      RootWindowController.fastContactsPermissionStatus(authorizationStatus: .restricted).status,
+      "needs_action"
+    )
+  }
+
+  func testFastFullDiskAccessStatusReportsMissingDatabaseAsUnknown() {
+    let missingPath = NSTemporaryDirectory().appending("missing-cued-chat.db")
+
+    let status = RootWindowController.fastFullDiskAccessPermissionStatus(messagesDBPath: missingPath)
+
+    XCTAssertEqual(status.key, "full_disk_access")
+    XCTAssertEqual(status.status, "unknown")
   }
 
   func testCodexCLIStatusReportsMissingAuthAndReadyStates() {

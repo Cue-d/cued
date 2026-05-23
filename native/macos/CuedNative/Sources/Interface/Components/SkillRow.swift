@@ -27,7 +27,7 @@ struct SkillRow: View {
           .font(.title3.weight(.semibold))
           .foregroundStyle(.green)
           .accessibilityLabel("Cued skill installed")
-      } else if isPending {
+      } else if isPending || status.status == "unknown" {
         ProgressView()
           .controlSize(.small)
           .frame(minWidth: 76)

@@ -1,5 +1,7 @@
 import AppKit
+import Contacts
 import Interface
+import SQLite3
 import SwiftUI
 
 struct SkillInstallResponse: Decodable {
@@ -15,7 +17,7 @@ struct RootSnapshotResponse: Decodable {
   let setupIntegrations: [IntegrationStatus]
 }
 
-private let liveRefreshPermissionKeys: Set<String> = ["messages_automation", "full_disk_access"]
+private let liveRefreshPermissionKeys: Set<String> = ["contacts", "full_disk_access"]
 
 @MainActor
 final class RootWindowController: NSWindowController {
@@ -151,6 +153,13 @@ final class RootWindowController: NSWindowController {
     let statusStore = self.statusStore
     let shouldEnsurePrerequisites = consumePrerequisiteSetupIntent()
     let shouldRefreshPermissions = forceActivePermissionRefresh || shouldRefreshLivePermissions()
+    let fastPermissionKeys = shouldRefreshPermissions
+      ? (pendingLivePermissionKeys.isEmpty ? liveRefreshPermissionKeys : pendingLivePermissionKeys)
+      : []
+
+    if shouldRefreshPermissions {
+      applyFastPermissionStatuses(for: fastPermissionKeys)
+    }
 
     Task.detached(priority: .userInitiated) { [daemonSupervisor, statusStore] in
       if shouldEnsurePrerequisites {
@@ -198,10 +207,14 @@ final class RootWindowController: NSWindowController {
 
       await MainActor.run {
         self.cachedAllIntegrations = snapshot.integrations ?? []
-        self.clearGrantedLivePermissions(using: snapshot.permissions)
+        let permissions = self.overlayFastPermissionStatuses(
+          on: snapshot.permissions,
+          for: fastPermissionKeys
+        )
+        self.clearGrantedLivePermissions(using: permissions)
         self.isRefreshing = false
         self.viewModel.apply(
-          permissions: snapshot.permissions,
+          permissions: permissions,
           globalSkill: globalSkill,
           relationshipSummary: snapshot.relationshipSummary ?? RelationshipSummary(),
           allIntegrations: self.cachedAllIntegrations,
@@ -371,15 +384,24 @@ final class RootWindowController: NSWindowController {
       setTelemetryEnabledFromOnboarding(false)
       return
     }
-    if permissionKeys(for: flags).contains("full_disk_access") {
-      markPermissionRelaunchSetupIntent()
-    }
-    let permissionTelemetry = permissionKeys(for: flags).map {
+    let keys = permissionKeys(for: flags)
+    let permissionTelemetry = keys.map {
       ["telemetry", "permission-requested", "--kind", $0]
     }
-    trackLivePermissionRequests(flags: flags)
+    if keys.contains("contacts") {
+      requestContactsPermission()
+    }
+    let remainingPermissionFlags = permissionRequestFlagsExcludingSwiftContacts(for: keys)
+    if remainingPermissionFlags.isEmpty {
+      runPermissionTelemetry(permissionTelemetry)
+      return
+    }
+    if keys.contains("full_disk_access") {
+      markPermissionRelaunchSetupIntent()
+    }
+    trackLivePermissionKeys(keys)
     runPermissionCommands(
-      permissionTelemetry + [["permissions", "request"] + flags],
+      permissionTelemetry + [["permissions", "request"] + remainingPermissionFlags],
       forceActiveRefreshAfter: shouldActivelyRefreshPermissions(for: flags)
     )
   }
@@ -392,6 +414,9 @@ final class RootWindowController: NSWindowController {
       markPermissionRelaunchSetupIntent()
     }
     PermissionGuideAssistant.shared.present(panel: panel)
+    applyFastPermissionStatuses(for: [key])
+    trackLivePermissionKeys([key])
+    schedulePermissionRefresh()
   }
 
   private func enableIntegration(platform: String, accountKey: String) {
@@ -631,9 +656,151 @@ final class RootWindowController: NSWindowController {
       }
       await MainActor.run {
         self.onRefresh()
+        self.applyFastPermissionStatuses()
         self.refresh(forceActivePermissionRefresh: forceActiveRefreshAfter)
       }
     }
+  }
+
+  private func runPermissionTelemetry(_ argumentsList: [[String]]) {
+    let daemonSupervisor = self.daemonSupervisor
+    Task.detached(priority: .utility) { [daemonSupervisor] in
+      for arguments in argumentsList {
+        _ = daemonSupervisor.runCLI(arguments: arguments)
+      }
+    }
+  }
+
+  private func requestContactsPermission() {
+    applyFastPermissionStatuses(for: ["contacts"])
+    trackLivePermissionKeys(["contacts"])
+    let store = CNContactStore()
+    store.requestAccess(for: .contacts) { [weak self] _, _ in
+      Task { @MainActor [weak self] in
+        guard let self else {
+          return
+        }
+        self.applyFastPermissionStatuses(for: ["contacts"])
+        self.clearGrantedLivePermissions(using: self.viewModel.permissionStatuses)
+        self.schedulePermissionRefresh()
+      }
+    }
+  }
+
+  private func applyFastPermissionStatuses(for keys: Set<String>? = nil) {
+    for permission in fastPermissionStatuses(for: keys) {
+      viewModel.setPermissionStatus(permission)
+    }
+  }
+
+  private func overlayFastPermissionStatuses(
+    on permissions: [PermissionStatus],
+    for keys: Set<String>? = nil
+  ) -> [PermissionStatus] {
+    var overlaid = permissions
+    for permission in fastPermissionStatuses(for: keys) {
+      if let index = overlaid.firstIndex(where: { $0.key == permission.key }) {
+        overlaid[index] = permission
+      } else {
+        overlaid.append(permission)
+      }
+    }
+    return overlaid
+  }
+
+  private func fastPermissionStatuses(for keys: Set<String>? = nil) -> [PermissionStatus] {
+    let keys = keys ?? liveRefreshPermissionKeys
+    var permissions: [PermissionStatus] = []
+    if keys.contains("contacts") {
+      permissions.append(Self.fastContactsPermissionStatus())
+    }
+    if keys.contains("full_disk_access") {
+      permissions.append(Self.fastFullDiskAccessPermissionStatus())
+    }
+    return permissions
+  }
+
+  nonisolated static func fastContactsPermissionStatus(
+    authorizationStatus: CNAuthorizationStatus = CNContactStore.authorizationStatus(for: .contacts)
+  ) -> PermissionStatus {
+    switch authorizationStatus {
+    case .authorized:
+      return PermissionStatus(
+        key: "contacts",
+        status: "granted",
+        summary: "Contacts access is authorized",
+        requestFlags: ["--contacts"]
+      )
+    case .notDetermined:
+      return PermissionStatus(
+        key: "contacts",
+        status: "unknown",
+        summary: "Contacts access has not been requested yet",
+        requestFlags: ["--contacts"]
+      )
+    case .denied:
+      return PermissionStatus(
+        key: "contacts",
+        status: "needs_action",
+        summary: "Contacts access is denied",
+        requestFlags: ["--contacts"]
+      )
+    case .restricted:
+      return PermissionStatus(
+        key: "contacts",
+        status: "needs_action",
+        summary: "Contacts access is restricted",
+        requestFlags: ["--contacts"]
+      )
+    @unknown default:
+      return PermissionStatus(
+        key: "contacts",
+        status: "unknown",
+        summary: "Contacts access could not be checked",
+        requestFlags: ["--contacts"]
+      )
+    }
+  }
+
+  nonisolated static func fastFullDiskAccessPermissionStatus(
+    messagesDBPath: String = appMessagesDBPath
+  ) -> PermissionStatus {
+    guard FileManager.default.fileExists(atPath: messagesDBPath) else {
+      return PermissionStatus(
+        key: "full_disk_access",
+        status: "unknown",
+        summary: "Messages database was not found",
+        requestFlags: ["--full-disk-access"]
+      )
+    }
+
+    if canOpenSQLiteDatabase(at: messagesDBPath) {
+      return PermissionStatus(
+        key: "full_disk_access",
+        status: "granted",
+        summary: "Full Disk Access is available for Messages data",
+        requestFlags: ["--full-disk-access"]
+      )
+    }
+
+    return PermissionStatus(
+      key: "full_disk_access",
+      status: "needs_action",
+      summary: "Messages database is not readable from Cued",
+      requestFlags: ["--full-disk-access"]
+    )
+  }
+
+  private nonisolated static func canOpenSQLiteDatabase(at path: String) -> Bool {
+    var db: OpaquePointer?
+    guard sqlite3_open_v2(path, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK, let db else {
+      if let db {
+        sqlite3_close(db)
+      }
+      return false
+    }
+    sqlite3_close(db)
+    return true
   }
 
   private func shouldRefreshLivePermissions() -> Bool {
@@ -653,8 +820,12 @@ final class RootWindowController: NSWindowController {
   }
 
   private func trackLivePermissionRequests(flags: [String]) {
+    trackLivePermissionKeys(permissionKeys(for: flags))
+  }
+
+  private func trackLivePermissionKeys(_ keys: Set<String>) {
     pendingLivePermissionKeys.formUnion(
-      permissionKeys(for: flags).filter { liveRefreshPermissionKeys.contains($0) }
+      keys.filter { liveRefreshPermissionKeys.contains($0) }
     )
     if !pendingLivePermissionKeys.isEmpty {
       pendingLivePermissionDeadline = Date().addingTimeInterval(30)
@@ -713,10 +884,15 @@ func permissionKeys(for flags: [String]) -> Set<String> {
   if flags.contains("--full-disk-access") {
     keys.insert("full_disk_access")
   }
-  if flags.contains("--messages") {
-    keys.insert("messages_automation")
-  }
   return keys
+}
+
+func permissionRequestFlagsExcludingSwiftContacts(for keys: Set<String>) -> [String] {
+  var flags: [String] = []
+  if keys.contains("full_disk_access") {
+    flags.append("--full-disk-access")
+  }
+  return flags
 }
 
 func shouldActivelyRefreshPermissions(for flags: [String]) -> Bool {
