@@ -3,50 +3,101 @@ function decodeLength(data: Buffer, offset = 0): [number, number] | null {
   const first = data[offset];
   if (first < 0x80) return [1, first];
 
-  const extraBytes = first - 0x80 + 1;
-  if (extraBytes < 2 || extraBytes > 4 || offset + extraBytes >= data.length) {
+  const extraBytesByMarker: Record<number, number> = {
+    129: 2,
+    130: 4,
+    131: 8,
+  };
+  const extraBytes = extraBytesByMarker[first];
+  if (!extraBytes || offset + 1 + extraBytes > data.length) {
     return null;
   }
 
-  let value = 0;
+  let value = 0n;
   for (let i = 0; i < extraBytes; i += 1) {
-    value |= data[offset + 1 + i] << (i * 8);
+    value |= BigInt(data[offset + 1 + i]) << BigInt(i * 8);
   }
-  return [1 + extraBytes, value];
+  if (value > BigInt(Number.MAX_SAFE_INTEGER)) {
+    return null;
+  }
+  return [1 + extraBytes, Number(value)];
+}
+
+const nsString = Buffer.from("NSString");
+const typedStringTag = 0x2b;
+const typedStreamEnd = Buffer.from([0x86, 0x84]);
+const utf8Decoder = new TextDecoder("utf-8", { fatal: true });
+
+function decodeUtf8(bytes: Buffer): string | null {
+  try {
+    return utf8Decoder.decode(bytes);
+  } catch {
+    return null;
+  }
+}
+
+function normalizeDecodedText(value: string): string | null {
+  const stripped = value.replace(/\ufffc/g, "").trim();
+  if (!stripped) {
+    return value.includes("\ufffc") ? "[attachment]" : null;
+  }
+  if (stripped.startsWith("NS") || stripped.startsWith("_NS") || stripped.startsWith("NSMutable")) {
+    return null;
+  }
+  return stripped;
+}
+
+function decodeLengthPrefixedString(data: Buffer, offset: number): string | null {
+  const result = decodeLength(data, offset);
+  if (!result) return null;
+
+  const [lengthBytes, textLength] = result;
+  const textStart = offset + lengthBytes;
+  const textEnd = textStart + textLength;
+  if (textLength <= 0 || textEnd > data.length) return null;
+
+  const decoded = decodeUtf8(data.subarray(textStart, textEnd));
+  return decoded ? normalizeDecodedText(decoded) : null;
+}
+
+function decodeEndDelimitedString(data: Buffer, offset: number): string | null {
+  const textEnd = data.indexOf(typedStreamEnd, offset);
+  if (textEnd === -1 || textEnd <= offset) return null;
+
+  let textBytes = data.subarray(offset, textEnd);
+  const embeddedLength = decodeLength(textBytes);
+  if (embeddedLength) {
+    const [lengthBytes, textLength] = embeddedLength;
+    if (lengthBytes + textLength === textBytes.length) {
+      textBytes = textBytes.subarray(lengthBytes);
+    }
+  }
+
+  const decoded = decodeUtf8(textBytes);
+  return decoded ? normalizeDecodedText(decoded) : null;
+}
+
+function decodeTypedStringAfterTag(data: Buffer, offset: number): string | null {
+  return decodeEndDelimitedString(data, offset) ?? decodeLengthPrefixedString(data, offset);
 }
 
 export function extractTextFromAttributedBody(blob: Buffer | null): string | null {
   if (!blob || blob.length === 0) return null;
 
-  const nsString = Buffer.from("NSString");
-  const pos = blob.indexOf(nsString);
-  if (pos === -1) return null;
+  let searchStart = 0;
+  while (searchStart < blob.length) {
+    const marker = blob.indexOf(nsString, searchStart);
+    if (marker === -1) return null;
 
-  const afterMarker = blob.subarray(pos + nsString.length);
-  for (let i = 0; i < afterMarker.length - 6; i += 1) {
-    const firstByte = afterMarker[i];
-    if ((firstByte === 0x94 || firstByte === 0x95) && afterMarker.length > i + 4) {
-      if (
-        afterMarker[i + 1] === 0x84 &&
-        afterMarker[i + 2] === 0x01 &&
-        afterMarker[i + 3] === 0x2b
-      ) {
-        const result = decodeLength(afterMarker, i + 4);
-        if (!result) continue;
+    const afterMarker = marker + nsString.length;
+    for (let i = afterMarker; i < blob.length - 1; i += 1) {
+      if (blob[i] !== typedStringTag) continue;
 
-        const [lenBytesConsumed, textLen] = result;
-        const textStart = i + 4 + lenBytesConsumed;
-        if (textStart + textLen > afterMarker.length) continue;
-
-        const textBytes = afterMarker.subarray(textStart, textStart + textLen);
-        const trimmed = textBytes.toString("utf8").trim();
-        const isAppleInternal = !trimmed || trimmed.startsWith("NS") || trimmed.startsWith("_NS");
-        if (isAppleInternal) continue;
-
-        const filtered = trimmed.replace(/\ufffc/g, "");
-        return filtered || "[attachment]";
-      }
+      const decoded = decodeTypedStringAfterTag(blob, i + 1);
+      if (decoded) return decoded;
     }
+
+    searchStart = afterMarker;
   }
 
   return null;
