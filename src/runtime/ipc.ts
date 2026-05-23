@@ -14,6 +14,8 @@ export type DaemonRequest =
   | { id: string; command: "sql"; query: string }
   | { id: string; command: "integrations-list" }
   | { id: string; command: "integrations-refresh" }
+  | { id: string; command: "integrations-interaction-start"; sessionId?: string; ttlMs?: number }
+  | { id: string; command: "integrations-interaction-end"; sessionId?: string }
   | { id: string; command: "integrations-connect"; platform: string; accountKey?: string }
   | { id: string; command: "integrations-disconnect"; platform: string; accountKey?: string }
   | { id: string; command: "integrations-remove"; platform: string; accountKey?: string }

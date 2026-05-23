@@ -183,6 +183,10 @@ const FTS_PROJECTION_THROTTLE_DELAY_MS = 5_000;
 const FTS_INDEXING_STALE_AFTER_MS = 5 * 60 * 1000;
 const PROJECTION_AUTH_RETRY_DELAY_MS = 250;
 const PROJECTION_AUTH_GRACE_MS = 2_000;
+const DEFAULT_INTERACTIVE_AUTH_TTL_MS = 45_000;
+const DEFAULT_INTERACTIVE_AUTH_PROJECTION_BATCH_SIZE = 25;
+const DEFAULT_INTERACTIVE_AUTH_PROJECTION_CONTINUE_DELAY_MS = 1_000;
+const DEFAULT_INTERACTIVE_AUTH_SYNC_CONTINUE_DELAY_MS = 30_000;
 const DEFAULT_CONTINUATION_PROJECTION_INTERVAL_MS = 2_000;
 const DEFAULT_CONTINUATION_PROJECTION_BACKLOG_EVENTS = 500;
 const NATIVE_WATCH_DEBOUNCE_MS = 1_500;
@@ -599,6 +603,34 @@ function getIngestConcurrency(): number {
   return Number.isFinite(configured) && configured > 0 ? configured : DEFAULT_INGEST_CONCURRENCY;
 }
 
+function getInteractiveAuthTtlMs(): number {
+  const configured = Number(process.env.CUED_INTERACTIVE_AUTH_TTL_MS);
+  return Number.isFinite(configured) && configured > 0
+    ? Math.trunc(configured)
+    : DEFAULT_INTERACTIVE_AUTH_TTL_MS;
+}
+
+function getInteractiveAuthProjectionBatchSize(): number {
+  const configured = Number(process.env.CUED_INTERACTIVE_AUTH_PROJECTION_BATCH_SIZE);
+  return Number.isFinite(configured) && configured > 0
+    ? Math.trunc(configured)
+    : DEFAULT_INTERACTIVE_AUTH_PROJECTION_BATCH_SIZE;
+}
+
+function getInteractiveAuthSyncContinueDelayMs(): number {
+  const configured = Number(process.env.CUED_INTERACTIVE_AUTH_SYNC_CONTINUE_DELAY_MS);
+  return Number.isFinite(configured) && configured >= 0
+    ? Math.trunc(configured)
+    : DEFAULT_INTERACTIVE_AUTH_SYNC_CONTINUE_DELAY_MS;
+}
+
+function getInteractiveAuthProjectionContinueDelayMs(): number {
+  const configured = Number(process.env.CUED_INTERACTIVE_AUTH_PROJECTION_CONTINUE_DELAY_MS);
+  return Number.isFinite(configured) && configured >= 0
+    ? Math.trunc(configured)
+    : DEFAULT_INTERACTIVE_AUTH_PROJECTION_CONTINUE_DELAY_MS;
+}
+
 function getProjectionBatchSize(): number {
   const configured = Number(
     process.env.CUED_PROJECTION_BATCH_SIZE ?? DEFAULT_PROJECTION_BATCH_SIZE,
@@ -606,12 +638,65 @@ function getProjectionBatchSize(): number {
   return Number.isFinite(configured) && configured > 0 ? configured : DEFAULT_PROJECTION_BATCH_SIZE;
 }
 
-export function getAdaptiveProjectionBatchSize(pendingRawEvents: number): number {
+export function getAdaptiveProjectionBatchSize(
+  pendingRawEvents: number,
+  options?: { maxBatchSize?: number },
+): number {
   const baseBatchSize = getProjectionBatchSize();
   const tier = PROJECTION_BACKLOG_TIERS.find(
     (candidate) => pendingRawEvents >= candidate.minEvents,
   );
-  return Math.max(baseBatchSize, tier?.batchSize ?? baseBatchSize);
+  const adaptiveBatchSize = Math.max(baseBatchSize, tier?.batchSize ?? baseBatchSize);
+  return options?.maxBatchSize != null
+    ? Math.max(1, Math.min(adaptiveBatchSize, options.maxBatchSize))
+    : adaptiveBatchSize;
+}
+
+export class InteractiveAuthSessions {
+  private activeUntil = 0;
+  private readonly expirations = new Map<string, number>();
+
+  constructor(private readonly nowMs: () => number = () => Date.now()) {}
+
+  isActive(): boolean {
+    this.refresh();
+    return this.nowMs() < this.activeUntil;
+  }
+
+  expiresAt(): number | null {
+    this.refresh();
+    return this.isActive() ? this.activeUntil : null;
+  }
+
+  begin(sessionId: string, ttlMs: number): { active: boolean; expiresAt: number | null } {
+    this.expirations.set(sessionId, this.nowMs() + ttlMs);
+    this.refresh();
+    return this.status();
+  }
+
+  end(sessionId: string): { active: boolean; expiresAt: number | null } {
+    this.expirations.delete(sessionId);
+    this.refresh();
+    return this.status();
+  }
+
+  status(): { active: boolean; expiresAt: number | null } {
+    const active = this.isActive();
+    return {
+      active,
+      expiresAt: active ? this.activeUntil : null,
+    };
+  }
+
+  private refresh(): void {
+    const nowMs = this.nowMs();
+    for (const [sessionId, expiresAt] of this.expirations) {
+      if (expiresAt <= nowMs) {
+        this.expirations.delete(sessionId);
+      }
+    }
+    this.activeUntil = Math.max(0, ...this.expirations.values());
+  }
 }
 
 function getMessageFtsIndexBatchSize(): number {
@@ -1844,6 +1929,7 @@ export async function runDaemon(): Promise<void> {
   let isUpdateShutdownRequested = false;
   let updateShutdownRequestedAt: number | null = null;
   let shutdownInitiated = false;
+  const interactiveAuthSessions = new InteractiveAuthSessions(now);
   const bootstrap: DaemonBootstrapSnapshot = {
     state: "starting",
     startedAt,
@@ -1887,11 +1973,67 @@ export async function runDaemon(): Promise<void> {
     const batches = buildProjectionMessageHookBatches(
       range,
       inboundMessages,
-      getAdaptiveProjectionBatchSize(db.getProjectionBacklog().pending_raw_events),
+      getEffectiveProjectionBatchSize(db.getProjectionBacklog().pending_raw_events),
     );
     for (const batch of batches) {
       projectionMessageHooks.enqueue(batch, batch.payloads);
     }
+  };
+
+  const isInteractiveAuthActive = () => interactiveAuthSessions.isActive();
+  const getEffectiveIngestConcurrency = () => (isInteractiveAuthActive() ? 1 : ingestConcurrency);
+  const getEffectiveProjectionBatchSize = (pendingRawEvents: number) =>
+    getAdaptiveProjectionBatchSize(
+      pendingRawEvents,
+      isInteractiveAuthActive()
+        ? { maxBatchSize: getInteractiveAuthProjectionBatchSize() }
+        : undefined,
+    );
+  const getEffectiveSyncContinueDelayMs = (platform: Platform) => {
+    const baseDelayMs = getSyncContinueDelayMsForPlatform(platform);
+    return isInteractiveAuthActive()
+      ? Math.max(baseDelayMs, getInteractiveAuthSyncContinueDelayMs())
+      : baseDelayMs;
+  };
+  const getEffectiveProjectionContinueDelayMs = (pendingRawEvents: number) => {
+    const baseDelayMs = getAdaptiveProjectionContinueDelayMs(pendingRawEvents);
+    return isInteractiveAuthActive()
+      ? Math.max(baseDelayMs, getInteractiveAuthProjectionContinueDelayMs())
+      : baseDelayMs;
+  };
+  const getInteractiveAuthStatus = () => ({
+    active: isInteractiveAuthActive(),
+    expiresAt: interactiveAuthSessions.expiresAt(),
+    projectionBatchSize: getInteractiveAuthProjectionBatchSize(),
+    ingestConcurrency: getEffectiveIngestConcurrency(),
+  });
+  const beginInteractiveAuth = (sessionId = "managed-auth", ttlMs?: number) => {
+    const normalizedTtlMs =
+      Number.isFinite(ttlMs) && ttlMs != null && ttlMs > 0
+        ? Math.trunc(ttlMs)
+        : getInteractiveAuthTtlMs();
+    const wasActive = isInteractiveAuthActive();
+    interactiveAuthSessions.begin(sessionId, normalizedTtlMs);
+    schedulers.wakeProjection();
+    schedulers.wakeIngest(QUEUE_DRAIN_RETRY_DELAY_MS);
+    if (!wasActive) {
+      daemonLogger.info("interactive platform auth mode started", {
+        ttlMs: normalizedTtlMs,
+        projectionBatchSize: getInteractiveAuthProjectionBatchSize(),
+        ingestConcurrency: getEffectiveIngestConcurrency(),
+      });
+    }
+    return getInteractiveAuthStatus();
+  };
+  const endInteractiveAuth = (sessionId = "managed-auth") => {
+    const wasActive = isInteractiveAuthActive();
+    interactiveAuthSessions.end(sessionId);
+    if (wasActive && !isInteractiveAuthActive()) {
+      daemonLogger.info("interactive platform auth mode ended");
+      schedulers.wakeIngest();
+      schedulers.wakeProjection();
+    }
+    return getInteractiveAuthStatus();
   };
 
   const releaseMessageReceivedHooksForRange = async (range: {
@@ -2768,7 +2910,8 @@ export async function runDaemon(): Promise<void> {
         return;
       }
     }
-    while (activeIngestRuns.size < ingestConcurrency) {
+    const effectiveIngestConcurrency = getEffectiveIngestConcurrency();
+    while (activeIngestRuns.size < effectiveIngestConcurrency) {
       const currentRun = db.claimNextQueuedRun(["sync", "sync_resume"], "ingesting", {
         ownerId: runOwnerId,
         leaseMs: INGEST_RUN_LEASE_MS,
@@ -4257,7 +4400,7 @@ export async function runDaemon(): Promise<void> {
         requestSignalRealtimeReconcile();
       }
       if (bundleHasMore && !db.hasQueuedOrRunningRun(currentRun.platform, accountKey)) {
-        const continuationDelayMs = getSyncContinueDelayMsForPlatform(currentRun.platform);
+        const continuationDelayMs = getEffectiveSyncContinueDelayMs(currentRun.platform);
         db.queueSyncRun({
           platform: currentRun.platform,
           accountKey,
@@ -4367,7 +4510,7 @@ export async function runDaemon(): Promise<void> {
       const projectionBacklogBeforeRun = db.withBusyTimeoutSync(DAEMON_STATUS_BUSY_TIMEOUT_MS, () =>
         db.getProjectionBacklog(),
       );
-      const adaptiveProjectionBatchSize = getAdaptiveProjectionBatchSize(
+      const adaptiveProjectionBatchSize = getEffectiveProjectionBatchSize(
         projectionBacklogBeforeRun.pending_raw_events,
       );
       daemonLogger.info("projection run started", {
@@ -4376,6 +4519,7 @@ export async function runDaemon(): Promise<void> {
         runType: currentRun.run_type,
         pendingRawEvents: projectionBacklogBeforeRun.pending_raw_events,
         projectionBatchSize: adaptiveProjectionBatchSize,
+        interactiveAuthMode: isInteractiveAuthActive(),
       });
       db.updateRunProgress(currentRun.id, { leaseMs: PROJECTION_RUN_LEASE_MS, claim: runClaim });
       await sendTelemetryEventSafe(db, "sync_started", {
@@ -4437,12 +4581,14 @@ export async function runDaemon(): Promise<void> {
               projectionDetails?.endRowId ??
               deferredProjected.projectionWatermark,
           },
-          { delayMs: getAdaptiveProjectionContinueDelayMs(remainingProjectionEvents) },
+          { delayMs: getEffectiveProjectionContinueDelayMs(remainingProjectionEvents) },
         );
       }
       const projectionBacklogAfterRun = db.getProjectionBacklog();
       queueProjectionRun(`projection:${currentRun.run_type}`, undefined, {
-        delayMs: getAdaptiveProjectionContinueDelayMs(projectionBacklogAfterRun.pending_raw_events),
+        delayMs: getEffectiveProjectionContinueDelayMs(
+          projectionBacklogAfterRun.pending_raw_events,
+        ),
       });
       await safeEmitHookEvent("sync.completed", {
         runId: currentRun.id,
@@ -4545,6 +4691,8 @@ export async function runDaemon(): Promise<void> {
         authProjectionPausedUntil = now() + PROJECTION_AUTH_GRACE_MS;
         schedulers.wakeProjection(PROJECTION_AUTH_RETRY_DELAY_MS);
       },
+      beginInteractiveAuth,
+      endInteractiveAuth,
       () => {
         requestDiscordRealtimeReconcile();
         requestSlackRealtimeReconcile();
@@ -4769,6 +4917,21 @@ function handleSocket(
   requestUpdateShutdown: () => { shuttingDown: boolean; requestedAt: number | null },
   isBackgroundWorkActive: () => boolean,
   pauseProjectionForAuth: () => void,
+  beginInteractiveAuth: (
+    sessionId?: string,
+    ttlMs?: number,
+  ) => {
+    active: boolean;
+    expiresAt: number | null;
+    projectionBatchSize: number;
+    ingestConcurrency: number;
+  },
+  endInteractiveAuth: (sessionId?: string) => {
+    active: boolean;
+    expiresAt: number | null;
+    projectionBatchSize: number;
+    ingestConcurrency: number;
+  },
   onAuthRuntimeStateChanged: () => void,
   refreshStatusCacheNow: (reason: string) => void,
   shouldRunRealtimePlatform: (platform: AdapterPlatform) => boolean,
@@ -4815,6 +4978,8 @@ function handleSocket(
           requestUpdateShutdown,
           isBackgroundWorkActive,
           pauseProjectionForAuth,
+          beginInteractiveAuth,
+          endInteractiveAuth,
           onAuthRuntimeStateChanged,
           refreshStatusCacheNow,
           shouldRunRealtimePlatform,
@@ -4875,6 +5040,21 @@ async function dispatchRequest(
   requestUpdateShutdown: () => { shuttingDown: boolean; requestedAt: number | null },
   isBackgroundWorkActive: () => boolean,
   pauseProjectionForAuth: () => void,
+  beginInteractiveAuth: (
+    sessionId?: string,
+    ttlMs?: number,
+  ) => {
+    active: boolean;
+    expiresAt: number | null;
+    projectionBatchSize: number;
+    ingestConcurrency: number;
+  },
+  endInteractiveAuth: (sessionId?: string) => {
+    active: boolean;
+    expiresAt: number | null;
+    projectionBatchSize: number;
+    ingestConcurrency: number;
+  },
   onAuthRuntimeStateChanged: () => void,
   refreshStatusCacheNow: (reason: string) => void,
   shouldRunRealtimePlatform: (platform: AdapterPlatform) => boolean,
@@ -5147,8 +5327,21 @@ async function dispatchRequest(
           result: integrationAuthService.listStatus(),
         };
       }
+      case "integrations-interaction-start":
+        return {
+          id: request.id,
+          ok: true,
+          result: beginInteractiveAuth(request.sessionId, request.ttlMs),
+        };
+      case "integrations-interaction-end":
+        return {
+          id: request.id,
+          ok: true,
+          result: endInteractiveAuth(request.sessionId),
+        };
       case "integrations-connect": {
         const integrationAuthService = await getIntegrationAuthService();
+        beginInteractiveAuth(`connect:${request.platform}:${request.accountKey ?? "default"}`);
         pauseProjectionForAuth();
         const started = await integrationAuthService.connectManaged(
           request.platform,
