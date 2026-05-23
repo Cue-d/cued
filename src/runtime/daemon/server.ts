@@ -185,7 +185,7 @@ const PROJECTION_AUTH_RETRY_DELAY_MS = 250;
 const PROJECTION_AUTH_GRACE_MS = 2_000;
 const DEFAULT_INTERACTIVE_AUTH_TTL_MS = 45_000;
 const DEFAULT_INTERACTIVE_AUTH_PROJECTION_BATCH_SIZE = 25;
-const DEFAULT_INTERACTIVE_AUTH_PROJECTION_CONTINUE_DELAY_MS = 1_000;
+const DEFAULT_INTERACTIVE_AUTH_PROJECTION_CONTINUE_DELAY_MS = 5_000;
 const DEFAULT_INTERACTIVE_AUTH_SYNC_CONTINUE_DELAY_MS = 30_000;
 const DEFAULT_CONTINUATION_PROJECTION_INTERVAL_MS = 2_000;
 const DEFAULT_CONTINUATION_PROJECTION_BACKLOG_EVENTS = 500;
@@ -2007,15 +2007,21 @@ export async function runDaemon(): Promise<void> {
     projectionBatchSize: getInteractiveAuthProjectionBatchSize(),
     ingestConcurrency: getEffectiveIngestConcurrency(),
   });
-  const beginInteractiveAuth = (sessionId = "managed-auth", ttlMs?: number) => {
+  const beginInteractiveAuth = (
+    sessionId = "managed-auth",
+    ttlMs?: number,
+    options: { wakeQueues?: boolean } = {},
+  ) => {
     const normalizedTtlMs =
       Number.isFinite(ttlMs) && ttlMs != null && ttlMs > 0
         ? Math.trunc(ttlMs)
         : getInteractiveAuthTtlMs();
     const wasActive = isInteractiveAuthActive();
     interactiveAuthSessions.begin(sessionId, normalizedTtlMs);
-    schedulers.wakeProjection();
-    schedulers.wakeIngest(QUEUE_DRAIN_RETRY_DELAY_MS);
+    if (options.wakeQueues ?? false) {
+      schedulers.wakeProjection();
+      schedulers.wakeIngest(QUEUE_DRAIN_RETRY_DELAY_MS);
+    }
     if (!wasActive) {
       daemonLogger.info("interactive platform auth mode started", {
         ttlMs: normalizedTtlMs,
@@ -5341,28 +5347,34 @@ async function dispatchRequest(
         };
       case "integrations-connect": {
         const integrationAuthService = await getIntegrationAuthService();
-        beginInteractiveAuth(`connect:${request.platform}:${request.accountKey ?? "default"}`);
+        const interactiveAuthSessionId = `connect:${request.platform}:${request.accountKey ?? "default"}`;
         pauseProjectionForAuth();
-        const started = await integrationAuthService.connectManaged(
-          request.platform,
-          request.accountKey,
-          activeAuthSessions,
-          {
-            wakeIngest: schedulers.wakeIngest,
-            onRuntimeStateChanged: onAuthRuntimeStateChanged,
-            shouldQueueAuthenticatedSync: (platform) =>
-              platform !== "whatsapp" || shouldRunRealtimePlatform("whatsapp"),
-            emitAuthenticatedHook: async (platform, accountKey) => {
-              await emitAuthenticatedHook(db, platform, accountKey);
+        beginInteractiveAuth(interactiveAuthSessionId);
+        try {
+          const started = await integrationAuthService.connectManaged(
+            request.platform,
+            request.accountKey,
+            activeAuthSessions,
+            {
+              wakeIngest: schedulers.wakeIngest,
+              onRuntimeStateChanged: onAuthRuntimeStateChanged,
+              shouldQueueAuthenticatedSync: (platform) =>
+                platform !== "whatsapp" || shouldRunRealtimePlatform("whatsapp"),
+              emitAuthenticatedHook: async (platform, accountKey) => {
+                await emitAuthenticatedHook(db, platform, accountKey);
+              },
             },
-          },
-        );
-        refreshStatusCacheNow("integrations_connect");
-        return {
-          id: request.id,
-          ok: true,
-          result: started,
-        };
+          );
+          refreshStatusCacheNow("integrations_connect");
+          return {
+            id: request.id,
+            ok: true,
+            result: started,
+          };
+        } catch (error) {
+          endInteractiveAuth(interactiveAuthSessionId);
+          throw error;
+        }
       }
       case "integrations-disconnect": {
         const integrationAuthService = await getIntegrationAuthService();

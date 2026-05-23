@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   buildOAuthUrl,
   GMAIL_READONLY_SCOPE,
+  inspectGoogleOAuthClientConfig,
   readGoogleOAuthClientConfig,
   resolveGoogleOAuthClientFile,
 } from "./client.js";
@@ -104,5 +105,23 @@ describe("Gmail OAuth client config", () => {
 
     expect(url.searchParams.get("scope")).toBe(GMAIL_READONLY_SCOPE);
     expect(url.searchParams.get("code_challenge_method")).toBe("S256");
+  });
+
+  it("reports invalid OAuth client files as unavailable", () => {
+    const dir = mkdtempSync(join(tmpdir(), "cued-gmail-oauth-"));
+    try {
+      const invalidPath = join(dir, "invalid.json");
+      writeFileSync(invalidPath, JSON.stringify({ installed: { client_id: "" } }), "utf8");
+
+      expect(inspectGoogleOAuthClientConfig(invalidPath)).toEqual(
+        expect.objectContaining({
+          available: false,
+          filePath: invalidPath,
+          error: expect.stringContaining("client_id/client_secret"),
+        }),
+      );
+    } finally {
+      rmSync(dir, { force: true, recursive: true });
+    }
   });
 });

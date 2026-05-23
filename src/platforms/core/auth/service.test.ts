@@ -1,5 +1,5 @@
 import type { ChildProcess } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -46,6 +46,7 @@ describe("IntegrationAuthService", () => {
 
   afterEach(() => {
     vi.clearAllMocks();
+    delete process.env.CUED_GOOGLE_OAUTH_CLIENT_FILE;
     while (tempDirs.length > 0) {
       const dir = tempDirs.pop();
       if (dir) {
@@ -106,6 +107,42 @@ describe("IntegrationAuthService", () => {
     expect(result.authSession?.accountKey).toBe("pending-slack-new");
     expect(activeAuthSessions.size).toBe(1);
     expect(startAuthSessionMock).toHaveBeenCalledTimes(1);
+
+    db.close();
+  });
+
+  it("fails gmail managed auth before creating a session when the OAuth client is missing", async () => {
+    const db = createDb();
+    const dir = mkdtempSync(join(tmpdir(), "cued-missing-google-oauth-"));
+    tempDirs.push(dir);
+    process.env.CUED_GOOGLE_OAUTH_CLIENT_FILE = join(dir, "missing.json");
+
+    const service = new IntegrationAuthService(db);
+
+    await expect(service.connectManaged("gmail", "pending-gmail-new", new Map())).rejects.toThrow(
+      "Google OAuth client is not configured",
+    );
+    expect(db.listAuthSessions(10)).toEqual([]);
+    expect(startAuthSessionMock).not.toHaveBeenCalled();
+
+    db.close();
+  });
+
+  it("fails gmail managed auth before creating a session when the OAuth client is invalid", async () => {
+    const db = createDb();
+    const dir = mkdtempSync(join(tmpdir(), "cued-invalid-google-oauth-"));
+    tempDirs.push(dir);
+    const invalidPath = join(dir, "invalid.json");
+    writeFileSync(invalidPath, JSON.stringify({ installed: { client_id: "" } }), "utf8");
+    process.env.CUED_GOOGLE_OAUTH_CLIENT_FILE = invalidPath;
+
+    const service = new IntegrationAuthService(db);
+
+    await expect(service.connectManaged("gmail", "pending-gmail-new", new Map())).rejects.toThrow(
+      "client_id/client_secret",
+    );
+    expect(db.listAuthSessions(10)).toEqual([]);
+    expect(startAuthSessionMock).not.toHaveBeenCalled();
 
     db.close();
   });

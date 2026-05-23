@@ -44,6 +44,7 @@ describe("integration state management", () => {
     delete process.env.CUED_AUTH_NATIVE_BINARY;
     delete process.env.CUED_APP_PATH;
     delete process.env.CUED_WHATSAPP_HELPER_BINARY;
+    delete process.env.CUED_GOOGLE_OAUTH_CLIENT_FILE;
 
     while (tempDirs.length > 0) {
       const dir = tempDirs.pop();
@@ -398,6 +399,52 @@ process.exit(44);
       { platform: "whatsapp", authState: "missing" },
       { platform: "signal", authState: "missing" },
     ]);
+
+    db.close();
+  });
+
+  it("marks gmail unavailable when Google OAuth client config is missing", () => {
+    const dir = createTempDir("cued-missing-google-oauth-");
+    process.env.CUED_GOOGLE_OAUTH_CLIENT_FILE = join(dir, "missing.json");
+    const db = createDb();
+
+    const gmailSetup = buildIntegrationStatus(db, {
+      includeLiveLocalIntegrations: false,
+    }).setupIntegrations.find((integration) => integration.platform === "gmail");
+
+    expect(gmailSetup).toEqual(
+      expect.objectContaining({
+        platform: "gmail",
+        capability: expect.objectContaining({
+          availability: "requires_helper",
+          reason: "Google OAuth client is not configured",
+        }),
+      }),
+    );
+
+    db.close();
+  });
+
+  it("marks gmail unavailable when Google OAuth client config is invalid", () => {
+    const dir = createTempDir("cued-invalid-google-oauth-");
+    const invalidPath = join(dir, "invalid.json");
+    writeFileSync(invalidPath, JSON.stringify({ installed: { client_id: "" } }), "utf8");
+    process.env.CUED_GOOGLE_OAUTH_CLIENT_FILE = invalidPath;
+    const db = createDb();
+
+    const gmailSetup = buildIntegrationStatus(db, {
+      includeLiveLocalIntegrations: false,
+    }).setupIntegrations.find((integration) => integration.platform === "gmail");
+
+    expect(gmailSetup).toEqual(
+      expect.objectContaining({
+        platform: "gmail",
+        capability: expect.objectContaining({
+          availability: "requires_helper",
+          reason: "Google OAuth client is not configured",
+        }),
+      }),
+    );
 
     db.close();
   });

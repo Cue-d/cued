@@ -1,7 +1,9 @@
 import { execFileSync } from "node:child_process";
+import type { PlatformCapabilitySummary } from "../../../core/platform-capabilities.js";
 import { resolveHostOS, summarizePlatformCapability } from "../../../core/platform-capabilities.js";
 import { safeParseJsonRecord, safeParseJsonStringArray } from "../../../db/codecs.js";
 import type { AuthSessionRow, CuedDatabase, IntegrationStateRow } from "../../../db/database.js";
+import { inspectGoogleOAuthClientConfig } from "../../gmail/oauth/client.js";
 import { inspectSlackHelper } from "../../slack/helper/binary.js";
 import { resolveIntegrationAccountKey } from "../account-keys.js";
 import { listAdapterPlatforms } from "../registry.js";
@@ -31,6 +33,30 @@ import type {
 } from "./types.js";
 
 export { getContactsAuthState, getIMessageAuthState } from "./local.js";
+
+function summarizeIntegrationCapability(
+  platform: Platform,
+  integration: {
+    platform: Platform;
+    authState: IntegrationStateSummary["authState"];
+    metadata?: Record<string, unknown> | null;
+  },
+  hostOs = resolveHostOS(),
+): PlatformCapabilitySummary {
+  const capability = summarizePlatformCapability(platform, integration, hostOs);
+  if (platform !== "gmail") {
+    return capability;
+  }
+  const googleOAuthClient = inspectGoogleOAuthClientConfig();
+  if (googleOAuthClient.available) {
+    return capability;
+  }
+  return {
+    ...capability,
+    availability: "requires_helper",
+    reason: "Google OAuth client is not configured",
+  };
+}
 
 export const REQUESTABLE_INTEGRATIONS: Record<string, RequestableIntegrationConfig> = {
   slack: {
@@ -504,7 +530,7 @@ export function summarizeIntegrationStates(
       latestAuthSessionId: includeDiagnostics
         ? (db.getLatestAuthSession(row.platform, row.account_key)?.id ?? null)
         : null,
-      capability: summarizePlatformCapability(
+      capability: summarizeIntegrationCapability(
         row.platform,
         { platform: row.platform, authState: row.auth_state, metadata },
         hostOs,
@@ -551,7 +577,7 @@ export function summarizeManagedIntegrationState(
     updatedAt: now(),
     latestAuthSessionId:
       db.getLatestAuthSession(integration.platform, integration.accountKey)?.id ?? null,
-    capability: summarizePlatformCapability(
+    capability: summarizeIntegrationCapability(
       integration.platform,
       {
         platform: integration.platform,

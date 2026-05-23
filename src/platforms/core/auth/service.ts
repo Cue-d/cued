@@ -6,6 +6,7 @@ import {
   safeTelemetryValue,
   sendTelemetryEventSafe,
 } from "../../../telemetry/context.js";
+import { inspectGoogleOAuthClientConfig } from "../../gmail/oauth/client.js";
 import { importLinkedInStoredAuth } from "../../linkedin/auth/keychain-import.js";
 import { importSlackDesktopAuth } from "../../slack/auth/desktop-import.js";
 import { resolveIntegrationAccountKey } from "../account-keys.js";
@@ -45,6 +46,19 @@ type ConnectLifecycle = {
 
 const SLACK_PENDING_ACCOUNT_KEY_PREFIX = "pending-slack-";
 const GMAIL_PENDING_ACCOUNT_KEY_PREFIX = "pending-gmail-";
+
+function assertConnectPreflight(platform: string) {
+  const normalized = parsePlatform(platform.trim().toLowerCase());
+  if (normalized !== "gmail") {
+    return;
+  }
+  const googleOAuthClient = inspectGoogleOAuthClientConfig();
+  if (!googleOAuthClient.available) {
+    throw new Error(
+      `Google OAuth client is not configured at ${googleOAuthClient.filePath}: ${googleOAuthClient.error}`,
+    );
+  }
+}
 
 export class IntegrationAuthService {
   constructor(private readonly db: CuedDatabase) {}
@@ -97,6 +111,7 @@ export class IntegrationAuthService {
       return reusable;
     }
 
+    assertConnectPreflight(platform);
     const requested = connectIntegration(this.db, platform, accountKey);
     await sendTelemetryEventSafe(this.db, "integration_setup_started", {
       component: "integration_auth",
@@ -166,6 +181,7 @@ export class IntegrationAuthService {
       };
     }
 
+    assertConnectPreflight(platform);
     const requested = connectIntegration(this.db, platform, accountKey);
     await sendTelemetryEventSafe(this.db, "integration_setup_started", {
       component: "integration_auth",
