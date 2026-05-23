@@ -5,11 +5,13 @@ const {
   buildIntegrationStatusMock,
   getGlobalCuedSkillStatusMock,
   installGlobalCuedSkillMock,
+  readMenuBarStatusCacheMock,
 } = vi.hoisted(() => ({
   buildPermissionStatusMock: vi.fn(),
   buildIntegrationStatusMock: vi.fn(),
   getGlobalCuedSkillStatusMock: vi.fn(),
   installGlobalCuedSkillMock: vi.fn(),
+  readMenuBarStatusCacheMock: vi.fn(),
 }));
 
 vi.mock("./doctor.js", () => ({
@@ -23,6 +25,10 @@ vi.mock("../platforms/core/state/status.js", () => ({
 vi.mock("../skills/install.js", () => ({
   getGlobalCuedSkillStatus: getGlobalCuedSkillStatusMock,
   installGlobalCuedSkill: installGlobalCuedSkillMock,
+}));
+
+vi.mock("./menu-bar-status-cache.js", () => ({
+  readMenuBarStatusCache: readMenuBarStatusCacheMock,
 }));
 
 import { buildOnboardingSnapshot } from "./onboarding.js";
@@ -40,7 +46,7 @@ describe("onboarding permission refresh", () => {
     vi.clearAllMocks();
   });
 
-  it("uses passive permission checks by default", async () => {
+  function mockSnapshotDependencies(): void {
     buildPermissionStatusMock.mockResolvedValue({ permissions: [] });
     buildIntegrationStatusMock.mockReturnValue({
       hostOs: "macos",
@@ -55,6 +61,10 @@ describe("onboarding permission refresh", () => {
       npxPath: null,
       installedPath: null,
     });
+  }
+
+  it("uses passive permission checks by default", async () => {
+    mockSnapshotDependencies();
 
     await buildOnboardingSnapshot(db as never);
 
@@ -65,20 +75,7 @@ describe("onboarding permission refresh", () => {
   });
 
   it("can force a live permission refresh for onboarding snapshots", async () => {
-    buildPermissionStatusMock.mockResolvedValue({ permissions: [] });
-    buildIntegrationStatusMock.mockReturnValue({
-      hostOs: "macos",
-      integrations: [],
-      setupIntegrations: [],
-    });
-    getGlobalCuedSkillStatusMock.mockReturnValue({
-      installed: false,
-      status: "needs_action",
-      summary: "",
-      sourcePath: null,
-      npxPath: null,
-      installedPath: null,
-    });
+    mockSnapshotDependencies();
 
     await buildOnboardingSnapshot(db as never, { refreshPermissions: true });
 
@@ -121,12 +118,7 @@ describe("onboarding permission refresh", () => {
   });
 
   it("can skip skill auto-install for status-only callers", async () => {
-    buildPermissionStatusMock.mockResolvedValue({ permissions: [] });
-    buildIntegrationStatusMock.mockReturnValue({
-      hostOs: "macos",
-      integrations: [],
-      setupIntegrations: [],
-    });
+    mockSnapshotDependencies();
     getGlobalCuedSkillStatusMock.mockReturnValue({
       installed: false,
       status: "needs_action",
@@ -139,5 +131,74 @@ describe("onboarding permission refresh", () => {
     await buildOnboardingSnapshot(db as never, { installGlobalSkill: false });
 
     expect(installGlobalCuedSkillMock).not.toHaveBeenCalled();
+  });
+
+  it("uses the menu bar cache relationship summary through the shared cache boundary", async () => {
+    mockSnapshotDependencies();
+    readMenuBarStatusCacheMock.mockReturnValue({
+      path: "/tmp/cued-test/menu-bar-status.json",
+      mtimeMs: 1234,
+      snapshot: {
+        dbPath: db.dbPath,
+        relationshipSummary: {
+          messages: 12,
+          contacts: 7,
+          phoneCalls: 3,
+          pendingProjectionEvents: 5,
+        },
+      },
+    });
+
+    const snapshot = await buildOnboardingSnapshot(db as never, { installGlobalSkill: false });
+
+    expect(readMenuBarStatusCacheMock).toHaveBeenCalledWith({ dbPath: db.dbPath });
+    expect(snapshot.relationshipSummary).toEqual({
+      messages: 12,
+      contacts: 7,
+      phoneCalls: 3,
+      pendingProjectionEvents: 5,
+      lastUpdatedAt: 1234,
+      source: "menu_bar_cache",
+    });
+  });
+
+  it("falls back to legacy menu bar cache fields when the summary is malformed", async () => {
+    mockSnapshotDependencies();
+    readMenuBarStatusCacheMock.mockReturnValue({
+      path: "/tmp/cued-test/menu-bar-status.json",
+      mtimeMs: 5678,
+      snapshot: {
+        dbPath: db.dbPath,
+        relationshipSummary: { messages: "bad" },
+        overview: {
+          messages: 4,
+          contacts: 2,
+        },
+        dataStatus: {
+          pendingProjectionEvents: 9,
+        },
+        integrations: [
+          {
+            platform: "imessage",
+            projectionStats: {
+              rawEventsBySchema: {
+                "call.observed@1": 6,
+              },
+            },
+          },
+        ],
+      },
+    });
+
+    const snapshot = await buildOnboardingSnapshot(db as never, { installGlobalSkill: false });
+
+    expect(snapshot.relationshipSummary).toEqual({
+      messages: 4,
+      contacts: 2,
+      phoneCalls: 6,
+      pendingProjectionEvents: 9,
+      lastUpdatedAt: 5678,
+      source: "menu_bar_cache",
+    });
   });
 });

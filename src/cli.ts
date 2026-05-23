@@ -7,12 +7,7 @@ import process from "node:process";
 import { fileURLToPath } from "node:url";
 import { DaemonRequestTimeoutError, sendDaemonRequest } from "./client.js";
 import { getCurrentAppVersion, getCurrentReleaseChannel } from "./core/app-metadata.js";
-import {
-  CUED_DB_PATH,
-  CUED_MENU_BAR_STATUS_PATH,
-  CUED_SOCKET_PATH,
-  ensureCuedDirs,
-} from "./core/config.js";
+import { CUED_DB_PATH, CUED_SOCKET_PATH, ensureCuedDirs } from "./core/config.js";
 import { resolveHostOS } from "./core/platform-capabilities.js";
 import {
   openCuedDatabase,
@@ -60,6 +55,7 @@ import {
   parseLogsCommandArgs,
   readRecentLogLines,
 } from "./runtime/logs.js";
+import { readMenuBarStatusCache } from "./runtime/menu-bar-status-cache.js";
 import { buildOnboardingSnapshot } from "./runtime/onboarding.js";
 import { runProjectionWorkerFromEnv } from "./runtime/projection/worker.js";
 import {
@@ -327,17 +323,7 @@ async function buildLocalStatusFallback(error: DaemonRequestTimeoutError) {
 }
 
 function readCachedStatusSnapshot(): Record<string, unknown> | null {
-  try {
-    if (!existsSync(CUED_MENU_BAR_STATUS_PATH)) {
-      return null;
-    }
-    const parsed = JSON.parse(readFileSync(CUED_MENU_BAR_STATUS_PATH, "utf8")) as unknown;
-    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
-      ? (parsed as Record<string, unknown>)
-      : null;
-  } catch {
-    return null;
-  }
+  return readMenuBarStatusCache()?.snapshot ?? null;
 }
 
 async function buildLocalDoctorFallback(error: DaemonRequestTimeoutError) {
