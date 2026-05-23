@@ -101,6 +101,42 @@ function normalizeWhatsAppAttachments(
   });
 }
 
+function whatsappReplySourceKey(message: WhatsAppMessageSnapshot): string | null {
+  const replyID = message.replyToMessageID?.trim();
+  if (!replyID) {
+    return null;
+  }
+  return `${normalizeWhatsAppJid(message.chatJID)}:${replyID}`;
+}
+
+type WhatsAppMessageProviderMetadata = {
+  providerMetadata?: {
+    whatsapp?: {
+      isForwarded?: boolean;
+      forwardingScore?: number;
+      replyToSenderJID?: string;
+    };
+  };
+};
+
+function whatsappMessageProviderMetadata(
+  message: WhatsAppMessageSnapshot,
+): WhatsAppMessageProviderMetadata {
+  const whatsapp: NonNullable<
+    NonNullable<WhatsAppMessageProviderMetadata["providerMetadata"]>["whatsapp"]
+  > = {};
+  if (message.isForwarded) {
+    whatsapp.isForwarded = true;
+  }
+  if (typeof message.forwardingScore === "number") {
+    whatsapp.forwardingScore = message.forwardingScore;
+  }
+  if (message.replyToSenderJID?.trim()) {
+    whatsapp.replyToSenderJID = normalizeWhatsAppJid(message.replyToSenderJID);
+  }
+  return Object.keys(whatsapp).length > 0 ? { providerMetadata: { whatsapp } } : {};
+}
+
 function bestContactName(contact: WhatsAppContactSnapshot): string {
   return (
     contact.name?.trim() ||
@@ -247,12 +283,13 @@ export function buildWhatsAppMessageEvent(
     : null;
   const normalizedChatJID = normalizeWhatsAppJid(message.chatJID);
   const sourceMessageKey = whatsappMessageSourceKey(message);
+  const replyToSourceMessageKey = whatsappReplySourceKey(message);
   return {
     id: stableId(`whatsapp:message:${accountKey}:${sourceMessageKey}`),
     platform: "whatsapp",
     accountKey,
     entityKind: "message",
-    eventKind: "created",
+    eventKind: message.revoked ? "deleted" : "created",
     externalEntityId: message.messageID,
     conversationExternalId: normalizedChatJID,
     occurredAt: message.timestamp,
@@ -269,8 +306,12 @@ export function buildWhatsAppMessageEvent(
       isFromMe: message.fromMe,
       deliveredAt: message.deliveredAt ?? null,
       readAt: message.readAt ?? null,
+      deletedAt: message.revoked ? message.timestamp : null,
+      replyToSourceMessageKey,
+      isDeleted: message.revoked ?? false,
       attachments: normalizeWhatsAppAttachments(message.attachments),
-    } satisfies MessagePayload,
+      ...whatsappMessageProviderMetadata(message),
+    } satisfies MessagePayload & WhatsAppMessageProviderMetadata,
     sourceVersion: "whatsapp-v1",
   };
 }

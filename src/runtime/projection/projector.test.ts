@@ -263,6 +263,76 @@ describe("projector", () => {
     db.close();
   });
 
+  it("marks deleted messages without overwriting original content", () => {
+    const db = createDb();
+
+    db.insertRawEvent({
+      id: "message-create",
+      platform: "whatsapp",
+      accountKey: "default",
+      entityKind: "message",
+      eventKind: "created",
+      observedAt: 1_710_000_000_000,
+      dedupeKey: "whatsapp:message:create",
+      payload: {
+        sourceMessageKey: "chat-1:msg-1",
+        sourceConversationKey: "chat-1",
+        senderSourceKey: "whatsapp:15551234567@s.whatsapp.net",
+        sentAt: 1_710_000_000_000,
+        content: "keep this content",
+        service: "whatsapp",
+        status: "delivered",
+        isFromMe: false,
+      },
+      sourceVersion: "whatsapp-v1",
+    });
+    db.insertRawEvent({
+      id: "message-delete",
+      platform: "whatsapp",
+      accountKey: "default",
+      entityKind: "message",
+      eventKind: "deleted",
+      observedAt: 1_710_000_001_000,
+      dedupeKey: "whatsapp:message:delete",
+      payload: {
+        sourceMessageKey: "chat-1:msg-1",
+        sourceConversationKey: "chat-1",
+        senderSourceKey: null,
+        sentAt: 1_710_000_001_000,
+        content: "",
+        service: "whatsapp",
+        status: "sent",
+        isFromMe: true,
+        deletedAt: 1_710_000_001_000,
+        isDeleted: true,
+      },
+      sourceVersion: "whatsapp-v1",
+    });
+
+    rebuildProjectedState(db);
+
+    const [row] = db.orm().all<{
+      content: string | null;
+      status: string | null;
+      is_deleted: number;
+      deleted_at: number | null;
+      is_from_me: number;
+    }>(sql`
+      SELECT content, status, is_deleted, deleted_at, is_from_me
+      FROM messages
+      WHERE platform_message_id = 'chat-1:msg-1'
+    `);
+    expect(row).toEqual({
+      content: "keep this content",
+      status: "delivered",
+      is_deleted: 1,
+      deleted_at: 1_710_000_001_000,
+      is_from_me: 0,
+    });
+
+    db.close();
+  });
+
   it("rebuilds projected state and preserves agent-facing views", () => {
     const db = createDb();
 

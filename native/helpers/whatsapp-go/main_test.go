@@ -2,10 +2,12 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strconv"
 	"testing"
 	"time"
@@ -495,6 +497,110 @@ func TestExtractTextUnwrapsFutureProofEditedMessage(t *testing.T) {
 	}
 }
 
+func TestHistoryMessageSnapshotFallbackRetainsReplyForwardAndRevokeMetadata(t *testing.T) {
+	forwardingScore := uint32(2)
+	historyMsg := &waHistorySync.HistorySyncMsg{
+		Message: &waWeb.WebMessageInfo{
+			Key: &waCommon.MessageKey{
+				ID:        proto.String("wamid-reply"),
+				RemoteJID: proto.String("15551234567@s.whatsapp.net"),
+				FromMe:    proto.Bool(false),
+			},
+			MessageTimestamp: proto.Uint64(1_710_000_000),
+			Message: &waProto.Message{
+				ExtendedTextMessage: &waProto.ExtendedTextMessage{
+					Text: proto.String("reply"),
+					ContextInfo: &waProto.ContextInfo{
+						StanzaID:        proto.String("wamid-parent"),
+						Participant:     proto.String("15557654321@s.whatsapp.net"),
+						IsForwarded:     proto.Bool(true),
+						ForwardingScore: proto.Uint32(forwardingScore),
+					},
+				},
+			},
+		},
+	}
+
+	snapshot, ok := historyMessageSnapshot(nil, types.NewJID("15551234567", types.DefaultUserServer), historyMsg)
+	if !ok {
+		t.Fatal("expected fallback history snapshot")
+	}
+	if snapshot.ReplyToID == nil || *snapshot.ReplyToID != "wamid-parent" {
+		t.Fatalf("expected reply id metadata, got %+v", snapshot)
+	}
+	if snapshot.ReplyToSender == nil || *snapshot.ReplyToSender != "15557654321@s.whatsapp.net" {
+		t.Fatalf("expected reply sender metadata, got %+v", snapshot)
+	}
+	if !snapshot.IsForwarded || snapshot.ForwardingScore == nil || *snapshot.ForwardingScore != forwardingScore {
+		t.Fatalf("expected forwarded metadata, got %+v", snapshot)
+	}
+
+	revokeType := waProto.ProtocolMessage_REVOKE
+	revokeSnapshot, ok := historyMessageSnapshot(nil, types.NewJID("15551234567", types.DefaultUserServer), &waHistorySync.HistorySyncMsg{
+		Message: &waWeb.WebMessageInfo{
+			Key: &waCommon.MessageKey{
+				ID:        proto.String("wamid-revoke"),
+				RemoteJID: proto.String("15551234567@s.whatsapp.net"),
+				FromMe:    proto.Bool(true),
+			},
+			MessageTimestamp: proto.Uint64(1_710_000_001),
+			Message: &waProto.Message{
+				ProtocolMessage: &waProto.ProtocolMessage{
+					Type: &revokeType,
+					Key: &waCommon.MessageKey{
+						ID:        proto.String("wamid-revoked"),
+						RemoteJID: proto.String("15551234567@s.whatsapp.net"),
+						FromMe:    proto.Bool(true),
+					},
+				},
+			},
+		},
+	})
+	if !ok {
+		t.Fatal("expected revoke fallback history snapshot")
+	}
+	if !revokeSnapshot.Revoked {
+		t.Fatalf("expected revoked metadata, got %+v", revokeSnapshot)
+	}
+	if revokeSnapshot.MessageID != "wamid-revoked" {
+		t.Fatalf("expected revoke to target original message id, got %+v", revokeSnapshot)
+	}
+}
+
+func TestMessageFromEventUsesDeviceSentDestinationChat(t *testing.T) {
+	destination := "15551234567@s.whatsapp.net"
+	event := &events.Message{
+		Info: types.MessageInfo{
+			MessageSource: types.MessageSource{
+				Chat:     types.NewJID("15550000000", types.DefaultUserServer),
+				Sender:   types.NewJID("15550000000", types.DefaultUserServer),
+				IsFromMe: true,
+			},
+			ID:        "wamid-device-sent",
+			Timestamp: time.Unix(1_710_000_000, 0).UTC(),
+			DeviceSentMeta: &types.DeviceSentMeta{
+				DestinationJID: destination,
+			},
+		},
+		Message: &waProto.Message{
+			DeviceSentMessage: &waProto.DeviceSentMessage{
+				DestinationJID: proto.String(destination),
+				Message: &waProto.Message{
+					Conversation: proto.String("sent from phone"),
+				},
+			},
+		},
+	}
+
+	snapshot := messageFromEvent(event)
+	if snapshot.ChatJID != destination {
+		t.Fatalf("expected device-sent destination chat, got %+v", snapshot)
+	}
+	if !snapshot.FromMe || snapshot.Text != "sent from phone" {
+		t.Fatalf("unexpected device-sent snapshot: %+v", snapshot)
+	}
+}
+
 func TestHandleHistorySyncEventPersistsMetadata(t *testing.T) {
 	storeDir := t.TempDir()
 	state, err := newHelperState(storeDir)
@@ -569,6 +675,110 @@ func TestConfigureClientPayloadMatchesWebDesktopCompanion(t *testing.T) {
 	if got := store.BaseClientPayload.GetWebInfo().GetWebSubPlatform(); got != waWa6.ClientPayload_WebInfo_WEB_BROWSER {
 		t.Fatalf("unexpected web sub-platform: %v", got)
 	}
+}
+
+func TestOpenSyncCacheMigratesLegacyMessageColumns(t *testing.T) {
+	storeDir := t.TempDir()
+	db, err := sql.Open("sqlite", fmt.Sprintf("file:%s", filepath.Join(storeDir, "history.db")))
+	if err != nil {
+		t.Fatalf("open legacy cache db: %v", err)
+	}
+	_, err = db.Exec(`CREATE TABLE messages (
+		chat_jid TEXT NOT NULL,
+		message_id TEXT NOT NULL,
+		sender_jid TEXT,
+		participant_jid TEXT,
+		from_me INTEGER NOT NULL,
+		timestamp INTEGER NOT NULL,
+		text TEXT NOT NULL,
+		push_name TEXT,
+		status TEXT,
+		delivered_at INTEGER,
+		read_at INTEGER,
+		updated_at INTEGER NOT NULL,
+		PRIMARY KEY (chat_jid, message_id)
+	)`)
+	if err != nil {
+		t.Fatalf("create legacy messages table: %v", err)
+	}
+	_, err = db.Exec(
+		`INSERT INTO messages (
+			chat_jid, message_id, sender_jid, from_me, timestamp, text, status, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		"15551234567@s.whatsapp.net",
+		"wamid-legacy",
+		"15551234567@s.whatsapp.net",
+		0,
+		1_710_000_000_000,
+		"legacy",
+		"delivered",
+		1_710_000_000_001,
+	)
+	if err != nil {
+		t.Fatalf("insert legacy message: %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("close legacy cache db: %v", err)
+	}
+
+	cache, err := openSyncCache(storeDir)
+	if err != nil {
+		t.Fatalf("openSyncCache should migrate legacy schema: %v", err)
+	}
+	defer cache.close()
+
+	for _, column := range []string{
+		"reply_to_message_id",
+		"reply_to_sender_jid",
+		"is_forwarded",
+		"forwarding_score",
+		"revoked",
+	} {
+		if !sqliteColumnExists(t, cache.db, "messages", column) {
+			t.Fatalf("expected migrated messages.%s column", column)
+		}
+	}
+
+	messages, _, _, err := cache.queryMessages(nil, &resyncCursor{SnapshotUpdatedAt: 1_710_000_000_001}, 10)
+	if err != nil {
+		t.Fatalf("query migrated legacy messages: %v", err)
+	}
+	if len(messages) != 1 {
+		t.Fatalf("expected legacy message to remain queryable, got %+v", messages)
+	}
+	if messages[0].IsForwarded || messages[0].Revoked {
+		t.Fatalf("expected legacy message defaults to be false, got %+v", messages[0])
+	}
+	if messages[0].ForwardingScore != nil || messages[0].ReplyToID != nil || messages[0].ReplyToSender != nil {
+		t.Fatalf("expected legacy nullable metadata defaults, got %+v", messages[0])
+	}
+}
+
+func sqliteColumnExists(t *testing.T, db *sql.DB, table string, column string) bool {
+	t.Helper()
+	rows, err := db.Query(fmt.Sprintf("PRAGMA table_info(%s)", table))
+	if err != nil {
+		t.Fatalf("inspect %s columns: %v", table, err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var cid int
+		var name string
+		var columnType string
+		var notNull int
+		var defaultValue sql.NullString
+		var primaryKey int
+		if err := rows.Scan(&cid, &name, &columnType, &notNull, &defaultValue, &primaryKey); err != nil {
+			t.Fatalf("scan %s column info: %v", table, err)
+		}
+		if name == column {
+			return true
+		}
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("iterate %s column info: %v", table, err)
+	}
+	return false
 }
 
 func TestHistorySyncNotificationQueueRoundTrip(t *testing.T) {

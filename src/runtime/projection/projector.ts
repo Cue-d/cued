@@ -1389,6 +1389,21 @@ function projectMessageEvent(
     event.observed_at,
   );
 
+  if (event.event_kind === "deleted") {
+    conn
+      .update(messages)
+      .set({
+        deletedAt: payload.deletedAt ?? payload.sentAt ?? event.observed_at,
+        isDeleted: 1,
+        updatedAt: event.observed_at,
+      })
+      .where(eq(messages.id, messageId))
+      .run();
+    changes.dirtyConversationSummaryIds.add(conversationId);
+    changes.dirtyMessageIds.add(messageId);
+    return;
+  }
+
   const senderContactId = resolveOrEnsureContact(
     conn,
     cache,

@@ -175,4 +175,57 @@ describe("whatsapp events", () => {
       },
     });
   });
+
+  it("maps WhatsApp reply, forward, and revoke metadata onto message payloads", () => {
+    const rawEvents = buildWhatsAppRawEventsFromSnapshot({
+      accountKey: "default",
+      snapshot: {
+        messages: [
+          {
+            messageID: "wamid-reply",
+            chatJID: "12016824050@s.whatsapp.net",
+            senderJID: "12016824050@s.whatsapp.net",
+            fromMe: false,
+            timestamp: 1_710_000_002_000,
+            text: "reply",
+            replyToMessageID: "wamid-parent",
+            replyToSenderJID: "15551234567@s.whatsapp.net",
+            isForwarded: true,
+            forwardingScore: 2,
+            status: "delivered",
+          },
+          {
+            messageID: "wamid-revoked",
+            chatJID: "12016824050@s.whatsapp.net",
+            fromMe: true,
+            timestamp: 1_710_000_003_000,
+            text: "",
+            revoked: true,
+            status: "sent",
+          },
+        ],
+      },
+      observedBase: 1_710_000_000_500,
+    });
+
+    const messageEvents = rawEvents.filter((event) => event.entityKind === "message");
+    expect(messageEvents[0]?.payload).toMatchObject({
+      sourceMessageKey: "12016824050@s.whatsapp.net:wamid-reply",
+      replyToSourceMessageKey: "12016824050@s.whatsapp.net:wamid-parent",
+      isDeleted: false,
+      providerMetadata: {
+        whatsapp: {
+          isForwarded: true,
+          forwardingScore: 2,
+          replyToSenderJID: "15551234567@s.whatsapp.net",
+        },
+      },
+    });
+    expect(messageEvents[1]?.payload).toMatchObject({
+      sourceMessageKey: "12016824050@s.whatsapp.net:wamid-revoked",
+      isDeleted: true,
+      deletedAt: 1_710_000_003_000,
+    });
+    expect(messageEvents[1]?.eventKind).toBe("deleted");
+  });
 });
