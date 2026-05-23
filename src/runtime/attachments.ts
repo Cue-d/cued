@@ -27,6 +27,7 @@ import {
   CUED_SIGNAL_DIR,
   ensureCuedDirs,
 } from "../core/config.js";
+import { safeParseJsonRecord } from "../db/codecs.js";
 import type { AttachmentCacheRow, CuedDatabase, MessageAttachmentRow } from "../db/database.js";
 import { loadIntegrationSecret } from "../platforms/core/secrets/keychain.js";
 
@@ -129,20 +130,6 @@ interface DownloadedResponse {
 
 function now(): number {
   return Date.now();
-}
-
-function parseJsonRecord(value: string | null | undefined): Record<string, unknown> | null {
-  if (!value) {
-    return null;
-  }
-  try {
-    const parsed = JSON.parse(value) as unknown;
-    return typeof parsed === "object" && parsed !== null
-      ? (parsed as Record<string, unknown>)
-      : null;
-  } catch {
-    return null;
-  }
 }
 
 function expandHomePath(candidate: string | null): string | null {
@@ -888,7 +875,10 @@ async function acquireAttachmentPayload(
   providerFetchers: ProviderFetchHandlers,
   maxBytes: number | null,
 ): Promise<{ tempPath: string; mimeType: string | null; filename: string | null }> {
-  const accessRef = parseJsonRecord(attachment.access_ref_json);
+  const accessRef = safeParseJsonRecord(
+    attachment.access_ref_json,
+    "message_attachments.access_ref_json",
+  );
   const localPath =
     typeof accessRef?.path === "string"
       ? expandHomePath(accessRef.path)

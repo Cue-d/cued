@@ -1,23 +1,10 @@
 import { type ChildProcess, spawn } from "node:child_process";
-import {
-  existsSync,
-  type FSWatcher,
-  readFileSync,
-  renameSync,
-  rmSync,
-  statSync,
-  watch,
-  writeFileSync,
-} from "node:fs";
+import { existsSync, type FSWatcher, rmSync, watch } from "node:fs";
 import { createConnection, createServer, type Socket } from "node:net";
 import { basename, dirname } from "node:path";
 import process from "node:process";
 import { getCurrentAppVersion, getCurrentReleaseChannel } from "../../core/app-metadata.js";
-import {
-  CUED_DAEMON_LOCK_PATH,
-  CUED_MENU_BAR_STATUS_PATH,
-  CUED_SOCKET_PATH,
-} from "../../core/config.js";
+import { CUED_DAEMON_LOCK_PATH, CUED_SOCKET_PATH } from "../../core/config.js";
 import { createLogger } from "../../core/logging.js";
 import {
   acquireSingletonLock,
@@ -130,6 +117,11 @@ import { fetchAttachment, listAttachments, searchAttachments } from "../attachme
 import { buildPermissionStatus } from "../doctor.js";
 import { emitHookEvent } from "../hooks.js";
 import type { DaemonRequest, DaemonResponse } from "../ipc.js";
+import {
+  readMenuBarStatusCache,
+  removeMenuBarStatusCache,
+  writeMenuBarStatusCache,
+} from "../menu-bar-status-cache.js";
 import { collectInboundMessageHookPayloads } from "../message-hooks.js";
 import { resolveMacOSNativeBinary } from "../native-binary.js";
 import { buildOnboardingSnapshot } from "../onboarding.js";
@@ -267,31 +259,13 @@ function writeMenuBarStatusSnapshot(
     socketPath: CUED_SOCKET_PATH,
     bootstrap: options.bootstrap,
   });
-  const tmpPath = `${CUED_MENU_BAR_STATUS_PATH}.${process.pid}.tmp`;
-  writeFileSync(tmpPath, `${JSON.stringify(snapshot)}\n`, { mode: 0o600 });
-  renameSync(tmpPath, CUED_MENU_BAR_STATUS_PATH);
+  writeMenuBarStatusCache(snapshot);
 }
 
 function readCachedDaemonStatusSnapshot(options?: {
   maxAgeMs?: number;
 }): Record<string, unknown> | null {
-  try {
-    if (!existsSync(CUED_MENU_BAR_STATUS_PATH)) {
-      return null;
-    }
-    if (options?.maxAgeMs != null) {
-      const ageMs = now() - statSync(CUED_MENU_BAR_STATUS_PATH).mtimeMs;
-      if (ageMs > options.maxAgeMs) {
-        return null;
-      }
-    }
-    const parsed = JSON.parse(readFileSync(CUED_MENU_BAR_STATUS_PATH, "utf8")) as unknown;
-    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
-      ? (parsed as Record<string, unknown>)
-      : null;
-  } catch {
-    return null;
-  }
+  return readMenuBarStatusCache(options)?.snapshot ?? null;
 }
 
 function now(): number {
@@ -307,20 +281,6 @@ function getDaemonIdentity(): {
     executablePath: process.execPath,
     appPath,
   };
-}
-
-function parseJsonRecord(value: string | null | undefined): Record<string, unknown> | null {
-  if (!value) {
-    return null;
-  }
-  try {
-    const parsed = JSON.parse(value) as unknown;
-    return typeof parsed === "object" && parsed !== null
-      ? (parsed as Record<string, unknown>)
-      : null;
-  } catch {
-    return null;
-  }
 }
 
 type QueueSchedulers = {
@@ -3507,7 +3467,7 @@ export async function runDaemon(): Promise<void> {
   };
   const refreshMenuBarStatusNow = (reason: string) => {
     try {
-      rmSync(CUED_MENU_BAR_STATUS_PATH, { force: true });
+      removeMenuBarStatusCache();
     } catch (error) {
       daemonLogger.warn("menu bar status cache invalidation failed", { reason, error });
     }
@@ -5248,7 +5208,10 @@ async function dispatchRequest(
             extractText: request.extractText,
             providerFetchers: {
               gmail: async (attachment) => {
-                const accessRef = parseJsonRecord(attachment.access_ref_json);
+                const accessRef = safeParseJsonRecord(
+                  attachment.access_ref_json,
+                  "message_attachments.access_ref_json",
+                );
                 const messageId =
                   typeof accessRef?.messageId === "string" ? accessRef.messageId : null;
                 const attachmentId =
@@ -5266,7 +5229,10 @@ async function dispatchRequest(
                 };
               },
               whatsapp: async (attachment) => {
-                const accessRef = parseJsonRecord(attachment.access_ref_json);
+                const accessRef = safeParseJsonRecord(
+                  attachment.access_ref_json,
+                  "message_attachments.access_ref_json",
+                );
                 const chatJID = typeof accessRef?.chatJID === "string" ? accessRef.chatJID : null;
                 const messageID =
                   typeof accessRef?.messageID === "string" ? accessRef.messageID : null;
