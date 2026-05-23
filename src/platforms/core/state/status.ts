@@ -686,11 +686,14 @@ function buildSetupIntegrations(
 
   if (options.includeLiveLocalIntegrations ?? true) {
     for (const managed of buildLocalIntegrationStates()) {
-      if (!byPlatform.has(managed.platform)) {
-        byPlatform.set(
-          managed.platform,
-          summarizeManagedIntegrationState(db, addSupportedByDaemonMetadata(managed), options),
-        );
+      const liveIntegration = summarizeManagedIntegrationState(
+        db,
+        addSupportedByDaemonMetadata(managed),
+        options,
+      );
+      const existing = byPlatform.get(managed.platform);
+      if (!existing || compareSetupIntegrations(liveIntegration, existing) < 0) {
+        byPlatform.set(managed.platform, liveIntegration);
       }
     }
   } else {
