@@ -21,6 +21,27 @@ export interface ChromiumAuthHandle {
   completion: Promise<ChromiumAuthResult>;
 }
 
+function buildChromiumProcessFailureResult(
+  session: AuthSessionSummary,
+  integration: IntegrationStateSummary,
+): ChromiumAuthResult {
+  return {
+    sessionId: session.id,
+    platform: session.platform,
+    accountKey: session.accountKey,
+    state: "failed",
+    keychainService: null,
+    keychainAccount: null,
+    resultSummary: {
+      provider: integration.platform,
+      runtime: "chromium",
+      errorCode: "browser_runtime_failed",
+      stage: "browser_runtime",
+    },
+    errorSummary: `${integration.platform} browser auth runtime failed`,
+  };
+}
+
 function resolveWorkerEntrypoint(): string {
   const jsEntrypoint = join(import.meta.dirname, "./chromium-worker.js");
   if (existsSync(jsEntrypoint)) {
@@ -80,15 +101,13 @@ export function startChromiumAuthSession(
   });
 
   const stdoutChunks: Buffer[] = [];
-  const stderrChunks: Buffer[] = [];
   child.stdout.on("data", (chunk) => stdoutChunks.push(Buffer.from(chunk)));
-  child.stderr.on("data", (chunk) => stderrChunks.push(Buffer.from(chunk)));
+  child.stderr.on("data", () => {});
 
   const completion = new Promise<ChromiumAuthResult>((resolve, reject) => {
     child.once("error", reject);
     child.once("close", (code) => {
       const stdout = Buffer.concat(stdoutChunks).toString("utf8").trim();
-      const stderr = Buffer.concat(stderrChunks).toString("utf8").trim();
 
       if (code === 0 && stdout.length > 0) {
         try {
@@ -100,9 +119,7 @@ export function startChromiumAuthSession(
         }
       }
 
-      reject(
-        new Error(stderr || stdout || `Chromium auth helper exited with code ${code ?? "unknown"}`),
-      );
+      resolve(buildChromiumProcessFailureResult(session, integration));
     });
   });
 
@@ -114,10 +131,15 @@ export function runChromiumAuthSessionSync(
   session: AuthSessionSummary,
   integration: IntegrationStateSummary,
 ): ChromiumAuthResult {
-  const stdout = execFileSync(process.execPath, buildWorkerArgs(db, session, integration), {
-    encoding: "utf8",
-    stdio: ["ignore", "pipe", "pipe"],
-    env: process.env,
-  });
+  let stdout: string;
+  try {
+    stdout = execFileSync(process.execPath, buildWorkerArgs(db, session, integration), {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+      env: process.env,
+    });
+  } catch {
+    return buildChromiumProcessFailureResult(session, integration);
+  }
   return parseChromiumAuthOutput(stdout);
 }

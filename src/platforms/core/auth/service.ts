@@ -496,5 +496,14 @@ function authResultErrorTelemetry(resultSummary: Record<string, unknown> | null 
     typeof resultSummary?.errorCode === "string"
       ? safeTelemetryValue(resultSummary.errorCode, "integration_setup_failed")
       : null;
-  return errorCode ? { error_code: errorCode } : {};
+  const phase =
+    typeof resultSummary?.phase === "string"
+      ? safeTelemetryValue(resultSummary.phase, "unknown")
+      : typeof resultSummary?.stage === "string"
+        ? safeTelemetryValue(resultSummary.stage, "unknown")
+        : null;
+  return {
+    ...(errorCode ? { error_code: errorCode } : {}),
+    ...(phase ? { phase } : {}),
+  };
 }
