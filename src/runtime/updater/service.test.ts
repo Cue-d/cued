@@ -73,7 +73,7 @@ describe("updater service", () => {
     expect(pickReleaseForChannel(releases, "dev")).toBeNull();
   });
 
-  it("reuses cached update metadata on 304 responses", async () => {
+  it("reuses cached update metadata on scheduled 304 responses", async () => {
     vi.stubEnv("CUED_APP_VERSION", "0.1.0");
     vi.stubEnv("CUED_RELEASE_CHANNEL", "stable");
     const db = createDb();
@@ -96,12 +96,145 @@ describe("updater service", () => {
     );
     const fetchImpl = fetchMock as unknown as typeof fetch;
 
-    const status = await checkForUpdates(db, { force: true, fetchImpl });
+    const status = await checkForUpdates(db, { fetchImpl });
     const headers = (fetchMock.mock.calls[0]?.[1] as { headers?: Headers } | undefined)?.headers;
 
     expect(status.available).toBe(true);
     expect(status.availableVersion).toBe("0.2.0");
     expect(headers?.get("If-None-Match")).toBe("etag-1");
+
+    db.close();
+  });
+
+  it("does not send stale etags on forced update checks", async () => {
+    vi.stubEnv("CUED_APP_VERSION", "0.1.0");
+    vi.stubEnv("CUED_RELEASE_CHANNEL", "stable");
+    const db = createDb();
+    db.setUpdateReleaseState({
+      checkedAt: 1,
+      channel: "stable",
+      currentVersion: "0.1.0",
+      latestVersion: "0.1.0",
+      availableVersion: null,
+      releaseUrl: null,
+      tarballUrl: null,
+      etag: "stale-etag",
+    });
+
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify([
+          {
+            tag_name: "v0.2.0",
+            prerelease: false,
+            html_url: "https://example.com/release",
+            assets: [
+              {
+                name: "cued-macos-arm64.tar.gz",
+                browser_download_url: "https://example.com/release.tgz",
+              },
+            ],
+          },
+        ]),
+        {
+          status: 200,
+          headers: { etag: "fresh-etag" },
+        },
+      ),
+    );
+    const fetchImpl = fetchMock as unknown as typeof fetch;
+
+    const status = await checkForUpdates(db, { force: true, fetchImpl });
+    const headers = (fetchMock.mock.calls[0]?.[1] as { headers?: Headers } | undefined)?.headers;
+
+    expect(headers?.get("If-None-Match")).toBeNull();
+    expect(status.available).toBe(true);
+    expect(status.availableVersion).toBe("0.2.0");
+    expect(db.getUpdateReleaseState()?.etag).toBe("fresh-etag");
+
+    db.close();
+  });
+
+  it("does not reuse fresh cache when the release channel changes", async () => {
+    vi.stubEnv("CUED_APP_VERSION", "0.1.0");
+    vi.stubEnv("CUED_RELEASE_CHANNEL", "internal");
+    const db = createDb();
+    db.setUpdateReleaseState({
+      checkedAt: Date.now(),
+      channel: "stable",
+      currentVersion: "0.1.0",
+      latestVersion: "0.1.0",
+      availableVersion: null,
+      releaseUrl: null,
+      tarballUrl: null,
+      etag: "stable-etag",
+    });
+
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify([
+          {
+            tag_name: "v0.2.0-internal.1",
+            prerelease: true,
+            html_url: "https://example.com/internal",
+            assets: [
+              {
+                name: "cued-macos-arm64.tar.gz",
+                browser_download_url: "https://example.com/internal.tgz",
+              },
+            ],
+          },
+        ]),
+        {
+          status: 200,
+          headers: { etag: "internal-etag" },
+        },
+      ),
+    );
+    const fetchImpl = fetchMock as unknown as typeof fetch;
+
+    const status = await checkForUpdates(db, { fetchImpl });
+    const headers = (fetchMock.mock.calls[0]?.[1] as { headers?: Headers } | undefined)?.headers;
+
+    expect(headers?.get("If-None-Match")).toBeNull();
+    expect(status.releaseChannel).toBe("internal");
+    expect(status.availableVersion).toBe("0.2.0-internal.1");
+    expect(db.getUpdateReleaseState()?.etag).toBe("internal-etag");
+
+    db.close();
+  });
+
+  it("does not reuse fresh cache when the current app version changes", async () => {
+    vi.stubEnv("CUED_APP_VERSION", "0.2.0");
+    vi.stubEnv("CUED_RELEASE_CHANNEL", "stable");
+    const db = createDb();
+    db.setUpdateReleaseState({
+      checkedAt: Date.now(),
+      channel: "stable",
+      currentVersion: "0.1.0",
+      latestVersion: "0.2.0",
+      availableVersion: "0.2.0",
+      releaseUrl: "https://example.com/release",
+      tarballUrl: "https://example.com/release.tgz",
+      etag: "etag-1",
+    });
+
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(null, {
+        status: 304,
+        headers: { etag: "etag-1" },
+      }),
+    );
+    const fetchImpl = fetchMock as unknown as typeof fetch;
+
+    const status = await checkForUpdates(db, { fetchImpl });
+    const headers = (fetchMock.mock.calls[0]?.[1] as { headers?: Headers } | undefined)?.headers;
+
+    expect(headers?.get("If-None-Match")).toBe("etag-1");
+    expect(status.currentVersion).toBe("0.2.0");
+    expect(status.available).toBe(false);
+    expect(status.availableVersion).toBeNull();
+    expect(db.getUpdateReleaseState()?.currentVersion).toBe("0.2.0");
 
     db.close();
   });
@@ -150,6 +283,17 @@ describe("updater service", () => {
     );
     expect(script).toContain(
       "INSTALLED_CLI_PATH='/Applications/Cued.app/Contents/Resources/cued-cli'",
+    );
+    expect(script).toContain(
+      "INSTALLED_DAEMON_CLI='/Applications/Cued.app/Contents/Resources/cued-runtime/dist/cli.js'",
+    );
+    expect(script).toContain("while installed_processes_running; do");
+    expect(script).toContain('/usr/bin/pgrep -f "$INSTALLED_DAEMON_CLI daemon"');
+    expect(script).toContain('/usr/bin/pgrep -f "$INSTALLED_NATIVE_HELPER_DIR/"');
+    expect(script).toContain('/usr/bin/pkill "-$signal" -f "$INSTALLED_DAEMON_CLI daemon"');
+    expect(script).toContain('/usr/bin/pkill "-$signal" -f "$INSTALLED_NATIVE_HELPER_DIR/"');
+    expect(script).toContain(
+      'set_last_error "Update failed because the previous Cued app did not exit."',
     );
     expect(script).toContain('"$INSTALLED_CLI_PATH" skill install-global >/dev/null 2>&1 || true');
     expect(script).not.toContain("/usr/bin/sqlite3");
