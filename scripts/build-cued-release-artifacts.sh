@@ -25,6 +25,11 @@ fi
 
 export CUED_RELEASE_CHANNEL="${CUED_RELEASE_CHANNEL:-stable}"
 
+if [[ "$CUED_RELEASE_CHANNEL" == "stable" && -z "${CUED_BUNDLED_GOOGLE_OAUTH_CLIENT_FILE:-}" ]]; then
+  echo "CUED_BUNDLED_GOOGLE_OAUTH_CLIENT_FILE is required for stable Gmail OAuth releases" >&2
+  exit 1
+fi
+
 runtime_entitlements_for_binary() {
   local target="$1"
 
