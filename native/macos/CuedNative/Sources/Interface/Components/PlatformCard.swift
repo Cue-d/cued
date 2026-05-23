@@ -20,6 +20,7 @@ extension RootView {
             .font(.subheadline)
             .foregroundStyle(isFullyConnected ? .tertiary : .secondary)
             .fixedSize(horizontal: false, vertical: true)
+            .textSelection(.enabled)
         }
 
         Spacer(minLength: 12)
@@ -123,6 +124,7 @@ extension RootView {
           .font(.subheadline)
           .foregroundStyle(.secondary)
           .fixedSize(horizontal: false, vertical: true)
+          .textSelection(.enabled)
       }
 
       Spacer(minLength: 12)

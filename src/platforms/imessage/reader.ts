@@ -99,6 +99,9 @@ function getTapbackBaseType(type: number): number {
 }
 
 function getMessageText(text: string | null, attributedBody: Uint8Array | null): string | null {
+  if (text && text.trim() !== "") {
+    return text;
+  }
   const extracted = extractTextFromAttributedBody(
     attributedBody ? Buffer.from(attributedBody) : null,
   );

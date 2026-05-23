@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { loadCallHistoryBatch } from "./call-history.js";
+import { IMessageReader } from "./reader.js";
 import { buildIMessageSyncBundle, resolveIMessageLoader } from "./sync.js";
 
 const require = createRequire(import.meta.url);
@@ -578,5 +579,60 @@ describe("imessage worker loader resolution", () => {
         sourceConversationKey: "1",
       }),
     );
+  });
+
+  it("recovers blank message text from typed attributedBody strings", () => {
+    const chatDbPath = createSyntheticChatDb(1);
+    const db = new DatabaseSync(chatDbPath);
+    const attributedBody = Buffer.concat([
+      Buffer.from("bplist00NSString"),
+      Buffer.from([0x01, 0x2b, 0x1e]),
+      Buffer.from("Recovered from attributed body"),
+      Buffer.from([0x86, 0x84]),
+    ]);
+    try {
+      db.prepare("UPDATE message SET text = NULL, attributedBody = ? WHERE ROWID = 1").run(
+        attributedBody,
+      );
+    } finally {
+      db.close();
+    }
+
+    const reader = new IMessageReader(chatDbPath);
+    try {
+      const batch = reader.buildSyncBatch(0, 10);
+
+      expect(batch.messages[0]?.text).toBe("Recovered from attributed body");
+    } finally {
+      reader.close();
+    }
+  });
+
+  it("does not replace existing message text with attributedBody text", () => {
+    const chatDbPath = createSyntheticChatDb(1);
+    const db = new DatabaseSync(chatDbPath);
+    const attributedBody = Buffer.concat([
+      Buffer.from("bplist00NSString"),
+      Buffer.from([0x01, 0x2b, 0x15]),
+      Buffer.from("attributed body value"),
+      Buffer.from([0x86, 0x84]),
+    ]);
+    try {
+      db.prepare("UPDATE message SET text = ?, attributedBody = ? WHERE ROWID = 1").run(
+        "sqlite text value",
+        attributedBody,
+      );
+    } finally {
+      db.close();
+    }
+
+    const reader = new IMessageReader(chatDbPath);
+    try {
+      const batch = reader.buildSyncBatch(0, 10);
+
+      expect(batch.messages[0]?.text).toBe("sqlite text value");
+    } finally {
+      reader.close();
+    }
   });
 });

@@ -96,6 +96,7 @@ struct ExampleCard: View {
         .foregroundStyle(.primary)
         .lineLimit(2)
         .fixedSize(horizontal: false, vertical: true)
+        .textSelection(.enabled)
     }
     .padding(.horizontal, 10)
     .padding(.vertical, 7)
@@ -149,7 +150,7 @@ struct ExampleCard: View {
     case .unknown:
       return "..."
     case .missing:
-      return "Missing"
+      return target.shortTitle
     case .notLoggedIn:
       return "Auth"
     }
@@ -180,6 +181,9 @@ struct ExampleCard: View {
   }
 
   private func helpText(for target: AgentTarget, status: AgentTargetStatus) -> String {
+    if status.readiness == .missing, status.remediation == nil {
+      return "Install \(target.title) to launch this example."
+    }
     if let remediation = status.remediation {
       return "\(status.detail) \(remediation)"
     }

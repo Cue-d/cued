@@ -1,7 +1,11 @@
 import type { ChildProcess } from "node:child_process";
 import process from "node:process";
 import type { CuedDatabase } from "../../../db/database.js";
-import { errorTelemetryProperties, sendTelemetryEventSafe } from "../../../telemetry/context.js";
+import {
+  errorTelemetryProperties,
+  safeTelemetryValue,
+  sendTelemetryEventSafe,
+} from "../../../telemetry/context.js";
 import { importLinkedInStoredAuth } from "../../linkedin/auth/keychain-import.js";
 import { importSlackDesktopAuth } from "../../slack/auth/desktop-import.js";
 import { resolveIntegrationAccountKey } from "../account-keys.js";
@@ -324,16 +328,22 @@ export class IntegrationAuthService {
       });
       refreshPersistedRequestableIntegrationStates(this.db);
       integration = getIntegrationSummary(this.db, integration.platform, integration.accountKey);
-    } else if (completed.authSession?.state === "failed") {
+    } else if (
+      completed.authSession?.state === "failed" ||
+      completed.authSession?.state === "cancelled"
+    ) {
       await sendTelemetryEventSafe(this.db, "integration_setup_failed", {
         component: "integration_auth",
         operation: "complete",
-        stage: "failed",
+        stage: completed.authSession.state,
         platform: completed.authSession.platform,
+        result: completed.authSession.state,
+        runtime_kind: integration?.runtimeKind,
         ...errorTelemetryProperties(
-          input.errorSummary ?? "auth failed",
+          input.errorSummary ?? `auth ${completed.authSession.state}`,
           "integration_setup_failed",
         ),
+        ...authResultErrorTelemetry(input.resultSummary),
       });
     }
 
@@ -479,4 +489,21 @@ export class IntegrationAuthService {
     const first = rows[0];
     return first ? getIntegrationSummary(this.db, first.platform, first.account_key) : null;
   }
+}
+
+function authResultErrorTelemetry(resultSummary: Record<string, unknown> | null | undefined) {
+  const errorCode =
+    typeof resultSummary?.errorCode === "string"
+      ? safeTelemetryValue(resultSummary.errorCode, "integration_setup_failed")
+      : null;
+  const phase =
+    typeof resultSummary?.phase === "string"
+      ? safeTelemetryValue(resultSummary.phase, "unknown")
+      : typeof resultSummary?.stage === "string"
+        ? safeTelemetryValue(resultSummary.stage, "unknown")
+        : null;
+  return {
+    ...(errorCode ? { error_code: errorCode } : {}),
+    ...(phase ? { phase } : {}),
+  };
 }

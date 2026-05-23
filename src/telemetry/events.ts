@@ -93,6 +93,7 @@ const safePropertyKeys = new Set([
   "run_id",
   "run_type",
   "result",
+  "runtime_kind",
   "stage",
   "subsystem",
   "target_version",

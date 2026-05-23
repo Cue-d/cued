@@ -355,4 +355,108 @@ describe("IntegrationAuthService", () => {
 
     db.close();
   });
+
+  it("persists privacy-safe WhatsApp QR auth failures", async () => {
+    const db = createDb();
+    runAuthSessionSyncMock.mockResolvedValue({
+      state: "failed",
+      keychainService: null,
+      keychainAccount: null,
+      resultSummary: {
+        runtime: "qr_native",
+        helper: "cued-whatsapp-helper",
+        helperAvailable: true,
+        helperVersion: "0.1.0",
+        errorCode: "helper_pair_failed",
+        phase: "start_pairing",
+      },
+      errorSummary: "WhatsApp QR pairing failed in the helper runtime.",
+    });
+
+    const service = new IntegrationAuthService(db);
+    const result = await service.connectLocally("whatsapp");
+
+    expect(result.integration?.platform).toBe("whatsapp");
+    expect(result.integration?.authState).toBe("failed");
+    const metadata = JSON.parse(
+      db.getIntegrationState("whatsapp", "default")?.metadata_json ?? "{}",
+    ) as Record<string, unknown>;
+    expect(metadata.lastAuthError).toBe("WhatsApp QR pairing failed in the helper runtime.");
+    expect(metadata.authResult).toMatchObject({
+      runtime: "qr_native",
+      helper: "cued-whatsapp-helper",
+      errorCode: "helper_pair_failed",
+    });
+    expect(JSON.stringify(metadata)).not.toMatch(/whatsapp\.net|whatsapp-test-qr|\/tmp\/private/);
+
+    db.close();
+  });
+
+  it.each([
+    {
+      name: "timeout",
+      state: "failed" as const,
+      errorCode: "auth_timeout",
+      stage: "wait_for_auth",
+      errorSummary: "linkedin authentication timed out",
+    },
+    {
+      name: "extraction failure",
+      state: "failed" as const,
+      errorCode: "auth_extraction_failed",
+      stage: "extract_auth",
+      errorSummary: "linkedin authentication data could not be extracted",
+    },
+    {
+      name: "cancelled window",
+      state: "cancelled" as const,
+      errorCode: "auth_window_closed",
+      stage: "browser_closed",
+      errorSummary: "linkedin login window closed before authentication completed",
+    },
+    {
+      name: "browser runtime",
+      state: "failed" as const,
+      errorCode: "browser_runtime_failed",
+      stage: "browser_runtime",
+      errorSummary: "linkedin browser auth runtime failed",
+    },
+  ])("persists privacy-safe LinkedIn Chromium auth $name failures", async (failure) => {
+    const db = createDb();
+    runAuthSessionSyncMock.mockResolvedValue({
+      state: failure.state,
+      keychainService: null,
+      keychainAccount: null,
+      resultSummary: {
+        provider: "linkedin",
+        runtime: "chromium",
+        errorCode: failure.errorCode,
+        stage: failure.stage,
+        pageCount: 1,
+        pageStates: ["auth_page"],
+      },
+      errorSummary: failure.errorSummary,
+    });
+
+    const service = new IntegrationAuthService(db);
+    const result = await service.connectLocally("linkedin");
+
+    expect(result.integration?.platform).toBe("linkedin");
+    expect(result.integration?.authState).toBe(failure.state);
+    const metadata = JSON.parse(
+      db.getIntegrationState("linkedin", "default")?.metadata_json ?? "{}",
+    ) as Record<string, unknown>;
+    expect(metadata.lastAuthError).toBe(failure.errorSummary);
+    expect(metadata.authResult).toMatchObject({
+      provider: "linkedin",
+      runtime: "chromium",
+      errorCode: failure.errorCode,
+      stage: failure.stage,
+    });
+    expect(
+      JSON.stringify({ authResult: metadata.authResult, lastAuthError: metadata.lastAuthError }),
+    ).not.toMatch(/linkedin\.com\/|\/tmp\/|profileDir|pageUrls|li_at|JSESSIONID|cookie/i);
+
+    db.close();
+  });
 });
