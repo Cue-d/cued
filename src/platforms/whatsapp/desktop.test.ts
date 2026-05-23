@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import Database from "better-sqlite3-multiple-ciphers";
@@ -170,6 +170,34 @@ describe("whatsapp desktop import", () => {
     return dir;
   }
 
+  function insertMediaMessage(source: string, mediaPath: string | null) {
+    const chat = new Database(join(source, "ChatStorage.sqlite"));
+    try {
+      chat
+        .prepare("INSERT INTO ZWAMEDIAITEM VALUES (?, ?, ?, ?, ?, ?)")
+        .run(21, mediaPath, "", "Media drift", "", 4321);
+      chat
+        .prepare("INSERT INTO ZWAMESSAGE VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+        .run(
+          104,
+          1,
+          null,
+          21,
+          `wamid-media-${mediaPath?.replaceAll("/", "-") ?? "null"}`,
+          0,
+          1_700_000_050 - appleBase,
+          "",
+          8,
+          0,
+          "15550100001@s.whatsapp.net",
+          "",
+          "Avery",
+        );
+    } finally {
+      chat.close();
+    }
+  }
+
   it("inspects a WhatsApp Desktop source without importing live files directly", () => {
     const source = createSource();
 
@@ -258,5 +286,39 @@ describe("whatsapp desktop import", () => {
           JSON.stringify(event.payload).includes("Message/Media/file.pdf"),
       ),
     ).toBe(true);
+  });
+
+  it("resolves modern Desktop Media rows under Message/Media when that file exists", () => {
+    const source = createSource();
+    const modernPath = join(source, "Message", "Media", "modern.pdf");
+    writeFileSync(modernPath, "modern");
+    insertMediaMessage(source, "Media/modern.pdf");
+
+    const bundle = buildWhatsAppDesktopSyncBundle({ sourcePath: source });
+
+    expect(JSON.stringify(bundle.rawEvents)).toContain(modernPath);
+  });
+
+  it("falls back to the legacy source Media path when only that file exists", () => {
+    const source = createSource();
+    const legacyDir = join(source, "Media");
+    mkdirSync(legacyDir, { recursive: true });
+    const legacyPath = join(legacyDir, "legacy.pdf");
+    writeFileSync(legacyPath, "legacy");
+    insertMediaMessage(source, "Media/legacy.pdf");
+
+    const bundle = buildWhatsAppDesktopSyncBundle({ sourcePath: source });
+
+    expect(JSON.stringify(bundle.rawEvents)).toContain(legacyPath);
+  });
+
+  it("keeps media URL metadata when a Desktop media row has no local path", () => {
+    const source = createSource();
+    insertMediaMessage(source, null);
+
+    const bundle = buildWhatsAppDesktopSyncBundle({ sourcePath: source });
+
+    expect(JSON.stringify(bundle.rawEvents)).toContain("wamid-media-null");
+    expect(JSON.stringify(bundle.rawEvents)).toContain('"local_path":null');
   });
 });

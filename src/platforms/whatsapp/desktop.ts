@@ -53,7 +53,7 @@ type DesktopMessageRow = {
   member_jid: string;
   member_name: string;
   member_first_name: string;
-  media_path: string;
+  media_path: string | null;
   media_url: string;
   media_title: string;
   vcard_name: string;
@@ -362,7 +362,7 @@ function readMessages(
         COALESCE(gm.ZMEMBERJID, '') AS member_jid,
         COALESCE(gm.ZCONTACTNAME, '') AS member_name,
         COALESCE(gm.ZFIRSTNAME, '') AS member_first_name,
-        COALESCE(mi.ZMEDIALOCALPATH, '') AS media_path,
+        mi.ZMEDIALOCALPATH AS media_path,
         COALESCE(mi.ZMEDIAURL, '') AS media_url,
         COALESCE(mi.ZTITLE, '') AS media_title,
         COALESCE(mi.ZVCARDNAME, '') AS vcard_name,
@@ -388,9 +388,7 @@ function readMessages(
       : normalizeWhatsAppJid(firstNonEmpty(row.member_jid, row.from_jid, chatJID) ?? chatJID);
     const text = firstNonEmpty(row.text, row.media_title, row.vcard_name) ?? "";
     const mediaTitle = firstNonEmpty(row.media_title, row.vcard_name);
-    const mediaPath = row.media_path
-      ? join(sourcePath, ...row.media_path.split("/").filter(Boolean))
-      : null;
+    const mediaPath = resolveDesktopMediaPath(sourcePath, row.media_path);
     return [
       {
         messageID,
@@ -514,6 +512,31 @@ function firstNonEmpty(...values: Array<string | null | undefined>): string | nu
     }
   }
   return null;
+}
+
+function resolveDesktopMediaPath(
+  sourcePath: string,
+  rawPath: string | null | undefined,
+): string | null {
+  const segments = (rawPath ?? "")
+    .split(/[\\/]+/)
+    .map((segment) => segment.trim())
+    .filter((segment) => segment && segment !== "." && segment !== "..");
+  if (segments.length === 0) {
+    return null;
+  }
+
+  if (segments[0] !== "Media") {
+    return join(sourcePath, ...segments);
+  }
+
+  const modernPath = join(sourcePath, "Message", ...segments);
+  if (existsSync(modernPath)) {
+    return modernPath;
+  }
+
+  const legacyPath = join(sourcePath, ...segments);
+  return existsSync(legacyPath) ? legacyPath : modernPath;
 }
 
 function mediaKind(rawType: number): string {
