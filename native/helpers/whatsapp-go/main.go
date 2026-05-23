@@ -23,6 +23,7 @@ import (
 
 	"go.mau.fi/whatsmeow"
 	waProto "go.mau.fi/whatsmeow/binary/proto"
+	"go.mau.fi/whatsmeow/proto/waCommon"
 	"go.mau.fi/whatsmeow/proto/waCompanionReg"
 	"go.mau.fi/whatsmeow/proto/waHistorySync"
 	"go.mau.fi/whatsmeow/proto/waSyncAction"
@@ -81,19 +82,24 @@ type attachmentSnapshot struct {
 }
 
 type messageSnapshot struct {
-	MessageID      string               `json:"messageID"`
-	ChatJID        string               `json:"chatJID"`
-	SenderJID      *string              `json:"senderJID,omitempty"`
-	ParticipantJID *string              `json:"participantJID,omitempty"`
-	FromMe         bool                 `json:"fromMe"`
-	Timestamp      int64                `json:"timestamp"`
-	Text           string               `json:"text"`
-	PushName       *string              `json:"pushName,omitempty"`
-	Status         *string              `json:"status,omitempty"`
-	DeliveredAt    *int64               `json:"deliveredAt,omitempty"`
-	ReadAt         *int64               `json:"readAt,omitempty"`
-	MessageProto   *string              `json:"messageProtoBase64,omitempty"`
-	Attachments    []attachmentSnapshot `json:"attachments,omitempty"`
+	MessageID       string               `json:"messageID"`
+	ChatJID         string               `json:"chatJID"`
+	SenderJID       *string              `json:"senderJID,omitempty"`
+	ParticipantJID  *string              `json:"participantJID,omitempty"`
+	FromMe          bool                 `json:"fromMe"`
+	Timestamp       int64                `json:"timestamp"`
+	Text            string               `json:"text"`
+	PushName        *string              `json:"pushName,omitempty"`
+	Status          *string              `json:"status,omitempty"`
+	DeliveredAt     *int64               `json:"deliveredAt,omitempty"`
+	ReadAt          *int64               `json:"readAt,omitempty"`
+	ReplyToID       *string              `json:"replyToMessageID,omitempty"`
+	ReplyToSender   *string              `json:"replyToSenderJID,omitempty"`
+	IsForwarded     bool                 `json:"isForwarded,omitempty"`
+	ForwardingScore *uint32              `json:"forwardingScore,omitempty"`
+	Revoked         bool                 `json:"revoked,omitempty"`
+	MessageProto    *string              `json:"messageProtoBase64,omitempty"`
+	Attachments     []attachmentSnapshot `json:"attachments,omitempty"`
 }
 
 type downloadableMessageSnapshot struct {
@@ -397,6 +403,11 @@ func openSyncCache(storeDir string) (*syncCache, error) {
 			status TEXT,
 			delivered_at INTEGER,
 			read_at INTEGER,
+			reply_to_message_id TEXT,
+			reply_to_sender_jid TEXT,
+			is_forwarded INTEGER NOT NULL DEFAULT 0,
+			forwarding_score INTEGER,
+			revoked INTEGER NOT NULL DEFAULT 0,
 			updated_at INTEGER NOT NULL,
 			PRIMARY KEY (chat_jid, message_id)
 		)`,
@@ -438,7 +449,49 @@ func openSyncCache(storeDir string) (*syncCache, error) {
 			return nil, err
 		}
 	}
+	for _, column := range []struct {
+		name       string
+		definition string
+	}{
+		{name: "reply_to_message_id", definition: "TEXT"},
+		{name: "reply_to_sender_jid", definition: "TEXT"},
+		{name: "is_forwarded", definition: "INTEGER NOT NULL DEFAULT 0"},
+		{name: "forwarding_score", definition: "INTEGER"},
+		{name: "revoked", definition: "INTEGER NOT NULL DEFAULT 0"},
+	} {
+		if err := ensureSQLiteColumn(db, "messages", column.name, column.definition); err != nil {
+			_ = db.Close()
+			return nil, err
+		}
+	}
 	return &syncCache{db: db}, nil
+}
+
+func ensureSQLiteColumn(db *sql.DB, table string, column string, definition string) error {
+	rows, err := db.Query(fmt.Sprintf("PRAGMA table_info(%s)", table))
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var cid int
+		var name string
+		var columnType string
+		var notNull int
+		var defaultValue sql.NullString
+		var primaryKey int
+		if err := rows.Scan(&cid, &name, &columnType, &notNull, &defaultValue, &primaryKey); err != nil {
+			return err
+		}
+		if name == column {
+			return nil
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	_, err = db.Exec(fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s %s", table, column, definition))
+	return err
 }
 
 func (c *syncCache) close() error {
@@ -814,7 +867,7 @@ func (c *syncCache) queryMessages(
 		_ = tx.Rollback()
 	}()
 
-	selectQuery := `SELECT chat_jid, message_id, sender_jid, participant_jid, from_me, timestamp, text, push_name, status, delivered_at, read_at FROM messages`
+	selectQuery := `SELECT chat_jid, message_id, sender_jid, participant_jid, from_me, timestamp, text, push_name, status, delivered_at, read_at, reply_to_message_id, reply_to_sender_jid, is_forwarded, forwarding_score, revoked FROM messages`
 	args := []any{}
 	if cursor == nil || cursor.SnapshotUpdatedAt <= 0 {
 		return nil, nil, false, errors.New("invalid resync cursor")
@@ -848,11 +901,11 @@ func (c *syncCache) queryMessages(
 	for rows.Next() {
 		var chatJID string
 		var messageID string
-		var senderJID, participantJID, pushName, status sql.NullString
-		var fromMe int64
+		var senderJID, participantJID, pushName, status, replyToID, replyToSender sql.NullString
+		var fromMe, isForwarded, revoked int64
 		var timestamp int64
 		var text string
-		var deliveredAt, readAt sql.NullInt64
+		var deliveredAt, readAt, forwardingScore sql.NullInt64
 		if err := rows.Scan(
 			&chatJID,
 			&messageID,
@@ -865,6 +918,11 @@ func (c *syncCache) queryMessages(
 			&status,
 			&deliveredAt,
 			&readAt,
+			&replyToID,
+			&replyToSender,
+			&isForwarded,
+			&forwardingScore,
+			&revoked,
 		); err != nil {
 			return nil, nil, false, err
 		}
@@ -893,6 +951,18 @@ func (c *syncCache) queryMessages(
 		if readAt.Valid {
 			message.ReadAt = int64Ptr(readAt.Int64)
 		}
+		if replyToID.Valid {
+			message.ReplyToID = stringPtr(replyToID.String)
+		}
+		if replyToSender.Valid {
+			message.ReplyToSender = stringPtr(replyToSender.String)
+		}
+		message.IsForwarded = isForwarded == 1
+		if forwardingScore.Valid {
+			score := uint32(forwardingScore.Int64)
+			message.ForwardingScore = &score
+		}
+		message.Revoked = revoked == 1
 		messages = append(messages, message)
 	}
 	if err := rows.Err(); err != nil {
@@ -1056,8 +1126,9 @@ func upsertMessageTx(tx *sql.Tx, message messageSnapshot, updatedAt int64) error
 	_, err := tx.Exec(
 		`INSERT INTO messages (
 		   chat_jid, message_id, sender_jid, participant_jid, from_me, timestamp, text, push_name,
-		   status, delivered_at, read_at, updated_at
-		 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		   status, delivered_at, read_at, reply_to_message_id, reply_to_sender_jid, is_forwarded,
+		   forwarding_score, revoked, updated_at
+		 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		 ON CONFLICT(chat_jid, message_id) DO UPDATE SET
 		   sender_jid = excluded.sender_jid,
 		   participant_jid = excluded.participant_jid,
@@ -1068,6 +1139,11 @@ func upsertMessageTx(tx *sql.Tx, message messageSnapshot, updatedAt int64) error
 		   status = excluded.status,
 		   delivered_at = COALESCE(excluded.delivered_at, messages.delivered_at),
 		   read_at = COALESCE(excluded.read_at, messages.read_at),
+		   reply_to_message_id = excluded.reply_to_message_id,
+		   reply_to_sender_jid = excluded.reply_to_sender_jid,
+		   is_forwarded = excluded.is_forwarded,
+		   forwarding_score = excluded.forwarding_score,
+		   revoked = excluded.revoked,
 		   updated_at = excluded.updated_at`,
 		normalizeJID(message.ChatJID),
 		message.MessageID,
@@ -1080,6 +1156,11 @@ func upsertMessageTx(tx *sql.Tx, message messageSnapshot, updatedAt int64) error
 		nullableString(message.Status),
 		nullableInt64(message.DeliveredAt),
 		nullableInt64(message.ReadAt),
+		nullableString(message.ReplyToID),
+		nullableString(message.ReplyToSender),
+		boolToInt(message.IsForwarded),
+		nullableUint32(message.ForwardingScore),
+		boolToInt(message.Revoked),
 		updatedAt,
 	)
 	return err
@@ -2142,6 +2223,24 @@ func historySyncBatchFromEvent(client *whatsmeow.Client, event *events.HistorySy
 
 func messageFromEvent(event *events.Message) messageSnapshot {
 	chatJID := normalizeJID(event.Info.Chat.String())
+	if event.Info.DeviceSentMeta != nil {
+		if destination := normalizeJID(event.Info.DeviceSentMeta.DestinationJID); destination != "" {
+			chatJID = destination
+		}
+	}
+	effectiveMessage, deviceSentDestination := unwrapDeviceSentMessage(event.Message)
+	if deviceSentDestination != "" {
+		chatJID = deviceSentDestination
+	}
+	messageID := event.Info.ID
+	if targetKey, ok := revokedMessageKey(effectiveMessage); ok {
+		if id := strings.TrimSpace(targetKey.GetID()); id != "" {
+			messageID = id
+		}
+		if remoteJID := normalizeJID(targetKey.GetRemoteJID()); remoteJID != "" {
+			chatJID = remoteJID
+		}
+	}
 	senderJID := normalizeJID(event.Info.Sender.String())
 	var participantJID *string
 	if event.Info.IsGroup {
@@ -2152,19 +2251,26 @@ func messageFromEvent(event *events.Message) messageSnapshot {
 	if event.Info.IsFromMe {
 		status = "sent"
 	}
-	attachments, messageProto := attachmentsFromMessage(event.Info.ID, chatJID, event.Message)
+	attachments, messageProto := attachmentsFromMessage(messageID, chatJID, effectiveMessage)
+	replyToID, replyToSender, isForwarded, forwardingScore := messageContextMetadata(effectiveMessage)
+	revoked := messageRevoked(effectiveMessage)
 	return messageSnapshot{
-		MessageID:      event.Info.ID,
-		ChatJID:        chatJID,
-		SenderJID:      stringPtr(senderJID),
-		ParticipantJID: participantJID,
-		FromMe:         event.Info.IsFromMe,
-		Timestamp:      event.Info.Timestamp.UnixMilli(),
-		Text:           extractText(event.Message),
-		PushName:       pushName,
-		Status:         &status,
-		MessageProto:   messageProto,
-		Attachments:    attachments,
+		MessageID:       messageID,
+		ChatJID:         chatJID,
+		SenderJID:       stringPtr(senderJID),
+		ParticipantJID:  participantJID,
+		FromMe:          event.Info.IsFromMe,
+		Timestamp:       event.Info.Timestamp.UnixMilli(),
+		Text:            extractText(effectiveMessage),
+		PushName:        pushName,
+		Status:          &status,
+		ReplyToID:       replyToID,
+		ReplyToSender:   replyToSender,
+		IsForwarded:     isForwarded,
+		ForwardingScore: forwardingScore,
+		Revoked:         revoked,
+		MessageProto:    messageProto,
+		Attachments:     attachments,
 	}
 }
 
@@ -2388,6 +2494,118 @@ func contentMessageForRead(message *waProto.Message) *waProto.Message {
 	return message
 }
 
+func unwrapDeviceSentMessage(message *waProto.Message) (*waProto.Message, string) {
+	deviceSent := message.GetDeviceSentMessage()
+	if deviceSent == nil || deviceSent.GetMessage() == nil {
+		return message, ""
+	}
+	return deviceSent.GetMessage(), normalizeJID(deviceSent.GetDestinationJID())
+}
+
+func contextInfoFromMessage(message *waProto.Message) *waProto.ContextInfo {
+	message = contentMessageForRead(message)
+	if message == nil {
+		return nil
+	}
+	if extended := message.GetExtendedTextMessage(); extended != nil {
+		return extended.GetContextInfo()
+	}
+	if image := message.GetImageMessage(); image != nil {
+		return image.GetContextInfo()
+	}
+	if video := message.GetVideoMessage(); video != nil {
+		return video.GetContextInfo()
+	}
+	if document := message.GetDocumentMessage(); document != nil {
+		return document.GetContextInfo()
+	}
+	if audio := message.GetAudioMessage(); audio != nil {
+		return audio.GetContextInfo()
+	}
+	if sticker := message.GetStickerMessage(); sticker != nil {
+		return sticker.GetContextInfo()
+	}
+	if contact := message.GetContactMessage(); contact != nil {
+		return contact.GetContextInfo()
+	}
+	if contacts := message.GetContactsArrayMessage(); contacts != nil {
+		return contacts.GetContextInfo()
+	}
+	if location := message.GetLocationMessage(); location != nil {
+		return location.GetContextInfo()
+	}
+	if liveLocation := message.GetLiveLocationMessage(); liveLocation != nil {
+		return liveLocation.GetContextInfo()
+	}
+	if buttons := message.GetButtonsMessage(); buttons != nil {
+		return buttons.GetContextInfo()
+	}
+	if buttonsResponse := message.GetButtonsResponseMessage(); buttonsResponse != nil {
+		return buttonsResponse.GetContextInfo()
+	}
+	if list := message.GetListMessage(); list != nil {
+		return list.GetContextInfo()
+	}
+	if listResponse := message.GetListResponseMessage(); listResponse != nil {
+		return listResponse.GetContextInfo()
+	}
+	if interactive := message.GetInteractiveMessage(); interactive != nil {
+		return interactive.GetContextInfo()
+	}
+	if interactiveResponse := message.GetInteractiveResponseMessage(); interactiveResponse != nil {
+		return interactiveResponse.GetContextInfo()
+	}
+	if template := message.GetTemplateMessage(); template != nil {
+		return template.GetContextInfo()
+	}
+	if templateReply := message.GetTemplateButtonReplyMessage(); templateReply != nil {
+		return templateReply.GetContextInfo()
+	}
+	if product := message.GetProductMessage(); product != nil {
+		return product.GetContextInfo()
+	}
+	if poll := message.GetPollCreationMessage(); poll != nil {
+		return poll.GetContextInfo()
+	}
+	if event := message.GetEventMessage(); event != nil {
+		return event.GetContextInfo()
+	}
+	return nil
+}
+
+func messageContextMetadata(message *waProto.Message) (*string, *string, bool, *uint32) {
+	contextInfo := contextInfoFromMessage(message)
+	if contextInfo == nil {
+		return nil, nil, false, nil
+	}
+	var replyToID *string
+	if stanzaID := strings.TrimSpace(contextInfo.GetStanzaID()); stanzaID != "" {
+		replyToID = stringPtr(stanzaID)
+	}
+	var replyToSender *string
+	if participant := normalizeJID(contextInfo.GetParticipant()); participant != "" {
+		replyToSender = stringPtr(participant)
+	}
+	return replyToID, replyToSender, contextInfo.GetIsForwarded(), uint32PtrOrNil(contextInfo.GetForwardingScore())
+}
+
+func messageRevoked(message *waProto.Message) bool {
+	_, ok := revokedMessageKey(message)
+	return ok
+}
+
+func revokedMessageKey(message *waProto.Message) (*waCommon.MessageKey, bool) {
+	protocolMessage := message.GetProtocolMessage()
+	if protocolMessage == nil || protocolMessage.GetType() != waProto.ProtocolMessage_REVOKE {
+		return nil, false
+	}
+	key := protocolMessage.GetKey()
+	if key == nil || strings.TrimSpace(key.GetID()) == "" {
+		return nil, false
+	}
+	return key, true
+}
+
 func historyMessageSnapshot(
 	client *whatsmeow.Client,
 	chatJID types.JID,
@@ -2410,7 +2628,23 @@ func historyMessageSnapshot(
 	if hasEncryptedWrapper(webMsg.GetMessage()) {
 		return messageSnapshot{}, false
 	}
+	effectiveMessage, deviceSentDestination := unwrapDeviceSentMessage(webMsg.GetMessage())
+	if hasEncryptedWrapper(effectiveMessage) {
+		return messageSnapshot{}, false
+	}
 	normalizedChatJID := normalizeJID(chatJID.String())
+	if deviceSentDestination != "" {
+		normalizedChatJID = deviceSentDestination
+	}
+	messageID := webMsg.GetKey().GetID()
+	if targetKey, ok := revokedMessageKey(effectiveMessage); ok {
+		if id := strings.TrimSpace(targetKey.GetID()); id != "" {
+			messageID = id
+		}
+		if remoteJID := normalizeJID(targetKey.GetRemoteJID()); remoteJID != "" {
+			normalizedChatJID = remoteJID
+		}
+	}
 	fromMe := webMsg.GetKey().GetFromMe()
 	sender := normalizeJID(webMsg.GetParticipant())
 	if sender == "" {
@@ -2428,20 +2662,27 @@ func historyMessageSnapshot(
 	if fromMe {
 		status = "sent"
 	}
-	attachments, messageProto := attachmentsFromMessage(webMsg.GetKey().GetID(), normalizedChatJID, webMsg.GetMessage())
+	attachments, messageProto := attachmentsFromMessage(messageID, normalizedChatJID, effectiveMessage)
+	replyToID, replyToSender, isForwarded, forwardingScore := messageContextMetadata(effectiveMessage)
+	revoked := messageRevoked(effectiveMessage)
 
 	return messageSnapshot{
-		MessageID:      webMsg.GetKey().GetID(),
-		ChatJID:        normalizedChatJID,
-		SenderJID:      stringPtr(sender),
-		ParticipantJID: participantJID,
-		FromMe:         fromMe,
-		Timestamp:      int64(webMsg.GetMessageTimestamp()) * 1000,
-		Text:           extractText(webMsg.GetMessage()),
-		PushName:       emptyToNil(webMsg.GetPushName()),
-		Status:         stringPtr(status),
-		MessageProto:   messageProto,
-		Attachments:    attachments,
+		MessageID:       messageID,
+		ChatJID:         normalizedChatJID,
+		SenderJID:       stringPtr(sender),
+		ParticipantJID:  participantJID,
+		FromMe:          fromMe,
+		Timestamp:       int64(webMsg.GetMessageTimestamp()) * 1000,
+		Text:            extractText(effectiveMessage),
+		PushName:        emptyToNil(webMsg.GetPushName()),
+		Status:          stringPtr(status),
+		ReplyToID:       replyToID,
+		ReplyToSender:   replyToSender,
+		IsForwarded:     isForwarded,
+		ForwardingScore: forwardingScore,
+		Revoked:         revoked,
+		MessageProto:    messageProto,
+		Attachments:     attachments,
 	}, true
 }
 
@@ -2824,6 +3065,13 @@ func nullableInt64(value *int64) interface{} {
 		return nil
 	}
 	return *value
+}
+
+func nullableUint32(value *uint32) interface{} {
+	if value == nil {
+		return nil
+	}
+	return int64(*value)
 }
 
 func boolToInt(value bool) int {

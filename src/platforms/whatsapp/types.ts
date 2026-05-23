@@ -24,6 +24,11 @@ export interface WhatsAppMessageSnapshot {
   status?: string | null;
   deliveredAt?: number | null;
   readAt?: number | null;
+  replyToMessageID?: string | null;
+  replyToSenderJID?: string | null;
+  isForwarded?: boolean;
+  forwardingScore?: number | null;
+  revoked?: boolean;
   attachments?: Array<Record<string, unknown>>;
 }
 
