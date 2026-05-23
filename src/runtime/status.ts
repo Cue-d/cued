@@ -84,6 +84,7 @@ export function buildDaemonStatusSnapshot(
   const projection = db.getProjectionBacklog();
   const searchIndex = db.getMessageFtsIndexBacklog();
   return {
+    statusGeneratedAt: Date.now(),
     app: options.app,
     bootstrap: options.bootstrap,
     daemon: db.getDaemonState(),
@@ -133,6 +134,7 @@ export function buildMenuBarDaemonStatusSnapshot(
   const searchIndex = db.getMessageFtsIndexBacklog();
   const phoneCalls = db.countObservedPhoneCalls();
   return {
+    statusGeneratedAt: Date.now(),
     app: options.app,
     bootstrap: options.bootstrap,
     daemon: db.getDaemonState(),

@@ -3,11 +3,13 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 const {
   buildPermissionStatusMock,
   buildIntegrationStatusMock,
+  refreshLocalIntegrationStatesMock,
   getGlobalCuedSkillStatusMock,
   installGlobalCuedSkillMock,
 } = vi.hoisted(() => ({
   buildPermissionStatusMock: vi.fn(),
   buildIntegrationStatusMock: vi.fn(),
+  refreshLocalIntegrationStatesMock: vi.fn(),
   getGlobalCuedSkillStatusMock: vi.fn(),
   installGlobalCuedSkillMock: vi.fn(),
 }));
@@ -18,6 +20,10 @@ vi.mock("./doctor.js", () => ({
 
 vi.mock("../platforms/core/state/status.js", () => ({
   buildIntegrationStatus: buildIntegrationStatusMock,
+}));
+
+vi.mock("../platforms/core/state/local-refresh.js", () => ({
+  refreshLocalIntegrationStates: refreshLocalIntegrationStatesMock,
 }));
 
 vi.mock("../skills/install.js", () => ({
@@ -58,6 +64,7 @@ describe("onboarding permission refresh", () => {
 
     await buildOnboardingSnapshot(db as never);
 
+    expect(refreshLocalIntegrationStatesMock).not.toHaveBeenCalled();
     expect(buildPermissionStatusMock).toHaveBeenCalledWith({
       mode: "passive",
       db: db as never,
@@ -82,6 +89,7 @@ describe("onboarding permission refresh", () => {
 
     await buildOnboardingSnapshot(db as never, { refreshPermissions: true });
 
+    expect(refreshLocalIntegrationStatesMock).toHaveBeenCalledWith(db);
     expect(buildPermissionStatusMock).toHaveBeenCalledWith({
       mode: "active",
       db: db as never,

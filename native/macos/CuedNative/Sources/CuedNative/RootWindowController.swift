@@ -902,5 +902,5 @@ func shouldActivelyRefreshPermissions(for flags: [String]) -> Bool {
 
 func onboardingSnapshotArguments(refreshPermissions: Bool) -> [String] {
   ["onboarding", "snapshot"] +
-    (refreshPermissions ? ["--refresh-managed", "--refresh-permissions"] : [])
+    (refreshPermissions ? ["--refresh-permissions"] : [])
 }

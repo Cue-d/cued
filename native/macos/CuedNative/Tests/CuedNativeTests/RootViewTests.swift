@@ -30,10 +30,10 @@ final class RootViewTests: XCTestCase {
     XCTAssertTrue(shouldActivelyRefreshPermissions(for: ["--all"]))
   }
 
-  func testActivePermissionSnapshotRefreshAlsoRefreshesManagedIntegrations() {
+  func testActivePermissionSnapshotRefreshOnlyRefreshesPermissions() {
     XCTAssertEqual(
       onboardingSnapshotArguments(refreshPermissions: true),
-      ["onboarding", "snapshot", "--refresh-managed", "--refresh-permissions"]
+      ["onboarding", "snapshot", "--refresh-permissions"]
     )
     XCTAssertEqual(
       onboardingSnapshotArguments(refreshPermissions: false),

@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { CUED_MENU_BAR_STATUS_PATH } from "../core/config.js";
 import type { CuedDatabase } from "../db/database.js";
+import { refreshLocalIntegrationStates } from "../platforms/core/state/local-refresh.js";
 import { refreshManagedIntegrationStates } from "../platforms/core/state/refresh.js";
 import { buildIntegrationStatus } from "../platforms/core/state/status.js";
 import { getGlobalCuedSkillStatus, installGlobalCuedSkill } from "../skills/install.js";
@@ -39,6 +40,13 @@ export async function buildOnboardingSnapshot(
     } catch {
       // The daemon may be writing at the same time. The onboarding UI can still
       // render a usable snapshot from the current DB state and live permission checks.
+    }
+  } else if (options.refreshPermissions) {
+    try {
+      refreshLocalIntegrationStates(db);
+    } catch {
+      // Keep permission-return refresh cheap and resilient. Live permission checks
+      // below still let the UI update even if the persisted local rows are busy.
     }
   }
 

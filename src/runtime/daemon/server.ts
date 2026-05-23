@@ -279,18 +279,66 @@ function readCachedDaemonStatusSnapshot(options?: {
     if (!existsSync(CUED_MENU_BAR_STATUS_PATH)) {
       return null;
     }
+    const ageMs = Math.max(0, now() - statSync(CUED_MENU_BAR_STATUS_PATH).mtimeMs);
     if (options?.maxAgeMs != null) {
-      const ageMs = now() - statSync(CUED_MENU_BAR_STATUS_PATH).mtimeMs;
       if (ageMs > options.maxAgeMs) {
         return null;
       }
     }
     const parsed = JSON.parse(readFileSync(CUED_MENU_BAR_STATUS_PATH, "utf8")) as unknown;
-    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
-      ? (parsed as Record<string, unknown>)
-      : null;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return null;
+    }
+    return {
+      ...(parsed as Record<string, unknown>),
+      statusCacheAgeMs: ageMs,
+      statusCachePath: CUED_MENU_BAR_STATUS_PATH,
+    };
   } catch {
     return null;
+  }
+}
+
+function refreshCachedStatusProjectionProgress(
+  db: CuedDatabase,
+  cached: Record<string, unknown>,
+): Record<string, unknown> {
+  try {
+    return db.withBusyTimeoutSync(150, () => {
+      const projection = db.getProjectionBacklog({ initializeProjectionState: false });
+      const dataStatus =
+        cached.dataStatus &&
+        typeof cached.dataStatus === "object" &&
+        !Array.isArray(cached.dataStatus)
+          ? (cached.dataStatus as Record<string, unknown>)
+          : {};
+      const relationshipSummary =
+        cached.relationshipSummary &&
+        typeof cached.relationshipSummary === "object" &&
+        !Array.isArray(cached.relationshipSummary)
+          ? (cached.relationshipSummary as Record<string, unknown>)
+          : {};
+      return {
+        ...cached,
+        projection,
+        dataStatus: {
+          ...dataStatus,
+          pendingProjectionEvents: projection.pending_raw_events,
+          projectionWatermark: projection.projection_watermark,
+          maxRawEventRowid: projection.max_raw_event_rowid,
+        },
+        relationshipSummary: {
+          ...relationshipSummary,
+          pendingProjectionEvents: projection.pending_raw_events,
+        },
+        statusProjectionLive: true,
+      };
+    });
+  } catch {
+    return {
+      ...cached,
+      statusProjectionLive: false,
+    };
   }
 }
 
@@ -4903,11 +4951,12 @@ async function dispatchRequest(
             maxAgeMs: DAEMON_STATUS_CACHE_MAX_AGE_MS,
           });
           if (cached) {
+            const refreshed = refreshCachedStatusProjectionProgress(db, cached);
             return {
               id: request.id,
               ok: true,
               result: {
-                ...cached,
+                ...refreshed,
                 statusCacheHit: true,
               },
             };
@@ -4916,11 +4965,12 @@ async function dispatchRequest(
         if (isBackgroundWorkActive()) {
           const cached = readCachedDaemonStatusSnapshot();
           if (cached) {
+            const refreshed = refreshCachedStatusProjectionProgress(db, cached);
             return {
               id: request.id,
               ok: true,
               result: {
-                ...cached,
+                ...refreshed,
                 daemonDbBusy: true,
                 daemonDbBusyError: "Cued daemon is running background sync/projection work",
               },
@@ -4965,11 +5015,12 @@ async function dispatchRequest(
           }
           const cached = readCachedDaemonStatusSnapshot();
           if (cached) {
+            const refreshed = refreshCachedStatusProjectionProgress(db, cached);
             return {
               id: request.id,
               ok: true,
               result: {
-                ...cached,
+                ...refreshed,
                 daemonDbBusy: true,
                 daemonDbBusyError: error instanceof Error ? error.message : String(error),
               },
