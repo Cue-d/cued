@@ -293,12 +293,13 @@ function setUpdateError(
 async function fetchReleases(
   db: CuedDatabase,
   fetchImpl: typeof fetch,
+  options: { useCachedEtag?: boolean } = {},
 ): Promise<{ releases: GitHubRelease[] | null; etag: string | null; notModified: boolean }> {
   const cached = db.getUpdateReleaseState();
   const headers = new Headers({
     Accept: "application/vnd.github+json",
   });
-  if (cached?.etag) {
+  if ((options.useCachedEtag ?? true) && cached?.etag) {
     headers.set("If-None-Match", cached.etag);
   }
 
@@ -339,8 +340,10 @@ export async function checkForUpdates(
   const currentVersion = getCurrentAppVersion();
   const cached = db.getUpdateReleaseState();
   const force = options.force ?? false;
+  const cacheMatchesCurrentRuntime =
+    cached?.channel === channel && cached.currentVersion === currentVersion;
 
-  if (!force && !isUpdateCheckDue(cached?.checkedAt ?? null)) {
+  if (!force && cacheMatchesCurrentRuntime && !isUpdateCheckDue(cached?.checkedAt ?? null)) {
     return db.getUpdateStatus();
   }
 
@@ -370,7 +373,9 @@ export async function checkForUpdates(
       current_version: currentVersion,
       release_channel: channel,
     });
-    const { releases, etag, notModified } = await fetchReleases(db, fetchImpl);
+    const { releases, etag, notModified } = await fetchReleases(db, fetchImpl, {
+      useCachedEtag: !force && cached?.channel === channel,
+    });
     const selected = notModified
       ? cached
         ? {
@@ -631,6 +636,8 @@ set -euo pipefail
 
 INSTALLED_APP_PATH=${shellEscape(input.installedAppPath)}
 INSTALLED_APP_EXEC=${shellEscape(getAppExecutablePath(input.installedAppPath))}
+INSTALLED_DAEMON_CLI=${shellEscape(join(input.installedAppPath, "Contents", "Resources", "cued-runtime", "dist", "cli.js"))}
+INSTALLED_NATIVE_HELPER_DIR=${shellEscape(join(input.installedAppPath, "Contents", "Resources", "helpers"))}
 STAGED_APP_PATH=${shellEscape(input.stagedAppPath)}
 HELPER_CLI_PATH=${shellEscape(join(input.stagedAppPath, "Contents", "Resources", "cued-cli"))}
 INSTALLED_CLI_PATH=${shellEscape(join(input.installedAppPath, "Contents", "Resources", "cued-cli"))}
@@ -666,20 +673,37 @@ cleanup_legacy_launch_agent() {
 
 wait_for_old_app_exit() {
   local deadline=$(( $(date +%s) * 1000 + WAIT_FOR_EXIT_MS ))
-  while /usr/bin/pgrep -f "$INSTALLED_APP_EXEC" >/dev/null 2>&1; do
+  while installed_processes_running; do
     if (( $(date +%s) * 1000 >= deadline )); then
-      /usr/bin/pkill -TERM -f "$INSTALLED_APP_EXEC" >/dev/null 2>&1 || true
+      terminate_installed_processes TERM
       sleep 2
+      terminate_installed_processes KILL
+      sleep 1
       break
     fi
     sleep 1
   done
+  ! installed_processes_running
+}
+
+installed_processes_running() {
+  /usr/bin/pgrep -f "$INSTALLED_APP_EXEC" >/dev/null 2>&1 ||
+    /usr/bin/pgrep -f "$INSTALLED_DAEMON_CLI daemon" >/dev/null 2>&1 ||
+    /usr/bin/pgrep -f "$INSTALLED_NATIVE_HELPER_DIR/" >/dev/null 2>&1
+}
+
+terminate_installed_processes() {
+  local signal="$1"
+  /usr/bin/pkill "-$signal" -f "$INSTALLED_APP_EXEC" >/dev/null 2>&1 || true
+  /usr/bin/pkill "-$signal" -f "$INSTALLED_DAEMON_CLI daemon" >/dev/null 2>&1 || true
+  /usr/bin/pkill "-$signal" -f "$INSTALLED_NATIVE_HELPER_DIR/" >/dev/null 2>&1 || true
 }
 
 restore_previous() {
   "$HELPER_CLI_PATH" telemetry rollback-started --target-version "$TARGET_VERSION" >/dev/null 2>&1 || true
-  /usr/bin/pkill -TERM -f "$INSTALLED_APP_EXEC" >/dev/null 2>&1 || true
+  terminate_installed_processes TERM
   sleep 2
+  terminate_installed_processes KILL
   mkdir -p "$INSTALLED_APP_PATH"
   /usr/bin/rsync -a --delete "$APP_BACKUP_PATH/" "$INSTALLED_APP_PATH/"
   cp "$DB_BACKUP_PATH" "$DB_PATH"
@@ -706,7 +730,12 @@ refresh_global_skill() {
   "$INSTALLED_CLI_PATH" skill install-global >/dev/null 2>&1 || true
 }
 
-wait_for_old_app_exit
+if ! wait_for_old_app_exit; then
+  set_last_error "Update failed because the previous Cued app did not exit."
+  clear_pending
+  rm -rf "$STAGING_ROOT"
+  exit 1
+fi
 mkdir -p "$INSTALLED_APP_PATH"
 /usr/bin/rsync -a --delete "$STAGED_APP_PATH/" "$INSTALLED_APP_PATH/"
 mkdir -p "$(dirname "$CLI_SYMLINK_PATH")"
