@@ -61,9 +61,9 @@ jobs:
           const { readFileSync } = require("node:fs");
           const filePath = process.argv[2];
           const parsed = JSON.parse(readFileSync(filePath, "utf8"));
-          const source = parsed.installed ?? parsed.web;
+          const source = parsed.installed;
           if (!source?.client_id || !source?.client_secret) {
-            throw new Error("Google OAuth client JSON must include installed/web client_id and client_secret");
+            throw new Error("Google OAuth client JSON must include installed client_id and client_secret");
           }
           NODE
           chmod 600 "$GOOGLE_OAUTH_CLIENT_FILE"
