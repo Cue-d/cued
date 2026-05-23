@@ -39,6 +39,12 @@ export interface StoredGmailCredentials {
   threadsTotal?: number | null;
 }
 
+export interface GoogleOAuthClientInspection {
+  available: boolean;
+  filePath: string;
+  error: string | null;
+}
+
 function resolveBundledGoogleOAuthClientFile(): string | null {
   const explicit = process.env.CUED_BUNDLED_GOOGLE_OAUTH_CLIENT_FILE;
   if (explicit) return explicit;
@@ -96,6 +102,25 @@ export function readGoogleOAuthClientConfig(filePath = resolveGoogleOAuthClientF
     config: { clientId, clientSecret, authUri, tokenUri } satisfies GoogleOAuthClientConfig,
     filePath,
   };
+}
+
+export function inspectGoogleOAuthClientConfig(
+  filePath = resolveGoogleOAuthClientFile(),
+): GoogleOAuthClientInspection {
+  try {
+    readGoogleOAuthClientConfig(filePath);
+    return {
+      available: true,
+      filePath,
+      error: null,
+    };
+  } catch (error) {
+    return {
+      available: false,
+      filePath,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
 }
 
 export function readGoogleOAuthClientConfigForCredentials(

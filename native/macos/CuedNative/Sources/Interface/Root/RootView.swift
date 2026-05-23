@@ -24,6 +24,7 @@ public struct RootView: View {
   let onEnableIntegration: (String, String) -> Void
   let onRemoveIntegration: (String, String) -> Void
   let onConnectIntegration: (String, String) -> Void
+  let onPlatformPageActiveChanged: (Bool) -> Void
   let onLaunchAgentExample: (AgentExampleID, AgentTarget) -> Void
   let onFinish: () -> Void
 
@@ -44,6 +45,7 @@ public struct RootView: View {
     onEnableIntegration: @escaping (String, String) -> Void,
     onRemoveIntegration: @escaping (String, String) -> Void,
     onConnectIntegration: @escaping (String, String) -> Void,
+    onPlatformPageActiveChanged: @escaping (Bool) -> Void,
     onLaunchAgentExample: @escaping (AgentExampleID, AgentTarget) -> Void,
     onFinish: @escaping () -> Void
   ) {
@@ -56,6 +58,7 @@ public struct RootView: View {
     self.onEnableIntegration = onEnableIntegration
     self.onRemoveIntegration = onRemoveIntegration
     self.onConnectIntegration = onConnectIntegration
+    self.onPlatformPageActiveChanged = onPlatformPageActiveChanged
     self.onLaunchAgentExample = onLaunchAgentExample
     self.onFinish = onFinish
   }
@@ -85,7 +88,11 @@ public struct RootView: View {
       if viewModel.currentPage >= viewModel.pageCount {
         viewModel.currentPage = 0
       }
+      onPlatformPageActiveChanged(rootPage(for: viewModel.currentPage) == .platforms)
       onRefresh()
+    }
+    .onDisappear {
+      onPlatformPageActiveChanged(false)
     }
     .onReceive(
       NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)
@@ -106,6 +113,7 @@ public struct RootView: View {
     }
     .onChange(of: viewModel.currentPage) { page in
       saveOnboardingPage(page)
+      onPlatformPageActiveChanged(rootPage(for: page) == .platforms)
       guard rootPage(for: page) != .permissions else {
         return
       }

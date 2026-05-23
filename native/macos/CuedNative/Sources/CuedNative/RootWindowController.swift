@@ -18,6 +18,8 @@ struct RootSnapshotResponse: Decodable {
 }
 
 private let liveRefreshPermissionKeys: Set<String> = ["contacts", "full_disk_access"]
+private let platformAuthInteractionTTLMS = 45_000
+private let platformAuthInteractionRenewalMS = 15_000
 
 @MainActor
 final class RootWindowController: NSWindowController {
@@ -29,6 +31,8 @@ final class RootWindowController: NSWindowController {
   private var isRefreshing = false
   private var didEnsurePrerequisites = false
   private var pendingAuthLaunchRefreshTask: Task<Void, Never>?
+  private var platformAuthInteractionTask: Task<Void, Never>?
+  private var platformAuthInteractionSessionId: String?
   private var pendingStatusRefreshTask: Task<Void, Never>?
   private var pendingPermissionRefreshTask: Task<Void, Never>?
   private var pendingLivePermissionKeys = Set<String>()
@@ -82,6 +86,9 @@ final class RootWindowController: NSWindowController {
         },
         onConnectIntegration: { [weak self] platform, accountKey in
           self?.connectIntegration(platform: platform, accountKey: accountKey)
+        },
+        onPlatformPageActiveChanged: { [weak self] isActive in
+          self?.setPlatformAuthInteractionActive(isActive)
         },
         onLaunchAgentExample: { [weak self] exampleID, target in
           self?.launchAgentExample(exampleID: exampleID, target: target)
@@ -562,11 +569,14 @@ final class RootWindowController: NSWindowController {
     pendingForceActivePermissionRefreshAfterCurrent = false
     pendingAuthLaunchRefreshTask?.cancel()
     pendingAuthLaunchRefreshTask = nil
+    platformAuthInteractionTask?.cancel()
+    platformAuthInteractionTask = nil
     pendingStatusRefreshTask?.cancel()
     pendingStatusRefreshTask = nil
     pendingPermissionRefreshTask?.cancel()
     pendingPermissionRefreshTask = nil
     PermissionGuideAssistant.shared.dismiss()
+    platformAuthInteractionSessionId = nil
     super.close()
   }
 
@@ -600,6 +610,48 @@ final class RootWindowController: NSWindowController {
         } else {
           self.refresh()
         }
+      }
+    }
+  }
+
+  private func setPlatformAuthInteractionActive(_ isActive: Bool) {
+    if isActive {
+      startPlatformAuthInteraction()
+    } else {
+      platformAuthInteractionTask?.cancel()
+      platformAuthInteractionTask = nil
+      platformAuthInteractionSessionId = nil
+    }
+  }
+
+  private func startPlatformAuthInteraction() {
+    guard platformAuthInteractionTask == nil else {
+      return
+    }
+    let daemonSupervisor = self.daemonSupervisor
+    let sessionId = UUID().uuidString
+    platformAuthInteractionSessionId = sessionId
+    platformAuthInteractionTask = Task.detached(priority: .utility) { [daemonSupervisor, sessionId] in
+      defer {
+        _ = daemonSupervisor.runCLI(arguments: [
+          "integrations",
+          "interaction",
+          "end",
+          "--session-id",
+          sessionId,
+        ])
+      }
+      while !Task.isCancelled {
+        _ = daemonSupervisor.runCLI(arguments: [
+          "integrations",
+          "interaction",
+          "start",
+          "--session-id",
+          sessionId,
+          "--ttl-ms",
+          String(platformAuthInteractionTTLMS),
+        ])
+        try? await Task.sleep(for: .milliseconds(platformAuthInteractionRenewalMS))
       }
     }
   }

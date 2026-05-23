@@ -335,7 +335,7 @@ if [[ -n "$GOOGLE_OAUTH_CLIENT_SOURCE" ]]; then
   fi
   mkdir -p "$RESOURCES_DIR/oauth"
   cp "$GOOGLE_OAUTH_CLIENT_SOURCE" "$RESOURCES_DIR/oauth/google-oauth-client.json"
-  chmod 600 "$RESOURCES_DIR/oauth/google-oauth-client.json"
+  chmod 644 "$RESOURCES_DIR/oauth/google-oauth-client.json"
 fi
 mkdir -p "$RESOURCES_DIR/skills"
 cp -R "$ROOT_DIR/skills/cued" "$RESOURCES_DIR/skills/cued"

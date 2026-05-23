@@ -4,6 +4,7 @@ import {
   getAdaptiveProjectionBatchSize,
   getAdaptiveProjectionContinueDelayMs,
   getAutoSyncTargets,
+  InteractiveAuthSessions,
   isDisconnectedSocketError,
   requestWhatsAppHistoryBackfillOnce,
   shouldDeferContinuationProjection,
@@ -224,11 +225,63 @@ describe("adaptive projection scheduling", () => {
     expect(getAdaptiveProjectionBatchSize(100_000)).toBe(2_000);
   });
 
+  it("caps adaptive batches during interactive auth", () => {
+    expect(getAdaptiveProjectionBatchSize(100_000, { maxBatchSize: 25 })).toBe(25);
+    expect(getAdaptiveProjectionBatchSize(1_000, { maxBatchSize: 25 })).toBe(25);
+    expect(getAdaptiveProjectionBatchSize(0, { maxBatchSize: 25 })).toBe(25);
+  });
+
   it("removes continuation delay only while backlog is large", () => {
     expect(getAdaptiveProjectionContinueDelayMs(999)).toBe(5_000);
     expect(getAdaptiveProjectionContinueDelayMs(5_000)).toBe(0);
     expect(getAdaptiveProjectionContinueDelayMs(25_000)).toBe(0);
     expect(getAdaptiveProjectionContinueDelayMs(100_000)).toBe(0);
+  });
+});
+
+describe("interactive auth sessions", () => {
+  it("keeps interaction mode active when an unrelated session ends", () => {
+    const nowMs = 1_000;
+    const sessions = new InteractiveAuthSessions(() => nowMs);
+
+    expect(sessions.begin("screen-a", 30_000)).toEqual({
+      active: true,
+      expiresAt: 31_000,
+    });
+    expect(sessions.end("wrong")).toEqual({
+      active: true,
+      expiresAt: 31_000,
+    });
+    expect(sessions.end("screen-a")).toEqual({
+      active: false,
+      expiresAt: null,
+    });
+  });
+
+  it("expires interaction sessions by ttl", () => {
+    let nowMs = 1_000;
+    const sessions = new InteractiveAuthSessions(() => nowMs);
+
+    sessions.begin("screen-a", 30_000);
+    nowMs = 31_000;
+
+    expect(sessions.status()).toEqual({
+      active: false,
+      expiresAt: null,
+    });
+  });
+
+  it("tracks the latest expiry across overlapping sessions", () => {
+    const nowMs = 1_000;
+    const sessions = new InteractiveAuthSessions(() => nowMs);
+
+    sessions.begin("screen-a", 30_000);
+    sessions.begin("connect:slack:default", 45_000);
+
+    expect(sessions.end("screen-a")).toEqual({
+      active: true,
+      expiresAt: 46_000,
+    });
   });
 });
 

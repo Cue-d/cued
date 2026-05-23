@@ -32,6 +32,11 @@ This script builds the packaged development app at `native/macos/dist/Cued.app`.
 - bundles helper binaries such as the native macOS helper, Signal helper, and WhatsApp helper
 - signs the app bundle for local execution
 
+Set `CUED_BUNDLED_GOOGLE_OAUTH_CLIENT_FILE=/path/to/google-oauth-client.json` to bundle Gmail
+OAuth credentials into `Cued.app/Contents/Resources/oauth/google-oauth-client.json`. The stable
+GitHub release workflow materializes this file from the `CUED_GOOGLE_OAUTH_CLIENT_JSON` secret and
+fails the release if the secret is missing or malformed.
+
 ## macOS Permissions
 
 ```bash

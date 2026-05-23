@@ -149,6 +149,8 @@ Usage:
   cued integrations status
   cued integrations capabilities
   cued integrations refresh
+  cued integrations interaction start [--session-id <id>] [--ttl-ms <ms>]
+  cued integrations interaction end [--session-id <id>]
   cued integrations connect <platform> [account]
   cued integrations disconnect <platform> [account]
   cued integrations remove <platform> [account]
@@ -1019,6 +1021,25 @@ async function main(): Promise<void> {
             return;
           }
           break;
+        case "interaction":
+          if (rest[0] === "start") {
+            response = await sendDaemonRequest({
+              command: "integrations-interaction-start",
+              sessionId: parseFlagValue(rest, "--session-id"),
+              ttlMs: Number.parseInt(parseFlagValue(rest, "--ttl-ms") ?? "", 10) || undefined,
+            });
+            break;
+          }
+          if (rest[0] === "end") {
+            response = await sendDaemonRequest({
+              command: "integrations-interaction-end",
+              sessionId: parseFlagValue(rest, "--session-id"),
+            });
+            break;
+          }
+          throw new Error(
+            "Usage: cued integrations interaction start [--session-id <id>] [--ttl-ms <ms>] | end [--session-id <id>]",
+          );
         case "connect":
           if (!rest[0]) {
             throw new Error("Usage: cued integrations connect <platform> [account]");
