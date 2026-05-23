@@ -36,10 +36,29 @@ export interface WhatsAppReceiptSnapshot {
   readAt?: number | null;
 }
 
+export interface WhatsAppCallSnapshot {
+  callID: string;
+  chatJID: string;
+  initiatorJID?: string | null;
+  remoteJID?: string | null;
+  fromMe: boolean;
+  timestamp: number;
+  durationSeconds?: number | null;
+  status: string;
+  medium: string;
+  providerCallType?: string | null;
+}
+
+export interface WhatsAppCallDeleteSnapshot {
+  chatJID: string;
+  fromMe: boolean;
+}
+
 export interface WhatsAppSnapshot {
   contacts?: WhatsAppContactSnapshot[];
   chats?: WhatsAppChatSnapshot[];
   messages?: WhatsAppMessageSnapshot[];
+  calls?: WhatsAppCallSnapshot[];
 }
 
 export interface WhatsAppResyncPage extends WhatsAppSnapshot {
@@ -70,6 +89,8 @@ export type WhatsAppHelperEventName =
   | "contact_upsert"
   | "chat_upsert"
   | "message_upsert"
+  | "call_upsert"
+  | "call_delete"
   | "receipt_update"
   | "history_sync"
   | "disconnected"
@@ -84,6 +105,8 @@ export type WhatsAppHelperEventData = {
   contact_upsert: WhatsAppContactSnapshot;
   chat_upsert: WhatsAppChatSnapshot;
   message_upsert: WhatsAppMessageSnapshot;
+  call_upsert: WhatsAppCallSnapshot;
+  call_delete: WhatsAppCallDeleteSnapshot;
   receipt_update: WhatsAppReceiptSnapshot;
   history_sync: WhatsAppSnapshot & {
     completedAt?: number | null;

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildWhatsAppCallDeleteEvent,
   buildWhatsAppMessageEvent,
   buildWhatsAppRawEventsFromSnapshot,
   extractWhatsAppPhone,
@@ -103,5 +104,75 @@ describe("whatsapp events", () => {
         ],
       }),
     );
+  });
+
+  it("builds canonical call events from WhatsApp call snapshots", () => {
+    const rawEvents = buildWhatsAppRawEventsFromSnapshot({
+      accountKey: "default",
+      snapshot: {
+        calls: [
+          {
+            callID: "call-1",
+            chatJID: "12016824050@s.whatsapp.net",
+            initiatorJID: "15551234567@s.whatsapp.net",
+            remoteJID: "12016824050@s.whatsapp.net",
+            fromMe: false,
+            timestamp: 1_710_000_001_000,
+            durationSeconds: 61,
+            status: "completed",
+            medium: "audio",
+            providerCallType: "regular",
+          },
+        ],
+      },
+      observedBase: 1_710_000_000_500,
+    });
+
+    expect(rawEvents.map((event) => event.entityKind)).toEqual([
+      "contact",
+      "contact",
+      "conversation",
+      "call",
+    ]);
+    expect(rawEvents[3]).toMatchObject({
+      platform: "whatsapp",
+      entityKind: "call",
+      eventKind: "observed",
+      sourceVersion: "whatsapp-v1",
+      payload: {
+        sourceCallKey: "12016824050@s.whatsapp.net:call-1",
+        sourceConversationKey: "whatsapp:12016824050@s.whatsapp.net",
+        provider: "whatsapp",
+        providerCallType: "regular",
+        direction: "incoming",
+        medium: "audio",
+        status: "completed",
+        durationSeconds: 61,
+        endedAt: 1_710_000_062_000,
+      },
+    });
+  });
+
+  it("builds canonical call delete events from WhatsApp app-state deletes", () => {
+    const event = buildWhatsAppCallDeleteEvent(
+      {
+        chatJID: "12016824050@s.whatsapp.net",
+        fromMe: true,
+      },
+      "default",
+      1_710_000_000_500,
+    );
+
+    expect(event).toMatchObject({
+      platform: "whatsapp",
+      entityKind: "call",
+      eventKind: "deleted",
+      conversationExternalId: "12016824050@s.whatsapp.net",
+      payload: {
+        sourceConversationKey: "whatsapp:12016824050@s.whatsapp.net",
+        provider: "whatsapp",
+        direction: "outgoing",
+      },
+    });
   });
 });

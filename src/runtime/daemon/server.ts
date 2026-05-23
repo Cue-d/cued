@@ -104,7 +104,10 @@ import {
   type WhatsAppRealtimeStatus,
   WhatsAppRealtimeSupervisor,
 } from "../../platforms/whatsapp/realtime/session.js";
-import { buildWhatsAppRawEventsFromSnapshot } from "../../platforms/whatsapp/sync/events.js";
+import {
+  buildWhatsAppCallDeleteEvent,
+  buildWhatsAppRawEventsFromSnapshot,
+} from "../../platforms/whatsapp/sync/events.js";
 import {
   addWhatsAppResyncStats,
   buildWhatsAppMessagesProof,
@@ -827,6 +830,25 @@ export function shouldDeferContinuationProjection(input: {
     input.pendingRawEvents < backlogEvents &&
     input.nowMs - input.lastProjectionQueuedAt < intervalMs
   );
+}
+
+export function buildWhatsAppRealtimeSnapshotFromEvent(
+  event: WhatsAppHelperEventEnvelope,
+): WhatsAppSnapshot | null {
+  switch (event.event) {
+    case "contact_upsert":
+      return { contacts: [event.data as WhatsAppHelperEventEnvelope<"contact_upsert">["data"]] };
+    case "chat_upsert":
+      return { chats: [event.data as WhatsAppHelperEventEnvelope<"chat_upsert">["data"]] };
+    case "message_upsert":
+      return { messages: [event.data as WhatsAppHelperEventEnvelope<"message_upsert">["data"]] };
+    case "call_upsert":
+      return { calls: [event.data as WhatsAppHelperEventEnvelope<"call_upsert">["data"]] };
+    case "history_sync":
+      return event.data as WhatsAppHelperEventEnvelope<"history_sync">["data"];
+    default:
+      return null;
+  }
 }
 
 function resolveCliEntrypoint(): string {
@@ -2790,51 +2812,59 @@ export async function runDaemon(): Promise<void> {
     accountKey: string,
     event: WhatsAppHelperEventEnvelope,
   ): Promise<void> => {
+    const snapshot = buildWhatsAppRealtimeSnapshotFromEvent(event);
+    if (snapshot) {
+      await ingestWhatsAppRealtimeSnapshot(
+        accountKey,
+        snapshot,
+        event.event === "history_sync"
+          ? `whatsapp_history_sync:${accountKey}`
+          : `whatsapp_realtime:${accountKey}`,
+      );
+      return;
+    }
     switch (event.event) {
-      case "contact_upsert": {
-        const contact = event.data as WhatsAppHelperEventEnvelope<"contact_upsert">["data"];
-        await ingestWhatsAppRealtimeSnapshot(
-          accountKey,
-          {
-            contacts: [contact],
-          },
-          `whatsapp_realtime:${accountKey}`,
+      case "call_delete": {
+        const callDelete = event.data as WhatsAppHelperEventEnvelope<"call_delete">["data"];
+        const rawEvents = withRawEventAcquisitionMode(
+          [buildWhatsAppCallDeleteEvent(callDelete, accountKey, now())],
+          "realtime",
         );
-        return;
-      }
-      case "chat_upsert": {
-        const chat = event.data as WhatsAppHelperEventEnvelope<"chat_upsert">["data"];
-        await ingestWhatsAppRealtimeSnapshot(
-          accountKey,
+        db.upsertSourceAccounts([
           {
-            chats: [chat],
+            platform: "whatsapp",
+            accountKey,
+            displayName: "WhatsApp",
           },
-          `whatsapp_realtime:${accountKey}`,
-        );
-        return;
-      }
-      case "message_upsert": {
-        const message = event.data as WhatsAppHelperEventEnvelope<"message_upsert">["data"];
-        await ingestWhatsAppRealtimeSnapshot(
-          accountKey,
-          {
-            messages: [message],
-          },
-          `whatsapp_realtime:${accountKey}`,
-        );
+        ]);
+        const insertResult = db.insertRawEvents(rawEvents);
+        if (
+          realtimeProjectionEnabled &&
+          insertResult.firstInsertedRowId != null &&
+          insertResult.lastInsertedRowId != null
+        ) {
+          projectRealtimeRange(db, {
+            startRowId: insertResult.firstInsertedRowId,
+            endRowId: insertResult.lastInsertedRowId,
+            batchSize: realtimeProjectionBatchSize,
+          });
+          scheduleSearchIndexDrain();
+        }
+        const projection = db.getProjectionBacklog();
+        if (projection.pending_raw_events > 0) {
+          queueProjectionRun(`whatsapp_realtime:${accountKey}`, undefined, {
+            delayMs: deferredProjectionCoalesceMs,
+          });
+        }
+        if (insertResult.insertedCount > 0) {
+          updateWhatsAppCheckpointFromRealtime(accountKey);
+        }
         return;
       }
       case "receipt_update":
         await applyReceiptToRealtimeSnapshot(
           accountKey,
           event.data as WhatsAppHelperEventEnvelope<"receipt_update">["data"],
-        );
-        return;
-      case "history_sync":
-        await ingestWhatsAppRealtimeSnapshot(
-          accountKey,
-          event.data as WhatsAppHelperEventEnvelope<"history_sync">["data"],
-          `whatsapp_history_sync:${accountKey}`,
         );
         return;
       default:

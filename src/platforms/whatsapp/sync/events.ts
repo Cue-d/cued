@@ -1,11 +1,17 @@
 import { createHash } from "node:crypto";
 import type {
+  CallDirection,
+  CallMedium,
+  CallPayload,
+  CallStatus,
   ContactObservationPayload,
   ConversationObservationPayload,
   MessagePayload,
 } from "../../../core/types/provider.js";
 import type { SyncBundle } from "../../core/sync.js";
 import type {
+  WhatsAppCallDeleteSnapshot,
+  WhatsAppCallSnapshot,
   WhatsAppChatSnapshot,
   WhatsAppContactSnapshot,
   WhatsAppMessageSnapshot,
@@ -42,6 +48,10 @@ export function extractWhatsAppPhone(jid: string): string | null {
 
 export function whatsappMessageSourceKey(message: WhatsAppMessageSnapshot): string {
   return `${normalizeWhatsAppJid(message.chatJID)}:${message.messageID}`;
+}
+
+export function whatsappCallSourceKey(call: WhatsAppCallSnapshot): string {
+  return `${normalizeWhatsAppJid(call.chatJID)}:${call.callID}`;
 }
 
 function extensionForMimeType(mimeType: string): string | null {
@@ -265,6 +275,105 @@ export function buildWhatsAppMessageEvent(
   };
 }
 
+function normalizeCallDirection(call: WhatsAppCallSnapshot): CallDirection {
+  return call.fromMe ? "outgoing" : "incoming";
+}
+
+function normalizeCallMedium(value: string): CallMedium {
+  const normalized = value.trim().toLowerCase();
+  return normalized === "video" || normalized === "audio" ? normalized : "unknown";
+}
+
+function normalizeCallStatus(value: string): CallStatus {
+  const normalized = value.trim().toLowerCase();
+  switch (normalized) {
+    case "completed":
+    case "missed":
+    case "declined":
+    case "canceled":
+    case "blocked":
+    case "failed":
+    case "ongoing":
+      return normalized;
+    default:
+      return "unknown";
+  }
+}
+
+export function buildWhatsAppCallEvent(
+  call: WhatsAppCallSnapshot,
+  accountKey: string,
+  observedAt: number,
+): SyncBundle["rawEvents"][number] {
+  const normalizedChatJID = normalizeWhatsAppJid(call.chatJID);
+  const sourceCallKey = whatsappCallSourceKey(call);
+  const initiatorSourceKey = call.initiatorJID ? whatsappSourceEntityKey(call.initiatorJID) : null;
+  const remoteSourceKey = call.remoteJID ? whatsappSourceEntityKey(call.remoteJID) : null;
+  return {
+    id: stableId(`whatsapp:call:${accountKey}:${sourceCallKey}`),
+    platform: "whatsapp",
+    accountKey,
+    entityKind: "call",
+    eventKind: "observed",
+    externalEntityId: call.callID,
+    conversationExternalId: normalizedChatJID,
+    occurredAt: call.timestamp,
+    observedAt,
+    dedupeKey: stableId(`whatsapp:call:${accountKey}:${sourceCallKey}`),
+    payload: {
+      sourceCallKey,
+      sourceConversationKey: whatsappSourceConversationKey(normalizedChatJID),
+      provider: "whatsapp",
+      providerCallType: call.providerCallType ?? null,
+      direction: normalizeCallDirection(call),
+      medium: normalizeCallMedium(call.medium),
+      status: normalizeCallStatus(call.status),
+      startedAt: call.timestamp,
+      durationSeconds: call.durationSeconds ?? null,
+      endedAt:
+        typeof call.durationSeconds === "number" && Number.isFinite(call.durationSeconds)
+          ? call.timestamp + call.durationSeconds * 1000
+          : null,
+      initiatorSourceKey,
+      primaryRemoteSourceKey: remoteSourceKey,
+      metadata: {
+        isFromMe: call.fromMe,
+      },
+    } satisfies CallPayload,
+    sourceVersion: "whatsapp-v1",
+  };
+}
+
+export function buildWhatsAppCallDeleteEvent(
+  callDelete: WhatsAppCallDeleteSnapshot,
+  accountKey: string,
+  observedAt: number,
+): SyncBundle["rawEvents"][number] {
+  const normalizedChatJID = normalizeWhatsAppJid(callDelete.chatJID);
+  const direction: CallDirection = callDelete.fromMe ? "outgoing" : "incoming";
+  return {
+    id: stableId(
+      `whatsapp:call-delete:${accountKey}:${normalizedChatJID}:${direction}:${observedAt}`,
+    ),
+    platform: "whatsapp",
+    accountKey,
+    entityKind: "call",
+    eventKind: "deleted",
+    conversationExternalId: normalizedChatJID,
+    occurredAt: observedAt,
+    observedAt,
+    dedupeKey: stableId(
+      `whatsapp:call-delete:${accountKey}:${normalizedChatJID}:${direction}:${observedAt}`,
+    ),
+    payload: {
+      sourceConversationKey: whatsappSourceConversationKey(normalizedChatJID),
+      provider: "whatsapp",
+      direction,
+    },
+    sourceVersion: "whatsapp-v1",
+  };
+}
+
 function appendMessages(
   rawEvents: SyncBundle["rawEvents"],
   messages: WhatsAppMessageSnapshot[],
@@ -295,6 +404,59 @@ function appendMessages(
     }
 
     rawEvents.push(buildWhatsAppMessageEvent(message, accountKey, observedAt));
+  }
+}
+
+function appendCalls(
+  rawEvents: SyncBundle["rawEvents"],
+  calls: WhatsAppCallSnapshot[],
+  accountKey: string,
+  observedBase: number,
+  seenContacts: Set<string>,
+  seenConversations: Set<string>,
+): void {
+  for (const [index, call] of calls.entries()) {
+    const observedAt = observedBase + index;
+    for (const jid of [call.initiatorJID, call.remoteJID]) {
+      if (!jid) {
+        continue;
+      }
+      const normalizedJID = normalizeWhatsAppJid(jid);
+      if (seenContacts.has(normalizedJID)) {
+        continue;
+      }
+      rawEvents.push(
+        buildWhatsAppContactEvent(
+          {
+            jid: normalizedJID,
+            phone: extractWhatsAppPhone(normalizedJID),
+          },
+          accountKey,
+          observedAt,
+        ),
+      );
+      seenContacts.add(normalizedJID);
+    }
+
+    const conversationKey = whatsappSourceConversationKey(call.chatJID);
+    if (!seenConversations.has(conversationKey)) {
+      rawEvents.push(
+        buildWhatsAppChatEvent(
+          {
+            jid: call.chatJID,
+            isGroup: normalizeWhatsAppJid(call.chatJID).endsWith("@g.us"),
+            participants: [call.initiatorJID, call.remoteJID].filter(
+              (jid): jid is string => typeof jid === "string" && jid.trim().length > 0,
+            ),
+          },
+          accountKey,
+          observedAt,
+        ),
+      );
+      seenConversations.add(conversationKey);
+    }
+
+    rawEvents.push(buildWhatsAppCallEvent(call, accountKey, observedAt));
   }
 }
 
@@ -331,6 +493,15 @@ export function buildWhatsAppRawEventsFromSnapshot(options: {
     options.snapshot.messages ?? [],
     options.accountKey,
     observedBase + 20_000,
+    seenContacts,
+    seenConversations,
+  );
+
+  appendCalls(
+    rawEvents,
+    options.snapshot.calls ?? [],
+    options.accountKey,
+    observedBase + 30_000,
     seenContacts,
     seenConversations,
   );
