@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { getManagedChromiumBrowser } from "./managed-browser.js";
 
 export interface BrowserCandidate {
   name: string;
@@ -60,16 +61,30 @@ export function listInstalledChromiumAuthBrowsers(
   return candidates.filter((candidate) => existsSync(candidate.executablePath));
 }
 
+export function listAvailableChromiumAuthBrowsers(
+  env: NodeJS.ProcessEnv = process.env,
+  candidates: BrowserCandidate[] = MACOS_BROWSER_CANDIDATES,
+): BrowserCandidate[] {
+  const installed = listInstalledChromiumAuthBrowsers(env, candidates);
+  let managed: BrowserCandidate | null = null;
+  try {
+    managed = getManagedChromiumBrowser(env);
+  } catch {
+    managed = null;
+  }
+  return managed ? [...installed, managed] : installed;
+}
+
 export function resolveChromiumAuthBrowser(
   env: NodeJS.ProcessEnv = process.env,
   candidates: BrowserCandidate[] = MACOS_BROWSER_CANDIDATES,
 ): BrowserCandidate | null {
-  return listInstalledChromiumAuthBrowsers(env, candidates)[0] ?? null;
+  return listAvailableChromiumAuthBrowsers(env, candidates)[0] ?? null;
 }
 
 export function formatMissingChromiumAuthBrowserError(): string {
   return [
-    "No supported browser was found for Cued browser authentication.",
-    "Install Google Chrome, Chromium, Microsoft Edge, or Brave Browser and try again.",
+    "No supported browser was available for Cued browser authentication.",
+    "Install Google Chrome, Chromium, Microsoft Edge, or Brave Browser, or run `cued browser install` to install Cued's managed Chromium.",
   ].join(" ");
 }

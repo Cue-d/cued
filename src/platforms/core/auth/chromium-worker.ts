@@ -5,8 +5,9 @@ import { cuedAuthKeychainService } from "../../../core/identity.js";
 import {
   type BrowserCandidate,
   formatMissingChromiumAuthBrowserError,
-  listInstalledChromiumAuthBrowsers,
+  listAvailableChromiumAuthBrowsers,
 } from "./browser-resolver.js";
+import { installManagedChromiumBrowser } from "./managed-browser.js";
 
 declare const localStorage: {
   getItem(key: string): string | null;
@@ -467,6 +468,18 @@ function getFakeResult(args: WorkerArgs): WorkerResult | null {
   };
 }
 
+async function launchBrowserCandidate(
+  browser: BrowserCandidate,
+  profileDir: string,
+): Promise<BrowserContext> {
+  return chromium.launchPersistentContext(profileDir, {
+    headless: false,
+    executablePath: browser.executablePath,
+    args: ["--disable-blink-features=AutomationControlled"],
+    viewport: { width: 1280, height: 900 },
+  });
+}
+
 async function run(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
   const fake = getFakeResult(args);
@@ -476,9 +489,9 @@ async function run(): Promise<void> {
   }
 
   mkdirSync(args.profileDir, { recursive: true });
-  const browsers = listInstalledChromiumAuthBrowsers();
+  const browsers = listAvailableChromiumAuthBrowsers();
   if (browsers.length === 0) {
-    throw new Error(formatMissingChromiumAuthBrowserError());
+    browsers.push(await installManagedChromiumBrowser());
   }
 
   let context: BrowserContext | null = null;
@@ -487,12 +500,7 @@ async function run(): Promise<void> {
   try {
     for (const candidate of browsers) {
       try {
-        context = await chromium.launchPersistentContext(args.profileDir, {
-          headless: false,
-          executablePath: candidate.executablePath,
-          args: ["--disable-blink-features=AutomationControlled"],
-          viewport: { width: 1280, height: 900 },
-        });
+        context = await launchBrowserCandidate(candidate, args.profileDir);
         browser = candidate;
         break;
       } catch (error) {
@@ -503,7 +511,18 @@ async function run(): Promise<void> {
     }
 
     if (!context || !browser) {
-      throw new Error(`Could not launch a supported browser. ${launchErrors.join(" ")}`);
+      const managedBrowser = await installManagedChromiumBrowser({ force: true });
+      try {
+        context = await launchBrowserCandidate(managedBrowser, args.profileDir);
+        browser = managedBrowser;
+      } catch (error) {
+        launchErrors.push(
+          `${managedBrowser.name}: ${error instanceof Error ? error.message : String(error)}`,
+        );
+        throw new Error(
+          `${formatMissingChromiumAuthBrowserError()} ${launchErrors.join(" ")}`.trim(),
+        );
+      }
     }
 
     let page = firstOpenPage(context) ?? (await context.newPage());
