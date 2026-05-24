@@ -288,6 +288,18 @@ export async function emitHookEvent(
   return Promise.all(executions);
 }
 
+export async function emitHookEventSafe(
+  event: HookEventName,
+  payload: Record<string, unknown>,
+  onError?: (event: HookEventName, error: unknown) => void,
+): Promise<void> {
+  try {
+    await emitHookEvent(event, payload);
+  } catch (error) {
+    onError?.(event, error);
+  }
+}
+
 export async function testHookEvent(event: HookEventName): Promise<{
   event: HookEventName;
   executions: HookExecutionResult[];

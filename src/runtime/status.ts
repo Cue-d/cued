@@ -1,3 +1,5 @@
+import { getCurrentAppVersion, getCurrentReleaseChannel } from "../core/app-metadata.js";
+import { resolveHostOS } from "../core/platform-capabilities.js";
 import type { CuedDatabase } from "../db/database.js";
 import {
   buildIntegrationStatus,
@@ -18,6 +20,24 @@ export interface DaemonBootstrapSnapshot {
   startedAt: number;
   finishedAt: number | null;
   error: string | null;
+}
+
+export function buildAppStatusMetadata(db: Pick<CuedDatabase, "getAppMetadata">) {
+  return {
+    hostOs: resolveHostOS(),
+    version: getCurrentAppVersion(),
+    releaseChannel: getCurrentReleaseChannel(),
+    install: db.getAppMetadata(),
+  };
+}
+
+export function buildFallbackAppStatusMetadata() {
+  return {
+    hostOs: resolveHostOS(),
+    version: getCurrentAppVersion(),
+    releaseChannel: getCurrentReleaseChannel(),
+    install: null,
+  };
 }
 
 export async function buildDoctorSnapshot(

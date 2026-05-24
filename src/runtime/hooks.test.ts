@@ -78,4 +78,29 @@ args = ["-lc", "cat > ${join(home, "hook-payload.json")}"]
     expect(payload).toContain('"event": "sync.completed"');
     expect(payload).toContain('"runId": "123"');
   });
+
+  it("reports hook load errors without throwing through the safe emitter", async () => {
+    const home = setTempHome();
+    const { emitHookEventSafe } = await loadHooksService();
+    const hooksDir = join(home, ".cued");
+    mkdirSync(hooksDir, { recursive: true });
+    writeFileSync(join(hooksDir, "hooks.toml"), "[[hooks]\n", "utf8");
+
+    const errors: Array<{ event: string; message: string }> = [];
+    await expect(
+      emitHookEventSafe("sync.completed", { ok: true }, (event, error) => {
+        errors.push({
+          event,
+          message: error instanceof Error ? error.message : String(error),
+        });
+      }),
+    ).resolves.toBeUndefined();
+
+    expect(errors).toEqual([
+      {
+        event: "sync.completed",
+        message: expect.any(String),
+      },
+    ]);
+  });
 });
