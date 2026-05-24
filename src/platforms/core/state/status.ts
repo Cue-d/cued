@@ -885,24 +885,6 @@ export function resolveCompletedMetadata(
   };
 }
 
-export function getPlatformRuntimeDefaults(platform: Platform): {
-  runtimeKind: IntegrationRuntimeKind;
-  accountKey: string;
-} {
-  const runtimeKind =
-    platform === "contacts" || platform === "imessage"
-      ? "native"
-      : platform === "signal" || platform === "whatsapp"
-        ? "qr_native"
-        : platform === "gmail"
-          ? "oauth"
-          : "chromium";
-  return {
-    runtimeKind,
-    accountKey: getDefaultAccountKeyForPlatform(platform),
-  };
-}
-
 export function buildIntegrationStatus(
   db: CuedDatabase,
   options: IntegrationStatusOptions = {},
