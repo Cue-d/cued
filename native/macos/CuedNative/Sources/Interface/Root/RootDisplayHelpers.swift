@@ -8,12 +8,6 @@ let permissionOrder = [
   "diagnostics",
 ]
 
-let defaultPermissionOrder = [
-  "contacts",
-  "full_disk_access",
-  "diagnostics",
-]
-
 let platformOrder = [
   "contacts",
   "phone_calls",
@@ -27,7 +21,7 @@ let platformOrder = [
 ]
 
 func defaultPermissionStatuses() -> [PermissionStatus] {
-  defaultPermissionOrder.compactMap { defaultPermissionStatus(for: $0) }
+  permissionOrder.compactMap { defaultPermissionStatus(for: $0) }
 }
 
 func defaultSkillStatus() -> SkillStatus {

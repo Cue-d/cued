@@ -8,9 +8,6 @@ import WebKit
 
 private let appleEpochOffset = 978_307_200
 nonisolated(unsafe) private let sqliteTransient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
-private let defaultMessagesDBPath =
-  FileManager.default.homeDirectoryForCurrentUser
-  .appendingPathComponent("Library/Messages/chat.db").path
 private let defaultCallHistoryDBPath =
   FileManager.default.homeDirectoryForCurrentUser
   .appendingPathComponent("Library/Application Support/CallHistoryDB/CallHistory.storedata").path
@@ -84,18 +81,18 @@ struct IMessageSyncBatch: Encodable {
 }
 
 struct IMessageDumpOptions {
-  var dbPath: String = defaultMessagesDBPath
+  var dbPath: String = appMessagesDBPath
   var afterRowID = 0
   var limit = 500
 }
 
 struct IMessageWatchOptions {
-  var dbPath: String = defaultMessagesDBPath
+  var dbPath: String = appMessagesDBPath
 }
 
 struct CallHistoryDumpOptions {
   var dbPath: String = defaultCallHistoryDBPath
-  var chatDBPath: String = defaultMessagesDBPath
+  var chatDBPath: String = appMessagesDBPath
   var afterPK = 0
   var limit = 500
 }
