@@ -6,9 +6,8 @@ import { dirname, join, resolve } from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 import { DaemonRequestTimeoutError, sendDaemonRequest } from "./client.js";
-import { getCurrentAppVersion, getCurrentReleaseChannel } from "./core/app-metadata.js";
+import { getCurrentAppVersion } from "./core/app-metadata.js";
 import { CUED_DB_PATH, CUED_SOCKET_PATH, ensureCuedDirs } from "./core/config.js";
-import { resolveHostOS } from "./core/platform-capabilities.js";
 import {
   openCuedDatabase,
   openCuedDatabaseReadOnly,
@@ -43,7 +42,7 @@ import { runDaemon } from "./runtime/daemon/server.js";
 import { buildDoctorReport, buildPermissionStatus } from "./runtime/doctor.js";
 import {
   doctorHooksConfig,
-  emitHookEvent,
+  emitHookEventSafe,
   HOOK_EVENT_NAMES,
   initHooksConfig,
   testHookEvent,
@@ -54,10 +53,10 @@ import {
   parseLogsCommandArgs,
   readRecentLogLines,
 } from "./runtime/logs.js";
-import { readMenuBarStatusCache } from "./runtime/menu-bar-status-cache.js";
+import { readMenuBarStatusSnapshot } from "./runtime/menu-bar-status-cache.js";
 import { buildOnboardingSnapshot } from "./runtime/onboarding.js";
 import { runProjectionWorkerFromEnv } from "./runtime/projection/worker.js";
-import { hydrateIntegrationProjectionCounts } from "./runtime/status.js";
+import { buildAppStatusMetadata, hydrateIntegrationProjectionCounts } from "./runtime/status.js";
 import {
   checkForUpdates,
   clearUpdateHelperPendingState,
@@ -253,30 +252,21 @@ function parseContactMergeBatchFile(path: string): Array<{
   });
 }
 
-function getAppStatusMetadata(db: ReturnType<typeof openCuedDatabase>) {
-  return {
-    hostOs: resolveHostOS(),
-    version: getCurrentAppVersion(),
-    releaseChannel: getCurrentReleaseChannel(),
-    install: db.getAppMetadata(),
-  };
-}
-
 async function safeEmitHookEvent(
   event: (typeof HOOK_EVENT_NAMES)[number],
   payload: unknown,
 ): Promise<void> {
-  try {
-    await emitHookEvent(event, payload as Record<string, unknown>);
-  } catch (error) {
+  await emitHookEventSafe(event, payload as Record<string, unknown>, (failedEvent, error) => {
     console.warn(
-      `[cued hooks] ${event} failed: ${error instanceof Error ? error.message : String(error)}`,
+      `[cued hooks] ${failedEvent} failed: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
     );
-  }
+  });
 }
 
 async function buildLocalStatusFallback(error: DaemonRequestTimeoutError) {
-  const cached = readCachedStatusSnapshot();
+  const cached = readMenuBarStatusSnapshot();
   if (cached) {
     return {
       ...cached,
@@ -294,7 +284,7 @@ async function buildLocalStatusFallback(error: DaemonRequestTimeoutError) {
     const db = openExistingCuedDatabase(undefined, { readonly: true });
     try {
       return {
-        app: getAppStatusMetadata(db),
+        app: buildAppStatusMetadata(db),
         daemon: db.getDaemonState(),
         overview: db.getOverview(),
         projection: db.getProjectionBacklog({ initializeProjectionState: false }),
@@ -322,16 +312,12 @@ async function buildLocalStatusFallback(error: DaemonRequestTimeoutError) {
   }
 }
 
-function readCachedStatusSnapshot(): Record<string, unknown> | null {
-  return readMenuBarStatusCache()?.snapshot ?? null;
-}
-
 async function buildLocalDoctorFallback(error: DaemonRequestTimeoutError) {
   try {
     const db = openExistingCuedDatabase(undefined, { readonly: true });
     try {
       return {
-        app: getAppStatusMetadata(db),
+        app: buildAppStatusMetadata(db),
         ...(await buildDoctorReport(db)),
         projection: db.getProjectionBacklog({ initializeProjectionState: false }),
         hooks: doctorHooksConfig(),
@@ -572,7 +558,7 @@ async function main(): Promise<void> {
       const overview = db.getMenuBarOverview();
       const phoneCalls = db.countObservedPhoneCalls();
       printJson({
-        app: getAppStatusMetadata(db),
+        app: buildAppStatusMetadata(db),
         daemon: db.getDaemonState(),
         overview,
         relationshipSummary: {
@@ -606,14 +592,14 @@ async function main(): Promise<void> {
       printJson(
         command === "doctor"
           ? {
-              app: getAppStatusMetadata(db),
+              app: buildAppStatusMetadata(db),
               ...(await buildDoctorReport(db)),
               projection: db.getProjectionBacklog(),
               hooks: doctorHooksConfig(),
               update: getUpdateStatus(db),
             }
           : {
-              app: getAppStatusMetadata(db),
+              app: buildAppStatusMetadata(db),
               daemon: db.getDaemonState(),
               overview: db.getOverview(),
               projection: db.getProjectionBacklog({

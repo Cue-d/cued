@@ -3,7 +3,7 @@ import { existsSync, type FSWatcher, rmSync, watch } from "node:fs";
 import { createConnection, createServer, type Socket } from "node:net";
 import { basename, dirname } from "node:path";
 import process from "node:process";
-import { getCurrentAppVersion, getCurrentReleaseChannel } from "../../core/app-metadata.js";
+import { getCurrentAppVersion } from "../../core/app-metadata.js";
 import { CUED_DAEMON_LOCK_PATH, CUED_SOCKET_PATH } from "../../core/config.js";
 import { createLogger } from "../../core/logging.js";
 import {
@@ -16,7 +16,6 @@ import {
 import {
   type AdapterPlatform,
   getDefaultAccountKeyForPlatform,
-  type HostOS,
   isPlatform,
   type Platform,
   type ProviderRawEventInput,
@@ -119,10 +118,10 @@ import { durationBucket, errorTelemetryProperties } from "../../telemetry/contex
 import { DaemonTelemetryQueue } from "../../telemetry/queue.js";
 import { fetchAttachment, listAttachments, searchAttachments } from "../attachments.js";
 import { buildPermissionStatus } from "../doctor.js";
-import { emitHookEvent } from "../hooks.js";
+import { emitHookEventSafe } from "../hooks.js";
 import type { DaemonRequest, DaemonResponse } from "../ipc.js";
 import {
-  readMenuBarStatusCache,
+  readMenuBarStatusSnapshot,
   removeMenuBarStatusCache,
   writeMenuBarStatusCache,
 } from "../menu-bar-status-cache.js";
@@ -141,8 +140,10 @@ import {
 import type { ProjectionWorkerMessage, ProjectionWorkerSuccess } from "../projection/worker.js";
 import { RunQueueService } from "../run-queue.js";
 import {
+  buildAppStatusMetadata,
   buildDaemonStatusSnapshot,
   buildDoctorSnapshot,
+  buildFallbackAppStatusMetadata,
   buildMenuBarDaemonStatusSnapshot,
   type DaemonBootstrapSnapshot,
 } from "../status.js";
@@ -212,36 +213,6 @@ const slackLogger = createLogger("slack");
 const signalLogger = createLogger("signal");
 const whatsAppLogger = createLogger("whatsapp");
 
-function getAppStatusMetadata(db: { getAppMetadata: () => unknown }): {
-  hostOs: HostOS;
-  version: string;
-  releaseChannel: string;
-  install: unknown;
-} {
-  return {
-    hostOs:
-      process.platform === "darwin" ? "macos" : process.platform === "win32" ? "windows" : "linux",
-    version: DAEMON_VERSION,
-    releaseChannel: getCurrentReleaseChannel(),
-    install: db.getAppMetadata(),
-  };
-}
-
-function getFallbackAppStatusMetadata(): {
-  hostOs: HostOS;
-  version: string;
-  releaseChannel: string;
-  install: null;
-} {
-  return {
-    hostOs:
-      process.platform === "darwin" ? "macos" : process.platform === "win32" ? "windows" : "linux",
-    version: DAEMON_VERSION,
-    releaseChannel: getCurrentReleaseChannel(),
-    install: null,
-  };
-}
-
 function isOutboundSendEnabled(): boolean {
   return false;
 }
@@ -258,7 +229,7 @@ function writeMenuBarStatusSnapshot(
   },
 ): void {
   const snapshot = buildMenuBarDaemonStatusSnapshot(db, {
-    app: getAppStatusMetadata(db),
+    app: buildAppStatusMetadata(db),
     discordRealtime: options.discordRealtime,
     slackRealtime: options.slackRealtime,
     linkedInRealtime: options.linkedInRealtime,
@@ -268,12 +239,6 @@ function writeMenuBarStatusSnapshot(
     bootstrap: options.bootstrap,
   });
   writeMenuBarStatusCache(snapshot);
-}
-
-function readCachedDaemonStatusSnapshot(options?: {
-  maxAgeMs?: number;
-}): Record<string, unknown> | null {
-  return readMenuBarStatusCache(options)?.snapshot ?? null;
 }
 
 function now(): number {
@@ -926,7 +891,7 @@ function buildDaemonBusyStatusSnapshot(options: {
   error: unknown;
 }) {
   return {
-    app: getFallbackAppStatusMetadata(),
+    app: buildFallbackAppStatusMetadata(),
     bootstrap: options.bootstrap,
     daemon: {
       pid: process.pid,
@@ -1021,11 +986,9 @@ async function safeEmitHookEvent(
     | "message.received",
   payload: Record<string, unknown>,
 ): Promise<void> {
-  try {
-    await emitHookEvent(event, payload);
-  } catch (error) {
-    hooksLogger.warn(`${event} failed`, error);
-  }
+  await emitHookEventSafe(event, payload, (failedEvent, error) => {
+    hooksLogger.warn(`${failedEvent} failed`, error);
+  });
 }
 
 async function emitAuthenticatedHook(
@@ -5109,7 +5072,7 @@ async function dispatchRequest(
         };
       case "status":
         {
-          const cached = readCachedDaemonStatusSnapshot({
+          const cached = readMenuBarStatusSnapshot({
             maxAgeMs: DAEMON_STATUS_CACHE_MAX_AGE_MS,
           });
           if (cached) {
@@ -5124,7 +5087,7 @@ async function dispatchRequest(
           }
         }
         if (isBackgroundWorkActive()) {
-          const cached = readCachedDaemonStatusSnapshot();
+          const cached = readMenuBarStatusSnapshot();
           if (cached) {
             return {
               id: request.id,
@@ -5158,7 +5121,7 @@ async function dispatchRequest(
             ok: true,
             result: await db.withBusyTimeout(DAEMON_STATUS_BUSY_TIMEOUT_MS, () =>
               buildDaemonStatusSnapshot(db, {
-                app: getAppStatusMetadata(db),
+                app: buildAppStatusMetadata(db),
                 discordRealtime,
                 slackRealtime,
                 linkedInRealtime,
@@ -5173,7 +5136,7 @@ async function dispatchRequest(
           if (!isSqliteBusyError(error)) {
             throw error;
           }
-          const cached = readCachedDaemonStatusSnapshot();
+          const cached = readMenuBarStatusSnapshot();
           if (cached) {
             return {
               id: request.id,
@@ -5238,7 +5201,7 @@ async function dispatchRequest(
               DAEMON_STATUS_BUSY_TIMEOUT_MS,
               async () =>
                 await buildDoctorSnapshot(db, {
-                  app: getAppStatusMetadata(db),
+                  app: buildAppStatusMetadata(db),
                   discordRealtime,
                   slackRealtime,
                   linkedInRealtime,

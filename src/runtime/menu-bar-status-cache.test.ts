@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   readMenuBarStatusCache,
+  readMenuBarStatusSnapshot,
   removeMenuBarStatusCache,
   writeMenuBarStatusCache,
 } from "./menu-bar-status-cache.js";
@@ -50,6 +51,10 @@ describe("menu bar status cache", () => {
         mtimeMs: expect.any(Number),
       }),
     );
+    expect(readMenuBarStatusSnapshot({ statusPath, dbPath: "/tmp/cued-test/local.db" })).toEqual({
+      dbPath: "/tmp/cued-test/local.db",
+      overview: { messages: 12 },
+    });
   });
 
   it("rejects stale, invalid, and wrong-database cache entries", () => {
