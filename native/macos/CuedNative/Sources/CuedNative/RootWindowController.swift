@@ -90,8 +90,8 @@ final class RootWindowController: NSWindowController {
         onPlatformPageActiveChanged: { [weak self] isActive in
           self?.setPlatformAuthInteractionActive(isActive)
         },
-        onLaunchAgentExample: { [weak self] exampleID, target in
-          self?.launchAgentExample(exampleID: exampleID, target: target)
+        onLaunchAgentExample: { [weak self] exampleID, target, userFocus in
+          self?.launchAgentExample(exampleID: exampleID, target: target, userFocus: userFocus)
         },
         onFinish: { [weak self] in self?.finishSetup() }
       )
@@ -491,7 +491,7 @@ final class RootWindowController: NSWindowController {
     }
   }
 
-  private func launchAgentExample(exampleID: AgentExampleID, target: AgentTarget) {
+  private func launchAgentExample(exampleID: AgentExampleID, target: AgentTarget, userFocus: String?) {
     viewModel.showAgentLaunchFeedback(
       AgentLaunchFeedback(
         title: "Preparing \(target.title)",
@@ -517,7 +517,7 @@ final class RootWindowController: NSWindowController {
         return
       }
 
-      let feedback = AgentLaunchService.launch(exampleID: exampleID, target: target)
+      let feedback = AgentLaunchService.launch(exampleID: exampleID, target: target, userFocus: userFocus)
       viewModel.showAgentLaunchFeedback(feedback)
       refreshAgentTargets()
     }

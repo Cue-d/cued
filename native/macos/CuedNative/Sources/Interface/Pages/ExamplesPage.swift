@@ -16,6 +16,8 @@ extension RootView {
         agentLaunchFeedback(feedback)
       }
 
+      agentFocusField
+
       LazyVGrid(
         columns: [
           GridItem(.flexible(), spacing: 12),
@@ -29,13 +31,24 @@ extension RootView {
             targetStatuses: viewModel.agentTargetStatuses,
             onLaunch: { target in
               viewModel.clearAgentLaunchFeedback()
-              onLaunchAgentExample(example.id, target)
+              onLaunchAgentExample(example.id, target, agentExampleFocus)
             }
           )
         }
       }
       .padding(.top, 10)
     }
+  }
+
+  private var agentFocusField: some View {
+    VStack(alignment: .leading, spacing: 7) {
+      Text("What should Cued look into?")
+        .font(.subheadline.weight(.semibold))
+
+      TextField("Project + people, decision X, today, or person Y", text: $agentExampleFocus)
+        .textFieldStyle(.roundedBorder)
+    }
+    .padding(.top, 8)
   }
 
   func agentLaunchFeedback(_ feedback: AgentLaunchFeedback) -> some View {
