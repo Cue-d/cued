@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import type {
   CallDirection,
   CallMedium,
@@ -8,6 +7,7 @@ import type {
   ConversationObservationPayload,
   MessagePayload,
 } from "../../../core/types/provider.js";
+import { stableId } from "../../core/raw-events/stable-hash.js";
 import type { SyncBundle } from "../../core/sync.js";
 import type {
   WhatsAppCallDeleteSnapshot,
@@ -17,10 +17,6 @@ import type {
   WhatsAppMessageSnapshot,
   WhatsAppSnapshot,
 } from "../types.js";
-
-function stableId(seed: string): string {
-  return createHash("sha256").update(seed).digest("hex");
-}
 
 export function normalizeWhatsAppJid(jid: string): string {
   return jid.trim().toLowerCase();

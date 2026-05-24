@@ -26,6 +26,7 @@ import {
   projectionState,
   timelineEvents,
 } from "../../db/schema.js";
+import { chunkArray, sqlValueList } from "../../db/sql-batch.js";
 import { normalizeStoredRawEventForProjection } from "./events.js";
 import {
   createProjectionCacheOverlay,
@@ -571,21 +572,6 @@ function inferAttachmentProjection(attachment: Record<string, unknown>): {
     availabilityStatus,
     providerMetadataJson: JSON.stringify(providerMetadata ?? attachment),
   };
-}
-
-function chunkArray<T>(items: readonly T[], size: number): T[][] {
-  const chunks: T[][] = [];
-  for (let index = 0; index < items.length; index += size) {
-    chunks.push(items.slice(index, index + size));
-  }
-  return chunks;
-}
-
-function sqlValueList(values: readonly (string | number)[]) {
-  return sql.join(
-    values.map((value) => sql`${value}`),
-    sql`, `,
-  );
 }
 
 function createProjectionCache(): StoredProjectionCache {

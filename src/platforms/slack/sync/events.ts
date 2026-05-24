@@ -1,16 +1,14 @@
-import { createHash } from "node:crypto";
 import type {
   ContactObservationPayload,
   ConversationObservationPayload,
   MessagePayload,
   ReactionPayload,
 } from "../../../core/types/provider.js";
+import { providerStableHash } from "../../core/raw-events/stable-hash.js";
 import type { SyncBundle } from "../../core/sync.js";
 import type { SlackConversation, SlackMessage, SlackUser } from "../types.js";
 
-export function slackDedupeKey(seed: string): string {
-  return createHash("sha256").update(seed).digest("hex");
-}
+export const slackDedupeKey = providerStableHash;
 
 export function slackSourceKey(teamId: string, userId: string): string {
   return `slack:${teamId}:${userId}`;

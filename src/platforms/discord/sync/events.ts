@@ -1,9 +1,9 @@
-import { createHash } from "node:crypto";
 import type {
   ContactObservationPayload,
   ConversationObservationPayload,
   MessagePayload,
 } from "../../../core/types/provider.js";
+import { providerStableHash } from "../../core/raw-events/stable-hash.js";
 import type { SyncBundle } from "../../core/sync.js";
 import type { DiscordChannel, DiscordMessage, DiscordUser } from "../types.js";
 import {
@@ -14,9 +14,7 @@ import {
   discordSourceKey,
 } from "../types.js";
 
-export function discordDedupeKey(seed: string): string {
-  return createHash("sha256").update(seed).digest("hex");
-}
+export const discordDedupeKey = providerStableHash;
 
 export function discordTimestampMs(value: string | null | undefined): number | null {
   if (!value) {

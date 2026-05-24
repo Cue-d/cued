@@ -1,7 +1,7 @@
-import { createHash } from "node:crypto";
 import type { SourceAccountInput, SyncProofInput } from "../../../core/types/provider.js";
 import { mapWithConcurrency } from "../../../core/utils/async.js";
 import { openCuedDatabaseReadOnly } from "../../../db/database.js";
+import { stableId } from "../../core/raw-events/stable-hash.js";
 import type { SyncBundle } from "../../core/sync.js";
 import {
   type Connection,
@@ -106,10 +106,6 @@ interface LinkedInMessageBatchResult {
 
 function now(): number {
   return Date.now();
-}
-
-function stableId(seed: string): string {
-  return createHash("sha256").update(seed).digest("hex");
 }
 
 function getLinkedInFetchConcurrency(): number {
