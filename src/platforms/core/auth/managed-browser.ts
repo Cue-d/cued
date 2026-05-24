@@ -116,6 +116,17 @@ function isProcessAlive(pid: number): boolean {
   }
 }
 
+function readLockOwner(path: string): { pid?: number; createdAt?: number } | null {
+  try {
+    return JSON.parse(readFileSync(join(path, "owner.json"), "utf8")) as {
+      pid?: number;
+      createdAt?: number;
+    };
+  } catch {
+    return null;
+  }
+}
+
 async function acquireInstallLock(targetRoot: string): Promise<() => void> {
   const path = lockPath(targetRoot);
   const deadline = Date.now() + INSTALL_LOCK_TIMEOUT_MS;
@@ -138,26 +149,22 @@ async function acquireInstallLock(targetRoot: string): Promise<() => void> {
         throw error;
       }
 
-      try {
-        const owner = JSON.parse(readFileSync(join(path, "owner.json"), "utf8")) as {
-          pid?: number;
-          createdAt?: number;
-        };
-        if (typeof owner.pid === "number" && isProcessAlive(owner.pid)) {
-          if (Date.now() >= deadline) {
-            throw new Error("Timed out waiting for managed Chromium install lock");
-          }
-          await sleep(INSTALL_LOCK_RETRY_MS);
-          continue;
+      const owner = readLockOwner(path);
+      if (!owner) {
+        rmSync(path, { recursive: true, force: true });
+        continue;
+      }
+      if (typeof owner.pid === "number" && isProcessAlive(owner.pid)) {
+        if (Date.now() >= deadline) {
+          throw new Error("Timed out waiting for managed Chromium install lock");
         }
-        if (
-          typeof owner.createdAt === "number" &&
-          Date.now() - owner.createdAt > INSTALL_LOCK_STALE_MS
-        ) {
-          rmSync(path, { recursive: true, force: true });
-          continue;
-        }
-      } catch {
+        await sleep(INSTALL_LOCK_RETRY_MS);
+        continue;
+      }
+      if (
+        typeof owner.createdAt === "number" &&
+        Date.now() - owner.createdAt > INSTALL_LOCK_STALE_MS
+      ) {
         rmSync(path, { recursive: true, force: true });
         continue;
       }
@@ -236,20 +243,24 @@ process.stdout.write(chromium.executablePath());
 
 function promoteManagedBrowserInstall(tmpRoot: string, targetRoot: string): void {
   const backupRoot = `${targetRoot}.previous-${process.pid}-${Date.now()}`;
-  let hasBackup = false;
+  let targetMovedToBackup = false;
+  let replacementPromoted = false;
 
   try {
     if (existsSync(targetRoot)) {
       renameSync(targetRoot, backupRoot);
-      hasBackup = true;
+      targetMovedToBackup = true;
     }
     renameSync(tmpRoot, targetRoot);
-    if (hasBackup) {
+    replacementPromoted = true;
+    if (targetMovedToBackup) {
       rmSync(backupRoot, { recursive: true, force: true });
     }
   } catch (error) {
-    rmSync(targetRoot, { recursive: true, force: true });
-    if (hasBackup && existsSync(backupRoot)) {
+    if (replacementPromoted) {
+      rmSync(targetRoot, { recursive: true, force: true });
+    }
+    if (targetMovedToBackup && existsSync(backupRoot)) {
       renameSync(backupRoot, targetRoot);
     }
     throw error;

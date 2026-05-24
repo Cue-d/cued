@@ -92,6 +92,50 @@ describe("managed Chromium browser", () => {
     expect(getManagedChromiumBrowser({ CUED_MANAGED_BROWSER_DIR: root })).toEqual(first.browser);
   });
 
+  it("serializes concurrent managed browser installs", async () => {
+    const root = tempDir("cued-managed-browser-concurrent-");
+    let installCalls = 0;
+    let releaseFirstInstall!: () => void;
+    let markFirstInstallStarted!: () => void;
+    const started = new Promise<void>((resolveStarted) => {
+      markFirstInstallStarted = resolveStarted;
+    });
+    const release = new Promise<void>((resolveRelease) => {
+      releaseFirstInstall = resolveRelease;
+    });
+
+    const install = () =>
+      installManagedChromiumBrowser({
+        env: { CUED_MANAGED_BROWSER_DIR: root },
+        installChromium: async ({ destinationRoot }) => {
+          installCalls += 1;
+          markFirstInstallStarted();
+          await release;
+          const executablePath = join(
+            destinationRoot,
+            "chromium",
+            "Chromium.app",
+            "Contents",
+            "MacOS",
+            "Chromium",
+          );
+          mkdirSync(dirname(executablePath), { recursive: true });
+          writeFileSync(executablePath, "");
+        },
+        resolveExecutablePath: async ({ browserRoot }) =>
+          join(browserRoot, "chromium", "Chromium.app", "Contents", "MacOS", "Chromium"),
+      });
+
+    const first = install();
+    await started;
+    const second = install();
+    releaseFirstInstall();
+
+    const [firstResult, secondResult] = await Promise.all([first, second]);
+    expect(secondResult).toEqual(firstResult);
+    expect(installCalls).toBe(1);
+  });
+
   it("forces reinstall when the managed browser should be refreshed", async () => {
     const root = tempDir("cued-managed-browser-force-");
     const first = await installFakeBrowser(root, "OldChromium");
