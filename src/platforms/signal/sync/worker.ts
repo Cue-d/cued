@@ -1,4 +1,4 @@
-import { runAdapterWorker } from "../../core/adapter-worker.js";
+import { runAdapterWorker } from "../../core/utils.js";
 import { buildSignalSyncBundle } from "./bundle.js";
 
 void runAdapterWorker(async () => {

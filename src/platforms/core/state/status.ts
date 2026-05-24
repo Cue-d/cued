@@ -131,10 +131,6 @@ const AUTH_SESSION_STALE_AFTER_MS = 15 * 60 * 1000;
 const AUTH_SESSION_ABANDONED_ERROR = "Auth session ended before Cued received a completion event";
 const AUTH_SESSION_EXPIRED_ERROR = "Auth session expired before completion";
 
-export function now(): number {
-  return Date.now();
-}
-
 export function normalizeIntegrationPlatform(platform: string): Platform {
   const normalized = platform.trim().toLowerCase();
   const parsed = parsePlatform(normalized);
@@ -365,7 +361,7 @@ export function reconcileAbandonedAuthSessions(
   db: CuedDatabase,
   options: { staleAfterMs?: number; nowMs?: number } = {},
 ): number {
-  const timestamp = options.nowMs ?? now();
+  const timestamp = options.nowMs ?? Date.now();
   const staleAfterMs = options.staleAfterMs ?? AUTH_SESSION_STALE_AFTER_MS;
   let reconciled = 0;
 
@@ -573,8 +569,8 @@ export function summarizeManagedIntegrationState(
     latestSyncDiagnostics: includeDiagnostics
       ? getLatestSyncDiagnostics(db, integration.platform, integration.accountKey)
       : null,
-    lastSeenAt: now(),
-    updatedAt: now(),
+    lastSeenAt: Date.now(),
+    updatedAt: Date.now(),
     latestAuthSessionId:
       db.getLatestAuthSession(integration.platform, integration.accountKey)?.id ?? null,
     capability: summarizeIntegrationCapability(

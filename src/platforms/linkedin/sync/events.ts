@@ -7,7 +7,7 @@ import type {
   ReactionPayload,
   TimelineEventPayload,
 } from "../../../core/types/provider.js";
-import { stableId } from "../../core/raw-events/stable-hash.js";
+import { stableId } from "../../core/utils.js";
 import type {
   Conversation,
   Message,

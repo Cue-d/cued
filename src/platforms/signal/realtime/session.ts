@@ -100,10 +100,6 @@ export function parseSignalJsonRpcLine(line: string): SignalJsonRpcMessage | nul
   }
 }
 
-function now(): number {
-  return Date.now();
-}
-
 function makeStatus(input: {
   accountKey: string;
   account: string;
@@ -240,7 +236,7 @@ export class SignalRealtimeSession implements SignalRealtimeSessionLike {
 
     const result = await this.request<{ timestamp?: number }>("send", params);
     return {
-      timestamp: typeof result?.timestamp === "number" ? result.timestamp : now(),
+      timestamp: typeof result?.timestamp === "number" ? result.timestamp : Date.now(),
     };
   }
 
@@ -322,7 +318,7 @@ export class SignalRealtimeSession implements SignalRealtimeSessionLike {
       this.hasEverConnected = true;
       this.setStatus({
         state: "connected",
-        connectedAt: now(),
+        connectedAt: Date.now(),
         reconnectAttempts: 0,
         lastSessionError: null,
       });
@@ -370,7 +366,7 @@ export class SignalRealtimeSession implements SignalRealtimeSessionLike {
       return;
     }
 
-    this.setStatus({ lastNotificationAt: now(), lastSessionError: null });
+    this.setStatus({ lastNotificationAt: Date.now(), lastSessionError: null });
     const parsed = toSignalMessage(message.params, this.account, this.nextNotificationIndex++);
     if (parsed) {
       this.onMessage?.(parsed);
@@ -403,7 +399,7 @@ export class SignalRealtimeSession implements SignalRealtimeSessionLike {
       state: this.shouldReconnect ? "reconnecting" : "degraded",
       connectedAt: null,
       reconnectAttempts,
-      lastReconnectAt: this.shouldReconnect ? now() : this.status.lastReconnectAt,
+      lastReconnectAt: this.shouldReconnect ? Date.now() : this.status.lastReconnectAt,
       lastSessionError: error.message,
     });
     this.onDisconnected?.(this.getStatus());

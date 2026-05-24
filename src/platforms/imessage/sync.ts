@@ -9,8 +9,8 @@ import type {
   SourceAccountInput,
 } from "../../core/types/provider.js";
 import { resolveMacOSNativeBinary } from "../../runtime/native-binary.js";
-import { providerStableHash } from "../core/raw-events/stable-hash.js";
 import type { SyncBundle } from "../core/sync.js";
+import { providerStableHash } from "../core/utils.js";
 import {
   DEFAULT_CALL_HISTORY_DB_PATH,
   type ImsCallSyncBatch,

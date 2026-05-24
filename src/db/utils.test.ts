@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { chunkArray } from "./sql-batch.js";
+import { chunkArray } from "./utils.js";
 
 describe("chunkArray", () => {
   it("splits items into fixed-size chunks", () => {

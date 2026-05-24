@@ -99,10 +99,6 @@ type ManagedDiscordSession = {
   session: DiscordRealtimeSessionLike;
 };
 
-function now(): number {
-  return Date.now();
-}
-
 function makeStatus(input: {
   accountKey: string;
   state?: DiscordRealtimeState;
@@ -222,7 +218,7 @@ export class DiscordRealtimeSession implements DiscordRealtimeSessionLike {
         state: "connected",
         userId: currentUser.id,
         username: discordDisplayName(currentUser),
-        connectedAt: this.status.connectedAt ?? now(),
+        connectedAt: this.status.connectedAt ?? Date.now(),
         reconnectAttempts: 0,
         lastSessionError: null,
       });
@@ -357,7 +353,7 @@ export class DiscordRealtimeSession implements DiscordRealtimeSessionLike {
   }
 
   private emitEvent(event: DiscordRealtimeEventEnvelope): void {
-    this.setStatus({ lastEventAt: now() });
+    this.setStatus({ lastEventAt: Date.now() });
     this.onEvent?.(this.accountKey, event);
   }
 
@@ -371,7 +367,7 @@ export class DiscordRealtimeSession implements DiscordRealtimeSessionLike {
       this.setStatus({
         state: "stopped",
         lastSessionError: message,
-        lastReconnectAt: now(),
+        lastReconnectAt: Date.now(),
         reconnectAttempts,
       });
       this.onAuthInvalidated?.(this.getStatus(), message);
@@ -380,7 +376,7 @@ export class DiscordRealtimeSession implements DiscordRealtimeSessionLike {
     this.setStatus({
       state: "degraded",
       lastSessionError: message,
-      lastReconnectAt: now(),
+      lastReconnectAt: Date.now(),
       reconnectAttempts,
     });
     if (!this.shouldReconnect) {

@@ -66,10 +66,6 @@ interface LinkedInRealtimeSupervisorOptions {
   onStatusChange?: (accountKey: string, status: LinkedInRealtimeStatus) => void;
 }
 
-function now(): number {
-  return Date.now();
-}
-
 function getCsrfToken(cookies: Cookie[]): string | null {
   const cookie = cookies.find((item) => item.name === "JSESSIONID");
   return cookie ? cookie.value.replace(/^"|"$/g, "") : null;
@@ -281,7 +277,7 @@ export class LinkedInRealtimeSession implements LinkedInRealtimeSessionLike {
         this.setStatus({
           state: this.hasEverConnected ? "reconnecting" : "connecting",
           connectedAt: null,
-          lastReconnectAt: now(),
+          lastReconnectAt: Date.now(),
           reconnectAttempts: attempt,
           lastSessionError: message,
         });
@@ -342,7 +338,7 @@ export class LinkedInRealtimeSession implements LinkedInRealtimeSessionLike {
       throw new Error(`LinkedIn realtime connect failed (${response.status})`);
     }
 
-    const connectedAt = now();
+    const connectedAt = Date.now();
     const reconnected = this.hasEverConnected;
     this.hasEverConnected = true;
     this.setStatus({
@@ -439,7 +435,7 @@ export class LinkedInRealtimeSession implements LinkedInRealtimeSessionLike {
           }
           try {
             const event = JSON.parse(payload) as RealtimeEventEnvelope;
-            this.setStatus({ lastEventAt: now() });
+            this.setStatus({ lastEventAt: Date.now() });
             if (event["com.linkedin.realtimefrontend.DecoratedEvent"] && this.userEntityUrn) {
               this.onEvent?.(this.accountKey, event, this.userEntityUrn);
             }

@@ -4,8 +4,8 @@ import type {
   MessagePayload,
   ReactionPayload,
 } from "../../../core/types/provider.js";
-import { providerStableHash } from "../../core/raw-events/stable-hash.js";
 import type { SyncBundle } from "../../core/sync.js";
+import { providerStableHash } from "../../core/utils.js";
 import type { SlackConversation, SlackMessage, SlackUser } from "../types.js";
 
 export const slackDedupeKey = providerStableHash;

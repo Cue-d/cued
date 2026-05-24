@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { providerStableHash, stableId } from "./stable-hash.js";
+import { providerStableHash, stableId } from "./utils.js";
 
 describe("providerStableHash", () => {
   it("matches sha256 hex digest of the seed", () => {

@@ -116,10 +116,6 @@ interface SlackRealtimeSupervisorOptions {
   onStatusChange?: (accountKey: string, status: SlackRealtimeStatus) => void;
 }
 
-function now(): number {
-  return Date.now();
-}
-
 function makeStatus(input: {
   accountKey: string;
   helperPath: string;
@@ -299,7 +295,7 @@ export class SlackRealtimeSession implements SlackRealtimeSessionLike {
       return;
     }
 
-    const eventAt = now();
+    const eventAt = Date.now();
     if (parsed.event === "connected") {
       const reconnected = this.hasEverConnected;
       this.hasEverConnected = true;
@@ -349,7 +345,7 @@ export class SlackRealtimeSession implements SlackRealtimeSessionLike {
       state: this.shouldReconnect ? "reconnecting" : "degraded",
       connectedAt: null,
       reconnectAttempts,
-      lastReconnectAt: this.shouldReconnect ? now() : this.status.lastReconnectAt,
+      lastReconnectAt: this.shouldReconnect ? Date.now() : this.status.lastReconnectAt,
       lastSessionError: error.message,
     });
     this.onDisconnected?.(this.getStatus());

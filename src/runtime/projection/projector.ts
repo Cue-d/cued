@@ -26,7 +26,7 @@ import {
   projectionState,
   timelineEvents,
 } from "../../db/schema.js";
-import { chunkArray, sqlValueList } from "../../db/sql-batch.js";
+import { chunkArray, sqlValueList } from "../../db/utils.js";
 import { normalizeStoredRawEventForProjection } from "./events.js";
 
 type LocalDbExecutor = Pick<

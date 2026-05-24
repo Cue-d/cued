@@ -128,10 +128,6 @@ interface DownloadedResponse {
   sizeBytes: number;
 }
 
-function now(): number {
-  return Date.now();
-}
-
 function expandHomePath(candidate: string | null): string | null {
   if (!candidate) {
     return null;
@@ -742,7 +738,7 @@ function ensureWithinLimit(
       sizeBytes: entry.size_bytes,
       sha256: entry.sha256,
       fetchedAt: entry.fetched_at,
-      lastAccessedAt: now(),
+      lastAccessedAt: Date.now(),
       expiresAt: entry.expires_at,
       lastError: null,
     });
@@ -1065,7 +1061,7 @@ export async function fetchAttachment(
 
   const existing = db.getAttachmentCacheEntry(attachment.id, variant);
   if (existing?.status === "ready" && existing.cache_path && existsSync(existing.cache_path)) {
-    db.touchAttachmentCacheEntry(attachment.id, variant, now());
+    db.touchAttachmentCacheEntry(attachment.id, variant, Date.now());
     if (input.extractText !== false && !db.getAttachmentContent(attachment.id)) {
       const extracted = await extractTextContent(existing.cache_path, attachment, {
         mimeType: existing.mime_type ?? attachment.mime_type,
@@ -1077,7 +1073,7 @@ export async function fetchAttachment(
         status: extracted.status,
         textContent: extracted.text,
         mimeType: existing.mime_type ?? attachment.mime_type,
-        extractedAt: extracted.status === "ready" ? now() : null,
+        extractedAt: extracted.status === "ready" ? Date.now() : null,
         lastError: extracted.lastError,
         filename: attachment.filename,
         title: attachment.title,
@@ -1099,7 +1095,7 @@ export async function fetchAttachment(
     sizeBytes: existing?.size_bytes ?? attachment.size_bytes,
     sha256: existing?.sha256 ?? null,
     fetchedAt: existing?.fetched_at ?? null,
-    lastAccessedAt: now(),
+    lastAccessedAt: Date.now(),
     expiresAt: existing?.expires_at ?? null,
     lastError: null,
   });
@@ -1136,8 +1132,8 @@ export async function fetchAttachment(
       mimeType: mimeType ?? attachment.mime_type,
       sizeBytes,
       sha256,
-      fetchedAt: now(),
-      lastAccessedAt: now(),
+      fetchedAt: Date.now(),
+      lastAccessedAt: Date.now(),
       expiresAt: null,
       lastError: null,
     });
@@ -1150,7 +1146,7 @@ export async function fetchAttachment(
         status: extracted.status,
         textContent: extracted.text,
         mimeType: mimeType ?? attachment.mime_type,
-        extractedAt: extracted.status === "ready" ? now() : null,
+        extractedAt: extracted.status === "ready" ? Date.now() : null,
         lastError: extracted.lastError,
         filename,
         title: attachment.title,
@@ -1174,7 +1170,7 @@ export async function fetchAttachment(
       sizeBytes: null,
       sha256: null,
       fetchedAt: null,
-      lastAccessedAt: now(),
+      lastAccessedAt: Date.now(),
       expiresAt: null,
       lastError: error instanceof Error ? error.message : String(error),
     });

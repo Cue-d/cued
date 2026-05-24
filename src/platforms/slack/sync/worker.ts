@@ -1,5 +1,5 @@
-import { runAdapterWorker } from "../../core/adapter-worker.js";
 import { readAdapterInvocationEnv } from "../../core/invocation.js";
+import { runAdapterWorker } from "../../core/utils.js";
 import { buildSlackSyncBundle } from "./bundle.js";
 
 void runAdapterWorker(async () => {

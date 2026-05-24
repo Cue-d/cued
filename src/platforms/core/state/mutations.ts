@@ -21,7 +21,6 @@ import {
   isGeneratedPendingAccountKey,
   isUserRemovedIntegrationMetadata,
   normalizeIntegrationPlatform,
-  now,
   resolveAccountKey,
   resolveCompletedDisplayName,
   resolveCompletedMetadata,
@@ -100,7 +99,7 @@ function ensureRequestableIntegrationState(
             : requested.runtimeKind === "oauth"
               ? "oauth-loopback-runtime"
               : "native-qr-runtime",
-      requestedAt: normalizedExistingMetadata.requestedAt ?? now(),
+      requestedAt: normalizedExistingMetadata.requestedAt ?? Date.now(),
       runtimeKind: requested.runtimeKind,
       browserProfileDir,
       configDir: signalConfigDir,
@@ -124,7 +123,7 @@ function cancelStaleAuthSessions(db: CuedDatabase, platform: Platform, accountKe
     db.updateAuthSessionState({
       id: session.id,
       state: "cancelled",
-      finishedAt: now(),
+      finishedAt: Date.now(),
       errorSummary: "Superseded by a newer auth session request",
     });
   }
@@ -186,7 +185,7 @@ export function markAuthSessionInProgress(
     id: sessionId,
     state: "in_progress",
     nativePid,
-    startedAt: now(),
+    startedAt: Date.now(),
     errorSummary: null,
   });
 
@@ -280,7 +279,7 @@ export function completeAuthSession(
   db.updateAuthSessionState({
     id: sessionId,
     state: input.state,
-    finishedAt: now(),
+    finishedAt: Date.now(),
     nativePid: null,
     keychainService: input.keychainService ?? null,
     keychainAccount: input.keychainAccount ?? null,
@@ -363,7 +362,7 @@ export function completeAuthSession(
       keychainAccount: hideGeneratedPending
         ? null
         : resolveCompletedKeychainAccount(targetAccountKey, input.keychainAccount),
-      authenticatedAt: input.state === "authenticated" ? now() : null,
+      authenticatedAt: input.state === "authenticated" ? Date.now() : null,
       authResult: input.resultSummary ?? null,
       lastAuthError: input.errorSummary ?? null,
       blockedAt: input.state === "authenticated" ? null : (metadata.blockedAt ?? null),
@@ -371,7 +370,7 @@ export function completeAuthSession(
       ...(hideGeneratedPending
         ? {
             userRemoved: true,
-            removedAt: now(),
+            removedAt: Date.now(),
           }
         : {}),
     },
@@ -420,7 +419,7 @@ export function disconnectIntegration(
       authResult: null,
       authenticatedAt: null,
       lastAuthError: null,
-      disconnectedAt: now(),
+      disconnectedAt: Date.now(),
     },
   });
 
@@ -447,7 +446,7 @@ export function removeIntegration(
       id: latestAuthSession.id,
       state: "cancelled",
       nativePid: null,
-      finishedAt: now(),
+      finishedAt: Date.now(),
       errorSummary: null,
     });
   }
@@ -483,7 +482,7 @@ export function removeIntegration(
     removeRuntimeDirectoryInsideRoot(configDir, getSignalConfigRoot(), "Signal config directory");
   }
 
-  const removedAt = now();
+  const removedAt = Date.now();
   db.clearIntegrationRuntimeState(integration.platform, integration.accountKey);
   db.upsertIntegrationState({
     platform: integration.platform,

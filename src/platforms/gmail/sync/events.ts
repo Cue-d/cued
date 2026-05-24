@@ -3,8 +3,8 @@ import type {
   ConversationObservationPayload,
   MessagePayload,
 } from "../../../core/types/provider.js";
-import { providerStableHash } from "../../core/raw-events/stable-hash.js";
 import type { SyncBundle } from "../../core/sync.js";
+import { providerStableHash } from "../../core/utils.js";
 import type { GmailMessage, GmailMessagePayload } from "../api/client.js";
 
 export const gmailStableId = providerStableHash;
