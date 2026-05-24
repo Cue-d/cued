@@ -50,12 +50,18 @@ const REQUIRED_ARGS = new Set([
   "--launch-target",
 ]);
 
+const DEFAULT_LAUNCH_TARGETS: Record<Platform, string> = {
+  slack: "https://slack.com/signin",
+  linkedin: "https://www.linkedin.com/login",
+  discord: "https://discord.com/login",
+};
+
 function parseArgs(argv: string[]): WorkerArgs {
   const values = new Map<string, string>();
   for (let index = 0; index < argv.length; index += 2) {
     const key = argv[index];
     const value = argv[index + 1];
-    if (!REQUIRED_ARGS.has(key) || !value) {
+    if (!REQUIRED_ARGS.has(key) || value == null) {
       throw new Error(`Invalid argument sequence at ${key ?? "end"}`);
     }
     values.set(key, value);
@@ -71,7 +77,7 @@ function parseArgs(argv: string[]): WorkerArgs {
     accountKey: values.get("--account-key")!,
     sessionId: values.get("--session-id")!,
     profileDir: values.get("--profile-dir")!,
-    launchTarget: values.get("--launch-target")!,
+    launchTarget: values.get("--launch-target") || DEFAULT_LAUNCH_TARGETS[platform],
   };
 }
 
