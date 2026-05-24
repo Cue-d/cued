@@ -108,6 +108,76 @@ final class RootViewTests: XCTestCase {
     XCTAssertTrue(path.contains("\(NSHomeDirectory())/.npm-global/bin"))
   }
 
+  func testAgentLaunchFocusInstructionHandlesBlankAndFilledInput() {
+    let blankInstruction = AgentLaunchService.focusInstruction(nil)
+    XCTAssertTrue(blankInstruction.contains("Pick the best candidate from local context."))
+    XCTAssertTrue(blankInstruction.contains("Choose exactly one high-signal candidate"))
+    XCTAssertTrue(blankInstruction.contains("most 15 candidate conversations or contacts"))
+
+    let whitespaceInstruction = AgentLaunchService.focusInstruction("   \n")
+    XCTAssertEqual(whitespaceInstruction, blankInstruction)
+
+    let filledInstruction = AgentLaunchService.focusInstruction("  follow-ups\nI owe\tthis week  ")
+    XCTAssertTrue(filledInstruction.contains("Use this user focus as the constraint: follow-ups I owe this week"))
+    XCTAssertTrue(filledInstruction.contains("required scope"))
+    XCTAssertTrue(filledInstruction.contains("unsupported by local"))
+    XCTAssertTrue(filledInstruction.contains("Do not broaden silently."))
+  }
+
+  func testAgentLaunchPromptsCoverCurrentExamples() {
+    let expectedPhrases: [(AgentExampleID, [String])] = [
+      (
+        .catchUp,
+        [
+          "Context for a Project",
+          "pull Cued context from threads with the relevant people into a working project spec",
+          "drop-in spec section",
+        ]
+      ),
+      (
+        .followUps,
+        [
+          "Recover Decisions",
+          "recover what the user decided about X",
+          "short decision timeline",
+        ]
+      ),
+      (
+        .prepPerson,
+        [
+          "Chief of Staff",
+          "tell the user about their day and design Codex automations or hooks",
+          "trigger conditions or schedule",
+        ]
+      ),
+      (
+        .findWarmIntros,
+        [
+          "Intros / Relationship Context",
+          "who should I intro Y to",
+          "suggested intro angle",
+        ]
+      ),
+    ]
+
+    for (exampleID, phrases) in expectedPhrases {
+      let prompt = AgentLaunchService.prompt(
+        for: exampleID,
+        repoPath: "/tmp/cued",
+        userFocus: "Cued agent launch examples"
+      )
+
+      XCTAssertTrue(prompt.contains("Use Cued's local data through the `cued` CLI"))
+      XCTAssertTrue(prompt.contains("Do not use `sqlite3`"))
+      XCTAssertTrue(prompt.contains("continue read-only with a freshness caveat"))
+      XCTAssertTrue(prompt.contains("Use this user focus as the constraint: Cued agent launch examples"))
+      XCTAssertFalse(prompt.contains("fix only the local runtime issue first"))
+      for phrase in phrases {
+        XCTAssertTrue(prompt.contains(phrase), "Prompt for \(exampleID) is missing \(phrase)")
+      }
+    }
+  }
+
   func testPermissionGuideURLsMatchExpectedSystemSettingsPanes() {
     XCTAssertEqual(
       permissionGuideURL(for: "contacts"),

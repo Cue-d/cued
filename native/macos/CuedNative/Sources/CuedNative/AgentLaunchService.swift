@@ -14,7 +14,11 @@ enum AgentLaunchService {
   }
 
   @MainActor
-  static func launch(exampleID: AgentExampleID, target: AgentTarget) -> AgentLaunchFeedback {
+  static func launch(
+    exampleID: AgentExampleID,
+    target: AgentTarget,
+    userFocus: String? = nil
+  ) -> AgentLaunchFeedback {
     let status = status(for: target)
     guard status.readiness == .ready else {
       return AgentLaunchFeedback(
@@ -25,7 +29,7 @@ enum AgentLaunchService {
     }
 
     let repoPath = resolveRepoPath()
-    let prompt = prompt(for: exampleID, repoPath: repoPath)
+    let prompt = prompt(for: exampleID, repoPath: repoPath, userFocus: userFocus)
     NSPasteboard.general.clearContents()
     NSPasteboard.general.setString(prompt, forType: .string)
 
@@ -43,6 +47,39 @@ enum AgentLaunchService {
         command: "cd \(shellEscape(repoPath)) && claude \(shellEscape(prompt))"
       )
     }
+  }
+
+  nonisolated static func focusInstruction(_ userFocus: String?) -> String {
+    let focus = (userFocus ?? "")
+      .split(whereSeparator: \.isWhitespace)
+      .joined(separator: " ")
+    guard !focus.isEmpty else {
+      return """
+        Pick the best candidate from local context.
+
+        Choose exactly one high-signal candidate using metadata-first ranking:
+        recency, unread or open-loop signal, two-way message volume, attachments,
+        reactions, calls, and deterministic contact/source evidence. Keep the
+        search bounded: inspect at most 15 candidate conversations or contacts,
+        drill into one, and stop after one representative example.
+        """
+    }
+    return """
+      Use this user focus as the constraint: \(focus)
+
+      Treat this focus as the required scope for all evidence selection and
+      synthesis. If local Cued data does not support it, say "unsupported by local
+      data", give the counts or metadata that prove it, and only then offer the
+      nearest supported fallback. Do not broaden silently.
+      """
+  }
+
+  nonisolated static func prompt(
+    for exampleID: AgentExampleID,
+    repoPath: String,
+    userFocus: String?
+  ) -> String {
+    agentLaunchPrompt(for: exampleID, repoPath: repoPath, userFocus: userFocus)
   }
 
   private nonisolated static func status(for target: AgentTarget) -> AgentTargetStatus {
@@ -379,11 +416,59 @@ enum AgentLaunchService {
 
 }
 
-private func prompt(for exampleID: AgentExampleID, repoPath: String) -> String {
+private func agentLaunchPrompt(
+  for exampleID: AgentExampleID,
+  repoPath: String,
+  userFocus: String?
+) -> String {
+  let focusInstruction = AgentLaunchService.focusInstruction(userFocus)
   let header = """
     You are operating in the Cued repo at \(repoPath).
 
-    Use Cued's local data through the cued CLI. Keep private message contents out of fixtures and broad summaries; synthesize only what the task needs.
+    Use Cued's local data through the `cued` CLI. Keep private message contents out
+    of fixtures, logs, commits, and broad summaries; synthesize only what the task
+    needs. Prefer concrete source types, ids, counts, timestamps, and commands run
+    over vague claims. Do not use `sqlite3`; use `cued sql "..."` for read-only
+    SQL.
+
+    \(focusInstruction)
+
+    Start read-only:
+    - `cued status`
+    - `cued doctor`
+    - `cued integrations status`
+    - `cued logs --tail 200`
+    - targeted `cued sql "..."` queries after inspecting the local schema
+
+    Data readiness:
+    - If projected data is readable but live source sync or integration health is
+      degraded, continue read-only with a freshness caveat. Repair only when the
+      needed projected data is unavailable.
+    - If Cued is actively syncing or projecting but `cued status` and read-only SQL
+      still work, do not repair. Report the projection/search-index backlog and
+      continue with a freshness caveat.
+    - Do not treat SQLite busy warnings during active projection as a reason to reset
+      data. Never run `cued reset --source <source>` without explicit user
+      confirmation.
+    - Validate recency with both `max(messages.sent_at)` and
+      `max(conversations.last_message_at)`. If they disagree materially, report the
+      mismatch and avoid claiming full current coverage.
+
+    SQL guardrails:
+    - Cued timestamps are Unix epoch milliseconds; use
+      `datetime(sent_at/1000,'unixepoch','localtime')`.
+    - Start with metadata: ids, timestamps, direction, counts, type, platform,
+      unread count, attachment count, reaction count, and source tables.
+    - Do not select `messages.content`, `conversations.last_message_preview`,
+      participant names, sender names, contact names, phone numbers, emails, or
+      handles unless the task cannot be answered from metadata. If content is
+      necessary, inspect at most 25 messages from one conversation/topic and return
+      only synthesis, never raw bodies.
+    - Before FTS, check
+      `select count(*) from messages_fts` and
+      `select count(*) from message_fts_index_queue`. If FTS is empty or queued,
+      fall back to bounded `messages.content like ...` queries and say search
+      indexing is not ready. `messages_fts.message_id` joins to `messages.id`.
     """
 
   switch exampleID {
@@ -393,63 +478,89 @@ private func prompt(for exampleID: AgentExampleID, repoPath: String) -> String {
 
       Goal: debug why one Cued source is not producing useful local context.
 
-      Start with status, doctor, recent logs, permissions, integration auth state, and recent sync jobs. Prefer targeted local repair commands such as `cued integrations refresh`, `cued sync run`, `cued sync resume`, or `cued reset --source <source>` only when the evidence points there.
+      Work in this order:
+      1. Inspect status, doctor output, recent logs, permissions, integration auth state, and recent sync jobs.
+      2. Identify the single weakest source and the evidence for why it is weak.
+      3. Try targeted local repair commands such as `cued integrations refresh`, `cued sync run`, or `cued sync resume` only when the evidence points there. Recommend `cued reset --source <source>` only after explicit user confirmation.
+      4. Re-run the smallest verification command that proves whether context improved.
 
-      End with what changed, what was verified, and whether code escalation is required.
+      End with: root cause, commands run, what changed, what was verified, and whether code escalation is required.
       """
   case .catchUp:
     return """
       \(header)
 
-      Goal: prove where local context changes the answer.
+      Goal: pull Cued context from threads with the relevant people into a working project spec.
 
-      Use Cued read-only context to pick one recent question, thread, or relationship where a generic model would miss important context. Compare:
-      - what an agent would say with no local history
-      - what changes after reading relevant Cued messages, contacts, calls, and source metadata
-      - what action becomes possible because of the context
+      This is the "Context for a Project" card. Treat the user focus as a mini request like "pull context from threads with X, Y, and Z people and add it to this spec." Use read-only Cued context to find the threads, people, decisions, constraints, and open questions that belong in the spec. If the focus names people, search threads involving those people plus the project/topic; if it names only a project, find the strongest related threads and participants.
 
-      Return a compact before/after analysis with citations to local source types, not private message dumps. End with the smallest product improvement that would make this context easier for future agents to use. If Cued itself is unhealthy, repair the local runtime first using the ladder above.
+      Return:
+      - the project/spec boundary you inferred
+      - the people and conversations consulted, cited by metadata
+      - decisions, constraints, facts, preferences, and open questions to add
+      - a drop-in spec section with only synthesized context
+      - what is uncertain, missing, stale, or unsupported by local data
+
+      Do not dump private messages. Cite local evidence by source type, conversation id, message id, timestamp, participant role, counts, and confidence.
+      If projected data is readable, answer from it with any freshness caveat. Repair only when the needed projected data is unavailable.
       """
   case .followUps:
     return """
       \(header)
 
-      Goal: find a real workflow where Cued turns messages into useful work.
+      Goal: recover what the user decided about X.
 
-      Search recent local context for a concrete workflow: follow-up drafting, meeting prep, recruiting, sales/customer development, school/project coordination, or another repeated task visible in the data. Avoid generic summaries.
+      This is the "Recover Decisions" card. Treat the user focus as the X in "what did I decide about X?" Use read-only Cued context to find decisions, commitments, reversals, settled preferences, unresolved disagreements, and later confirmations related to that topic. Avoid generic summaries and do not produce a broad inbox digest.
+
+      If a user focus is provided, treat it as the decision topic. If no focus is provided, pick one recent topic with clear decision evidence and enough replayable history. Define what counts as a decision before searching: explicit acceptance/rejection, selected option, committed next step, owner/date assignment, repeated later behavior, or a message that resolves prior ambiguity.
 
       Return:
-      - the workflow you found
-      - the local evidence that makes it real
-      - the exact output an agent should produce
-      - how to measure whether it created value
+      - the decision question you answered
+      - the recovered decision, current best answer, and confidence
+      - a short decision timeline with evidence ids, timestamps, source types, and participant roles
+      - contradictions, reversals, and stale assumptions
+      - what should be checked before acting on the decision
 
-      Keep this read-only unless a local Cued operational issue blocks the query. If Cued itself is unhealthy, repair the local runtime first using the ladder above.
+      Keep this read-only unless a local Cued operational issue blocks the query. If projected data is readable, answer from it with any freshness caveat. Repair only when the needed projected data is unavailable.
       """
   case .prepPerson:
     return """
       \(header)
 
-      Goal: turn repeated local context into accumulated understanding.
+      Goal: act like a chief of staff over message context.
 
-      Pick a person, project, or recurring topic from local Cued context. Build a durable brief that would still be useful next week: stable facts, open loops, preferences, unresolved questions, recent changes, and what an agent should remember before acting.
+      This is the "Chief of Staff" card. Use read-only Cued context to tell the user about their day and design Codex automations or hooks that activate when messages arrive. Examples include: morning brief inputs, follow-up queues, meeting prep context, messages that should wake an agent, and hooks that fire when specific people, topics, or urgency signals appear.
 
-      Explain which parts came from replayable history versus one-off recent messages. Do not dump private messages; synthesize. Keep the work local and read-only unless Cued needs operational repair first.
+      If a user focus is provided, it overrides the most active thread overall. Pick only a day-planning, automation, or hook candidate directly related to the focus. If no focus is provided, choose one repeated workflow with clear evidence and low noise.
+
+      Return:
+      - the chief-of-staff job to be done, such as day brief or message hook
+      - trigger conditions or schedule, including message events that should activate it
+      - context the agent should gather before acting
+      - the exact output it should produce, such as a day brief, queue, or hook spec
+      - actions that require confirmation, and cases where the agent should stay silent
+      - how to measure value and false positives
+
+      Do not send messages, create calendar events, mark work done, or mutate Cued. If projected data is readable, answer from it with any freshness caveat. Repair only when the needed projected data is unavailable.
       """
   case .findWarmIntros:
     return """
       \(header)
 
-      Goal: design explicit intent and triggers for an always-on Cued agent.
+      Goal: find intros and relationship context for person Y, especially someone the user just met.
 
-      Use local context to identify where a background agent would create value and where it would be noisy. Pick one candidate workflow and define:
-      - the user intent it serves
-      - the trigger conditions that should wake the agent up
-      - the context it needs before acting
-      - the action it may take
-      - the cases where it should stay silent or ask first
+      This is the "Intros / Relationship Context" card. Treat the user focus as the Y in "who should I intro Y to?" Use read-only Cued context to answer who this person should meet, what relationship context matters, and what to remember after meeting them. A filled user focus may name the person, company, topic, or desired intro area.
 
-      Return a small trigger spec that could be implemented or evaluated. Keep the work read-only unless Cued needs operational repair first.
+      If the focus names a person, first identify the likely contact or conversation by deterministic local evidence. Then search for relationship context and possible intro targets using local conversations, contact handles/sources, prior messages, shared topics, and interaction strength. If the identity is ambiguous, say so and do not guess.
+
+      Return:
+      - the person/context you matched, with confidence and ambiguity notes
+      - candidate intro targets or relationship-context notes
+      - why each candidate fits, using metadata and synthesized evidence
+      - suggested intro angle or question to ask the user before making the intro
+      - people or paths to avoid because evidence is weak, stale, private, or noisy
+
+      Do not send introductions or reveal private message bodies. If projected data is readable, answer from it with any freshness caveat. Repair only when the needed projected data is unavailable.
       """
   }
 }

@@ -75,7 +75,7 @@ public enum Preview {
       onRemoveIntegration: { _, _ in },
       onConnectIntegration: { _, _ in },
       onPlatformPageActiveChanged: { _ in },
-      onLaunchAgentExample: { _, _ in },
+      onLaunchAgentExample: { _, _, _ in },
       onFinish: {}
     )
     .frame(width: previewCase.size.width, height: previewCase.size.height)

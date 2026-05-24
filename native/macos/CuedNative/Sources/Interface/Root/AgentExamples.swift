@@ -109,30 +109,30 @@ public let agentExamples: [AgentExample] = [
   AgentExample(
     id: .catchUp,
     icon: "point.3.connected.trianglepath.dotted",
-    title: "Context Use",
-    detail: "Find where local context changes what the agent should do.",
-    promptPreview: "Show where context changes the answer"
+    title: "Context for a Project",
+    detail: "Pull context from threads into a spec.",
+    promptPreview: "Use threads with specific people to fill in a spec"
   ),
   AgentExample(
     id: .followUps,
     icon: "rectangle.3.group.bubble.left",
-    title: "Workflow Value",
-    detail: "Turn recent messages into useful work, not a generic summary.",
-    promptPreview: "Find a real workflow Cued can improve"
+    title: "Recover Decisions",
+    detail: "Answer what you decided about something.",
+    promptPreview: "What did I decide about X?"
   ),
   AgentExample(
     id: .prepPerson,
     icon: "arrow.trianglehead.clockwise",
-    title: "Accumulated Understanding",
-    detail: "Build a durable brief from replayable local history.",
-    promptPreview: "Turn repeated context into understanding"
+    title: "Chief of Staff",
+    detail: "Brief your day and design message hooks.",
+    promptPreview: "Tell me about my day and what should activate"
   ),
   AgentExample(
     id: .findWarmIntros,
     icon: "scope",
-    title: "Intent And Triggers",
-    detail: "Decide when an always-on agent should act or stay quiet.",
-    promptPreview: "Design explicit triggers from local context"
+    title: "Intros / Relationship Context",
+    detail: "Find who a new person should meet.",
+    promptPreview: "Who should I intro Y to?"
   ),
 ]
 

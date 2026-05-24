@@ -80,7 +80,7 @@ struct RootPreview: View {
       onRemoveIntegration: { _, _ in },
       onConnectIntegration: { _, _ in },
       onPlatformPageActiveChanged: { _ in },
-      onLaunchAgentExample: { _, _ in },
+      onLaunchAgentExample: { _, _, _ in },
       onFinish: {}
     )
   }

@@ -25,7 +25,7 @@ public struct RootView: View {
   let onRemoveIntegration: (String, String) -> Void
   let onConnectIntegration: (String, String) -> Void
   let onPlatformPageActiveChanged: (Bool) -> Void
-  let onLaunchAgentExample: (AgentExampleID, AgentTarget) -> Void
+  let onLaunchAgentExample: (AgentExampleID, AgentTarget, String?) -> Void
   let onFinish: () -> Void
 
   @State var addAccountPrompt: AddAccountPrompt?
@@ -34,6 +34,7 @@ public struct RootView: View {
   @State var pendingIntegrationActionIDs = Set<String>()
   @State var pendingRemovedIntegrationIDs = Set<String>()
   @State var activePermissionGuideKey: String?
+  @State var agentExampleFocus = ""
 
   public init(
     viewModel: RootViewModel,
@@ -46,7 +47,7 @@ public struct RootView: View {
     onRemoveIntegration: @escaping (String, String) -> Void,
     onConnectIntegration: @escaping (String, String) -> Void,
     onPlatformPageActiveChanged: @escaping (Bool) -> Void,
-    onLaunchAgentExample: @escaping (AgentExampleID, AgentTarget) -> Void,
+    onLaunchAgentExample: @escaping (AgentExampleID, AgentTarget, String?) -> Void,
     onFinish: @escaping () -> Void
   ) {
     self.viewModel = viewModel
