@@ -40,8 +40,6 @@ export type PlatformFeature = (typeof PLATFORM_FEATURE_VALUES)[number];
 export const PLATFORM_FEATURE_SUPPORT_VALUES = ["yes", "partial", "no"] as const;
 export type PlatformFeatureSupport = (typeof PLATFORM_FEATURE_SUPPORT_VALUES)[number];
 
-export type PlatformFutureFeatureNotes = Record<string, never>;
-
 type PlatformDefinition = {
   adapter: boolean;
   defaultAccountKey: "default" | "local";
@@ -427,11 +425,6 @@ export function getPlatformFeatureMatrixRow(
   platform: Platform,
 ): Readonly<Record<PlatformFeature, PlatformFeatureSupport>> {
   return PLATFORM_FEATURE_MATRIX[platform];
-}
-
-export function getPlatformFutureFeatureNotes(platform: Platform): PlatformFutureFeatureNotes {
-  void platform;
-  return {};
 }
 
 export function isIntegrationAuthState(value: string): value is IntegrationAuthState {

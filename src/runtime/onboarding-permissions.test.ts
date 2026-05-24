@@ -63,26 +63,12 @@ describe("onboarding permission refresh", () => {
     });
   }
 
-  it("uses passive permission checks by default", async () => {
+  it("loads permission status for onboarding snapshots", async () => {
     mockSnapshotDependencies();
 
     await buildOnboardingSnapshot(db as never);
 
-    expect(buildPermissionStatusMock).toHaveBeenCalledWith({
-      mode: "passive",
-      db: db as never,
-    });
-  });
-
-  it("can force a live permission refresh for onboarding snapshots", async () => {
-    mockSnapshotDependencies();
-
-    await buildOnboardingSnapshot(db as never, { refreshPermissions: true });
-
-    expect(buildPermissionStatusMock).toHaveBeenCalledWith({
-      mode: "active",
-      db: db as never,
-    });
+    expect(buildPermissionStatusMock).toHaveBeenCalledWith();
   });
 
   it("auto-installs the bundled skill when onboarding can resolve it", async () => {

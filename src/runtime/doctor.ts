@@ -72,13 +72,6 @@ export interface PermissionCheckSummaryInput {
   messagesNativeHelper: DoctorCheck;
 }
 
-export type PermissionStatusMode = "active" | "passive";
-
-export interface BuildPermissionStatusOptions {
-  mode?: PermissionStatusMode;
-  db?: CuedDatabase | null;
-}
-
 export function summarizePermissionStatuses(
   checks: PermissionCheckSummaryInput,
 ): PermissionStatusSummary[] {
@@ -121,9 +114,7 @@ export function summarizePermissionStatuses(
   ];
 }
 
-export async function buildPermissionStatus(
-  _options: BuildPermissionStatusOptions = {},
-): Promise<{ permissions: PermissionStatusSummary[] }> {
+export async function buildPermissionStatus(): Promise<{ permissions: PermissionStatusSummary[] }> {
   const contacts =
     process.platform === "darwin"
       ? getContactsPermissionCheck()

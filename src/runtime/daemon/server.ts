@@ -28,7 +28,7 @@ import {
   buildAdapterInvocationEnv,
   selectAdapterInvocationProofs,
 } from "../../platforms/core/invocation.js";
-import { isAdapterPlatform, listAutoSyncPlatforms } from "../../platforms/core/registry.js";
+import { isAdapterPlatform, listAdapterPlatforms } from "../../platforms/core/registry.js";
 import { runAdapter } from "../../platforms/core/runner.js";
 import { loadIntegrationSecret } from "../../platforms/core/secrets/keychain.js";
 import { refreshLocalIntegrationStates } from "../../platforms/core/state/local-refresh.js";
@@ -419,7 +419,7 @@ export function getAutoSyncTargets(
     return [];
   }
 
-  return listAutoSyncPlatforms().map((platform) => ({
+  return listAdapterPlatforms().map((platform) => ({
     platform,
     accountKey: getDefaultAccountKeyForPlatform(platform),
   }));
@@ -5265,10 +5265,7 @@ async function dispatchRequest(
           id: request.id,
           ok: true,
           result: await db.withBusyTimeout(DAEMON_STATUS_BUSY_TIMEOUT_MS, () =>
-            buildPermissionStatus({
-              mode: "passive",
-              db,
-            }),
+            buildPermissionStatus(),
           ),
         };
       case "onboarding-status":
@@ -5292,7 +5289,6 @@ async function dispatchRequest(
           result: await db.withBusyTimeout(DAEMON_STATUS_BUSY_TIMEOUT_MS, () =>
             buildOnboardingSnapshot(db, {
               refreshManagedIntegrations: request.refreshManagedIntegrations,
-              refreshPermissions: request.refreshPermissions,
             }),
           ),
         };
