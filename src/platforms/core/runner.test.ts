@@ -25,6 +25,9 @@ vi.mock("./registry.js", () => ({
 import { runAdapter } from "./runner.js";
 
 class MockChild extends EventEmitter {
+  stdin = {
+    end: vi.fn(),
+  };
   stdout = new EventEmitter();
   stderr = new EventEmitter();
   kill = vi.fn();
@@ -54,7 +57,7 @@ describe("adapter runner", () => {
     const child = new MockChild();
     spawnMock.mockReturnValue(child);
 
-    const promise = runAdapter("slack", "workspace-a");
+    const promise = runAdapter("slack", { accountKey: "workspace-a" });
     child.stdout.emit(
       "data",
       Buffer.from(
@@ -75,7 +78,7 @@ describe("adapter runner", () => {
     const child = new MockChild();
     spawnMock.mockReturnValue(child);
 
-    const promise = runAdapter("slack", "workspace-a");
+    const promise = runAdapter("slack", { accountKey: "workspace-a" });
     promise.catch(() => undefined);
     const assertion = expect(promise).rejects.toThrow(
       "Adapter worker timed out after 50ms for platform 'slack' account 'workspace-a'",
@@ -109,7 +112,7 @@ describe("adapter runner", () => {
     const child = new MockChild();
     spawnMock.mockReturnValue(child);
 
-    const promise = runAdapter("signal", "default");
+    const promise = runAdapter("signal", { accountKey: "default" });
     child.stdout.emit(
       "data",
       Buffer.from(
@@ -133,8 +136,9 @@ describe("adapter runner", () => {
       [...process.execArgv, tsWorker],
       expect.objectContaining({
         detached: true,
-        stdio: ["ignore", "pipe", "pipe"],
+        stdio: ["pipe", "pipe", "pipe"],
       }),
     );
+    expect(child.stdin.end).toHaveBeenCalledWith(JSON.stringify({ accountKey: "default" }));
   });
 });

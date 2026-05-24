@@ -10,7 +10,7 @@ export interface Logger {
   error(message: string, details?: unknown): void;
 }
 
-const DEFAULT_MAX_LOG_BYTES = Number(process.env.CUED_LOG_MAX_BYTES ?? 1_048_576);
+const DEFAULT_MAX_LOG_BYTES = 1_048_576;
 
 function nowIso(): string {
   return new Date().toISOString();

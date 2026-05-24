@@ -320,28 +320,18 @@ describe("interactive auth sessions", () => {
 });
 
 describe("sync resume targets", () => {
-  it("allows autosync to be explicitly disabled", () => {
-    const previous = process.env.CUED_AUTOSYNC_PLATFORMS;
-    process.env.CUED_AUTOSYNC_PLATFORMS = "none";
-    try {
-      expect(
-        getAutoSyncTargets({
-          listEnabledSyncTargets: () => [
-            {
-              platform: "imessage",
-              account_key: "local",
-            },
-          ],
-          listIntegrationStates: () => [],
-        }),
-      ).toEqual([]);
-    } finally {
-      if (previous == null) {
-        delete process.env.CUED_AUTOSYNC_PLATFORMS;
-      } else {
-        process.env.CUED_AUTOSYNC_PLATFORMS = previous;
-      }
-    }
+  it("uses enabled sync targets before falling back to default autosync platforms", () => {
+    expect(
+      getAutoSyncTargets({
+        listEnabledSyncTargets: () => [
+          {
+            platform: "imessage",
+            account_key: "local",
+          },
+        ],
+        listIntegrationStates: () => [],
+      }),
+    ).toEqual([{ platform: "imessage", accountKey: "local" }]);
   });
 
   it("preserves account keys that contain colons", () => {

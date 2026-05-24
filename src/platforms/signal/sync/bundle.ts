@@ -16,10 +16,9 @@ export async function buildSignalSyncBundle(options?: {
   lastSyncAt?: number;
   client?: SignalClientLike;
 }): Promise<SyncBundle> {
-  const accountKey = options?.accountKey ?? process.env.CUED_ACCOUNT_KEY ?? "default";
+  const accountKey = options?.accountKey ?? "default";
   const configDir = getSignalConfigDir(accountKey);
-  const account =
-    options?.account ?? process.env.CUED_SIGNAL_ACCOUNT ?? readSignalLinkedAccount(configDir);
+  const account = options?.account ?? readSignalLinkedAccount(configDir);
   if (!account) {
     throw new Error(`Signal account is not linked for '${accountKey}'`);
   }

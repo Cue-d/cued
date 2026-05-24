@@ -1,34 +1,46 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 
 describe("config path resolution", () => {
-  afterEach(() => {
-    vi.resetModules();
-    vi.unstubAllEnvs();
-  });
-
-  it("uses CUED_HOME for all runtime paths", async () => {
-    vi.stubEnv("CUED_HOME", "/tmp/cued-home");
-    vi.stubEnv("CUED_DB_PATH", undefined);
-
+  it("uses configured home for runtime paths", async () => {
     const config = await import("./config.js");
 
-    expect(config.CUED_HOME).toBe("/tmp/cued-home");
-    expect(config.CUED_DB_PATH).toBe("/tmp/cued-home/local.db");
-    expect(config.CUED_SOCKET_PATH).toBe("/tmp/cued-home/cued.sock");
-    expect(config.CUED_DAEMON_LOCK_PATH).toBe("/tmp/cued-home/daemon.lock");
-    expect(config.CUED_MENU_BAR_LOCK_PATH).toBe("/tmp/cued-home/menu-bar.lock");
-    expect(config.CUED_DAEMON_LOG_PATH).toBe("/tmp/cued-home/logs/daemon.log");
+    expect(config.resolveCuedHome({ home: "/tmp/cued-home" })).toBe("/tmp/cued-home");
+    expect(config.resolveCuedDbPath({ home: "/tmp/cued-home" })).toBe("/tmp/cued-home/local.db");
   });
 
-  it("derives the cued home from CUED_DB_PATH when only the db path is overridden", async () => {
-    vi.stubEnv("CUED_HOME", undefined);
-    vi.stubEnv("CUED_DB_PATH", "/tmp/cued-db/local.db");
-
+  it("derives the cued home from dbPath when only the db path is configured", async () => {
     const config = await import("./config.js");
 
-    expect(config.CUED_HOME).toBe("/tmp/cued-db");
-    expect(config.CUED_DB_PATH).toBe("/tmp/cued-db/local.db");
-    expect(config.CUED_BROWSER_DIR).toBe("/tmp/cued-db/browser");
-    expect(config.CUED_DAEMON_LOCK_PATH).toBe("/tmp/cued-db/daemon.lock");
+    expect(config.resolveCuedHome({ dbPath: "/tmp/cued-db/local.db" })).toBe("/tmp/cued-db");
+    expect(config.resolveCuedDbPath({ dbPath: "/tmp/cued-db/local.db" })).toBe(
+      "/tmp/cued-db/local.db",
+    );
+  });
+
+  it("strips runtime config args before command parsing", async () => {
+    const config = await import("./config.js");
+
+    expect(config.stripRuntimeConfigArgs(["--config", "/tmp/cued.json", "daemon"])).toEqual([
+      "daemon",
+    ]);
+    expect(config.stripRuntimeConfigArgs(["--cued-config=/tmp/cued.json", "status"])).toEqual([
+      "status",
+    ]);
+  });
+
+  it("resolves packaged Chromium beside the bundled runtime", async () => {
+    const config = await import("./config.js");
+    const existingPaths = new Set([
+      "/Applications/Cued.app/Contents/Resources/runtime/chromium/chrome/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing",
+    ]);
+
+    expect(
+      config.resolveChromiumExecutablePath(
+        "/Applications/Cued.app/Contents/Resources/cued-runtime",
+        (path) => existingPaths.has(path),
+      ),
+    ).toBe(
+      "/Applications/Cued.app/Contents/Resources/runtime/chromium/chrome/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing",
+    );
   });
 });

@@ -25,17 +25,25 @@ export type ProjectionWorkerMessage =
   | { ok: true; result: ProjectionWorkerSuccess }
   | { ok: false; error: string };
 
+type ProjectionWorkerInvocation = {
+  run: QueuedSyncRun;
+  projectionBatchSize?: number;
+};
+
 function now(): number {
   return Date.now();
 }
 
-export async function runProjectionWorker(run: QueuedSyncRun): Promise<ProjectionWorkerSuccess> {
+export async function runProjectionWorker(
+  run: QueuedSyncRun,
+  options: { projectionBatchSize?: number } = {},
+): Promise<ProjectionWorkerSuccess> {
   const db = openCuedDatabase();
   const projectionStartedAt = now();
   const runClaim = { ownerId: run.owner_id, attempt: run.attempt };
   try {
     const projectionDetails = parseProjectionRunDetails(run.details_json);
-    const projectionBatchSize = Number(process.env.CUED_PROJECTION_BATCH_SIZE || "25");
+    const projectionBatchSize = options.projectionBatchSize ?? 25;
     const projected =
       run.run_type === "rebuild"
         ? rebuildProjectedState(db, { limit: projectionBatchSize })
@@ -110,14 +118,16 @@ export async function runProjectionWorker(run: QueuedSyncRun): Promise<Projectio
   }
 }
 
-export async function runProjectionWorkerFromEnv(): Promise<void> {
-  const runJson = process.env.CUED_PROJECTION_WORKER_RUN;
-  if (!runJson) {
-    throw new Error("CUED_PROJECTION_WORKER_RUN is required");
+export async function runProjectionWorkerFromStdin(): Promise<void> {
+  const raw = await readText(process.stdin);
+  if (!raw.trim()) {
+    throw new Error("Projection worker invocation JSON is required on stdin");
   }
-  const run = JSON.parse(runJson) as QueuedSyncRun;
+  const invocation = JSON.parse(raw) as ProjectionWorkerInvocation;
   try {
-    const result = await runProjectionWorker(run);
+    const result = await runProjectionWorker(invocation.run, {
+      projectionBatchSize: invocation.projectionBatchSize,
+    });
     writeWorkerMessage({ ok: true, result });
   } catch (error) {
     writeWorkerMessage({
@@ -130,4 +140,12 @@ export async function runProjectionWorkerFromEnv(): Promise<void> {
 
 function writeWorkerMessage(message: ProjectionWorkerMessage): void {
   process.stdout.write(`${JSON.stringify(message)}\n`);
+}
+
+async function readText(input: AsyncIterable<Buffer | string>): Promise<string> {
+  const chunks: Buffer[] = [];
+  for await (const chunk of input) {
+    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  }
+  return Buffer.concat(chunks).toString("utf8");
 }

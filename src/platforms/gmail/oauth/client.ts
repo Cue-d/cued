@@ -1,13 +1,12 @@
 import { createHash, randomBytes } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { cuedAuthKeychainService } from "../../../core/identity.js";
 
 export const GMAIL_KEYCHAIN_SERVICE = cuedAuthKeychainService("gmail");
 export const GMAIL_READONLY_SCOPE = "https://www.googleapis.com/auth/gmail.readonly";
-export const GOOGLE_OAUTH_CLIENT_RESOURCE_PATH =
-  "Contents/Resources/oauth/google-oauth-client.json";
 
 export interface GoogleOAuthClientConfig {
   clientId: string;
@@ -45,21 +44,19 @@ export interface GoogleOAuthClientInspection {
   error: string | null;
 }
 
+function runtimeBundledGoogleOAuthClientFile(): string {
+  return resolve(
+    dirname(fileURLToPath(import.meta.url)),
+    "../../../../../oauth/google-oauth-client.json",
+  );
+}
+
 function resolveBundledGoogleOAuthClientFile(): string | null {
   const explicit = process.env.CUED_BUNDLED_GOOGLE_OAUTH_CLIENT_FILE;
   if (explicit) return explicit;
 
-  const appPath = process.env.CUED_APP_PATH;
-  if (appPath) {
-    const bundledPath = join(appPath, GOOGLE_OAUTH_CLIENT_RESOURCE_PATH);
-    if (existsSync(bundledPath)) return bundledPath;
-  }
-
-  const runtimeRoot = process.env.CUED_BUNDLED_RUNTIME_ROOT;
-  if (runtimeRoot) {
-    const bundledPath = join(runtimeRoot, "..", "oauth", "google-oauth-client.json");
-    if (existsSync(bundledPath)) return bundledPath;
-  }
+  const bundledPath = runtimeBundledGoogleOAuthClientFile();
+  if (existsSync(bundledPath)) return bundledPath;
 
   return null;
 }

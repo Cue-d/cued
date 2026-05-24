@@ -1,36 +1,34 @@
 import { describe, expect, it } from "vitest";
 import {
-  buildAdapterInvocationEnv,
-  readAdapterInvocationEnv,
+  buildAdapterInvocation,
+  readAdapterInvocation,
   selectAdapterInvocationProofs,
 } from "./invocation.js";
 
-describe("adapter invocation env", () => {
-  it("preserves legacy cursor env vars while adding generic cursor env", () => {
-    const env = buildAdapterInvocationEnv({
+describe("adapter invocation", () => {
+  it("builds a structured cursor payload for workers", () => {
+    const invocation = buildAdapterInvocation({
       platform: "linkedin",
+      accountKey: "default",
       checkpointSourceCursorJson: JSON.stringify({
         lastSyncAt: 123,
         syncToken: "sync-token",
       }),
     });
 
-    expect(env).toEqual({
-      CUED_SYNC_SOURCE_CURSOR: JSON.stringify({
+    expect(invocation).toEqual({
+      accountKey: "default",
+      sourceCursor: {
         lastSyncAt: 123,
         syncToken: "sync-token",
-      }),
-      CUED_LINKEDIN_SOURCE_CURSOR: JSON.stringify({
-        lastSyncAt: 123,
-        syncToken: "sync-token",
-      }),
-      CUED_LINKEDIN_LAST_SYNC_AT: "123",
-      CUED_LINKEDIN_SYNC_TOKEN: "sync-token",
+      },
+      lastSyncAt: 123,
+      syncToken: "sync-token",
     });
   });
 
-  it("serializes proof rows for generic and Discord legacy proof env", () => {
-    const env = buildAdapterInvocationEnv({
+  it("serializes proof rows into the worker payload", () => {
+    const invocation = buildAdapterInvocation({
       platform: "discord",
       proofs: [
         {
@@ -46,8 +44,7 @@ describe("adapter invocation env", () => {
       ],
     });
 
-    const parsed = JSON.parse(env.CUED_SYNC_PROOFS ?? "[]");
-    expect(parsed).toEqual([
+    expect(invocation.syncProofs).toEqual([
       {
         scopeKind: "conversation",
         scopeKey: "dm-1",
@@ -59,16 +56,17 @@ describe("adapter invocation env", () => {
         lastObservedAt: 456,
       },
     ]);
-    expect(env.CUED_DISCORD_SYNC_PROOFS).toBe(env.CUED_SYNC_PROOFS);
   });
 
-  it("reads generic invocation env when platform legacy env is absent", () => {
-    expect(
-      readAdapterInvocationEnv("slack", {
-        CUED_SYNC_SOURCE_CURSOR: JSON.stringify({ lastSyncAt: 123 }),
-        CUED_SYNC_PROOFS: JSON.stringify([{ scopeKey: "C1", proofKind: "messages" }]),
-      }),
-    ).toEqual({
+  it("reads invocation JSON from stdin", async () => {
+    await expect(
+      readAdapterInvocation([
+        JSON.stringify({
+          sourceCursor: { lastSyncAt: 123 },
+          syncProofs: [{ scopeKey: "C1", proofKind: "messages" }],
+        }),
+      ]),
+    ).resolves.toEqual({
       sourceCursor: { lastSyncAt: 123 },
       syncProofs: [{ scopeKey: "C1", proofKind: "messages" }],
     });

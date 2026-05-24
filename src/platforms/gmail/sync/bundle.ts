@@ -1,3 +1,4 @@
+import { GMAIL_SYNC_CONFIG } from "../../../core/config.js";
 import type { ProviderRawEventInput } from "../../../core/types/provider.js";
 import { mapWithConcurrency } from "../../../core/utils/async.js";
 import type { SyncBundle } from "../../core/sync.js";
@@ -8,10 +9,6 @@ import {
   isGmailNotFoundError,
 } from "../api/client.js";
 import { buildGmailRawEvents } from "./events.js";
-
-const DEFAULT_PAGE_SIZE = Number(process.env.CUED_GMAIL_PAGE_SIZE ?? "50");
-const DEFAULT_PAGE_BUDGET = Number(process.env.CUED_GMAIL_PAGE_BUDGET ?? "5");
-const DEFAULT_FETCH_CONCURRENCY = Number(process.env.CUED_GMAIL_FETCH_CONCURRENCY ?? "8");
 
 export interface GmailSourceCursor {
   emailAddress?: string;
@@ -101,11 +98,14 @@ export async function buildGmailSyncBundle(
     fetchConcurrency?: number;
   } = {},
 ): Promise<SyncBundle> {
-  const accountKey = input.accountKey ?? process.env.CUED_ACCOUNT_KEY ?? "default";
+  const accountKey = input.accountKey ?? "default";
   const cursor = parseCursor(input.sourceCursor);
-  const pageBudget = positiveInt(input.pageBudget ?? DEFAULT_PAGE_BUDGET, 5);
-  const pageSize = positiveInt(input.pageSize ?? DEFAULT_PAGE_SIZE, 50);
-  const fetchConcurrency = positiveInt(input.fetchConcurrency ?? DEFAULT_FETCH_CONCURRENCY, 8);
+  const pageBudget = positiveInt(input.pageBudget ?? GMAIL_SYNC_CONFIG.pageBudget, 5);
+  const pageSize = positiveInt(input.pageSize ?? GMAIL_SYNC_CONFIG.pageSize, 50);
+  const fetchConcurrency = positiveInt(
+    input.fetchConcurrency ?? GMAIL_SYNC_CONFIG.fetchConcurrency,
+    8,
+  );
   const observedAt = Date.now();
   const startedAt = cursor.startedAt ?? observedAt;
   const client = GmailClient.fromKeychain(accountKey);

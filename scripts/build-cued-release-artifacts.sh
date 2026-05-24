@@ -23,9 +23,9 @@ if [[ -z "${CUED_NOTARY_PROFILE:-}" ]]; then
   exit 1
 fi
 
-export CUED_RELEASE_CHANNEL="${CUED_RELEASE_CHANNEL:-stable}"
+RELEASE_CHANNEL="stable"
 
-if [[ "$CUED_RELEASE_CHANNEL" == "stable" && -z "${CUED_BUNDLED_GOOGLE_OAUTH_CLIENT_FILE:-}" ]]; then
+if [[ "$RELEASE_CHANNEL" == "stable" && -z "${CUED_BUNDLED_GOOGLE_OAUTH_CLIENT_FILE:-}" ]]; then
   echo "CUED_BUNDLED_GOOGLE_OAUTH_CLIENT_FILE is required for stable Gmail OAuth releases" >&2
   exit 1
 fi
@@ -139,7 +139,7 @@ sign_nested_code_containers() {
   done < <(find "$APP_BUNDLE/Contents" -type f -path '*/Contents/Info.plist' -print0 | sort -rz)
 }
 
-bash "$APP_BUILDER" >/dev/null
+bash "$APP_BUILDER" --release-channel "$RELEASE_CHANNEL" >/dev/null
 sign_nested_binaries
 sign_embedded_archives
 sign_nested_code_containers

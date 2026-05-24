@@ -762,7 +762,6 @@ async function main(): Promise<void> {
           path: imessageFixture.dbPath,
           lastRowId: 1,
           limit: 2500,
-          env: { CUED_IMESSAGE_DB_PATH: imessageFixture.dbPath },
           repoRoot: imessageFixture.dir,
         });
       }),

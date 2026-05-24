@@ -2,6 +2,13 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import {
+  IMESSAGE_CONFIG,
+  NATIVE_RUNTIME_CONFIG,
+  PLATFORM_RUNTIME_CONFIG,
+  SIGNAL_CLI_CONFIG,
+  SLACK_DESKTOP_IMPORT_CONFIG,
+} from "../../../core/config.js";
 import { resolveHostOS } from "../../../core/platform-capabilities.js";
 import { CuedDatabase } from "../../../db/database.js";
 import { openSqliteDatabase } from "../../../db/sqlite.js";
@@ -11,6 +18,8 @@ import {
 } from "../../discord/sync/events.js";
 import { importLinkedInStoredAuth } from "../../linkedin/auth/keychain-import.js";
 import { storeSlackSession } from "../../slack/auth/session-store.js";
+import { SLACK_HELPER_CONFIG } from "../../slack/helper/binary.js";
+import { WHATSAPP_HELPER_CONFIG } from "../../whatsapp/helper/pair.js";
 import { startQrNativeAuthSession } from "../auth/qr-native.js";
 import { refreshLocalIntegrationStates } from "./local-refresh.js";
 import {
@@ -32,19 +41,26 @@ import {
 describe("integration state management", () => {
   const tempDirs: string[] = [];
   const originalPath = process.env.PATH;
+  const originalIMessageDbPath = IMESSAGE_CONFIG.chatDbPath;
+  const originalNativeRepoRoot = NATIVE_RUNTIME_CONFIG.repoRoot;
+  const originalSignalRepoRoot = SIGNAL_CLI_CONFIG.repoRoot;
+  const originalSlackAppBinary = SLACK_DESKTOP_IMPORT_CONFIG.appBinary;
+  const originalSlackUserDataDir = SLACK_DESKTOP_IMPORT_CONFIG.userDataDir;
+  const originalSlackHelperBinary = SLACK_HELPER_CONFIG.helperBinary;
+  const originalSignalConfigRoot = PLATFORM_RUNTIME_CONFIG.signalConfigRoot;
+  const originalWhatsAppHelperBinary = WHATSAPP_HELPER_CONFIG.helperBinary;
 
   afterEach(() => {
     process.env.PATH = originalPath;
-    delete process.env.CUED_CONTACTS_NATIVE_BINARY;
-    delete process.env.CUED_IMESSAGE_DB_PATH;
-    delete process.env.CUED_SIGNAL_DIR;
-    delete process.env.CUED_SIGNAL_CLI_PATH;
-    delete process.env.CUED_SLACK_APP_BINARY;
-    delete process.env.CUED_SLACK_HELPER_BINARY;
-    delete process.env.CUED_AUTH_NATIVE_BINARY;
-    delete process.env.CUED_APP_PATH;
-    delete process.env.CUED_WHATSAPP_HELPER_BINARY;
+    SLACK_HELPER_CONFIG.helperBinary = originalSlackHelperBinary;
+    WHATSAPP_HELPER_CONFIG.helperBinary = originalWhatsAppHelperBinary;
     delete process.env.CUED_GOOGLE_OAUTH_CLIENT_FILE;
+    IMESSAGE_CONFIG.chatDbPath = originalIMessageDbPath;
+    NATIVE_RUNTIME_CONFIG.repoRoot = originalNativeRepoRoot;
+    SIGNAL_CLI_CONFIG.repoRoot = originalSignalRepoRoot;
+    SLACK_DESKTOP_IMPORT_CONFIG.appBinary = originalSlackAppBinary;
+    SLACK_DESKTOP_IMPORT_CONFIG.userDataDir = originalSlackUserDataDir;
+    PLATFORM_RUNTIME_CONFIG.signalConfigRoot = originalSignalConfigRoot;
 
     while (tempDirs.length > 0) {
       const dir = tempDirs.pop();
@@ -58,6 +74,24 @@ describe("integration state management", () => {
     const dir = mkdtempSync(join(tmpdir(), prefix));
     tempDirs.push(dir);
     return dir;
+  }
+
+  function installNativeBinary(contents: string): string {
+    const repoRoot = createTempDir("cued-native-repo-");
+    NATIVE_RUNTIME_CONFIG.repoRoot = repoRoot;
+    const nativeBinaryPath = join(
+      repoRoot,
+      "native",
+      "macos",
+      "CuedNative",
+      ".build",
+      "release",
+      "CuedNative",
+    );
+    mkdirSync(join(nativeBinaryPath, ".."), { recursive: true });
+    writeFileSync(nativeBinaryPath, contents);
+    chmodSync(nativeBinaryPath, 0o755);
+    return nativeBinaryPath;
   }
 
   function createDb(): CuedDatabase {
@@ -78,21 +112,22 @@ describe("integration state management", () => {
     return (db as unknown as { sqlite: RawSql }).sqlite;
   }
 
-  function createPackagedSignalHelper(version = "0.12.9"): string {
-    process.env.CUED_SIGNAL_DIR = createTempDir("cued-signal-config-");
-    const appPath = join(createTempDir("cued-app-"), "Cued.app");
+  function installSignalHelper(version = "0.12.9"): void {
+    PLATFORM_RUNTIME_CONFIG.signalConfigRoot = createTempDir("cued-signal-config-");
+    const repoRoot = createTempDir("cued-signal-repo-");
+    SIGNAL_CLI_CONFIG.repoRoot = repoRoot;
     const helperPath = join(
-      appPath,
-      "Contents",
-      "Resources",
+      repoRoot,
+      "native",
       "helpers",
       "signal-cli",
+      ".build",
+      "cued-signal-cli",
       "cued-signal-cli",
     );
     mkdirSync(join(helperPath, ".."), { recursive: true });
     writeFileSync(helperPath, `#!/bin/sh\necho "signal-cli ${version}"\n`);
     chmodSync(helperPath, 0o755);
-    return appPath;
   }
 
   function createSlackHelper(version = "0.1.0"): string {
@@ -184,19 +219,14 @@ process.exit(44);
 
   it("refreshes managed integrations and creates managed auth sessions for browser platforms", async () => {
     installSecurityTool({});
-    const nativeBinaryDir = createTempDir("cued-native-binary-");
-    const nativeBinaryPath = join(nativeBinaryDir, "CuedNative");
-    writeFileSync(
-      nativeBinaryPath,
+    installNativeBinary(
       '#!/bin/sh\nif [ "$1" = "contacts" ] && [ "$2" = "status" ]; then\n  echo \'{"status":"authorized"}\'\n  exit 0\nfi\nexit 1\n',
     );
-    chmodSync(nativeBinaryPath, 0o755);
 
-    process.env.CUED_CONTACTS_NATIVE_BINARY = nativeBinaryPath;
-    process.env.CUED_IMESSAGE_DB_PATH = join(createTempDir("cued-imessage-"), "missing.db");
-    process.env.CUED_SLACK_APP_BINARY = join(createTempDir("cued-no-slack-app-"), "Slack");
-    process.env.CUED_APP_PATH = createPackagedSignalHelper();
-    process.env.CUED_WHATSAPP_HELPER_BINARY = join(
+    IMESSAGE_CONFIG.chatDbPath = join(createTempDir("cued-imessage-"), "missing.db");
+    SLACK_DESKTOP_IMPORT_CONFIG.appBinary = join(createTempDir("cued-no-slack-app-"), "Slack");
+    installSignalHelper();
+    WHATSAPP_HELPER_CONFIG.helperBinary = join(
       createTempDir("cued-no-whatsapp-helper-"),
       "cued-whatsapp-helper",
     );
@@ -314,7 +344,7 @@ process.exit(44);
   });
 
   it("includes local native integrations in setup status before the first refresh", () => {
-    process.env.CUED_IMESSAGE_DB_PATH = join(createTempDir("cued-imessage-"), "missing.db");
+    IMESSAGE_CONFIG.chatDbPath = join(createTempDir("cued-imessage-"), "missing.db");
 
     const db = createDb();
 
@@ -335,16 +365,11 @@ process.exit(44);
   });
 
   it("prefers live local permissions over stale setup integration rows", () => {
-    const nativeBinaryDir = createTempDir("cued-native-binary-");
-    const nativeBinaryPath = join(nativeBinaryDir, "CuedNative");
-    writeFileSync(
-      nativeBinaryPath,
+    installNativeBinary(
       '#!/bin/sh\nif [ "$1" = "contacts" ] && [ "$2" = "status" ]; then\n  echo \'{"status":"authorized"}\'\n  exit 0\nfi\nexit 1\n',
     );
-    chmodSync(nativeBinaryPath, 0o755);
 
-    process.env.CUED_CONTACTS_NATIVE_BINARY = nativeBinaryPath;
-    process.env.CUED_IMESSAGE_DB_PATH = join(createTempDir("cued-imessage-"), "missing.db");
+    IMESSAGE_CONFIG.chatDbPath = join(createTempDir("cued-imessage-"), "missing.db");
 
     const db = createDb();
     db.upsertIntegrationState({
@@ -657,18 +682,13 @@ process.exit(44);
   });
 
   it("refreshes only local integrations when using the local refresh path", () => {
-    const nativeBinaryDir = createTempDir("cued-native-binary-");
-    const nativeBinaryPath = join(nativeBinaryDir, "CuedNative");
-    writeFileSync(
-      nativeBinaryPath,
+    installNativeBinary(
       '#!/bin/sh\nif [ "$1" = "contacts" ] && [ "$2" = "status" ]; then\n  echo \'{"status":"authorized"}\'\n  exit 0\nfi\nexit 1\n',
     );
-    chmodSync(nativeBinaryPath, 0o755);
 
-    process.env.CUED_CONTACTS_NATIVE_BINARY = nativeBinaryPath;
-    process.env.CUED_IMESSAGE_DB_PATH = join(createTempDir("cued-imessage-"), "missing.db");
-    process.env.CUED_APP_PATH = createPackagedSignalHelper();
-    process.env.CUED_WHATSAPP_HELPER_BINARY = join(
+    IMESSAGE_CONFIG.chatDbPath = join(createTempDir("cued-imessage-"), "missing.db");
+    installSignalHelper();
+    WHATSAPP_HELPER_CONFIG.helperBinary = join(
       createTempDir("cued-no-whatsapp-helper-"),
       "cued-whatsapp-helper",
     );
@@ -702,7 +722,7 @@ process.exit(44);
 
   it("repairs stale linkedin sync capability on refresh", async () => {
     installSecurityTool({});
-    process.env.CUED_SLACK_APP_BINARY = join(createTempDir("cued-no-slack-app-"), "Slack");
+    SLACK_DESKTOP_IMPORT_CONFIG.appBinary = join(createTempDir("cued-no-slack-app-"), "Slack");
 
     const db = createDb();
     db.upsertIntegrationState({
@@ -782,7 +802,7 @@ process.exit(44);
         savedAt: 1234,
       },
     });
-    process.env.CUED_SLACK_APP_BINARY = join(createTempDir("cued-no-slack-app-"), "Slack");
+    SLACK_DESKTOP_IMPORT_CONFIG.appBinary = join(createTempDir("cued-no-slack-app-"), "Slack");
 
     const db = createDb();
     await refreshManagedIntegrationStates(db);
@@ -939,7 +959,7 @@ process.exit(44);
 
   it("repairs stale slack sync capability only when the helper is available", async () => {
     installSecurityTool({});
-    process.env.CUED_SLACK_HELPER_BINARY = createSlackHelper();
+    SLACK_HELPER_CONFIG.helperBinary = createSlackHelper();
 
     const db = createDb();
     db.upsertIntegrationState({
@@ -980,9 +1000,9 @@ process.exit(44);
 
   it("marks bundled QR helpers without linked devices as needing auth", async () => {
     installSecurityTool({});
-    process.env.CUED_APP_PATH = createPackagedSignalHelper("0.14.1");
-    process.env.CUED_WHATSAPP_HELPER_BINARY = createWhatsAppHelper({ authenticated: false });
-    process.env.CUED_SLACK_APP_BINARY = join(createTempDir("cued-no-slack-app-"), "Slack");
+    installSignalHelper("0.14.1");
+    WHATSAPP_HELPER_CONFIG.helperBinary = createWhatsAppHelper({ authenticated: false });
+    SLACK_DESKTOP_IMPORT_CONFIG.appBinary = join(createTempDir("cued-no-slack-app-"), "Slack");
 
     const db = createDb();
     await refreshManagedIntegrationStates(db);
@@ -1014,12 +1034,12 @@ process.exit(44);
 
   it("does not trust WhatsApp helper authentication without a durable account jid", async () => {
     installSecurityTool({});
-    process.env.CUED_APP_PATH = createPackagedSignalHelper("0.14.1");
-    process.env.CUED_WHATSAPP_HELPER_BINARY = createWhatsAppHelper({
+    installSignalHelper("0.14.1");
+    WHATSAPP_HELPER_CONFIG.helperBinary = createWhatsAppHelper({
       authenticated: true,
       accountJid: null,
     });
-    process.env.CUED_SLACK_APP_BINARY = join(createTempDir("cued-no-slack-app-"), "Slack");
+    SLACK_DESKTOP_IMPORT_CONFIG.appBinary = join(createTempDir("cued-no-slack-app-"), "Slack");
 
     const db = createDb();
     db.upsertIntegrationState({
@@ -1201,8 +1221,8 @@ process.exit(44);
 
   it("removes a signal integration and its local config directory", () => {
     const db = createDb();
-    process.env.CUED_SIGNAL_DIR = createTempDir("cued-signal-root-");
-    const configDir = join(process.env.CUED_SIGNAL_DIR, "default");
+    PLATFORM_RUNTIME_CONFIG.signalConfigRoot = createTempDir("cued-signal-root-");
+    const configDir = join(PLATFORM_RUNTIME_CONFIG.signalConfigRoot, "default");
     mkdirSync(configDir, { recursive: true });
 
     db.upsertIntegrationState({
@@ -1249,15 +1269,15 @@ process.exit(44);
 
   it("does not resurrect a removed signal integration during managed helper refresh", async () => {
     installSecurityTool({});
-    process.env.CUED_APP_PATH = createPackagedSignalHelper("0.14.1");
-    process.env.CUED_WHATSAPP_HELPER_BINARY = join(
+    installSignalHelper("0.14.1");
+    WHATSAPP_HELPER_CONFIG.helperBinary = join(
       createTempDir("cued-missing-whatsapp-helper-"),
       "cued-whatsapp-helper",
     );
-    process.env.CUED_SLACK_APP_BINARY = join(createTempDir("cued-no-slack-app-"), "Slack");
+    SLACK_DESKTOP_IMPORT_CONFIG.appBinary = join(createTempDir("cued-no-slack-app-"), "Slack");
 
     const db = createDb();
-    const signalRoot = process.env.CUED_SIGNAL_DIR!;
+    const signalRoot = PLATFORM_RUNTIME_CONFIG.signalConfigRoot;
     const configDir = join(signalRoot, "default");
     mkdirSync(configDir, { recursive: true });
     db.upsertIntegrationState({
@@ -1535,15 +1555,11 @@ process.exit(44);
 
   it("refreshes signal and whatsapp managed states for every persisted account", async () => {
     installSecurityTool({});
-    process.env.CUED_SIGNAL_CLI_PATH = join(
-      createTempDir("cued-missing-signal-cli-"),
-      "signal-cli",
-    );
-    process.env.CUED_WHATSAPP_HELPER_BINARY = join(
+    WHATSAPP_HELPER_CONFIG.helperBinary = join(
       createTempDir("cued-missing-whatsapp-helper-"),
       "cued-whatsapp-helper",
     );
-    process.env.CUED_SLACK_APP_BINARY = join(createTempDir("cued-no-slack-app-"), "Slack");
+    SLACK_DESKTOP_IMPORT_CONFIG.appBinary = join(createTempDir("cued-no-slack-app-"), "Slack");
 
     const db = createDb();
     db.upsertIntegrationState({
@@ -1807,12 +1823,9 @@ exit 1
 `,
     );
     chmodSync(helperPath, 0o755);
-    process.env.CUED_WHATSAPP_HELPER_BINARY = helperPath;
+    WHATSAPP_HELPER_CONFIG.helperBinary = helperPath;
 
-    const nativePath = join(createTempDir("cued-native-qr-bin-"), "CuedNative");
-    writeFileSync(nativePath, "#!/bin/sh\nsleep 30\n");
-    chmodSync(nativePath, 0o755);
-    process.env.CUED_AUTH_NATIVE_BINARY = nativePath;
+    installNativeBinary("#!/bin/sh\nsleep 30\n");
 
     const db = createDb();
     const requested = requestIntegrationAccess(db, "whatsapp");
@@ -1833,7 +1846,7 @@ exit 1
   });
 
   it("returns privacy-safe WhatsApp QR missing helper failures", async () => {
-    process.env.CUED_WHATSAPP_HELPER_BINARY = join(
+    WHATSAPP_HELPER_CONFIG.helperBinary = join(
       createTempDir("cued-missing-whatsapp-helper-"),
       "cued-whatsapp-helper",
     );
@@ -1847,8 +1860,7 @@ exit 1
       platform: "whatsapp",
       accountKey: "default",
       state: "failed",
-      errorSummary:
-        "WhatsApp helper was not found. Build native/helpers/whatsapp-go first or set CUED_WHATSAPP_HELPER_BINARY.",
+      errorSummary: "WhatsApp helper was not found. Build native/helpers/whatsapp-go first.",
       resultSummary: {
         runtime: "qr_native",
         helper: "cued-whatsapp-helper",
@@ -1884,7 +1896,7 @@ exit 1
 `,
     );
     chmodSync(helperPath, 0o755);
-    process.env.CUED_WHATSAPP_HELPER_BINARY = helperPath;
+    WHATSAPP_HELPER_CONFIG.helperBinary = helperPath;
 
     const db = createDb();
     const requested = requestIntegrationAccess(db, "whatsapp");
@@ -1933,12 +1945,9 @@ exit 1
 `,
     );
     chmodSync(helperPath, 0o755);
-    process.env.CUED_WHATSAPP_HELPER_BINARY = helperPath;
+    WHATSAPP_HELPER_CONFIG.helperBinary = helperPath;
 
-    const nativePath = join(createTempDir("cued-native-qr-bin-"), "CuedNative");
-    writeFileSync(nativePath, "#!/bin/sh\nexit 0\n");
-    chmodSync(nativePath, 0o755);
-    process.env.CUED_AUTH_NATIVE_BINARY = nativePath;
+    installNativeBinary("#!/bin/sh\nexit 0\n");
 
     const db = createDb();
     const requested = requestIntegrationAccess(db, "whatsapp");
@@ -1985,11 +1994,8 @@ exit 1
 `,
     );
     chmodSync(helperPath, 0o755);
-    process.env.CUED_WHATSAPP_HELPER_BINARY = helperPath;
-    process.env.CUED_AUTH_NATIVE_BINARY = join(
-      createTempDir("cued-missing-native-qr-bin-"),
-      "CuedNative",
-    );
+    WHATSAPP_HELPER_CONFIG.helperBinary = helperPath;
+    NATIVE_RUNTIME_CONFIG.repoRoot = createTempDir("cued-missing-native-repo-");
 
     const db = createDb();
     const requested = requestIntegrationAccess(db, "whatsapp");
@@ -2007,7 +2013,7 @@ exit 1
         helperAvailable: true,
         helperVersion: "0.1.0",
         errorCode: "native_qr_unavailable",
-        phase: "pairing",
+        phase: "start_pairing",
       },
     });
     expect(JSON.stringify(result)).not.toMatch(/whatsapp-test-qr|storeDir|helperPath/);

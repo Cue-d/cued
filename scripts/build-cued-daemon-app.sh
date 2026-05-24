@@ -33,14 +33,13 @@ PERMISSIONS_SCRIPT_SOURCE="$ROOT_DIR/scripts/request-macos-access.sh"
 APP_ICON_SOURCE="$ROOT_DIR/native/macos/CuedNative/Resources/AppIcon.icns"
 TRAY_ICON_SOURCE="$ROOT_DIR/native/macos/CuedNative/Resources/trayIconTemplate.png"
 CUED_MARK_SOURCE="$ROOT_DIR/native/macos/CuedNative/Resources/cued-mark.png"
-NODE_PATH="${CUED_NODE_PATH:-$(command -v node)}"
+NODE_PATH="$(command -v node)"
 RUNTIME_SYMLINK_PRUNER="$ROOT_DIR/dist/macos/runtime-symlinks.js"
 GOOGLE_OAUTH_CLIENT_SOURCE="${CUED_BUNDLED_GOOGLE_OAUTH_CLIENT_FILE:-}"
 APP_VERSION="$("$NODE_PATH" -p "require(process.argv[1]).version" "$ROOT_DIR/package.json")"
+RELEASE_CHANNEL="internal"
 NODE_VERSION="$("$NODE_PATH" -p 'process.versions.node')"
 NODE_ARCH="$("$NODE_PATH" -p 'process.arch === "arm64" ? "arm64" : "x64"')"
-RELEASE_CHANNEL="${CUED_RELEASE_CHANNEL:-internal}"
-DAEMON_COMMAND="${CUED_DAEMON_COMMAND:-\"\$CUED_APP_PATH/Contents/Resources/cued-cli\" daemon}"
 BETTER_SQLITE3_BINDING_SOURCE="$(find "$ROOT_DIR/node_modules/.pnpm" -path "*/better-sqlite3-multiple-ciphers/build/Release/better_sqlite3.node" | head -n 1)"
 DEPLOY_STAGING_DIR="$(mktemp -d "${TMPDIR:-/tmp}/cued-runtime.XXXXXX")"
 
@@ -50,12 +49,30 @@ cleanup() {
 
 trap cleanup EXIT
 
-xml_escape() {
-  printf '%s' "$1" \
-    | sed -e 's/&/\&amp;/g' \
-          -e 's/</\&lt;/g' \
-          -e 's/>/\&gt;/g'
-}
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --release-channel)
+      RELEASE_CHANNEL="${2:-}"
+      shift 2
+      ;;
+    --help|-h)
+      echo "Usage: bash scripts/build-cued-daemon-app.sh [--release-channel internal|stable|dev]" >&2
+      exit 0
+      ;;
+    *)
+      echo "Unknown argument: $1" >&2
+      exit 1
+      ;;
+  esac
+done
+
+case "$RELEASE_CHANNEL" in
+  internal|stable|dev) ;;
+  *)
+    echo "Unsupported release channel: $RELEASE_CHANNEL" >&2
+    exit 1
+    ;;
+esac
 
 sign_app_bundle() {
   strip_extended_attributes "$APP_BUNDLE"
@@ -265,6 +282,9 @@ cp -R "$NODE_RUNTIME_SOURCE_DIR/lib" "$RUNTIME_NODE_ROOT/lib"
 chmod +x "$RUNTIME_NODE_BIN_DIR/node"
 ditto --noextattr --norsrc "$PLAYWRIGHT_CHROMIUM_SOURCE_DIR" "$PLAYWRIGHT_CHROMIUM_PAYLOAD_DIR"
 cp -R "$DEPLOY_STAGING_DIR/." "$RUNTIME_DIR/"
+cat > "$RUNTIME_DIR/app-metadata.json" <<EOF
+{"version":"$APP_VERSION","releaseChannel":"$RELEASE_CHANNEL"}
+EOF
 cp -R "$SIGNAL_HELPER_SOURCE_DIR" "$HELPERS_DIR/signal-cli"
 cp "$SLACK_HELPER_SOURCE" "$HELPERS_DIR/cued-slack-helper"
 chmod +x "$HELPERS_DIR/cued-slack-helper"
@@ -341,15 +361,6 @@ mkdir -p "$RESOURCES_DIR/skills"
 cp -R "$ROOT_DIR/skills/cued" "$RESOURCES_DIR/skills/cued"
 rm -rf "$RESOURCES_DIR/skills/cued/cued-workspace" "$RESOURCES_DIR/skills/cued/evals/runs"
 
-INFO_PLIST_DB_PATH_BLOCK=""
-if [[ -n "${CUED_DB_PATH_OVERRIDE:-}" ]]; then
-  INFO_PLIST_DB_PATH_BLOCK=$(cat <<EOF
-  <key>CuedDBPath</key>
-  <string>$(xml_escape "$CUED_DB_PATH_OVERRIDE")</string>
-EOF
-)
-fi
-
 cat > "$CONTENTS_DIR/Info.plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -381,9 +392,6 @@ cat > "$CONTENTS_DIR/Info.plist" <<EOF
   <true/>
   <key>NSContactsUsageDescription</key>
   <string>Cued reads local contacts so your local message database can resolve people consistently across platforms.</string>
-  <key>CuedDaemonCommand</key>
-  <string>$(xml_escape "$DAEMON_COMMAND")</string>
-$INFO_PLIST_DB_PATH_BLOCK
 </dict>
 </plist>
 EOF
@@ -398,28 +406,13 @@ while [[ -L "\$SCRIPT_SOURCE" ]]; do
   [[ "\$SCRIPT_SOURCE" != /* ]] && SCRIPT_SOURCE="\$SCRIPT_DIR/\$SCRIPT_SOURCE"
 done
 SCRIPT_DIR="\$(cd "\$(dirname "\$SCRIPT_SOURCE")" && pwd)"
-APP_EXEC="\$SCRIPT_DIR/../MacOS/$APP_EXECUTABLE_NAME"
 APP_BUNDLE_PATH="\$(cd "\$SCRIPT_DIR/../.." && pwd)"
 RUNTIME_ROOT="\$SCRIPT_DIR/cued-runtime"
-SCRIPT_ROOT="\$SCRIPT_DIR/scripts"
 NODE_BIN="\$SCRIPT_DIR/runtime/node/bin/node"
-HELPER_BINARY="\$SCRIPT_DIR/helpers/$HELPER_NAME"
 export PATH="\$(dirname "\$NODE_BIN"):\$PATH"
-export CUED_APP_PATH="\${CUED_APP_PATH:-\$APP_BUNDLE_PATH}"
-export CUED_BUNDLED_RUNTIME_ROOT="\${CUED_BUNDLED_RUNTIME_ROOT:-\$RUNTIME_ROOT}"
-export CUED_BUNDLED_SCRIPT_ROOT="\${CUED_BUNDLED_SCRIPT_ROOT:-\$SCRIPT_ROOT}"
-export CUED_NATIVE_BINARY="\${CUED_NATIVE_BINARY:-\$HELPER_BINARY}"
-export CUED_IMESSAGE_NATIVE_BINARY="\${CUED_IMESSAGE_NATIVE_BINARY:-\$HELPER_BINARY}"
-export CUED_CONTACTS_NATIVE_BINARY="\${CUED_CONTACTS_NATIVE_BINARY:-\$HELPER_BINARY}"
-export CUED_AUTH_NATIVE_BINARY="\${CUED_AUTH_NATIVE_BINARY:-\$APP_EXEC}"
-export CUED_CHROMIUM_EXECUTABLE_PATH="\${CUED_CHROMIUM_EXECUTABLE_PATH:-\$SCRIPT_DIR/runtime/chromium/chrome/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing}"
 if [[ -f "\$SCRIPT_DIR/oauth/google-oauth-client.json" ]]; then
   export CUED_BUNDLED_GOOGLE_OAUTH_CLIENT_FILE="\${CUED_BUNDLED_GOOGLE_OAUTH_CLIENT_FILE:-\$SCRIPT_DIR/oauth/google-oauth-client.json}"
 fi
-export CUED_SLACK_HELPER_BINARY="\${CUED_SLACK_HELPER_BINARY:-\$SCRIPT_DIR/helpers/cued-slack-helper}"
-export CUED_WHATSAPP_HELPER_BINARY="\${CUED_WHATSAPP_HELPER_BINARY:-\$SCRIPT_DIR/helpers/cued-whatsapp-helper}"
-export CUED_APP_VERSION="$APP_VERSION"
-export CUED_RELEASE_CHANNEL="$RELEASE_CHANNEL"
 exec "\$NODE_BIN" "\$RUNTIME_ROOT/dist/cli.js" "\$@"
 EOF
 chmod +x "$RESOURCES_DIR/cued-cli"

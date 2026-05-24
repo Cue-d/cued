@@ -3,9 +3,9 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-NODE_BIN="${CUED_NODE_PATH:-$(command -v node)}"
+NODE_BIN="$(command -v node)"
 PLAYWRIGHT_CLI="$ROOT_DIR/node_modules/.bin/playwright"
-PLAYWRIGHT_CACHE_DIR="${CUED_PLAYWRIGHT_BROWSER_CACHE_DIR:-${TMPDIR:-/tmp}/cued-playwright-browsers}"
+PLAYWRIGHT_CACHE_DIR="${TMPDIR:-/tmp}/cued-playwright-browsers"
 
 if [[ ! -x "$PLAYWRIGHT_CLI" ]]; then
   echo "Playwright CLI not found at $PLAYWRIGHT_CLI" >&2

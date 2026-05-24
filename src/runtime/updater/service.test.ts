@@ -2,6 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { APP_METADATA_CONFIG } from "../../core/app-metadata.js";
 import { CuedDatabase } from "../../db/database.js";
 import {
   checkForUpdates,
@@ -16,9 +17,12 @@ import {
 
 describe("updater service", () => {
   const tempDirs: string[] = [];
+  const originalAppVersion = APP_METADATA_CONFIG.version;
+  const originalReleaseChannel = APP_METADATA_CONFIG.releaseChannel;
 
   afterEach(() => {
-    vi.unstubAllEnvs();
+    APP_METADATA_CONFIG.version = originalAppVersion;
+    APP_METADATA_CONFIG.releaseChannel = originalReleaseChannel;
     while (tempDirs.length > 0) {
       const dir = tempDirs.pop();
       if (dir) {
@@ -74,8 +78,8 @@ describe("updater service", () => {
   });
 
   it("reuses cached update metadata on scheduled 304 responses", async () => {
-    vi.stubEnv("CUED_APP_VERSION", "0.1.0");
-    vi.stubEnv("CUED_RELEASE_CHANNEL", "stable");
+    APP_METADATA_CONFIG.version = "0.1.0";
+    APP_METADATA_CONFIG.releaseChannel = "stable";
     const db = createDb();
     db.setUpdateReleaseState({
       checkedAt: 1,
@@ -107,8 +111,8 @@ describe("updater service", () => {
   });
 
   it("does not send stale etags on forced update checks", async () => {
-    vi.stubEnv("CUED_APP_VERSION", "0.1.0");
-    vi.stubEnv("CUED_RELEASE_CHANNEL", "stable");
+    APP_METADATA_CONFIG.version = "0.1.0";
+    APP_METADATA_CONFIG.releaseChannel = "stable";
     const db = createDb();
     db.setUpdateReleaseState({
       checkedAt: 1,
@@ -156,8 +160,8 @@ describe("updater service", () => {
   });
 
   it("does not reuse fresh cache when the release channel changes", async () => {
-    vi.stubEnv("CUED_APP_VERSION", "0.1.0");
-    vi.stubEnv("CUED_RELEASE_CHANNEL", "internal");
+    APP_METADATA_CONFIG.version = "0.1.0";
+    APP_METADATA_CONFIG.releaseChannel = "internal";
     const db = createDb();
     db.setUpdateReleaseState({
       checkedAt: Date.now(),
@@ -205,8 +209,8 @@ describe("updater service", () => {
   });
 
   it("does not reuse fresh cache when the current app version changes", async () => {
-    vi.stubEnv("CUED_APP_VERSION", "0.2.0");
-    vi.stubEnv("CUED_RELEASE_CHANNEL", "stable");
+    APP_METADATA_CONFIG.version = "0.2.0";
+    APP_METADATA_CONFIG.releaseChannel = "stable";
     const db = createDb();
     db.setUpdateReleaseState({
       checkedAt: Date.now(),
@@ -240,8 +244,8 @@ describe("updater service", () => {
   });
 
   it("skips remote checks on dev channel", async () => {
-    vi.stubEnv("CUED_APP_VERSION", "0.1.3");
-    vi.stubEnv("CUED_RELEASE_CHANNEL", "dev");
+    APP_METADATA_CONFIG.version = "0.1.3";
+    APP_METADATA_CONFIG.releaseChannel = "dev";
     const db = createDb();
     const fetchMock = vi.fn();
     const fetchImpl = fetchMock as unknown as typeof fetch;

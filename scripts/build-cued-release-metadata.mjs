@@ -8,13 +8,14 @@ import { join, resolve } from "node:path";
 const rootDir = resolve(import.meta.dirname, "..");
 const distDir = join(rootDir, "native", "macos", "dist");
 
-const version =
-  process.env.CUED_RELEASE_VERSION ??
-  JSON.parse(readFileSync(join(rootDir, "package.json"), "utf8")).version;
-const tag = process.env.CUED_RELEASE_TAG ?? `v${version}`;
-const repo = process.env.CUED_RELEASE_REPO ?? "Cue-d/cued";
-const channel = process.env.CUED_RELEASE_CHANNEL ?? "stable";
-const publishedAt = process.env.CUED_RELEASE_PUBLISHED_AT ?? new Date().toISOString();
+const releaseConfig = {
+  repo: "Cue-d/cued",
+  channel: "stable",
+};
+
+const version = JSON.parse(readFileSync(join(rootDir, "package.json"), "utf8")).version;
+const tag = `v${version}`;
+const publishedAt = new Date().toISOString();
 
 const artifactNames = {
   dmg: "Cued.dmg",
@@ -51,18 +52,18 @@ function sha256(fileName) {
 const metadata = {
   version,
   tag,
-  channel,
+  channel: releaseConfig.channel,
   architecture: "arm64",
   publishedAt,
   artifacts: {
     dmg: {
       name: artifactNames.dmg,
-      url: `https://github.com/${repo}/releases/download/${tag}/${artifactNames.dmg}`,
+      url: `https://github.com/${releaseConfig.repo}/releases/download/${tag}/${artifactNames.dmg}`,
       sha256: sha256(artifactNames.dmg),
     },
     tarball: {
       name: artifactNames.tarball,
-      url: `https://github.com/${repo}/releases/download/${tag}/${artifactNames.tarball}`,
+      url: `https://github.com/${releaseConfig.repo}/releases/download/${tag}/${artifactNames.tarball}`,
       sha256: sha256(artifactNames.tarball),
     },
   },

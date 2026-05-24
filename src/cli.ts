@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import "./core/env.js";
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -7,7 +8,12 @@ import process from "node:process";
 import { fileURLToPath } from "node:url";
 import { DaemonRequestTimeoutError, sendDaemonRequest } from "./client.js";
 import { getCurrentAppVersion, getCurrentReleaseChannel } from "./core/app-metadata.js";
-import { CUED_DB_PATH, CUED_SOCKET_PATH, ensureCuedDirs } from "./core/config.js";
+import {
+  CUED_DB_PATH,
+  CUED_SOCKET_PATH,
+  ensureCuedDirs,
+  stripRuntimeConfigArgs,
+} from "./core/config.js";
 import { resolveHostOS } from "./core/platform-capabilities.js";
 import {
   openCuedDatabase,
@@ -57,7 +63,7 @@ import {
 } from "./runtime/logs.js";
 import { readMenuBarStatusCache } from "./runtime/menu-bar-status-cache.js";
 import { buildOnboardingSnapshot } from "./runtime/onboarding.js";
-import { runProjectionWorkerFromEnv } from "./runtime/projection/worker.js";
+import { runProjectionWorkerFromStdin } from "./runtime/projection/worker.js";
 import {
   checkForUpdates,
   clearUpdateHelperPendingState,
@@ -79,13 +85,11 @@ import {
 const DIST_ROOT = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(DIST_ROOT, "..");
 
-export function resolveBundledScriptPath(scriptName: string): string | null {
+export function resolveBundledScriptPath(scriptName: string, distRoot = DIST_ROOT): string | null {
   const candidates = [
-    process.env.CUED_BUNDLED_SCRIPT_ROOT
-      ? join(process.env.CUED_BUNDLED_SCRIPT_ROOT, scriptName)
-      : null,
-    join(DIST_ROOT, "../scripts", scriptName),
-  ].filter((value): value is string => Boolean(value));
+    join(distRoot, "../scripts", scriptName),
+    join(distRoot, "../../scripts", scriptName),
+  ];
 
   return candidates.find((candidate) => existsSync(candidate)) ?? null;
 }
@@ -428,7 +432,7 @@ function isUnsupportedDaemonCommand(response: { ok: boolean; error?: string }): 
 async function main(): Promise<void> {
   ensureCuedDirs();
 
-  const args = process.argv.slice(2);
+  const args = stripRuntimeConfigArgs(process.argv.slice(2));
   const [command, subcommand, ...rest] = args;
 
   if (!command || command === "help" || command === "--help" || command === "-h") {
@@ -442,7 +446,7 @@ async function main(): Promise<void> {
   }
 
   if (command === "__projection-worker") {
-    await runProjectionWorkerFromEnv();
+    await runProjectionWorkerFromStdin();
     return;
   }
 

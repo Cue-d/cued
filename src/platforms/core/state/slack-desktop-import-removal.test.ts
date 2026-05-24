@@ -25,18 +25,19 @@ vi.mock("playwright", () => ({
   },
 }));
 
+import { SLACK_DESKTOP_IMPORT_CONFIG } from "../../../core/config.js";
 import { importSlackDesktopAuth } from "../../slack/auth/desktop-import.js";
 
 describe("slack desktop import removal tombstones", () => {
   const tempDirs: string[] = [];
-  const originalSlackAppBinary = process.env.CUED_SLACK_APP_BINARY;
-  const originalSlackUserDataDir = process.env.CUED_SLACK_USER_DATA_DIR;
-  const originalSlackDesktopImportTimeout = process.env.CUED_SLACK_DESKTOP_IMPORT_TIMEOUT_MS;
+  const originalSlackAppBinary = SLACK_DESKTOP_IMPORT_CONFIG.appBinary;
+  const originalSlackUserDataDir = SLACK_DESKTOP_IMPORT_CONFIG.userDataDir;
+  const originalSlackDesktopImportTimeout = SLACK_DESKTOP_IMPORT_CONFIG.timeoutMs;
 
   afterEach(() => {
-    restoreEnv("CUED_SLACK_APP_BINARY", originalSlackAppBinary);
-    restoreEnv("CUED_SLACK_USER_DATA_DIR", originalSlackUserDataDir);
-    restoreEnv("CUED_SLACK_DESKTOP_IMPORT_TIMEOUT_MS", originalSlackDesktopImportTimeout);
+    SLACK_DESKTOP_IMPORT_CONFIG.appBinary = originalSlackAppBinary;
+    SLACK_DESKTOP_IMPORT_CONFIG.userDataDir = originalSlackUserDataDir;
+    SLACK_DESKTOP_IMPORT_CONFIG.timeoutMs = originalSlackDesktopImportTimeout;
     vi.clearAllMocks();
     while (tempDirs.length > 0) {
       const dir = tempDirs.pop();
@@ -45,14 +46,6 @@ describe("slack desktop import removal tombstones", () => {
       }
     }
   });
-
-  function restoreEnv(key: string, value: string | undefined): void {
-    if (value === undefined) {
-      delete process.env[key];
-      return;
-    }
-    process.env[key] = value;
-  }
 
   function createTempDir(prefix: string): string {
     const dir = mkdtempSync(join(tmpdir(), prefix));
@@ -72,8 +65,8 @@ describe("slack desktop import removal tombstones", () => {
     chmodSync(appBinary, 0o755);
     const userDataDir = createTempDir("cued-slack-user-data-");
     mkdirSync(userDataDir, { recursive: true });
-    process.env.CUED_SLACK_APP_BINARY = appBinary;
-    process.env.CUED_SLACK_USER_DATA_DIR = userDataDir;
+    SLACK_DESKTOP_IMPORT_CONFIG.appBinary = appBinary;
+    SLACK_DESKTOP_IMPORT_CONFIG.userDataDir = userDataDir;
   }
 
   it("imports unrelated teams without resurrecting a removed workspace", async () => {
@@ -143,13 +136,13 @@ describe("slack desktop import removal tombstones", () => {
       {
         platform: "slack",
         accountKey: "T_REMOVED",
-        sourcePath: process.env.CUED_SLACK_USER_DATA_DIR,
+        sourcePath: SLACK_DESKTOP_IMPORT_CONFIG.userDataDir,
         imported: false,
       },
       {
         platform: "slack",
         accountKey: "T_ACTIVE",
-        sourcePath: process.env.CUED_SLACK_USER_DATA_DIR,
+        sourcePath: SLACK_DESKTOP_IMPORT_CONFIG.userDataDir,
         imported: true,
       },
     ]);
@@ -184,7 +177,7 @@ describe("slack desktop import removal tombstones", () => {
 
   it("relaunches Slack once when an existing desktop debugger is wedged", async () => {
     installFakeSlackDesktop();
-    process.env.CUED_SLACK_DESKTOP_IMPORT_TIMEOUT_MS = "500";
+    SLACK_DESKTOP_IMPORT_CONFIG.timeoutMs = 500;
 
     const debuggerReachable = [true, true, false, true];
     execFileSyncMock.mockImplementation((command: string, args?: string[]) => {
@@ -247,7 +240,7 @@ describe("slack desktop import removal tombstones", () => {
       {
         platform: "slack",
         accountKey: "T_RECOVERED",
-        sourcePath: process.env.CUED_SLACK_USER_DATA_DIR,
+        sourcePath: SLACK_DESKTOP_IMPORT_CONFIG.userDataDir,
         imported: true,
       },
     ]);
@@ -269,7 +262,7 @@ describe("slack desktop import removal tombstones", () => {
 
   it("does not reconnect when the stale Slack debugger keeps the port", async () => {
     installFakeSlackDesktop();
-    process.env.CUED_SLACK_DESKTOP_IMPORT_TIMEOUT_MS = "500";
+    SLACK_DESKTOP_IMPORT_CONFIG.timeoutMs = 500;
 
     execFileSyncMock.mockImplementation((command: string, args?: string[]) => {
       if (command === "curl") {

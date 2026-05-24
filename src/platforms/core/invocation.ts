@@ -1,6 +1,20 @@
 import { safeParseJsonRecord } from "../../db/codecs.js";
 import type { AdapterPlatform } from "./types.js";
 
+export type AdapterInvocation = {
+  accountKey?: string;
+  sourceCursor?: unknown;
+  syncProofs?: unknown;
+  lastSyncAt?: number;
+  syncToken?: string | null;
+  signalAccount?: string;
+  imessageLastRowId?: number;
+  whatsappSource?: "desktop_db";
+  whatsappDesktopSourcePath?: string;
+  slackHelperPath?: string | null;
+  slackHelperApiUrl?: string;
+};
+
 export type AdapterInvocationProofRow = {
   scope_kind: string;
   scope_key: string;
@@ -12,49 +26,54 @@ export type AdapterInvocationProofRow = {
   last_observed_at: number;
 };
 
-export function buildAdapterInvocationEnv(input: {
+export function buildAdapterInvocation(input: {
   platform: AdapterPlatform;
+  accountKey?: string;
   checkpointSourceCursorJson?: string | null;
   proofs?: AdapterInvocationProofRow[];
-}): Record<string, string> {
-  const env: Record<string, string> = {};
-  const platformEnvPrefix = `CUED_${input.platform.toUpperCase()}_`;
+}): AdapterInvocation {
+  const invocation: AdapterInvocation = {};
   const sourceCursor = safeParseJsonRecord(
     input.checkpointSourceCursorJson ?? null,
     "sync_checkpoints.source_cursor_json",
   );
 
-  if (input.checkpointSourceCursorJson) {
-    env.CUED_SYNC_SOURCE_CURSOR = input.checkpointSourceCursorJson;
-    env[`${platformEnvPrefix}SOURCE_CURSOR`] = input.checkpointSourceCursorJson;
+  if (input.accountKey) {
+    invocation.accountKey = input.accountKey;
+  }
+  if (sourceCursor) {
+    invocation.sourceCursor = sourceCursor;
   }
   if (input.proofs && input.proofs.length > 0) {
-    const proofsJson = JSON.stringify(input.proofs.map(serializeInvocationProof));
-    env.CUED_SYNC_PROOFS = proofsJson;
-    if (input.platform === "discord") {
-      env.CUED_DISCORD_SYNC_PROOFS = proofsJson;
-    }
+    invocation.syncProofs = input.proofs.map(serializeInvocationProof);
   }
 
   if (input.platform === "imessage" && typeof sourceCursor?.rowId === "number") {
-    env.CUED_IMESSAGE_LAST_ROWID = String(sourceCursor.rowId);
+    invocation.imessageLastRowId = sourceCursor.rowId;
   }
   if (input.platform === "slack" && typeof sourceCursor?.lastSyncAt === "number") {
-    env.CUED_SLACK_LAST_SYNC_AT = String(sourceCursor.lastSyncAt);
+    invocation.lastSyncAt = sourceCursor.lastSyncAt;
   }
   if (input.platform === "linkedin") {
     if (typeof sourceCursor?.lastSyncAt === "number") {
-      env.CUED_LINKEDIN_LAST_SYNC_AT = String(sourceCursor.lastSyncAt);
+      invocation.lastSyncAt = sourceCursor.lastSyncAt;
     }
     if (typeof sourceCursor?.syncToken === "string" && sourceCursor.syncToken.length > 0) {
-      env.CUED_LINKEDIN_SYNC_TOKEN = sourceCursor.syncToken;
+      invocation.syncToken = sourceCursor.syncToken;
     }
   }
   if (input.platform === "signal" && typeof sourceCursor?.lastSyncAt === "number") {
-    env.CUED_SIGNAL_LAST_SYNC_AT = String(sourceCursor.lastSyncAt);
+    invocation.lastSyncAt = sourceCursor.lastSyncAt;
   }
 
-  return env;
+  return invocation;
+}
+
+export async function readAdapterInvocation(
+  input: AsyncIterable<Buffer | string> | Iterable<Buffer | string> = process.stdin,
+): Promise<AdapterInvocation> {
+  const raw = await readText(input);
+  return raw.trim() ? (JSON.parse(raw) as AdapterInvocation) : {};
 }
 
 export function selectAdapterInvocationProofs(input: {
@@ -107,24 +126,6 @@ export function selectAdapterInvocationProofs(input: {
   return input.proofs.filter((proof) => proof.status === "running");
 }
 
-export function readAdapterInvocationEnv(
-  platform: AdapterPlatform,
-  env: NodeJS.ProcessEnv = process.env,
-): {
-  sourceCursor?: unknown;
-  syncProofs?: unknown;
-} {
-  const platformEnvPrefix = `CUED_${platform.toUpperCase()}_`;
-  return {
-    sourceCursor: parseOptionalJsonEnv(
-      env[`${platformEnvPrefix}SOURCE_CURSOR`] ?? env.CUED_SYNC_SOURCE_CURSOR,
-    ),
-    syncProofs: parseOptionalJsonEnv(
-      env[`${platformEnvPrefix}SYNC_PROOFS`] ?? env.CUED_SYNC_PROOFS,
-    ),
-  };
-}
-
 function serializeInvocationProof(proof: AdapterInvocationProofRow): Record<string, unknown> {
   return {
     scopeKind: proof.scope_kind,
@@ -138,8 +139,14 @@ function serializeInvocationProof(proof: AdapterInvocationProofRow): Record<stri
   };
 }
 
-function parseOptionalJsonEnv(value: string | undefined): unknown {
-  return value ? JSON.parse(value) : undefined;
+async function readText(
+  input: AsyncIterable<Buffer | string> | Iterable<Buffer | string>,
+): Promise<string> {
+  const chunks: Buffer[] = [];
+  for await (const chunk of input) {
+    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  }
+  return Buffer.concat(chunks).toString("utf8");
 }
 
 function getStringPath(value: unknown, path: string[]): string | null {

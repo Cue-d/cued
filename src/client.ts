@@ -4,7 +4,7 @@ import { CUED_SOCKET_PATH } from "./core/config.js";
 import type { DaemonRequest, DaemonResponse } from "./runtime/ipc.js";
 
 const DAEMON_CONNECT_RETRY_DELAYS_MS = [100, 250, 500] as const;
-const DEFAULT_DAEMON_REQUEST_TIMEOUT_MS = 10_000;
+const DAEMON_REQUEST_TIMEOUT_MS = 10_000;
 
 export class DaemonRequestTimeoutError extends Error {
   constructor(
@@ -97,10 +97,7 @@ function sendSingleDaemonRequest(request: DaemonRequest): Promise<DaemonResponse
 }
 
 function getDaemonRequestTimeoutMs(): number {
-  const configured = Number(process.env.CUED_DAEMON_REQUEST_TIMEOUT_MS);
-  return Number.isFinite(configured) && configured > 0
-    ? Math.trunc(configured)
-    : DEFAULT_DAEMON_REQUEST_TIMEOUT_MS;
+  return DAEMON_REQUEST_TIMEOUT_MS;
 }
 
 function isRetriableDaemonConnectionError(error: unknown): boolean {

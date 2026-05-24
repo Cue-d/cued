@@ -5,14 +5,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 describe("app metadata", () => {
   afterEach(() => {
-    vi.unstubAllEnvs();
     vi.resetModules();
   });
 
-  it("falls back to the repo package version when env vars are unset", async () => {
-    vi.stubEnv("CUED_APP_VERSION", undefined);
-    vi.stubEnv("npm_package_version", undefined);
-
+  it("falls back to the repo package version when no version is configured", async () => {
     const expectedVersion = (
       JSON.parse(
         readFileSync(
@@ -25,5 +21,11 @@ describe("app metadata", () => {
     const metadata = await import("./app-metadata.js");
 
     expect(metadata.getCurrentAppVersion()).toBe(expectedVersion);
+  });
+
+  it("uses dev as the source checkout release channel fallback", async () => {
+    const metadata = await import("./app-metadata.js");
+
+    expect(metadata.getCurrentReleaseChannel()).toBe("dev");
   });
 });

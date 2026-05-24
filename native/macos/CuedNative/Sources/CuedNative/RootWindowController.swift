@@ -242,7 +242,11 @@ final class RootWindowController: NSWindowController {
   }
 
   private func consumePrerequisiteSetupIntent() -> Bool {
-    guard !didEnsurePrerequisites, shouldAutoConfigurePrerequisites() else {
+    guard !didEnsurePrerequisites,
+      shouldAutoConfigurePrerequisites(
+        skipAutoPrerequisites: loadCuedRuntimeConfig().skipAutoPrerequisites == true
+      )
+    else {
       return false
     }
     didEnsurePrerequisites = true

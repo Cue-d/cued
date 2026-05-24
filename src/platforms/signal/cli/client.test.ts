@@ -63,7 +63,7 @@ describe("signal cli helpers", () => {
     expect(readSignalLinkedAccount(dir)).toBe("+14155550123");
   });
 
-  it("prefers the packaged app helper over the repo-local helper", () => {
+  it("ignores app path shaped helpers and uses source-owned candidates", () => {
     const repoRoot = createTempDir("cued-signal-repo-");
     const appPath = join(createTempDir("cued-signal-app-"), "Cued.app");
     const packagedHelper = join(
@@ -89,11 +89,9 @@ describe("signal cli helpers", () => {
     createSignalHelperBinary(packagedHelper, "0.14.1");
     createSignalHelperBinary(repoHelper, "0.13.1");
 
-    const env = { CUED_APP_PATH: appPath } as NodeJS.ProcessEnv;
-    expect(getSignalCliBinaryCandidates(env, repoRoot)).toEqual(
-      expect.arrayContaining([packagedHelper, repoHelper]),
-    );
-    expect(resolveSignalCliPath(env, repoRoot)).toBe(packagedHelper);
+    expect(getSignalCliBinaryCandidates(repoRoot)).toEqual(expect.arrayContaining([repoHelper]));
+    expect(getSignalCliBinaryCandidates(repoRoot)).not.toContain(packagedHelper);
+    expect(resolveSignalCliPath(repoRoot)).toBe(repoHelper);
   });
 
   it("falls back to the repo-local staged helper when no packaged app helper exists", () => {
@@ -111,21 +109,19 @@ describe("signal cli helpers", () => {
     mkdirSync(join(repoHelper, ".."), { recursive: true });
     createSignalHelperBinary(repoHelper);
 
-    expect(resolveSignalCliPath({}, repoRoot)).toBe(repoHelper);
+    expect(resolveSignalCliPath(repoRoot)).toBe(repoHelper);
   });
 
-  it("returns null when no bundled helper exists and ignores legacy env overrides", () => {
+  it("returns null when no bundled helper exists and ignores unrelated env overrides", () => {
     const repoRoot = createTempDir("cued-signal-repo-");
     const legacyOverride = join(createTempDir("cued-signal-legacy-"), "signal-cli");
     createSignalHelperBinary(legacyOverride);
 
-    expect(
-      resolveSignalCliPath({ CUED_SIGNAL_CLI_PATH: legacyOverride } as NodeJS.ProcessEnv, repoRoot),
-    ).toBeNull();
+    expect(resolveSignalCliPath(repoRoot)).toBeNull();
   });
 
   it("uses the relocated runtime bundled helper fallback path", () => {
-    const candidates = getSignalCliHelperRootCandidates({});
+    const candidates = getSignalCliHelperRootCandidates();
 
     expect(candidates[0]).toBe(
       resolve(dirname(fileURLToPath(import.meta.url)), "../../../../../helpers/signal-cli"),

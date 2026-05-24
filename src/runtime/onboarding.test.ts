@@ -2,18 +2,30 @@ import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:f
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import {
+  IMESSAGE_CONFIG,
+  NATIVE_RUNTIME_CONFIG,
+  SIGNAL_CLI_CONFIG,
+  SLACK_DESKTOP_IMPORT_CONFIG,
+} from "../core/config.js";
 import { CuedDatabase } from "../db/database.js";
+import { WHATSAPP_HELPER_CONFIG } from "../platforms/whatsapp/helper/pair.js";
 import { buildOnboardingSnapshot } from "./onboarding.js";
 
 describe("onboarding snapshot", () => {
   const tempDirs: string[] = [];
+  const originalIMessageDbPath = IMESSAGE_CONFIG.chatDbPath;
+  const originalNativeRepoRoot = NATIVE_RUNTIME_CONFIG.repoRoot;
+  const originalSignalRepoRoot = SIGNAL_CLI_CONFIG.repoRoot;
+  const originalSlackAppBinary = SLACK_DESKTOP_IMPORT_CONFIG.appBinary;
+  const originalWhatsAppHelperBinary = WHATSAPP_HELPER_CONFIG.helperBinary;
 
   afterEach(() => {
-    delete process.env.CUED_CONTACTS_NATIVE_BINARY;
-    delete process.env.CUED_IMESSAGE_DB_PATH;
-    delete process.env.CUED_SLACK_APP_BINARY;
-    delete process.env.CUED_APP_PATH;
-    delete process.env.CUED_WHATSAPP_HELPER_BINARY;
+    WHATSAPP_HELPER_CONFIG.helperBinary = originalWhatsAppHelperBinary;
+    IMESSAGE_CONFIG.chatDbPath = originalIMessageDbPath;
+    NATIVE_RUNTIME_CONFIG.repoRoot = originalNativeRepoRoot;
+    SIGNAL_CLI_CONFIG.repoRoot = originalSignalRepoRoot;
+    SLACK_DESKTOP_IMPORT_CONFIG.appBinary = originalSlackAppBinary;
 
     while (tempDirs.length > 0) {
       const dir = tempDirs.pop();
@@ -36,36 +48,50 @@ describe("onboarding snapshot", () => {
     return db;
   }
 
-  function createPackagedSignalHelper(version = "0.12.9"): string {
-    const appPath = join(createTempDir("cued-app-"), "Cued.app");
+  function installSignalHelper(version = "0.12.9"): void {
+    const repoRoot = createTempDir("cued-signal-repo-");
+    SIGNAL_CLI_CONFIG.repoRoot = repoRoot;
     const helperPath = join(
-      appPath,
-      "Contents",
-      "Resources",
+      repoRoot,
+      "native",
       "helpers",
       "signal-cli",
+      ".build",
+      "cued-signal-cli",
       "cued-signal-cli",
     );
     mkdirSync(join(helperPath, ".."), { recursive: true });
     writeFileSync(helperPath, `#!/bin/sh\necho "signal-cli ${version}"\n`);
     chmodSync(helperPath, 0o755);
-    return appPath;
+  }
+
+  function installNativeBinary(contents: string): string {
+    const repoRoot = createTempDir("cued-native-repo-");
+    NATIVE_RUNTIME_CONFIG.repoRoot = repoRoot;
+    const nativeBinaryPath = join(
+      repoRoot,
+      "native",
+      "macos",
+      "CuedNative",
+      ".build",
+      "release",
+      "CuedNative",
+    );
+    mkdirSync(join(nativeBinaryPath, ".."), { recursive: true });
+    writeFileSync(nativeBinaryPath, contents);
+    chmodSync(nativeBinaryPath, 0o755);
+    return nativeBinaryPath;
   }
 
   it("builds one snapshot with fresh permissions and onboarding integrations", async () => {
-    const nativeBinaryDir = createTempDir("cued-native-binary-");
-    const nativeBinaryPath = join(nativeBinaryDir, "CuedNative");
-    writeFileSync(
-      nativeBinaryPath,
+    installNativeBinary(
       '#!/bin/sh\nif [ "$1" = "contacts" ] && [ "$2" = "status" ]; then\n  echo \'{"status":"authorized"}\'\n  exit 0\nfi\nexit 1\n',
     );
-    chmodSync(nativeBinaryPath, 0o755);
 
-    process.env.CUED_CONTACTS_NATIVE_BINARY = nativeBinaryPath;
-    process.env.CUED_IMESSAGE_DB_PATH = join(createTempDir("cued-imessage-"), "missing.db");
-    process.env.CUED_SLACK_APP_BINARY = join(createTempDir("cued-no-slack-app-"), "Slack");
-    process.env.CUED_APP_PATH = createPackagedSignalHelper();
-    process.env.CUED_WHATSAPP_HELPER_BINARY = join(
+    IMESSAGE_CONFIG.chatDbPath = join(createTempDir("cued-imessage-"), "missing.db");
+    SLACK_DESKTOP_IMPORT_CONFIG.appBinary = join(createTempDir("cued-no-slack-app-"), "Slack");
+    installSignalHelper();
+    WHATSAPP_HELPER_CONFIG.helperBinary = join(
       createTempDir("cued-no-whatsapp-helper-"),
       "cued-whatsapp-helper",
     );

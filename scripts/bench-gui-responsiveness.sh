@@ -1,34 +1,69 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-CLI="${CUED_CLI:-cued}"
-DURATION_SECONDS="${CUED_BENCH_DURATION_SECONDS:-60}"
-INTERVAL_SECONDS="${CUED_BENCH_INTERVAL_SECONDS:-1}"
-TRIGGER_SYNC="${CUED_BENCH_TRIGGER_SYNC:-0}"
-OUT="${CUED_BENCH_OUT:-/tmp/cued-gui-responsiveness-$(date +%Y%m%d-%H%M%S).jsonl}"
+CLI="cued"
+DURATION_SECONDS="60"
+INTERVAL_SECONDS="1"
+TRIGGER_SYNC="0"
+OUT="/tmp/cued-gui-responsiveness-$(date +%Y%m%d-%H%M%S).jsonl"
 SYNC_OUT="$(mktemp -t cued-bench-sync-resume.out.XXXXXX)"
 SYNC_ERR="$(mktemp -t cued-bench-sync-resume.err.XXXXXX)"
 trap 'rm -f "$SYNC_OUT" "$SYNC_ERR"' EXIT
+
+usage() {
+  cat <<EOF
+Usage: $(basename "$0") [--cli PATH] [--duration SECONDS] [--interval SECONDS] [--trigger-sync] [--out PATH]
+EOF
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --cli)
+      CLI="${2:-}"
+      shift 2
+      ;;
+    --duration)
+      DURATION_SECONDS="${2:-}"
+      shift 2
+      ;;
+    --interval)
+      INTERVAL_SECONDS="${2:-}"
+      shift 2
+      ;;
+    --trigger-sync)
+      TRIGGER_SYNC="1"
+      shift
+      ;;
+    --out)
+      OUT="${2:-}"
+      shift 2
+      ;;
+    --help|-h)
+      usage
+      exit 0
+      ;;
+    *)
+      usage >&2
+      exit 1
+      ;;
+  esac
+done
 
 if [[ "$TRIGGER_SYNC" == "1" ]]; then
   ("$CLI" sync resume >"$SYNC_OUT" 2>"$SYNC_ERR" || true) &
 fi
 
-CUED_CLI="$CLI" \
-CUED_BENCH_DURATION_SECONDS="$DURATION_SECONDS" \
-CUED_BENCH_INTERVAL_SECONDS="$INTERVAL_SECONDS" \
-CUED_BENCH_OUT="$OUT" \
-python3 - <<'PY'
+python3 - "$CLI" "$DURATION_SECONDS" "$INTERVAL_SECONDS" "$OUT" <<'PY'
 import json
-import os
 import statistics
 import subprocess
+import sys
 import time
 
-cli = os.environ["CUED_CLI"]
-duration_seconds = float(os.environ["CUED_BENCH_DURATION_SECONDS"])
-interval_seconds = float(os.environ["CUED_BENCH_INTERVAL_SECONDS"])
-out = os.environ["CUED_BENCH_OUT"]
+cli = sys.argv[1]
+duration_seconds = float(sys.argv[2])
+interval_seconds = float(sys.argv[3])
+out = sys.argv[4]
 METRIC_KEYS = [
     "messages",
     "rawEvents",

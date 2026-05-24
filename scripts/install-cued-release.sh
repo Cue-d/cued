@@ -7,14 +7,43 @@ if [[ "$(uname -s)" != "Darwin" ]]; then
   exit 1
 fi
 
-REPO="${CUED_RELEASE_REPO:-Cue-d/cued}"
-CHANNEL="${CUED_RELEASE_CHANNEL:-stable}"
-API_BASE="${CUED_RELEASE_API_BASE:-https://api.github.com}"
+REPO="Cue-d/cued"
+CHANNEL="stable"
+API_BASE="https://api.github.com"
 APP_NAME="Cued.app"
 TARBALL_NAME="cued-macos-arm64.tar.gz"
-DESTINATION="${CUED_DESTINATION:-}"
-OPEN_APP="${CUED_OPEN_APP:-1}"
+DESTINATION=""
+OPEN_APP="1"
 TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/cued-install.XXXXXX")"
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --channel|--release-channel)
+      CHANNEL="${2:-}"
+      shift 2
+      ;;
+    --destination)
+      DESTINATION="${2:-}"
+      shift 2
+      ;;
+    --no-open)
+      OPEN_APP="0"
+      shift
+      ;;
+    *)
+      echo "Unknown argument: $1" >&2
+      exit 1
+      ;;
+  esac
+done
+
+case "$CHANNEL" in
+  stable|internal) ;;
+  *)
+    echo "Unsupported Cued release channel: $CHANNEL" >&2
+    exit 1
+    ;;
+esac
 
 if [[ "$(uname -m)" != "arm64" ]]; then
   echo "Cued internal releases currently support Apple Silicon Macs only." >&2
@@ -64,15 +93,17 @@ validate_app_bundle() {
   spctl --assess --type execute "$app_path" >/dev/null
 }
 
-release_json="$(curl -fsSL -H 'Accept: application/vnd.github+json' "${API_BASE}/repos/${REPO}/releases")"
+release_json_path="$TMP_DIR/releases.json"
+curl -fsSL -H 'Accept: application/vnd.github+json' "${API_BASE}/repos/${REPO}/releases" -o "$release_json_path"
 
-release_info="$(RELEASE_JSON="$release_json" RELEASE_CHANNEL="$CHANNEL" python3 - <<'PY'
+release_info="$(python3 - "$CHANNEL" "$release_json_path" <<'PY'
 import json
-import os
+import sys
 
-channel = os.environ["RELEASE_CHANNEL"]
+channel = sys.argv[1]
 desired_prerelease = channel != "stable"
-releases = json.loads(os.environ["RELEASE_JSON"])
+with open(sys.argv[2], encoding="utf-8") as handle:
+    releases = json.load(handle)
 release = next((r for r in releases if bool(r.get("prerelease")) == desired_prerelease), None)
 if release is None and releases:
     release = releases[0]

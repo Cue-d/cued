@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { sql } from "drizzle-orm";
@@ -6,9 +6,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 describe("projection worker", () => {
   const tempDirs: string[] = [];
+  const originalArgv = process.argv.slice();
 
   afterEach(() => {
-    vi.unstubAllEnvs();
+    process.argv.splice(0, process.argv.length, ...originalArgv);
     vi.resetModules();
     while (tempDirs.length > 0) {
       const dir = tempDirs.pop();
@@ -24,11 +25,15 @@ describe("projection worker", () => {
     return dir;
   }
 
+  function useRuntimeConfig(home: string): void {
+    const configPath = join(home, "config.json");
+    writeFileSync(configPath, JSON.stringify({ home, dbPath: join(home, "local.db") }), "utf8");
+    process.argv.splice(0, process.argv.length, ...originalArgv, "--config", configPath);
+  }
+
   it("fails instead of reporting success when the run claim was reclaimed", async () => {
     const home = createTempHome();
-    vi.stubEnv("CUED_HOME", home);
-    vi.stubEnv("CUED_DB_PATH", join(home, "local.db"));
-    vi.stubEnv("CUED_PROJECTION_BATCH_SIZE", "10");
+    useRuntimeConfig(home);
     vi.resetModules();
 
     const { openCuedDatabase } = await import("../../db/database.js");

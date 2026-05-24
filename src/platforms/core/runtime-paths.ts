@@ -1,6 +1,6 @@
 import { lstatSync, mkdirSync, realpathSync, renameSync, rmSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
-import { CUED_BROWSER_DIR, CUED_SIGNAL_DIR, CUED_WHATSAPP_DIR } from "../../core/config.js";
+import { CUED_BROWSER_DIR, CUED_WHATSAPP_DIR, PLATFORM_RUNTIME_CONFIG } from "../../core/config.js";
 import { validateIntegrationAccountKey } from "./account-keys.js";
 import type { Platform } from "./types.js";
 
@@ -52,7 +52,7 @@ export function getChromiumProfileDir(platform: Platform, accountKey: string): s
 }
 
 export function getSignalConfigRoot(): string {
-  return process.env.CUED_SIGNAL_DIR?.trim() || CUED_SIGNAL_DIR;
+  return PLATFORM_RUNTIME_CONFIG.signalConfigRoot;
 }
 
 export function getWhatsAppStoreRoot(): string {

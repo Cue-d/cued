@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -15,6 +15,7 @@ vi.mock("node:child_process", async (importOriginal) => {
   };
 });
 
+import { NATIVE_RUNTIME_CONFIG } from "../core/config.js";
 import { CuedDatabase } from "../db/database.js";
 import { buildPermissionStatus } from "./doctor.js";
 
@@ -22,10 +23,10 @@ const itDarwin = process.platform === "darwin" ? it : it.skip;
 
 describe("permission status modes", () => {
   const tempDirs: string[] = [];
+  const originalNativeRepoRoot = NATIVE_RUNTIME_CONFIG.repoRoot;
 
   afterEach(() => {
-    delete process.env.CUED_CONTACTS_NATIVE_BINARY;
-    delete process.env.CUED_IMESSAGE_NATIVE_BINARY;
+    NATIVE_RUNTIME_CONFIG.repoRoot = originalNativeRepoRoot;
     vi.clearAllMocks();
     while (tempDirs.length > 0) {
       const dir = tempDirs.pop();
@@ -43,16 +44,34 @@ describe("permission status modes", () => {
     return db;
   }
 
+  function installNativeBinary(): string {
+    const repoRoot = mkdtempSync(join(tmpdir(), "cued-doctor-native-repo-"));
+    tempDirs.push(repoRoot);
+    NATIVE_RUNTIME_CONFIG.repoRoot = repoRoot;
+    const binaryPath = join(
+      repoRoot,
+      "native",
+      "macos",
+      "CuedNative",
+      ".build",
+      "release",
+      "CuedNative",
+    );
+    mkdirSync(join(binaryPath, ".."), { recursive: true });
+    writeFileSync(binaryPath, "#!/bin/sh\nexit 0\n");
+    chmodSync(binaryPath, 0o755);
+    return binaryPath;
+  }
+
   itDarwin("omits removed permission checks in passive mode", async () => {
     const db = createDb();
-    process.env.CUED_CONTACTS_NATIVE_BINARY = "/tmp/cued-native-helper";
-    process.env.CUED_IMESSAGE_NATIVE_BINARY = "/tmp/cued-native-helper";
+    const nativeBinary = installNativeBinary();
 
     execFileSyncMock.mockImplementation((command: string, args?: string[]) => {
-      if (command === "/tmp/cued-native-helper" && args?.[0] === "contacts") {
+      if (command === nativeBinary && args?.[0] === "contacts") {
         return '{"status":"authorized"}';
       }
-      if (command === "/tmp/cued-native-helper" && args?.[0] === "imessage") {
+      if (command === nativeBinary && args?.[0] === "imessage") {
         return "";
       }
       throw new Error(`unexpected command: ${command}`);

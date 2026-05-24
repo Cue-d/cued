@@ -200,7 +200,7 @@ function tryReadMessagesDatabase(): DoctorCheck {
 }
 
 function getMessagesNativeHelperCheck(): DoctorCheck {
-  const nativeBinary = resolveMacOSNativeBinary(process.env.CUED_IMESSAGE_NATIVE_BINARY);
+  const nativeBinary = resolveMacOSNativeBinary();
   if (!nativeBinary) {
     return {
       name: "messages_native_helper",
@@ -244,7 +244,7 @@ function getMessagesNativeHelperCheck(): DoctorCheck {
 }
 
 function getContactsPermissionCheck(): DoctorCheck {
-  const nativeBinary = resolveMacOSNativeBinary(process.env.CUED_CONTACTS_NATIVE_BINARY);
+  const nativeBinary = resolveMacOSNativeBinary();
   if (!nativeBinary) {
     return {
       name: "contacts_permission",

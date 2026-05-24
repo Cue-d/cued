@@ -209,16 +209,20 @@ Release packaging can inject the official client without committing it:
 CUED_BUNDLED_GOOGLE_OAUTH_CLIENT_FILE=/private/path/google-oauth-client.json pnpm build:app:macos
 ```
 
-### Idle performance controls
+### Configuration
 
-The daemon defaults to a low-idle scheduler tick and platform-specific sync intervals. Tune these only when debugging or benchmarking:
+Cued loads repo-root `.env` files through dotenv at Node process startup.
+`.env.example` is a short credential reference, not an inventory of every
+internal `CUED_*` value. Normal installs use app defaults, `~/.cued`, Keychain,
+and bundled helper discovery.
 
-```bash
-CUED_AUTOSYNC_SCHEDULER_TICK_MS=15000
-CUED_AUTOSYNC_INTERVAL_MS=60000
-CUED_AUTOSYNC_INTERVAL_SIGNAL_MS=300000
-CUED_AUTOSYNC_INTERVAL_WHATSAPP_MS=300000
-```
+For packaged app launch overrides, the macOS host reads `~/.cued/daemon.env`.
+Use that only for rare credential-path overrides. Non-secret defaults and
+runtime path overrides live in `src/core/config.ts`; isolated local runs can pass
+`--config path/to/config.json`.
+
+See [docs/configuration.md](docs/configuration.md) for the configuration ownership
+rules.
 
 ### Contributor workflow
 

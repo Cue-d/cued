@@ -22,6 +22,7 @@ import {
   readWhatsAppHelperStatus,
   resolveWhatsAppHelperBinary,
   startWhatsAppPairSession,
+  WHATSAPP_HELPER_CONFIG,
 } from "./pair.js";
 
 class MockPairChild extends EventEmitter {
@@ -37,9 +38,10 @@ class MockPairChild extends EventEmitter {
 
 describe("whatsapp helper", () => {
   const tempDirs: string[] = [];
+  const originalHelperBinary = WHATSAPP_HELPER_CONFIG.helperBinary;
 
   afterEach(() => {
-    delete process.env.CUED_WHATSAPP_HELPER_BINARY;
+    WHATSAPP_HELPER_CONFIG.helperBinary = originalHelperBinary;
     vi.clearAllMocks();
     while (tempDirs.length > 0) {
       const dir = tempDirs.pop();
@@ -56,7 +58,7 @@ describe("whatsapp helper", () => {
   }
 
   it("uses the flattened repo root for implicit development candidates", () => {
-    expect(getWhatsAppHelperBinaryCandidates()[0]).toBe(
+    expect(getWhatsAppHelperBinaryCandidates()).toContain(
       join(process.cwd(), "native", "helpers", "whatsapp-go", ".build", "cued-whatsapp-helper"),
     );
   });
@@ -69,20 +71,27 @@ describe("whatsapp helper", () => {
 
   it("finds the compiled helper under the repo root when available", () => {
     const repoRoot = createRepoRoot();
-    const candidates = getWhatsAppHelperBinaryCandidates(repoRoot);
     mkdirSync(join(repoRoot, "native", "helpers", "whatsapp-go", ".build"), {
       recursive: true,
     });
-    writeFileSync(candidates[0], "#!/bin/sh\nexit 0\n");
-    chmodSync(candidates[0], 0o755);
+    const helperPath = join(
+      repoRoot,
+      "native",
+      "helpers",
+      "whatsapp-go",
+      ".build",
+      "cued-whatsapp-helper",
+    );
+    writeFileSync(helperPath, "#!/bin/sh\nexit 0\n");
+    chmodSync(helperPath, 0o755);
 
-    expect(resolveWhatsAppHelperBinary(undefined, repoRoot)).toBe(candidates[0]);
+    expect(resolveWhatsAppHelperBinary(undefined, repoRoot)).toBe(helperPath);
   });
 
   it("parses extended helper history status fields", async () => {
     const repoRoot = createRepoRoot();
     const helperPath = join(repoRoot, "cued-whatsapp-helper");
-    process.env.CUED_WHATSAPP_HELPER_BINARY = helperPath;
+    WHATSAPP_HELPER_CONFIG.helperBinary = helperPath;
     writeFileSync(
       helperPath,
       `#!/bin/sh

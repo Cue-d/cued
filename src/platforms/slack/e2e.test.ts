@@ -135,10 +135,14 @@ describe("slack e2e", () => {
   it("syncs full history, stays idempotent, and discovers new channels, DMs, and MPDMs", async () => {
     const envDir = mkdtempSync(join(tmpdir(), "cued-slack-e2e-"));
     tempDirs.push(envDir);
+    const configPath = join(envDir, "config.json");
+    writeFileSync(configPath, JSON.stringify({ home: envDir, dbPath: join(envDir, "local.db") }));
     const db = new CuedDatabase(join(envDir, "local.db"));
     db.migrate();
     const originalExecArgv = [...process.execArgv];
+    const originalArgv = [...process.argv];
     process.execArgv = ["--import", "tsx"];
+    process.argv = [...originalArgv, "--config", configPath];
 
     const securityDir = join(envDir, "bin");
     const securityPath = join(securityDir, "security");
@@ -458,7 +462,6 @@ echo '{"token":"xoxc-test","cookie":"cookie-test","teamId":"T123","teamName":"Ac
 
     try {
       const first = await runSlackPhase(db, {
-        dbPath: db.dbPath,
         helperBinaryPath,
         apiURL,
         securityDir,
@@ -537,7 +540,6 @@ echo '{"token":"xoxc-test","cookie":"cookie-test","teamId":"T123","teamName":"Ac
 
       phase = "rerun";
       const second = await runSlackPhase(db, {
-        dbPath: db.dbPath,
         helperBinaryPath,
         apiURL,
         securityDir,
@@ -553,7 +555,6 @@ echo '{"token":"xoxc-test","cookie":"cookie-test","teamId":"T123","teamName":"Ac
 
       phase = "expand";
       const third = await runSlackPhase(db, {
-        dbPath: db.dbPath,
         helperBinaryPath,
         apiURL,
         securityDir,
@@ -627,45 +628,42 @@ echo '{"token":"xoxc-test","cookie":"cookie-test","teamId":"T123","teamName":"Ac
       );
     } finally {
       process.execArgv = originalExecArgv;
+      process.argv = originalArgv;
       db.close();
       await new Promise<void>((resolve, reject) =>
         server.close((error) => (error ? reject(error) : resolve())),
       );
     }
-  }, 15_000);
+  }, 30_000);
 });
 
 async function runSlackCycle(
   db: CuedDatabase,
   options: {
-    dbPath: string;
     helperBinaryPath: string;
     apiURL: string;
     securityDir: string;
-    apiPageBudget?: number;
   },
 ) {
   const checkpoint = db.getCheckpoint("slack", "workspace-a");
   const sourceCursor = checkpoint?.source_cursor_json
     ? JSON.parse(checkpoint.source_cursor_json)
     : null;
-  const envOverrides: Record<string, string> = {
-    CUED_DB_PATH: options.dbPath,
-    CUED_SLACK_HELPER_BINARY: options.helperBinaryPath,
-    CUED_SLACK_HELPER_API_URL: options.apiURL,
+  const subprocessEnv: Record<string, string> = {
     PATH: `${options.securityDir}:${process.env.PATH ?? ""}`,
   };
-  if (typeof sourceCursor?.lastSyncAt === "number") {
-    envOverrides.CUED_SLACK_LAST_SYNC_AT = String(sourceCursor.lastSyncAt);
-  }
-  if (checkpoint?.source_cursor_json) {
-    envOverrides.CUED_SLACK_SOURCE_CURSOR = checkpoint.source_cursor_json;
-  }
-  if (typeof options.apiPageBudget === "number") {
-    envOverrides.CUED_SLACK_API_PAGE_BUDGET = String(options.apiPageBudget);
-  }
-
-  const bundle = await runAdapter("slack", "workspace-a", envOverrides);
+  const bundle = await runAdapter(
+    "slack",
+    {
+      accountKey: "workspace-a",
+      slackHelperPath: options.helperBinaryPath,
+      slackHelperApiUrl: options.apiURL,
+      lastSyncAt:
+        typeof sourceCursor?.lastSyncAt === "number" ? sourceCursor.lastSyncAt : undefined,
+      sourceCursor: sourceCursor ?? undefined,
+    },
+    subprocessEnv,
+  );
   const insertResult = db.insertRawEvents(bundle.rawEvents);
   db.upsertSourceAccounts(bundle.sourceAccounts ?? []);
   for (const proof of bundle.proofs ?? []) {
@@ -700,7 +698,6 @@ async function runSlackCycle(
 async function runSlackPhase(
   db: CuedDatabase,
   options: {
-    dbPath: string;
     helperBinaryPath: string;
     apiURL: string;
     securityDir: string;

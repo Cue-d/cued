@@ -1,13 +1,15 @@
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
+import { getRuntimeConfigArgs } from "../../core/config.js";
 import type { AdapterPlatform } from "../../core/types/provider.js";
+import type { AdapterInvocation } from "./invocation.js";
 import { getAdapterDefinition } from "./registry.js";
 import type { AdapterWorkerOutput, SyncBundle } from "./sync.js";
 
 export async function runAdapter(
   platform: AdapterPlatform,
-  accountKey?: string,
-  envOverrides?: Record<string, string>,
+  invocation: AdapterInvocation = {},
+  subprocessEnv?: Record<string, string>,
 ): Promise<SyncBundle> {
   const definition = getAdapterDefinition(platform);
   if (!definition) {
@@ -17,15 +19,19 @@ export async function runAdapter(
   const workerEntrypoint = resolveWorkerEntrypoint(definition.workerEntrypoint);
 
   return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, [...process.execArgv, workerEntrypoint], {
-      stdio: ["ignore", "pipe", "pipe"],
-      detached: true,
-      env: {
-        ...process.env,
-        ...(accountKey ? { CUED_ACCOUNT_KEY: accountKey } : {}),
-        ...envOverrides,
+    const child = spawn(
+      process.execPath,
+      [...process.execArgv, workerEntrypoint, ...getRuntimeConfigArgs()],
+      {
+        stdio: ["pipe", "pipe", "pipe"],
+        detached: true,
+        env: {
+          ...process.env,
+          ...subprocessEnv,
+        },
       },
-    });
+    );
+    child.stdin?.end(JSON.stringify(invocation));
 
     let stdout = "";
     let stderr = "";
@@ -38,7 +44,7 @@ export async function runAdapter(
       killAdapterProcessTree(child.pid, () => child.kill("SIGKILL"));
       reject(
         new Error(
-          `Adapter worker timed out after ${definition.workerTimeoutMs}ms for platform '${platform}'${accountKey ? ` account '${accountKey}'` : ""}`,
+          `Adapter worker timed out after ${definition.workerTimeoutMs}ms for platform '${platform}'${invocation.accountKey ? ` account '${invocation.accountKey}'` : ""}`,
         ),
       );
     }, definition.workerTimeoutMs);

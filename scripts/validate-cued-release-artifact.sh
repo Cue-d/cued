@@ -9,8 +9,8 @@ INFO_PLIST="$APP_BUNDLE/Contents/Info.plist"
 RUNTIME_PATH="$APP_BUNDLE/Contents/Resources/cued-runtime"
 RESOURCES_PATH="$APP_BUNDLE/Contents/Resources"
 SKILL_PATH="$APP_BUNDLE/Contents/Resources/skills/cued/SKILL.md"
-EXPECTED_VERSION="${CUED_RELEASE_VERSION:-$(node -p "require(process.argv[1]).version" "$ROOT_DIR/package.json")}"
-EXPECTED_TAG="${CUED_RELEASE_TAG:-v$EXPECTED_VERSION}"
+EXPECTED_VERSION="$(node -p "require(process.argv[1]).version" "$ROOT_DIR/package.json")"
+EXPECTED_TAG="v$EXPECTED_VERSION"
 
 if [[ ! -d "$APP_BUNDLE" ]]; then
   echo "Cued.app not found at $APP_BUNDLE" >&2

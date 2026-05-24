@@ -7,14 +7,15 @@ import {
   inspectSlackHelper,
   readSlackHelperStatus,
   resolveSlackHelperBinary,
+  SLACK_HELPER_CONFIG,
 } from "./binary.js";
 
 describe("slack helper binary", () => {
   const tempDirs: string[] = [];
+  const originalHelperBinary = SLACK_HELPER_CONFIG.helperBinary;
 
   afterEach(() => {
-    delete process.env.CUED_APP_PATH;
-    delete process.env.CUED_SLACK_HELPER_BINARY;
+    SLACK_HELPER_CONFIG.helperBinary = originalHelperBinary;
     while (tempDirs.length > 0) {
       const dir = tempDirs.pop();
       if (dir) {
@@ -66,7 +67,7 @@ exit 1
     );
     chmodSync(helperPath, 0o755);
 
-    process.env.CUED_SLACK_HELPER_BINARY = helperPath;
+    SLACK_HELPER_CONFIG.helperBinary = helperPath;
 
     expect(inspectSlackHelper()).toEqual({
       helperPath,

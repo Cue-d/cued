@@ -8,6 +8,10 @@ const execFileAsync = promisify(execFile);
 const SLACK_HELPER_BINARY_NAME = "cued-slack-helper";
 const SUPPORTED_SLACK_HELPER_PROTOCOL_VERSION = 1;
 
+export const SLACK_HELPER_CONFIG = {
+  helperBinary: null as string | null,
+};
+
 function resolveRepoRoot(): string {
   return resolve(dirname(fileURLToPath(import.meta.url)), "../../../..");
 }
@@ -19,14 +23,8 @@ function runtimeBundledSlackHelperBinary(): string {
   );
 }
 
-export function getSlackHelperBinaryCandidates(
-  env: NodeJS.ProcessEnv = process.env,
-  repoRoot = resolveRepoRoot(),
-): string[] {
+export function getSlackHelperBinaryCandidates(repoRoot = resolveRepoRoot()): string[] {
   return [
-    env.CUED_APP_PATH?.trim()
-      ? join(env.CUED_APP_PATH.trim(), "Contents", "Resources", "helpers", SLACK_HELPER_BINARY_NAME)
-      : null,
     runtimeBundledSlackHelperBinary(),
     join(repoRoot, "native", "helpers", "slack-go", ".build", SLACK_HELPER_BINARY_NAME),
     join(repoRoot, "native", "helpers", "slack-go", SLACK_HELPER_BINARY_NAME),
@@ -34,17 +32,15 @@ export function getSlackHelperBinaryCandidates(
 }
 
 export function resolveSlackHelperBinary(
-  envVarValue = process.env.CUED_SLACK_HELPER_BINARY,
+  explicitPath = SLACK_HELPER_CONFIG.helperBinary,
   repoRoot = resolveRepoRoot(),
 ): string | null {
-  if (envVarValue) {
-    return envVarValue;
+  if (explicitPath) {
+    return explicitPath;
   }
 
   return (
-    getSlackHelperBinaryCandidates(process.env, repoRoot).find((candidate) =>
-      existsSync(candidate),
-    ) ?? null
+    getSlackHelperBinaryCandidates(repoRoot).find((candidate) => existsSync(candidate)) ?? null
   );
 }
 
@@ -64,8 +60,7 @@ export function isSlackHelperProtocolSupported(protocolVersion: number | null): 
   return protocolVersion === SUPPORTED_SLACK_HELPER_PROTOCOL_VERSION;
 }
 
-export function inspectSlackHelper(): SlackHelperInspection {
-  const helperPath = resolveSlackHelperBinary();
+export function inspectSlackHelper(helperPath = resolveSlackHelperBinary()): SlackHelperInspection {
   if (!helperPath) {
     return {
       helperPath: null,
@@ -100,8 +95,9 @@ export function inspectSlackHelper(): SlackHelperInspection {
   }
 }
 
-export async function readSlackHelperStatus(): Promise<SlackHelperStatus> {
-  const helperPath = resolveSlackHelperBinary();
+export async function readSlackHelperStatus(
+  helperPath = resolveSlackHelperBinary(),
+): Promise<SlackHelperStatus> {
   if (!helperPath) {
     return {
       helperVersion: null,

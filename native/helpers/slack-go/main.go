@@ -599,18 +599,36 @@ func commandErrorEnvelope(err error) commandEnvelope {
 
 func main() {
 	if len(os.Args) < 2 {
-		fmt.Fprintln(os.Stderr, "usage: cued-slack-helper <version|status|authTest|listUsers|listConversations|getConversationMembers|getHistory|getReplies|session>")
+		fmt.Fprintln(os.Stderr, "usage: cued-slack-helper [--api-url URL] <version|status|authTest|listUsers|listConversations|getConversationMembers|getHistory|getReplies|session>")
 		os.Exit(1)
 	}
 
-	command := os.Args[1]
+	args := os.Args[1:]
+	apiURL := ""
+	if strings.HasPrefix(args[0], "--api-url=") {
+		apiURL = strings.TrimSpace(strings.TrimPrefix(args[0], "--api-url="))
+		args = args[1:]
+	} else if args[0] == "--api-url" {
+		if len(args) < 3 {
+			fmt.Fprintln(os.Stderr, "--api-url requires a value and command")
+			os.Exit(1)
+		}
+		apiURL = strings.TrimSpace(args[1])
+		args = args[2:]
+	}
+	if len(args) < 1 {
+		fmt.Fprintln(os.Stderr, "missing helper command")
+		os.Exit(1)
+	}
+
+	command := args[0]
 	baseCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	ctx, cancel := context.WithTimeout(baseCtx, requestTimeout)
 	defer cancel()
 
 	runner := newHelperRunner(runnerOptions{
-		apiURL: os.Getenv("CUED_SLACK_HELPER_API_URL"),
+		apiURL: apiURL,
 	})
 
 	if command == "session" {

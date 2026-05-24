@@ -1,16 +1,15 @@
 import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
+import { IMESSAGE_CONFIG } from "../../../core/config.js";
 import { resolveMacOSNativeBinary } from "../../../runtime/native-binary.js";
-import { DEFAULT_CHAT_DB_PATH, IMessageReader } from "../../imessage/reader.js";
+import { IMessageReader } from "../../imessage/reader.js";
 import { type IntegrationAuthState, parseIntegrationAuthState } from "../types.js";
 import type { ManagedIntegrationState } from "./types.js";
 
 export function getContactsAuthState(
-  resolveNativeBinary: (
-    envVarValue: string | undefined,
-  ) => string | null = resolveMacOSNativeBinary,
+  resolveNativeBinary: () => string | null = resolveMacOSNativeBinary,
 ): IntegrationAuthState {
-  const nativeBinary = resolveNativeBinary(process.env.CUED_CONTACTS_NATIVE_BINARY);
+  const nativeBinary = resolveNativeBinary();
   if (!nativeBinary) {
     return "native_helper_missing";
   }
@@ -27,15 +26,13 @@ export function getContactsAuthState(
 }
 
 export function getIMessageAuthState(
-  resolveNativeBinary: (
-    envVarValue: string | undefined,
-  ) => string | null = resolveMacOSNativeBinary,
+  resolveNativeBinary: () => string | null = resolveMacOSNativeBinary,
 ): IntegrationAuthState {
-  const chatDbPath = process.env.CUED_IMESSAGE_DB_PATH ?? DEFAULT_CHAT_DB_PATH;
+  const chatDbPath = IMESSAGE_CONFIG.chatDbPath;
   if (!existsSync(chatDbPath)) {
     return "missing";
   }
-  const nativeBinary = resolveNativeBinary(process.env.CUED_IMESSAGE_NATIVE_BINARY);
+  const nativeBinary = resolveNativeBinary();
   if (nativeBinary) {
     try {
       execFileSync(
@@ -79,7 +76,7 @@ export function getIMessageAuthState(
 }
 
 export function buildLocalIntegrationStates(): ManagedIntegrationState[] {
-  const chatDbPath = process.env.CUED_IMESSAGE_DB_PATH ?? DEFAULT_CHAT_DB_PATH;
+  const chatDbPath = IMESSAGE_CONFIG.chatDbPath;
   const contactsAuthState = getContactsAuthState();
   const imessageAuthState = getIMessageAuthState();
   return [

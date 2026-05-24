@@ -1,12 +1,12 @@
-import { readAdapterInvocationEnv } from "../../core/invocation.js";
+import { readAdapterInvocation } from "../../core/invocation.js";
 import { buildDiscordSyncBundle } from "./bundle.js";
 
 async function main(): Promise<void> {
   try {
-    const invocation = readAdapterInvocationEnv("discord");
+    const invocation = await readAdapterInvocation();
     const bundle = await buildDiscordSyncBundle(
       {
-        accountKey: process.env.CUED_ACCOUNT_KEY,
+        accountKey: invocation.accountKey,
       },
       {
         sourceCursor: invocation.sourceCursor,

@@ -1,16 +1,13 @@
-import { readAdapterInvocationEnv } from "../../core/invocation.js";
+import { readAdapterInvocation } from "../../core/invocation.js";
 import { buildLinkedInSyncBundle } from "./bundle.js";
 
 async function main(): Promise<void> {
   try {
-    const lastSyncAt = process.env.CUED_LINKEDIN_LAST_SYNC_AT
-      ? Number(process.env.CUED_LINKEDIN_LAST_SYNC_AT)
-      : undefined;
-    const invocation = readAdapterInvocationEnv("linkedin");
+    const invocation = await readAdapterInvocation();
     const bundle = await buildLinkedInSyncBundle({
-      accountKey: process.env.CUED_ACCOUNT_KEY,
-      lastSyncAt: Number.isFinite(lastSyncAt) ? lastSyncAt : undefined,
-      syncToken: process.env.CUED_LINKEDIN_SYNC_TOKEN ?? null,
+      accountKey: invocation.accountKey,
+      lastSyncAt: invocation.lastSyncAt,
+      syncToken: invocation.syncToken ?? null,
       sourceCursor: invocation.sourceCursor,
       syncProofs: invocation.syncProofs,
     });

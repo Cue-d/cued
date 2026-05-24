@@ -1,24 +1,12 @@
-import { readAdapterInvocationEnv } from "../../core/invocation.js";
+import { readAdapterInvocation } from "../../core/invocation.js";
 import { buildGmailSyncBundle } from "./bundle.js";
 
 async function main(): Promise<void> {
   try {
-    const invocation = readAdapterInvocationEnv("gmail");
-    const pageBudget = process.env.CUED_GMAIL_PAGE_BUDGET
-      ? Number(process.env.CUED_GMAIL_PAGE_BUDGET)
-      : undefined;
-    const pageSize = process.env.CUED_GMAIL_PAGE_SIZE
-      ? Number(process.env.CUED_GMAIL_PAGE_SIZE)
-      : undefined;
-    const fetchConcurrency = process.env.CUED_GMAIL_FETCH_CONCURRENCY
-      ? Number(process.env.CUED_GMAIL_FETCH_CONCURRENCY)
-      : undefined;
+    const invocation = await readAdapterInvocation();
     const bundle = await buildGmailSyncBundle({
-      accountKey: process.env.CUED_ACCOUNT_KEY,
+      accountKey: invocation.accountKey,
       sourceCursor: invocation.sourceCursor,
-      pageBudget: Number.isFinite(pageBudget) ? pageBudget : undefined,
-      pageSize: Number.isFinite(pageSize) ? pageSize : undefined,
-      fetchConcurrency: Number.isFinite(fetchConcurrency) ? fetchConcurrency : undefined,
     });
     process.stdout.write(JSON.stringify({ ok: true, bundle }));
   } catch (error) {

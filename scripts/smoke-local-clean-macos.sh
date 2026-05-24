@@ -5,11 +5,11 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-TIMEOUT_SECONDS="${CUED_SMOKE_TIMEOUT_SECONDS:-60}"
+TIMEOUT_SECONDS="60"
 KEEP_SANDBOX=1
 BUILD_APP=1
 NO_SCREENSHOTS=0
-SANDBOX_ROOT="${CUED_SMOKE_SANDBOX_ROOT:-}"
+SANDBOX_ROOT=""
 INSTALL_MODE="sandbox"
 APPLICATIONS_APP_PATH="/Applications/Cued.app"
 
@@ -37,6 +37,7 @@ Usage:
 
 Options:
   --sandbox <path>      Reuse a specific sandbox root instead of creating a new temp one
+  --timeout <seconds>   Wait time for daemon/app readiness checks
   --applications        Install the built app into /Applications/Cued.app and smoke test that path
   --skip-build          Skip pnpm check:ci-local and pnpm build:app:macos
   --cleanup             Remove the sandbox on success
@@ -55,6 +56,11 @@ while [[ $# -gt 0 ]]; do
     --sandbox)
       SANDBOX_ROOT="${2:-}"
       [[ -n "$SANDBOX_ROOT" ]] || die "--sandbox requires a path"
+      shift 2
+      ;;
+    --timeout)
+      TIMEOUT_SECONDS="${2:-}"
+      [[ -n "$TIMEOUT_SECONDS" ]] || die "--timeout requires seconds"
       shift 2
       ;;
     --applications)
@@ -94,6 +100,7 @@ fi
 APP_UNDER_TEST="$SANDBOX_ROOT/Cued.app"
 HOME_UNDER_TEST="$SANDBOX_ROOT/home"
 CUED_HOME_UNDER_TEST="$HOME_UNDER_TEST/.cued"
+CUED_CONFIG_UNDER_TEST="$CUED_HOME_UNDER_TEST/config.json"
 ARTIFACTS_DIR="$SANDBOX_ROOT/artifacts"
 APP_LOG="$SANDBOX_ROOT/app.log"
 NOTES_PATH="$ARTIFACTS_DIR/notes.md"
@@ -104,7 +111,10 @@ INSTALLED_APP_BACKUP="$SANDBOX_ROOT/original-installed-Cued.app"
 APP_PID=""
 ONBOARDING_PROCESS_NAME=""
 
-mkdir -p "$HOME_UNDER_TEST" "$ARTIFACTS_DIR"
+mkdir -p "$CUED_HOME_UNDER_TEST" "$ARTIFACTS_DIR"
+cat >"$CUED_CONFIG_UNDER_TEST" <<EOF
+{"home":"$CUED_HOME_UNDER_TEST","dbPath":"$CUED_HOME_UNDER_TEST/local.db","skipAutoPrerequisites":true}
+EOF
 
 cleanup() {
   if [[ -n "$APP_PID" ]] && kill -0 "$APP_PID" >/dev/null 2>&1; then
@@ -146,10 +156,7 @@ snapshot_path_manifest() {
 smoke_env() {
   env \
     HOME="$HOME_UNDER_TEST" \
-    CUED_HOME="$CUED_HOME_UNDER_TEST" \
-    CUED_DB_PATH="$CUED_HOME_UNDER_TEST/local.db" \
-    CUED_SKIP_AUTO_PREREQUISITES=1 \
-    "$@"
+    "$@" --config "$CUED_CONFIG_UNDER_TEST"
 }
 
 run_cli() {

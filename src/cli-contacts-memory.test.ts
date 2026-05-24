@@ -47,12 +47,18 @@ describe("contacts memory CLI", () => {
   }
 
   function runCli(home: string, args: string[]): string {
-    return execFileSync("pnpm", ["--silent", "exec", "tsx", "src/cli.ts", ...args], {
-      cwd: process.cwd(),
-      env: { ...process.env, CUED_HOME: home },
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "pipe"],
-    });
+    const configPath = join(home, "config.json");
+    writeFileSync(configPath, JSON.stringify({ home, dbPath: join(home, "local.db") }), "utf8");
+    return execFileSync(
+      "pnpm",
+      ["--silent", "exec", "tsx", "src/cli.ts", "--config", configPath, ...args],
+      {
+        cwd: process.cwd(),
+        env: process.env,
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+      },
+    );
   }
 
   it("adds, supersedes, and lists current contact memories", () => {

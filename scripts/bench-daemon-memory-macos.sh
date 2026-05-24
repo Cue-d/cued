@@ -5,19 +5,19 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DIST_CLI_PATH="$ROOT_DIR/dist/cli.js"
 DEFAULT_BASELINE_PATH="$ROOT_DIR/src/runtime/perf/daemon-memory-baseline.json"
 
-DEFAULT_RUN_COUNT="${CUED_BENCH_RUN_COUNT:-3}"
-DEFAULT_WARMUP_SECONDS="${CUED_BENCH_WARMUP_SECONDS:-5}"
-DEFAULT_SAMPLE_COUNT="${CUED_BENCH_SAMPLE_COUNT:-20}"
-DEFAULT_SAMPLE_INTERVAL_SECONDS="${CUED_BENCH_SAMPLE_INTERVAL_SECONDS:-1}"
-DEFAULT_STARTUP_ATTEMPTS="${CUED_BENCH_STARTUP_ATTEMPTS:-300}"
-DEFAULT_STARTUP_SLEEP_SECONDS="${CUED_BENCH_STARTUP_SLEEP_SECONDS:-0.1}"
-DEFAULT_IDLE_CPU_POWER_RUN_COUNT="${CUED_BENCH_IDLE_CPU_POWER_RUN_COUNT:-1}"
-DEFAULT_IDLE_CPU_POWER_WARMUP_SECONDS="${CUED_BENCH_IDLE_CPU_POWER_WARMUP_SECONDS:-10}"
-DEFAULT_IDLE_CPU_POWER_SAMPLE_COUNT="${CUED_BENCH_IDLE_CPU_POWER_SAMPLE_COUNT:-60}"
-DEFAULT_IDLE_CPU_POWER_SAMPLE_INTERVAL_SECONDS="${CUED_BENCH_IDLE_CPU_POWER_SAMPLE_INTERVAL_SECONDS:-10}"
-DEFAULT_ACTIVE_SYNC_RUN_COUNT="${CUED_BENCH_ACTIVE_SYNC_RUN_COUNT:-3}"
-DEFAULT_ACTIVE_SYNC_SAMPLE_INTERVAL_SECONDS="${CUED_BENCH_ACTIVE_SYNC_SAMPLE_INTERVAL_SECONDS:-0.25}"
-DEFAULT_ACTIVE_SYNC_TIMEOUT_SECONDS="${CUED_BENCH_ACTIVE_SYNC_TIMEOUT_SECONDS:-60}"
+DEFAULT_RUN_COUNT="3"
+DEFAULT_WARMUP_SECONDS="5"
+DEFAULT_SAMPLE_COUNT="20"
+DEFAULT_SAMPLE_INTERVAL_SECONDS="1"
+DEFAULT_STARTUP_ATTEMPTS="300"
+DEFAULT_STARTUP_SLEEP_SECONDS="0.1"
+DEFAULT_IDLE_CPU_POWER_RUN_COUNT="1"
+DEFAULT_IDLE_CPU_POWER_WARMUP_SECONDS="10"
+DEFAULT_IDLE_CPU_POWER_SAMPLE_COUNT="60"
+DEFAULT_IDLE_CPU_POWER_SAMPLE_INTERVAL_SECONDS="10"
+DEFAULT_ACTIVE_SYNC_RUN_COUNT="3"
+DEFAULT_ACTIVE_SYNC_SAMPLE_INTERVAL_SECONDS="0.25"
+DEFAULT_ACTIVE_SYNC_TIMEOUT_SECONDS="60"
 
 SCENARIO="clean_idle"
 BASELINE_PATH=""
@@ -231,17 +231,23 @@ current_time_ms() {
   node -e 'process.stdout.write(String(Date.now()))'
 }
 
+runtime_config_path() {
+  printf '%s\n' "$1/config.json"
+}
+
+write_runtime_config() {
+  local home_dir="$1"
+  local db_path="${2:-$home_dir/local.db}"
+  mkdir -p "$home_dir"
+  printf '{"home":"%s","dbPath":"%s"}\n' "$home_dir" "$db_path" >"$(runtime_config_path "$home_dir")"
+}
+
 run_cli_to_file() {
   local home_dir="$1"
   local output_path="$2"
   shift 2
-  local disabled_slack_app_path="$home_dir/disabled/Slack.app/Contents/MacOS/Slack"
-  local disabled_slack_user_data_dir="$home_dir/disabled/SlackData"
-  CUED_HOME="$home_dir" \
-  CUED_DB_PATH="$home_dir/local.db" \
-  CUED_SLACK_APP_BINARY="$disabled_slack_app_path" \
-  CUED_SLACK_USER_DATA_DIR="$disabled_slack_user_data_dir" \
-  node "$DIST_CLI_PATH" "$@" >"$output_path"
+  write_runtime_config "$home_dir"
+  node "$DIST_CLI_PATH" --config "$(runtime_config_path "$home_dir")" "$@" >"$output_path"
 }
 
 run_cli_quiet() {
@@ -333,6 +339,9 @@ prepare_home_for_run() {
   {"displayName":"Perf Gamma","company":"Cued","phoneNumbers":["+14155550103"],"emails":["gamma@example.com"]}
 ]}
 EOF
+      cat >"$home_dir/contacts.config.json" <<EOF
+{"jsonPath":"$home_dir/contacts-benchmark.json"}
+EOF
       return
       ;;
     cloned_profile_idle)
@@ -362,12 +371,10 @@ prepare_cloned_profile_seed() {
 
   (
     cd "$ROOT_DIR"
-    CUED_HOME="$seed_home_dir" \
-    CUED_DB_PATH="$CLONED_PROFILE_SEED_DB_PATH" \
-    node <<'EOF'
+    node - "$CLONED_PROFILE_SEED_DB_PATH" <<'EOF'
 (async () => {
   const { openCuedDatabase } = await import("./dist/db/database.js");
-  const db = openCuedDatabase(process.env.CUED_DB_PATH);
+  const db = openCuedDatabase(process.argv[2]);
   db.close();
 })().catch((error) => {
   console.error(error);
@@ -587,25 +594,11 @@ SCENARIO_NOTE=""
 for run_number in $(seq 1 "$RUN_COUNT"); do
   RUN_DIR="$ARTIFACT_ROOT/run-$run_number"
   HOME_DIR="$RUN_DIR/home"
-  DISABLED_SLACK_APP_PATH="$HOME_DIR/disabled/Slack.app/Contents/MacOS/Slack"
-  DISABLED_SLACK_USER_DATA_DIR="$HOME_DIR/disabled/SlackData"
   mkdir -p "$RUN_DIR"
   prepare_home_for_run "$HOME_DIR"
+  write_runtime_config "$HOME_DIR"
 
-  DAEMON_ENV=(
-    "CUED_HOME=$HOME_DIR"
-    "CUED_DB_PATH=$HOME_DIR/local.db"
-    "CUED_SLACK_APP_BINARY=$DISABLED_SLACK_APP_PATH"
-    "CUED_SLACK_USER_DATA_DIR=$DISABLED_SLACK_USER_DATA_DIR"
-  )
-  if [ "$SCENARIO" = "active_sync_projection" ]; then
-    DAEMON_ENV+=(
-      "CUED_AUTOSYNC_PLATFORMS=contacts"
-      "CUED_CONTACTS_JSON_PATH=$HOME_DIR/contacts-benchmark.json"
-    )
-  fi
-
-  env "${DAEMON_ENV[@]}" node "$DIST_CLI_PATH" daemon >"$RUN_DIR/daemon.out" 2>&1 &
+  node "$DIST_CLI_PATH" --config "$(runtime_config_path "$HOME_DIR")" daemon >"$RUN_DIR/daemon.out" 2>&1 &
   ACTIVE_ROOT_PID="$!"
 
   READY_MS="$(wait_for_daemon_ready "$HOME_DIR")"

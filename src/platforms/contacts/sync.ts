@@ -1,6 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
+import { getConfiguredContactsJsonPath } from "../../core/config.js";
 import type { ContactObservationPayload } from "../../core/types/provider.js";
 import {
   getMacOSNativeBinaryCandidates,
@@ -122,15 +123,13 @@ function loadContactsFromMacOS(): ContactRecordInput[] {
 
 export const getNativeContactsBinaryCandidates = getMacOSNativeBinaryCandidates;
 
-export function resolveContactsLoader(
-  env: NodeJS.ProcessEnv = process.env,
-  repoRoot?: string,
-): ContactsLoader {
-  if (env.CUED_CONTACTS_JSON_PATH) {
-    return { kind: "file", path: env.CUED_CONTACTS_JSON_PATH };
+export function resolveContactsLoader(repoRoot?: string): ContactsLoader {
+  const jsonPath = getConfiguredContactsJsonPath();
+  if (jsonPath) {
+    return { kind: "file", path: jsonPath };
   }
 
-  const nativeBinary = resolveMacOSNativeBinary(env.CUED_CONTACTS_NATIVE_BINARY, repoRoot);
+  const nativeBinary = resolveMacOSNativeBinary(repoRoot);
   if (nativeBinary) {
     return { kind: "native", path: nativeBinary };
   }

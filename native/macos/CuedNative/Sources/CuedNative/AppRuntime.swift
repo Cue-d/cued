@@ -14,18 +14,6 @@ let appMessagesDBPath =
   FileManager.default.homeDirectoryForCurrentUser
   .appendingPathComponent("Library/Messages/chat.db").path
 
-private func environmentPath(_ name: String) -> String? {
-  trimmedEnvironmentPath(ProcessInfo.processInfo.environment, name: name)
-}
-
-private func configuredCuedHomePath() -> String {
-  configuredCuedHomePath(environment: ProcessInfo.processInfo.environment)
-}
-
-private func configuredCuedDBPath() -> String {
-  configuredCuedDBPath(environment: ProcessInfo.processInfo.environment)
-}
-
 private func configuredDaemonLockPath() -> String {
   "\(configuredCuedHomePath())/daemon.lock"
 }
@@ -36,18 +24,6 @@ private func configuredMenuBarLockPath() -> String {
 
 private func configuredMenuBarStatusPath() -> String {
   "\(configuredCuedHomePath())/menu-bar-status.json"
-}
-
-private func bundledHelperPath() -> String? {
-  guard let resourcePath = Bundle.main.resourcePath?.trimmingCharacters(in: .whitespacesAndNewlines),
-        !resourcePath.isEmpty else {
-    return nil
-  }
-
-  let candidate = URL(fileURLWithPath: resourcePath)
-    .appendingPathComponent("helpers/cued-native-helper")
-    .path
-  return FileManager.default.fileExists(atPath: candidate) ? candidate : nil
 }
 
 private func currentTimeMs() -> Int {
@@ -1323,10 +1299,11 @@ final class DaemonSupervisor {
   }
 
   nonisolated func runCLI(arguments: [String]) -> (status: Int32, stdout: String, stderr: String)? {
+    let fullArguments = runtimeConfigArguments() + arguments
     if let daemonLaunchPath, !daemonLaunchPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
       let process = Process()
       process.executableURL = URL(fileURLWithPath: daemonLaunchPath)
-      process.arguments = arguments
+      process.arguments = fullArguments
       process.environment = daemonEnvironment()
       let stdoutPipe = Pipe()
       let stderrPipe = Pipe()
@@ -1343,15 +1320,16 @@ final class DaemonSupervisor {
       }
     }
 
-    let command = arguments.map(shellEscape).joined(separator: " ")
+    let command = fullArguments.map(shellEscape).joined(separator: " ")
     return runShellCommandAndCapture(command, environment: daemonEnvironment())
   }
 
   nonisolated func launchCLI(arguments: [String]) -> Bool {
+    let fullArguments = runtimeConfigArguments() + arguments
     if let daemonLaunchPath, !daemonLaunchPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
       let process = Process()
       process.executableURL = URL(fileURLWithPath: daemonLaunchPath)
-      process.arguments = arguments
+      process.arguments = fullArguments
       process.environment = daemonEnvironment()
       process.standardOutput = nil
       process.standardError = nil
@@ -1363,52 +1341,30 @@ final class DaemonSupervisor {
       }
     }
 
-    let command = arguments.map(shellEscape).joined(separator: " ")
+    let command = fullArguments.map(shellEscape).joined(separator: " ")
     return launchShellCommand(command, environment: daemonEnvironment()) != nil
   }
 
   private nonisolated func daemonEnvironment() -> [String: String] {
     var environment = ProcessInfo.processInfo.environment
-    for (key, value) in loadConfiguredDaemonEnvironment(environment: environment) {
+    for (key, value) in loadConfiguredDaemonEnvironment() {
       environment[key] = value
     }
-    let executablePath = Bundle.main.executablePath?.trimmingCharacters(in: .whitespacesAndNewlines)
-
-    if let helperPath = bundledHelperPath() {
-      if environment["CUED_NATIVE_BINARY"] == nil {
-        environment["CUED_NATIVE_BINARY"] = helperPath
-      }
-      if environment["CUED_IMESSAGE_NATIVE_BINARY"] == nil {
-        environment["CUED_IMESSAGE_NATIVE_BINARY"] = helperPath
-      }
-      if environment["CUED_CONTACTS_NATIVE_BINARY"] == nil {
-        environment["CUED_CONTACTS_NATIVE_BINARY"] = helperPath
-      }
-    } else if let executablePath, !executablePath.isEmpty {
-      if environment["CUED_IMESSAGE_NATIVE_BINARY"] == nil {
-        environment["CUED_IMESSAGE_NATIVE_BINARY"] = executablePath
-      }
-      if environment["CUED_CONTACTS_NATIVE_BINARY"] == nil {
-        environment["CUED_CONTACTS_NATIVE_BINARY"] = executablePath
-      }
-    }
-    if let executablePath, !executablePath.isEmpty, environment["CUED_AUTH_NATIVE_BINARY"] == nil
-    {
-      environment["CUED_AUTH_NATIVE_BINARY"] = executablePath
-    }
-    let bundlePath = Bundle.main.bundlePath.trimmingCharacters(in: .whitespacesAndNewlines)
-    if !bundlePath.isEmpty, environment["CUED_APP_PATH"] == nil {
-      environment["CUED_APP_PATH"] = bundlePath
-    }
-
     return environment
+  }
+
+  private nonisolated func runtimeConfigArguments() -> [String] {
+    let path = configuredCuedConfigPath()
+    return hasExplicitCuedConfigArgument() || FileManager.default.fileExists(atPath: path)
+      ? ["--config", path]
+      : []
   }
 
   private func launchDaemonProcess() -> Process? {
     if let daemonLaunchPath, !daemonLaunchPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
       let process = Process()
       process.executableURL = URL(fileURLWithPath: daemonLaunchPath)
-      process.arguments = ["daemon"]
+      process.arguments = runtimeConfigArguments() + ["daemon"]
       process.environment = daemonEnvironment()
       process.standardOutput = nil
       process.standardError = nil
@@ -1968,11 +1924,8 @@ final class MenuBarAppController: NSObject, NSApplicationDelegate {
 @MainActor
 func runMenuBarApp() throws {
   let daemonLaunchPath = Bundle.main.path(forResource: "cued-cli", ofType: nil)
-  let daemonCommand = (Bundle.main.object(forInfoDictionaryKey: "CuedDaemonCommand") as? String)
-    ?? ProcessInfo.processInfo.environment["CUED_DAEMON_COMMAND"]
-    ?? ""
-  let dbPath = environmentPath("CUED_DB_PATH")
-    ?? (Bundle.main.object(forInfoDictionaryKey: "CuedDBPath") as? String)
+  let daemonCommand = (Bundle.main.object(forInfoDictionaryKey: "CuedDaemonCommand") as? String) ?? ""
+  let dbPath = (Bundle.main.object(forInfoDictionaryKey: "CuedDBPath") as? String)
     ?? configuredCuedDBPath()
   let bundlePath = Bundle.main.bundlePath.trimmingCharacters(in: .whitespacesAndNewlines)
   if !bundlePath.isEmpty {

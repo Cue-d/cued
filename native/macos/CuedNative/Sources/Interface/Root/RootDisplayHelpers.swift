@@ -244,11 +244,11 @@ func platformDescription(for configuration: PlatformConfig) -> String {
   }
 }
 
-public func shouldAutoConfigurePrerequisites() -> Bool {
+public func shouldAutoConfigurePrerequisites(skipAutoPrerequisites: Bool = false) -> Bool {
   if ProcessInfo.processInfo.environment["XCODE_RUNNING_FOR_PREVIEWS"] == "1" {
     return false
   }
-  if ProcessInfo.processInfo.environment["CUED_SKIP_AUTO_PREREQUISITES"] == "1" {
+  if skipAutoPrerequisites {
     return false
   }
   let bundlePath = Bundle.main.bundlePath.trimmingCharacters(in: .whitespacesAndNewlines)

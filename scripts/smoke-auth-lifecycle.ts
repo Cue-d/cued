@@ -23,11 +23,31 @@ type IntegrationRow = {
   metadata_json: string | null;
 };
 
+function parseArgs(argv: string[]): { home?: string; keepHome: boolean } {
+  const parsed: { home?: string; keepHome: boolean } = { keepHome: false };
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = argv[index];
+    if (arg === "--home") {
+      parsed.home = argv[index + 1];
+      index += 1;
+      continue;
+    }
+    if (arg === "--keep-home") {
+      parsed.keepHome = true;
+      continue;
+    }
+    throw new Error(`Unknown argument: ${arg}`);
+  }
+  return parsed;
+}
+
+const args = parseArgs(process.argv.slice(2));
 const runId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-const cuedHome =
-  process.env.CUED_AUTH_SMOKE_HOME || mkdtempSync(join(tmpdir(), "cued-auth-smoke-"));
+const cuedHome = args.home || mkdtempSync(join(tmpdir(), "cued-auth-smoke-"));
+const cuedConfigPath = join(cuedHome, "config.json");
+const authTestHooksPath = join(cuedHome, "auth-test-hooks.json");
 const shadowKeychainService = `so.cued.desktop.smoke.auth.${runId}`;
-const cleanup = process.env.CUED_AUTH_SMOKE_KEEP_HOME !== "1";
+const cleanup = !args.keepHome;
 
 const cases: PlatformCase[] = [
   {
@@ -129,16 +149,24 @@ function extractJson(stdout: string): unknown {
 }
 
 function runCued(args: string[], extraEnv: Record<string, string> = {}): unknown {
-  const stdout = execFileSync("pnpm", ["exec", "tsx", "src/cli.ts", ...args], {
-    cwd: process.cwd(),
-    encoding: "utf8",
-    env: {
-      ...process.env,
-      CUED_HOME: cuedHome,
-      ...extraEnv,
+  mkdirSync(cuedHome, { recursive: true });
+  writeFileSync(
+    cuedConfigPath,
+    JSON.stringify({ home: cuedHome, dbPath: join(cuedHome, "local.db") }),
+  );
+  const stdout = execFileSync(
+    "pnpm",
+    ["exec", "tsx", "src/cli.ts", "--config", cuedConfigPath, ...args],
+    {
+      cwd: process.cwd(),
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        ...extraEnv,
+      },
+      stdio: ["ignore", "pipe", "pipe"],
     },
-    stdio: ["ignore", "pipe", "pipe"],
-  });
+  );
   return extractJson(stdout);
 }
 
@@ -216,7 +244,7 @@ function deleteShadowKeychain(service: string, account: string): void {
   security(["delete-generic-password", "-s", service, "-a", account]);
 }
 
-function makeFakeEnv(testCase: PlatformCase, accountKey: string): Record<string, string> {
+function writeFakeAuthResult(testCase: PlatformCase, accountKey: string): void {
   const keychainAccount = testCase.runtime === "chromium" ? testCase.finalAccount : accountKey;
   const fake = {
     state: "authenticated",
@@ -228,16 +256,18 @@ function makeFakeEnv(testCase: PlatformCase, accountKey: string): Record<string,
       ...testCase.fakeResult.resultSummary,
     },
   };
-  return testCase.runtime === "chromium"
-    ? { CUED_FAKE_CHROMIUM_AUTH_RESULT: JSON.stringify(fake) }
-    : { CUED_FAKE_QR_AUTH_RESULT: JSON.stringify(fake) };
+  mkdirSync(cuedHome, { recursive: true });
+  writeFileSync(
+    authTestHooksPath,
+    JSON.stringify({
+      [testCase.runtime === "chromium" ? "chromium" : "qrNative"]: fake,
+    }),
+  );
 }
 
 function connect(testCase: PlatformCase, accountKey: string): Json {
-  const result = runCued(
-    ["integrations", "connect", testCase.platform, accountKey],
-    makeFakeEnv(testCase, accountKey),
-  ) as Json;
+  writeFakeAuthResult(testCase, accountKey);
+  const result = runCued(["integrations", "connect", testCase.platform, accountKey]) as Json;
   const authSession = result.authSession as Json;
   const integration = result.integration as Json;
   assert(

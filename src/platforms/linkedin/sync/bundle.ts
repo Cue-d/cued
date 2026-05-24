@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { LINKEDIN_SYNC_CONFIG } from "../../../core/config.js";
 import type { SourceAccountInput, SyncProofInput } from "../../../core/types/provider.js";
 import { mapWithConcurrency } from "../../../core/utils/async.js";
 import { openCuedDatabaseReadOnly } from "../../../db/database.js";
@@ -30,12 +31,6 @@ import {
 } from "./events.js";
 
 const INCREMENTAL_BUFFER_MS = 5 * 60 * 1000;
-const MAX_CONNECTION_PAGES = Number(process.env.CUED_LINKEDIN_CONNECTION_PAGES ?? "25");
-const MAX_CONVERSATION_PAGES = Number(process.env.CUED_LINKEDIN_CONVERSATION_PAGES ?? "50");
-const MAX_MESSAGE_PAGES = Number(process.env.CUED_LINKEDIN_MESSAGE_PAGES ?? "10");
-const DEFAULT_LINKEDIN_FETCH_CONCURRENCY = Number(
-  process.env.CUED_LINKEDIN_FETCH_CONCURRENCY ?? "3",
-);
 
 type LinkedInClientLike = Pick<
   LinkedInClient,
@@ -113,10 +108,7 @@ function stableId(seed: string): string {
 }
 
 function getLinkedInFetchConcurrency(): number {
-  return Number.isFinite(DEFAULT_LINKEDIN_FETCH_CONCURRENCY) &&
-    DEFAULT_LINKEDIN_FETCH_CONCURRENCY > 0
-    ? Math.trunc(DEFAULT_LINKEDIN_FETCH_CONCURRENCY)
-    : 3;
+  return LINKEDIN_SYNC_CONFIG.fetchConcurrency;
 }
 
 function incrementalOldestMs(lastSyncAt?: number): number {
@@ -348,7 +340,9 @@ async function listConnections(
   const connections: Connection[] = [];
   let cursor: string | undefined;
   let pages = 0;
-  const maxPages = incremental ? Math.min(2, MAX_CONNECTION_PAGES) : MAX_CONNECTION_PAGES;
+  const maxPages = incremental
+    ? Math.min(2, LINKEDIN_SYNC_CONFIG.connectionPages)
+    : LINKEDIN_SYNC_CONFIG.connectionPages;
   do {
     const result = await client.getConnections(cursor);
     connections.push(...result.connections);
@@ -419,7 +413,7 @@ async function listConversations(
   while (
     firstPage.conversations.length > 0 &&
     Number.isFinite(oldestLastActivity) &&
-    pageCount < MAX_CONVERSATION_PAGES
+    pageCount < LINKEDIN_SYNC_CONFIG.conversationPages
   ) {
     const page =
       nextCursor && client.getConversationsWithCursor
@@ -446,7 +440,7 @@ async function listConversations(
   }
 
   const complete = !(
-    pageCount >= MAX_CONVERSATION_PAGES &&
+    pageCount >= LINKEDIN_SYNC_CONFIG.conversationPages &&
     ((nextCursor && nextCursor.length > 0) ||
       (Number.isFinite(oldestLastActivity) && oldestLastActivity !== Number.NEGATIVE_INFINITY))
   );
@@ -532,7 +526,7 @@ async function listMessagesForConversation(
 
   while (
     !incremental &&
-    pageCount < MAX_MESSAGE_PAGES &&
+    pageCount < LINKEDIN_SYNC_CONFIG.messagePages &&
     ((prevCursor && prevCursor.length > 0) ||
       (Number.isFinite(oldestDeliveredAt) && oldestDeliveredAt > oldestMs))
   ) {
@@ -847,7 +841,7 @@ export async function buildLinkedInSyncBundle(options?: {
   client?: LinkedInClientLike;
   loadProjectedReactions?: ProjectedReactionLookup;
 }): Promise<SyncBundle> {
-  const accountKey = options?.accountKey ?? process.env.CUED_ACCOUNT_KEY ?? "default";
+  const accountKey = options?.accountKey ?? "default";
   const savedCursor = parseLinkedInSourceCursor(options?.sourceCursor);
   const syncProofState = parseLinkedInSyncProofState(options?.syncProofs, accountKey);
   const resumeScan = syncProofState.discoveryScan ?? savedCursor?.scan;

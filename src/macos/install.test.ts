@@ -15,6 +15,7 @@ vi.mock("node:child_process", async (importOriginal) => {
   };
 });
 
+import { MACOS_APP_CONFIG } from "../core/config.js";
 import {
   disableLoginItem,
   enableLoginItem,
@@ -27,11 +28,11 @@ import {
 describe("macOS app bundle resolution", () => {
   const tempDirs: string[] = [];
   const originalHome = process.env.HOME;
-  const originalAppPath = process.env.CUED_APP_PATH;
+  const originalCurrentAppPath = MACOS_APP_CONFIG.currentAppPath;
 
   afterEach(() => {
     process.env.HOME = originalHome;
-    process.env.CUED_APP_PATH = originalAppPath;
+    MACOS_APP_CONFIG.currentAppPath = originalCurrentAppPath;
     vi.clearAllMocks();
     while (tempDirs.length > 0) {
       const dir = tempDirs.pop();
@@ -97,7 +98,6 @@ describe("macOS app bundle resolution", () => {
   it("reports login item status alongside legacy launch agent state", () => {
     const homeDir = setTempHome();
     const appPath = createAppBundle(createTempDir("cued-valid-app-"), "so.cued.desktop");
-    process.env.CUED_APP_PATH = appPath;
 
     const plistPath = join(homeDir, "Library", "LaunchAgents", "dev.cued.daemon.plist");
     mkdirSync(join(plistPath, ".."), { recursive: true });
@@ -130,7 +130,6 @@ describe("macOS app bundle resolution", () => {
   it("uses the launchctl-reported plist path when the shell HOME differs", () => {
     setTempHome();
     const appPath = createAppBundle(createTempDir("cued-valid-app-"), "so.cued.desktop");
-    process.env.CUED_APP_PATH = appPath;
 
     const actualHome = createTempDir("cued-actual-home-");
     const actualPlistPath = join(actualHome, "Library", "LaunchAgents", "dev.cued.daemon.plist");
@@ -159,7 +158,6 @@ describe("macOS app bundle resolution", () => {
   it("migrates an existing legacy launch agent when enabling the login item", () => {
     const homeDir = setTempHome();
     const appPath = createAppBundle(createTempDir("cued-valid-app-"), "so.cued.desktop");
-    process.env.CUED_APP_PATH = appPath;
 
     const plistPath = join(homeDir, "Library", "LaunchAgents", "dev.cued.daemon.plist");
     mkdirSync(join(plistPath, ".."), { recursive: true });
@@ -203,7 +201,6 @@ describe("macOS app bundle resolution", () => {
   it("disables the native login item and removes any legacy plist", () => {
     const homeDir = setTempHome();
     const appPath = createAppBundle(createTempDir("cued-valid-app-"), "so.cued.desktop");
-    process.env.CUED_APP_PATH = appPath;
 
     const plistPath = join(homeDir, "Library", "LaunchAgents", "dev.cued.daemon.plist");
     mkdirSync(join(plistPath, ".."), { recursive: true });

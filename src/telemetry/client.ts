@@ -85,7 +85,7 @@ function getOrCreateSetting(db: CuedDatabase, key: string, createValue: () => st
 }
 
 export function isTelemetryEnabled(db: CuedDatabase): boolean {
-  if (process.env.VITEST_WORKER_ID && !process.env.CUED_TELEMETRY_ENDPOINT) {
+  if (process.env.VITEST_WORKER_ID) {
     return false;
   }
   return db.getAppSetting(TELEMETRY_SETTING_KEYS.enabled)?.value !== "0";
@@ -146,9 +146,12 @@ export async function sendTelemetryEvent(
   db: CuedDatabase,
   eventName: TelemetryEventName,
   properties: TelemetryProperties = {},
-  options: { fetchImpl?: typeof fetch } = {},
+  options: { fetchImpl?: typeof fetch; allowInTests?: boolean } = {},
 ): Promise<{ sent: boolean; skipped: boolean; status?: number }> {
-  if (!isTelemetryEnabled(db)) {
+  if (!options.allowInTests && process.env.VITEST_WORKER_ID) {
+    return { sent: false, skipped: true };
+  }
+  if (db.getAppSetting(TELEMETRY_SETTING_KEYS.enabled)?.value === "0") {
     return { sent: false, skipped: true };
   }
 

@@ -15,6 +15,7 @@ vi.mock("node:child_process", async (importOriginal) => {
   };
 });
 
+import { MACOS_APP_CONFIG } from "../core/config.js";
 import {
   getGlobalCuedSkillStatus,
   installGlobalCuedSkill,
@@ -25,11 +26,11 @@ import {
 describe("cued skill installer", () => {
   const tempDirs: string[] = [];
   const originalHome = process.env.HOME;
-  const originalAppPath = process.env.CUED_APP_PATH;
+  const originalAppPath = MACOS_APP_CONFIG.currentAppPath;
 
   afterEach(() => {
     process.env.HOME = originalHome;
-    process.env.CUED_APP_PATH = originalAppPath;
+    MACOS_APP_CONFIG.currentAppPath = originalAppPath;
     vi.clearAllMocks();
     while (tempDirs.length > 0) {
       const dir = tempDirs.pop();
@@ -98,7 +99,7 @@ describe("cued skill installer", () => {
   it("resolves the bundled cued skill from the installed app resources", () => {
     setTempHome();
     const appPath = createAppBundle(createTempDir("cued-skill-app-"));
-    process.env.CUED_APP_PATH = appPath;
+    MACOS_APP_CONFIG.currentAppPath = appPath;
 
     expect(resolveCuedSkillSourcePath()).toBe(
       join(appPath, "Contents", "Resources", "skills", "cued"),
@@ -109,7 +110,7 @@ describe("cued skill installer", () => {
     setTempHome();
     const appPath = createAppBundle(createTempDir("cued-skill-app-"));
     const npxPath = createMockNpx(createTempDir("cued-skill-npx-"));
-    process.env.CUED_APP_PATH = appPath;
+    MACOS_APP_CONFIG.currentAppPath = appPath;
 
     execFileSyncMock.mockImplementation(
       (command: string, args?: string[], options?: { env?: Record<string, string> }) => {
@@ -155,7 +156,7 @@ describe("cued skill installer", () => {
     setTempHome();
     const appPath = createAppBundle(createTempDir("cued-skill-app-"));
     const npxPath = createMockNpx(createTempDir("cued-skill-npx-"));
-    process.env.CUED_APP_PATH = appPath;
+    MACOS_APP_CONFIG.currentAppPath = appPath;
 
     execFileSyncMock.mockImplementation((command: string, args?: string[]) => {
       if (command === "/bin/zsh") {
@@ -182,7 +183,7 @@ describe("cued skill installer", () => {
   it("prefers the newest NVM npx version by semantic version order", () => {
     const homeDir = setTempHome();
     const appPath = createAppBundle(createTempDir("cued-skill-app-"));
-    process.env.CUED_APP_PATH = appPath;
+    MACOS_APP_CONFIG.currentAppPath = appPath;
 
     createFile(join(homeDir, ".nvm", "versions", "node", "v20.9.0", "bin", "npx"));
     createFile(join(homeDir, ".nvm", "versions", "node", "v20.11.0", "bin", "npx"));

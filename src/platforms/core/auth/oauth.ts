@@ -3,6 +3,7 @@ import { randomBytes } from "node:crypto";
 import { createServer } from "node:http";
 import type { AddressInfo, Socket } from "node:net";
 import { pathToFileURL } from "node:url";
+import { AUTH_RUNTIME_CONFIG, getRuntimeConfigArgs } from "../../../core/config.js";
 import type { AuthSessionState, Platform } from "../../../core/types/provider.js";
 import type { CuedDatabase } from "../../../db/database.js";
 import { GmailClient, writeGmailSecret } from "../../gmail/api/client.js";
@@ -15,8 +16,6 @@ import {
   type StoredGmailCredentials,
 } from "../../gmail/oauth/client.js";
 import type { AuthSessionSummary, IntegrationStateSummary } from "../state/types.js";
-
-const DEFAULT_OAUTH_TIMEOUT_MS = 5 * 60 * 1000;
 
 export interface OAuthAuthResult {
   sessionId: string;
@@ -75,7 +74,7 @@ async function runGmailOAuthSession(
   const { config, filePath } = readGoogleOAuthClientConfig();
   const { verifier, challenge } = createPkcePair();
   const state = randomBytes(16).toString("hex");
-  const timeoutMs = Number(process.env.CUED_OAUTH_TIMEOUT_MS ?? DEFAULT_OAUTH_TIMEOUT_MS);
+  const timeoutMs = AUTH_RUNTIME_CONFIG.oauthTimeoutMs;
 
   const codePromise = new Promise<{ code: string; redirectUri: string }>((resolve, reject) => {
     const sockets = new Set<Socket>();
@@ -193,7 +192,12 @@ export function startOAuthAuthSession(
 ): OAuthAuthHandle {
   const child = spawn(
     process.execPath,
-    [...process.execArgv, import.meta.filename, JSON.stringify({ session, integration })],
+    [
+      ...process.execArgv,
+      import.meta.filename,
+      JSON.stringify({ session, integration }),
+      ...getRuntimeConfigArgs(),
+    ],
     { stdio: ["ignore", "pipe", "pipe"] },
   );
   const stdoutChunks: Buffer[] = [];

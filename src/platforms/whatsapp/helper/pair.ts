@@ -10,8 +10,19 @@ import type { WhatsAppHelperEventEnvelope } from "../types.js";
 
 const execFileAsync = promisify(execFile);
 
+export const WHATSAPP_HELPER_CONFIG = {
+  helperBinary: null as string | null,
+};
+
 function resolveRepoRoot(): string {
   return resolve(dirname(fileURLToPath(import.meta.url)), "../../../..");
+}
+
+function runtimeBundledWhatsAppHelperBinary(): string {
+  return resolve(
+    dirname(fileURLToPath(import.meta.url)),
+    "../../../../../helpers/cued-whatsapp-helper",
+  );
 }
 
 export function getWhatsAppStoreDir(accountKey: string): string {
@@ -24,6 +35,7 @@ export function getWhatsAppStoreDir(accountKey: string): string {
 export function getWhatsAppHelperBinaryCandidates(repoRoot = resolveRepoRoot()): string[] {
   const helperRoot = join(repoRoot, "native", "helpers", "whatsapp-go");
   return [
+    runtimeBundledWhatsAppHelperBinary(),
     join(helperRoot, ".build", "cued-whatsapp-helper"),
     join(helperRoot, ".build", "CuedWhatsAppHelper"),
     join(helperRoot, "cued-whatsapp-helper"),
@@ -31,11 +43,11 @@ export function getWhatsAppHelperBinaryCandidates(repoRoot = resolveRepoRoot()):
 }
 
 export function resolveWhatsAppHelperBinary(
-  envVarValue = process.env.CUED_WHATSAPP_HELPER_BINARY,
+  explicitPath = WHATSAPP_HELPER_CONFIG.helperBinary,
   repoRoot = resolveRepoRoot(),
 ): string | null {
-  if (envVarValue) {
-    return envVarValue;
+  if (explicitPath) {
+    return explicitPath;
   }
 
   return (

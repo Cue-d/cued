@@ -43,12 +43,6 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Resolve release version
-        run: |
-          VERSION="$(node -p "require('./package.json').version")"
-          echo "CUED_RELEASE_VERSION=$VERSION" >> "$GITHUB_ENV"
-          echo "CUED_RELEASE_TAG=v$VERSION" >> "$GITHUB_ENV"
-
       - name: Prepare bundled Google OAuth client
         run: |
           if [[ -z "${CUED_GOOGLE_OAUTH_CLIENT_JSON:-}" ]]; then
@@ -76,13 +70,9 @@ jobs:
         env:
           CUED_CODESIGN_IDENTITY: ${{ secrets.CUED_CODESIGN_IDENTITY }}
           CUED_NOTARY_PROFILE: ${{ secrets.CUED_NOTARY_PROFILE }}
-          CUED_RELEASE_CHANNEL: stable
 
       - name: Build release metadata
         run: node scripts/build-cued-release-metadata.mjs
-        env:
-          CUED_RELEASE_CHANNEL: stable
-          CUED_RELEASE_REPO: Cue-d/cued
 
       - name: Create or update release
         run: |

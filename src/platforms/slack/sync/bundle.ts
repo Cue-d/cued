@@ -1,3 +1,4 @@
+import { SLACK_SYNC_CONFIG } from "../../../core/config.js";
 import type { SourceAccountInput } from "../../../core/types/provider.js";
 import { loadIntegrationSecret } from "../../core/secrets/keychain.js";
 import type { SyncBundle } from "../../core/sync.js";
@@ -22,7 +23,7 @@ const DEFAULT_SLACK_CONVERSATIONS_PER_RUN = 5;
 const DEFAULT_SLACK_MESSAGES_PAGE_LIMIT = 100;
 const DEFAULT_SLACK_REPLIES_PAGE_LIMIT = 50;
 const DEFAULT_SLACK_CHANNEL_HISTORY_DAYS = 0;
-const DEFAULT_SLACK_API_PAGES_PER_RUN = 25;
+const DEFAULT_SLACK_API_PAGES_PER_RUN = SLACK_SYNC_CONFIG.apiPageBudget;
 
 type SlackScanMode = "full" | "incremental";
 type SlackConversationFamily = "direct" | "channels";
@@ -818,6 +819,8 @@ function buildCompleteSlackBackfillConversationProof(input: {
 
 export async function buildSlackSyncBundle(options?: {
   accountKey?: string;
+  helperPath?: string | null;
+  helperApiUrl?: string;
   lastSyncAt?: number;
   sourceCursor?: unknown;
   syncProofs?: unknown;
@@ -826,9 +829,14 @@ export async function buildSlackSyncBundle(options?: {
   messagesPageLimit?: number;
   apiPageBudget?: number;
 }): Promise<SyncBundle> {
-  const accountKey = options?.accountKey ?? process.env.CUED_ACCOUNT_KEY ?? "default";
+  const accountKey = options?.accountKey ?? "default";
   const loadedAuth = options?.client ? null : loadSlackAuthFromKeychain(accountKey);
-  const client = options?.client ?? new SlackHelperClient(loadedAuth!);
+  const client =
+    options?.client ??
+    new SlackHelperClient(loadedAuth!, {
+      helperPath: options?.helperPath,
+      apiURL: options?.helperApiUrl,
+    });
   const savedCursor = parseSlackSourceCursor(options?.sourceCursor);
   const syncProofState = parseSlackSyncProofState(options?.syncProofs);
   const previousLastSyncAt =

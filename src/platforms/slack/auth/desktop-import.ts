@@ -1,23 +1,13 @@
 import { type ChildProcess, execFileSync, spawn } from "node:child_process";
 import { existsSync } from "node:fs";
-import { join } from "node:path";
 import { chromium } from "playwright";
+import { SLACK_DESKTOP_IMPORT_CONFIG } from "../../../core/config.js";
 import type { CuedDatabase } from "../../../db/database.js";
 import { storeSlackSession } from "./session-store.js";
 
 declare const localStorage: {
   getItem(key: string): string | null;
 };
-
-const DEFAULT_SLACK_APP_BINARY = "/Applications/Slack.app/Contents/MacOS/Slack";
-const DEFAULT_SLACK_USER_DATA_DIR = join(
-  process.env.HOME ?? "",
-  "Library",
-  "Application Support",
-  "Slack",
-);
-const DEFAULT_DEBUGGING_PORT = 9222;
-const DEFAULT_SLACK_DESKTOP_IMPORT_TIMEOUT_MS = 20_000;
 
 interface SlackDesktopTeamConfig {
   id: string;
@@ -31,25 +21,19 @@ interface SlackDesktopLocalConfig {
 }
 
 function getSlackAppBinary(): string {
-  return process.env.CUED_SLACK_APP_BINARY ?? DEFAULT_SLACK_APP_BINARY;
+  return SLACK_DESKTOP_IMPORT_CONFIG.appBinary;
 }
 
 function getSlackUserDataDir(): string {
-  return process.env.CUED_SLACK_USER_DATA_DIR ?? DEFAULT_SLACK_USER_DATA_DIR;
+  return SLACK_DESKTOP_IMPORT_CONFIG.userDataDir;
 }
 
 function getDebuggingPort(): number {
-  const configured = Number(process.env.CUED_SLACK_REMOTE_DEBUGGING_PORT ?? DEFAULT_DEBUGGING_PORT);
-  return Number.isFinite(configured) && configured > 0 ? configured : DEFAULT_DEBUGGING_PORT;
+  return SLACK_DESKTOP_IMPORT_CONFIG.remoteDebuggingPort;
 }
 
 function getDesktopImportTimeoutMs(): number {
-  const configured = Number(
-    process.env.CUED_SLACK_DESKTOP_IMPORT_TIMEOUT_MS ?? DEFAULT_SLACK_DESKTOP_IMPORT_TIMEOUT_MS,
-  );
-  return Number.isFinite(configured) && configured > 0
-    ? configured
-    : DEFAULT_SLACK_DESKTOP_IMPORT_TIMEOUT_MS;
+  return SLACK_DESKTOP_IMPORT_CONFIG.timeoutMs;
 }
 
 function hasAuthenticatedSlackIntegration(db: CuedDatabase): boolean {

@@ -1,8 +1,9 @@
 import { type ChildProcess, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import { readFakeAuthResult } from "../../../core/config.js";
 import type { AuthSessionState, Platform } from "../../../core/types/provider.js";
 import type { CuedDatabase } from "../../../db/database.js";
-import { resolveMacOSNativeBinary } from "../../../runtime/native-binary.js";
+import { resolveMacOSAppExecutable } from "../../../runtime/native-binary.js";
 import {
   getSignalConfigDir,
   inspectSignalCli,
@@ -53,9 +54,7 @@ function keepSentinelUntilComplete(
 }
 
 function resolveNativeQrBinary(): string {
-  const binary = resolveMacOSNativeBinary(
-    process.env.CUED_AUTH_NATIVE_BINARY ?? process.env.CUED_CONTACTS_NATIVE_BINARY,
-  );
+  const binary = resolveMacOSAppExecutable();
   if (!binary) {
     throw new Error("CuedNative binary not found; build native/macos/CuedNative first");
   }
@@ -144,8 +143,7 @@ function buildWhatsAppFailedResult(input: {
   phase: string;
 }): QrNativeAuthResult {
   const messageByCode: Record<WhatsAppQrFailureCode, string> = {
-    helper_missing:
-      "WhatsApp helper was not found. Build native/helpers/whatsapp-go first or set CUED_WHATSAPP_HELPER_BINARY.",
+    helper_missing: "WhatsApp helper was not found. Build native/helpers/whatsapp-go first.",
     helper_pair_failed: "WhatsApp QR pairing failed in the helper runtime.",
     native_qr_unavailable: "WhatsApp QR window could not be opened.",
     qr_cancelled: "WhatsApp QR pairing cancelled.",
@@ -195,12 +193,11 @@ function parseFakeResult(
   session: AuthSessionSummary,
   integration: IntegrationStateSummary,
 ): QrNativeAuthResult | null {
-  const raw = process.env.CUED_FAKE_QR_AUTH_RESULT;
-  if (!raw) {
+  const parsed = readFakeAuthResult("qrNative");
+  if (!parsed) {
     return null;
   }
 
-  const parsed = JSON.parse(raw) as Record<string, unknown>;
   return {
     sessionId: session.id,
     platform: session.platform,
@@ -485,7 +482,7 @@ export function startQrNativeAuthSession(
     };
   }
 
-  const errorSummary = `QR auth runtime not implemented yet for ${integration.platform}; set CUED_FAKE_QR_AUTH_RESULT for tests`;
+  const errorSummary = `QR auth runtime not implemented yet for ${integration.platform}`;
   const child = spawn("sh", ["-lc", "exit 1"], { stdio: "ignore" });
   return {
     child,

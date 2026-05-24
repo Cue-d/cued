@@ -50,7 +50,6 @@ describe("Gmail OAuth client config", () => {
       writeClient(explicitPath, "explicit-project");
       writeClient(bundledPath, "bundled-project");
       process.env.CUED_GOOGLE_OAUTH_CLIENT_FILE = explicitPath;
-      process.env.CUED_APP_PATH = join(dir, "Cued.app");
 
       expect(resolveGoogleOAuthClientFile()).toBe(explicitPath);
       expect(readGoogleOAuthClientConfig().config.clientId).toBe(
@@ -61,23 +60,15 @@ describe("Gmail OAuth client config", () => {
     }
   });
 
-  it("falls back to the bundled app OAuth client when no user file exists", () => {
+  it("falls back to the bundled OAuth client when no user file exists", () => {
     const dir = mkdtempSync(join(tmpdir(), "cued-gmail-oauth-"));
     try {
-      const bundledPath = join(
-        dir,
-        "Cued.app",
-        "Contents",
-        "Resources",
-        "oauth",
-        "google-oauth-client.json",
-      );
+      const bundledPath = join(dir, "oauth", "google-oauth-client.json");
       writeClient(bundledPath, "bundled-project");
       process.env.HOME = join(dir, "home");
-      process.env.CUED_APP_PATH = join(dir, "Cued.app");
       delete process.env.CUED_GOOGLE_OAUTH_CLIENT_FILE;
       delete process.env.GOOGLE_OAUTH_CLIENT_FILE;
-      delete process.env.CUED_BUNDLED_GOOGLE_OAUTH_CLIENT_FILE;
+      process.env.CUED_BUNDLED_GOOGLE_OAUTH_CLIENT_FILE = bundledPath;
 
       expect(resolveGoogleOAuthClientFile()).toBe(bundledPath);
       expect(readGoogleOAuthClientConfig().config.clientId).toBe(

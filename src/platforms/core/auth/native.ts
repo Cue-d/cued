@@ -1,7 +1,7 @@
 import { type ChildProcess, execFileSync, spawn } from "node:child_process";
 import type { AuthSessionState, Platform } from "../../../core/types/provider.js";
 import type { CuedDatabase } from "../../../db/database.js";
-import { resolveMacOSNativeBinary } from "../../../runtime/native-binary.js";
+import { resolveMacOSAppExecutable } from "../../../runtime/native-binary.js";
 import type { AuthSessionSummary } from "../state/types.js";
 
 export interface NativeAuthResult {
@@ -21,9 +21,7 @@ export interface NativeAuthHandle {
 }
 
 function resolveNativeAuthBinary(): string {
-  const binary = resolveMacOSNativeBinary(
-    process.env.CUED_AUTH_NATIVE_BINARY ?? process.env.CUED_CONTACTS_NATIVE_BINARY,
-  );
+  const binary = resolveMacOSAppExecutable();
   if (!binary) {
     throw new Error("CuedNative binary not found; build native/macos/CuedNative first");
   }

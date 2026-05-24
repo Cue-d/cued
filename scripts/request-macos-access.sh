@@ -5,22 +5,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 NATIVE_PACKAGE_DIR="$ROOT_DIR/native/macos/CuedNative"
-DEFAULT_NATIVE_BINARY="$NATIVE_PACKAGE_DIR/.build/release/CuedNative"
-if [[ -z "${CUED_APP_PATH:-}" ]]; then
-  APP_BUNDLE_CANDIDATE="$(cd "$SCRIPT_DIR/../.." 2>/dev/null && pwd || true)"
-  if [[ -n "$APP_BUNDLE_CANDIDATE" && "$(basename "$APP_BUNDLE_CANDIDATE")" == *.app ]]; then
-    CUED_APP_PATH="$APP_BUNDLE_CANDIDATE"
-  fi
-fi
-IS_BUNDLED_APP=0
-if [[ -n "${CUED_APP_PATH:-}" && -d "${CUED_APP_PATH}/Contents/Resources" ]]; then
-  IS_BUNDLED_APP=1
-fi
-if [[ $IS_BUNDLED_APP -eq 1 ]]; then
-  DEFAULT_NATIVE_BINARY="${CUED_APP_PATH}/Contents/Resources/helpers/cued-native-helper"
-fi
-NATIVE_BINARY="${CUED_NATIVE_BINARY:-$DEFAULT_NATIVE_BINARY}"
-PERMISSION_TARGET="${CUED_PERMISSION_TARGET:-${CUED_APP_PATH:-$NATIVE_BINARY}}"
+APP_PATH=""
 
 REQUEST_CONTACTS=0
 REQUEST_FULL_DISK=0
@@ -57,6 +42,14 @@ Notes:
   - Contacts can prompt automatically.
   - Full Disk Access cannot be granted programmatically on macOS.
 EOF
+}
+
+detect_packaged_app_path() {
+  local candidate
+  candidate="$(cd "$SCRIPT_DIR/../../.." 2>/dev/null && pwd || true)"
+  if [[ -n "$candidate" && "$(basename "$candidate")" == *.app ]]; then
+    printf '%s\n' "$candidate"
+  fi
 }
 
 ensure_macos() {
@@ -157,6 +150,16 @@ while [[ $# -gt 0 ]]; do
   esac
   shift
 done
+
+APP_PATH="${APP_PATH:-$(detect_packaged_app_path)}"
+IS_BUNDLED_APP=0
+DEFAULT_NATIVE_BINARY="$NATIVE_PACKAGE_DIR/.build/release/CuedNative"
+if [[ -n "$APP_PATH" && -d "$APP_PATH/Contents/Resources" ]]; then
+  IS_BUNDLED_APP=1
+  DEFAULT_NATIVE_BINARY="$APP_PATH/Contents/Resources/helpers/cued-native-helper"
+fi
+NATIVE_BINARY="$DEFAULT_NATIVE_BINARY"
+PERMISSION_TARGET="${APP_PATH:-$NATIVE_BINARY}"
 
 ensure_macos
 

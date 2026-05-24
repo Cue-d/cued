@@ -1,17 +1,14 @@
-import { readAdapterInvocationEnv } from "../../core/invocation.js";
+import { readAdapterInvocation } from "../../core/invocation.js";
 import type { AdapterWorkerOutput } from "../../core/sync.js";
 import { buildWhatsAppDesktopSyncBundle } from "../desktop.js";
 
 async function main(): Promise<void> {
   try {
-    const invocation = readAdapterInvocationEnv("whatsapp");
-    if (
-      process.env.CUED_WHATSAPP_SYNC_SOURCE === "desktop_db" ||
-      process.env.CUED_WHATSAPP_DESKTOP_SOURCE_PATH
-    ) {
+    const invocation = await readAdapterInvocation();
+    if (invocation.whatsappSource === "desktop_db" || invocation.whatsappDesktopSourcePath) {
       const bundle = buildWhatsAppDesktopSyncBundle({
-        sourcePath: process.env.CUED_WHATSAPP_DESKTOP_SOURCE_PATH || undefined,
-        accountKey: process.env.CUED_ACCOUNT_KEY || "default",
+        sourcePath: invocation.whatsappDesktopSourcePath,
+        accountKey: invocation.accountKey || "default",
       });
       if (typeof invocation.sourceCursor === "object" && invocation.sourceCursor) {
         bundle.sourceCursor = {

@@ -1,6 +1,7 @@
 import { type ChildProcess, execFileSync, spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
+import { getRuntimeConfigArgs } from "../../../core/config.js";
 import type { AuthSessionState, Platform } from "../../../core/types/provider.js";
 import type { CuedDatabase } from "../../../db/database.js";
 import type { AuthSessionSummary, IntegrationStateSummary } from "../state/types.js";
@@ -83,6 +84,7 @@ function buildWorkerArgs(
     profileDir,
     "--launch-target",
     integration.launchTarget ?? "",
+    ...getRuntimeConfigArgs(),
   ];
 }
 

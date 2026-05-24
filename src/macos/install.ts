@@ -3,8 +3,9 @@ import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync 
 import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { MACOS_APP_CONFIG } from "../core/config.js";
 import { CUED_APP_BUNDLE_IDENTIFIER, CUED_LEGACY_LAUNCH_AGENT_LABELS } from "../core/identity.js";
-import { resolveMacOSNativeBinary } from "../runtime/native-binary.js";
+import { resolveMacOSAppExecutable } from "../runtime/native-binary.js";
 import { terminateCompetingDaemons } from "./competing-daemons.js";
 
 const APP_NAME = "Cued.app";
@@ -43,12 +44,16 @@ function repoRoot(): string {
   return resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 }
 
+function bundledAppPath(): string | null {
+  const candidate = resolve(dirname(fileURLToPath(import.meta.url)), "../../../../..");
+  return isValidCuedAppBundle(candidate) ? candidate : null;
+}
+
 function currentAppPath(): string | null {
-  const appPath = process.env.CUED_APP_PATH;
-  if (!appPath || !isValidCuedAppBundle(appPath)) {
-    return null;
+  if (MACOS_APP_CONFIG.currentAppPath && isValidCuedAppBundle(MACOS_APP_CONFIG.currentAppPath)) {
+    return MACOS_APP_CONFIG.currentAppPath;
   }
-  return appPath;
+  return bundledAppPath();
 }
 
 export function getCurrentAppPath(): string | null {
@@ -114,7 +119,7 @@ export function getFallbackInstallAppPath(): string {
 
 export function resolveInstalledAppPath(): string | null {
   const candidates = [
-    process.env.CUED_APP_PATH,
+    currentAppPath(),
     getDefaultInstallAppPath(),
     getFallbackInstallAppPath(),
     getBuiltAppPath(),
@@ -256,10 +261,7 @@ function resolveLoginItemBinary(appPath?: string): string {
     return appExecutablePath(preferredAppPath);
   }
 
-  const nativeBinary = resolveMacOSNativeBinary(
-    process.env.CUED_AUTH_NATIVE_BINARY ?? process.env.CUED_CONTACTS_NATIVE_BINARY,
-    repoRoot(),
-  );
+  const nativeBinary = resolveMacOSAppExecutable(repoRoot());
   if (!nativeBinary) {
     throw new Error("CuedNative binary not found; build native/macos/CuedNative first");
   }

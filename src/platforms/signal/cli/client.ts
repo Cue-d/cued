@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
+import { SIGNAL_CLI_CONFIG } from "../../../core/config.js";
 import { validateIntegrationAccountKey } from "../../core/account-keys.js";
 import { getSignalConfigRoot } from "../../core/runtime-paths.js";
 
@@ -111,10 +112,6 @@ function normalizeHandle(value: string): string {
   return value.trim().toLowerCase();
 }
 
-function resolveRepoRoot(): string {
-  return resolve(dirname(fileURLToPath(import.meta.url)), "../../../..");
-}
-
 function makeSignalConfigDir(accountKey: string): string {
   return join(getSignalConfigRoot(), validateIntegrationAccountKey(accountKey));
 }
@@ -131,14 +128,8 @@ function runtimeBundledSignalCliRoot(): string {
   return resolve(dirname(fileURLToPath(import.meta.url)), "../../../../../helpers/signal-cli");
 }
 
-export function getSignalCliHelperRootCandidates(
-  env: NodeJS.ProcessEnv = process.env,
-  repoRoot = resolveRepoRoot(),
-): string[] {
+export function getSignalCliHelperRootCandidates(repoRoot = SIGNAL_CLI_CONFIG.repoRoot): string[] {
   const candidates = [
-    env.CUED_APP_PATH?.trim()
-      ? join(env.CUED_APP_PATH.trim(), "Contents", "Resources", "helpers", "signal-cli")
-      : null,
     runtimeBundledSignalCliRoot(),
     join(repoRoot, "native", "helpers", "signal-cli", ".build", "cued-signal-cli"),
   ].filter((value): value is string => Boolean(value));
@@ -146,11 +137,8 @@ export function getSignalCliHelperRootCandidates(
   return [...new Set(candidates)];
 }
 
-export function getSignalCliBinaryCandidates(
-  env: NodeJS.ProcessEnv = process.env,
-  repoRoot = resolveRepoRoot(),
-): string[] {
-  return getSignalCliHelperRootCandidates(env, repoRoot).map((candidate) =>
+export function getSignalCliBinaryCandidates(repoRoot = SIGNAL_CLI_CONFIG.repoRoot): string[] {
+  return getSignalCliHelperRootCandidates(repoRoot).map((candidate) =>
     join(candidate, SIGNAL_HELPER_BINARY_NAME),
   );
 }
@@ -167,11 +155,8 @@ function signalCliDistributionPathFromRoot(helperRoot: string): string {
   return join(helperRoot, "signal-cli");
 }
 
-export function resolveSignalCliPath(
-  env: NodeJS.ProcessEnv = process.env,
-  repoRoot = resolveRepoRoot(),
-): string | null {
-  for (const candidate of getSignalCliBinaryCandidates(env, repoRoot)) {
+export function resolveSignalCliPath(repoRoot = SIGNAL_CLI_CONFIG.repoRoot): string | null {
+  for (const candidate of getSignalCliBinaryCandidates(repoRoot)) {
     if (existsSync(candidate)) {
       return candidate;
     }
@@ -206,14 +191,14 @@ export function isSignalCliVersionSupported(version: SignalCliVersion | null): b
   return version.patch >= MIN_SIGNAL_CLI_VERSION.patch;
 }
 
-export async function inspectSignalCli(env: NodeJS.ProcessEnv = process.env): Promise<{
+export async function inspectSignalCli(): Promise<{
   cliPath: string | null;
   helperRoot: string | null;
   distributionPath: string | null;
   javaHome: string | null;
   version: SignalCliVersion | null;
 }> {
-  const cliPath = resolveSignalCliPath(env);
+  const cliPath = resolveSignalCliPath();
   if (!cliPath) {
     return {
       cliPath: null,

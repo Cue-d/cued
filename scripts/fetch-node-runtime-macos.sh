@@ -9,7 +9,7 @@ fi
 
 NODE_VERSION="$1"
 NODE_ARCH="$2"
-CACHE_DIR="${CUED_NODE_RUNTIME_CACHE_DIR:-${TMPDIR:-/tmp}/cued-node-runtime}"
+CACHE_DIR="${TMPDIR:-/tmp}/cued-node-runtime"
 DIST_NAME="node-v${NODE_VERSION}-darwin-${NODE_ARCH}"
 ARCHIVE_PATH="$CACHE_DIR/${DIST_NAME}.tar.gz"
 RUNTIME_DIR="$CACHE_DIR/${DIST_NAME}"

@@ -2,12 +2,15 @@ import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:f
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { CONTACTS_CONFIG } from "../../core/config.js";
 import { buildContactsSyncBundle, resolveContactsLoader } from "./sync.js";
 
 describe("contacts worker loader resolution", () => {
   const tempDirs: string[] = [];
+  const originalJsonPath = CONTACTS_CONFIG.jsonPath;
 
   afterEach(() => {
+    CONTACTS_CONFIG.jsonPath = originalJsonPath;
     while (tempDirs.length > 0) {
       const dir = tempDirs.pop();
       if (dir) {
@@ -24,15 +27,8 @@ describe("contacts worker loader resolution", () => {
 
   it("prefers file input when configured", () => {
     const repoRoot = createRepoRoot();
-    expect(
-      resolveContactsLoader(
-        {
-          CUED_CONTACTS_JSON_PATH: "/tmp/contacts.json",
-          CUED_CONTACTS_NATIVE_BINARY: "/tmp/native-cued",
-        },
-        repoRoot,
-      ),
-    ).toEqual({
+    CONTACTS_CONFIG.jsonPath = "/tmp/contacts.json";
+    expect(resolveContactsLoader(repoRoot)).toEqual({
       kind: "file",
       path: "/tmp/contacts.json",
     });
@@ -55,7 +51,7 @@ describe("contacts worker loader resolution", () => {
     writeFileSync(releaseCandidate, "#!/bin/sh\nexit 0\n");
     chmodSync(releaseCandidate, 0o755);
 
-    expect(resolveContactsLoader({}, repoRoot)).toEqual({
+    expect(resolveContactsLoader(repoRoot)).toEqual({
       kind: "native",
       path: releaseCandidate,
     });
@@ -63,7 +59,7 @@ describe("contacts worker loader resolution", () => {
 
   it("falls back to JXA when no file input or native binary exists", () => {
     const repoRoot = createRepoRoot();
-    expect(resolveContactsLoader({}, repoRoot)).toEqual({ kind: "jxa" });
+    expect(resolveContactsLoader(repoRoot)).toEqual({ kind: "jxa" });
   });
 
   it("accepts the cached contacts wrapper shape", () => {
@@ -83,25 +79,16 @@ describe("contacts worker loader resolution", () => {
       }),
     );
 
-    const originalPath = process.env.CUED_CONTACTS_JSON_PATH;
-    try {
-      process.env.CUED_CONTACTS_JSON_PATH = fixturePath;
-      const bundle = buildContactsSyncBundle();
-      expect(bundle.rawEvents).toHaveLength(1);
-      expect(bundle.rawEvents[0]?.payload).toEqual(
-        expect.objectContaining({
-          fields: expect.objectContaining({
-            display_name: "Ava Chen",
-            company: "Cued",
-          }),
+    CONTACTS_CONFIG.jsonPath = fixturePath;
+    const bundle = buildContactsSyncBundle();
+    expect(bundle.rawEvents).toHaveLength(1);
+    expect(bundle.rawEvents[0]?.payload).toEqual(
+      expect.objectContaining({
+        fields: expect.objectContaining({
+          display_name: "Ava Chen",
+          company: "Cued",
         }),
-      );
-    } finally {
-      if (originalPath === undefined) {
-        delete process.env.CUED_CONTACTS_JSON_PATH;
-      } else {
-        process.env.CUED_CONTACTS_JSON_PATH = originalPath;
-      }
-    }
+      }),
+    );
   });
 });

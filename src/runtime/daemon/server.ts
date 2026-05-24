@@ -4,7 +4,13 @@ import { createConnection, createServer, type Socket } from "node:net";
 import { basename, dirname } from "node:path";
 import process from "node:process";
 import { getCurrentAppVersion, getCurrentReleaseChannel } from "../../core/app-metadata.js";
-import { CUED_DAEMON_LOCK_PATH, CUED_SOCKET_PATH } from "../../core/config.js";
+import {
+  CUED_DAEMON_LOCK_PATH,
+  CUED_SOCKET_PATH,
+  DAEMON_CONFIG,
+  getRuntimeConfigArgs,
+  IMESSAGE_CONFIG,
+} from "../../core/config.js";
 import { createLogger } from "../../core/logging.js";
 import {
   acquireSingletonLock,
@@ -24,8 +30,9 @@ import {
 } from "../../core/types/provider.js";
 import { safeParseJsonRecord, safeParseJsonStringArray } from "../../db/codecs.js";
 import { type CuedDatabase, type OutboundMessageRow, openCuedDatabase } from "../../db/database.js";
+import { getCurrentAppPath } from "../../macos/install.js";
 import {
-  buildAdapterInvocationEnv,
+  buildAdapterInvocation,
   selectAdapterInvocationProofs,
 } from "../../platforms/core/invocation.js";
 import { isAdapterPlatform, listAutoSyncPlatforms } from "../../platforms/core/registry.js";
@@ -51,7 +58,6 @@ import {
 } from "../../platforms/discord/sync/events.js";
 import { isDiscordDmChannel } from "../../platforms/discord/types.js";
 import { GmailClient } from "../../platforms/gmail/api/client.js";
-import { DEFAULT_CALL_HISTORY_DB_PATH } from "../../platforms/imessage/call-history.js";
 import { DEFAULT_CHAT_DB_PATH } from "../../platforms/imessage/reader.js";
 import { loadLinkedInSessionSecret } from "../../platforms/linkedin/auth/session-store.js";
 import { buildLinkedInRawEventsFromRealtimeEnvelope } from "../../platforms/linkedin/realtime/events.js";
@@ -152,42 +158,12 @@ import {
 } from "./local-watchers.js";
 
 const DAEMON_VERSION = getCurrentAppVersion();
-const DEFAULT_AUTOSYNC_INTERVAL_MS = 60_000;
-const DEFAULT_DISCORD_AUTOSYNC_INTERVAL_MS = 10 * 60_000;
-const DEFAULT_SIGNAL_CATCHUP_INTERVAL_MS = 300_000;
-const DEFAULT_WHATSAPP_CATCHUP_INTERVAL_MS = 300_000;
-const DEFAULT_DISCORD_REALTIME_ENABLED = true;
-const DEFAULT_DISCORD_DM_POLL_MS = 45_000;
-const DEFAULT_SLACK_REALTIME_ENABLED = false;
-const DEFAULT_INGEST_CONCURRENCY = 4;
-const DEFAULT_PROJECTION_BATCH_SIZE = 100;
-const DEFAULT_MESSAGE_FTS_INDEX_BATCH_SIZE = 250;
-const DEFAULT_REALTIME_PROJECTION_ENABLED = true;
-const DEFAULT_INLINE_PROJECTION_MAX_RAW_EVENTS = 250;
-const DEFAULT_DEFERRED_PROJECTION_COALESCE_MS = 250;
-const DEFAULT_AUTOSYNC_PROJECTION_BACKLOG_PAUSE_EVENTS = 5_000;
-const DEFAULT_PROJECTION_CONTINUE_DELAY_MS = 5_000;
-const PROJECTION_BACKLOG_TIERS = [
-  { minEvents: 100_000, batchSize: 2_000, continueDelayMs: 0 },
-  { minEvents: 25_000, batchSize: 1_500, continueDelayMs: 0 },
-  { minEvents: 5_000, batchSize: 1_000, continueDelayMs: 0 },
-  { minEvents: 1_000, batchSize: 500, continueDelayMs: null },
-] as const;
 const FTS_PROJECTION_THROTTLE_BACKLOG_EVENTS = 0;
 const FTS_PROJECTION_THROTTLE_DELAY_MS = 5_000;
 const FTS_INDEXING_STALE_AFTER_MS = 5 * 60 * 1000;
 const PROJECTION_AUTH_RETRY_DELAY_MS = 250;
 const PROJECTION_AUTH_GRACE_MS = 2_000;
-const DEFAULT_INTERACTIVE_AUTH_TTL_MS = 45_000;
-const DEFAULT_INTERACTIVE_AUTH_PROJECTION_BATCH_SIZE = 25;
-const DEFAULT_INTERACTIVE_AUTH_PROJECTION_CONTINUE_DELAY_MS = 5_000;
-const DEFAULT_INTERACTIVE_AUTH_SYNC_CONTINUE_DELAY_MS = 30_000;
-const DEFAULT_CONTINUATION_PROJECTION_INTERVAL_MS = 2_000;
-const DEFAULT_CONTINUATION_PROJECTION_BACKLOG_EVENTS = 500;
 const NATIVE_WATCH_DEBOUNCE_MS = 1_500;
-const DEFAULT_AUTOSYNC_SCHEDULER_TICK_MS = 15_000;
-const DEFAULT_SYNC_CONTINUE_DELAY_MS = 15_000;
-const DEFAULT_SIGNAL_RECONNECT_SYNC_COOLDOWN_MS = 5 * 60_000;
 const DAEMON_STATUS_BUSY_TIMEOUT_MS = 100;
 const MENU_BAR_STATUS_WRITE_INTERVAL_MS = 15_000;
 const MENU_BAR_STATUS_EVENT_DEBOUNCE_MS = 500;
@@ -283,10 +259,9 @@ function getDaemonIdentity(): {
   executablePath: string;
   appPath?: string;
 } {
-  const appPath = process.env.CUED_APP_PATH?.trim() || undefined;
   return {
     executablePath: process.execPath,
-    appPath,
+    appPath: getCurrentAppPath() ?? undefined,
   };
 }
 
@@ -361,34 +336,13 @@ type PendingSignalEcho = {
 };
 
 function getConfiguredAutoSyncPlatforms(): AdapterPlatform[] | null {
-  const raw = process.env.CUED_AUTOSYNC_PLATFORMS?.trim();
-  if (raw == null) {
-    return null;
-  }
-  if (raw === "" || ["0", "false", "none", "off"].includes(raw.toLowerCase())) {
-    return [];
-  }
-  const configured = raw
-    .split(",")
-    .map((value) => value.trim())
-    .filter(isAdapterPlatform);
-  return [...new Set(configured)];
+  return DAEMON_CONFIG.autoSyncPlatforms == null
+    ? null
+    : [...new Set(DAEMON_CONFIG.autoSyncPlatforms)];
 }
 
 function getConfiguredRealtimePlatforms(): Set<AdapterPlatform> | null {
-  const raw = process.env.CUED_REALTIME_PLATFORMS?.trim();
-  if (!raw) {
-    return null;
-  }
-  if (["0", "false", "none", "off"].includes(raw.toLowerCase())) {
-    return new Set();
-  }
-  return new Set(
-    raw
-      .split(",")
-      .map((value) => value.trim())
-      .filter(isAdapterPlatform),
-  );
+  return DAEMON_CONFIG.realtimePlatforms == null ? null : new Set(DAEMON_CONFIG.realtimePlatforms);
 }
 
 export function getAutoSyncTargets(
@@ -486,32 +440,13 @@ export async function requestWhatsAppHistoryBackfillOnce(input: {
 
 function getAutoSyncIntervalMs(platform?: AdapterPlatform): number {
   if (platform) {
-    const platformEnvName = `CUED_AUTOSYNC_INTERVAL_${platform.toUpperCase()}_MS`;
-    const platformConfigured = Number(process.env[platformEnvName]);
-    if (Number.isFinite(platformConfigured) && platformConfigured > 0) {
+    const platformConfigured = DAEMON_CONFIG.platformAutoSyncIntervalMs[platform];
+    if (platformConfigured != null) {
       return platformConfigured;
     }
   }
 
-  const globalConfiguredRaw = process.env.CUED_AUTOSYNC_INTERVAL_MS;
-  const globalConfigured = Number(globalConfiguredRaw);
-  if (globalConfiguredRaw != null && Number.isFinite(globalConfigured) && globalConfigured > 0) {
-    return globalConfigured;
-  }
-
-  if (platform === "signal") {
-    return DEFAULT_SIGNAL_CATCHUP_INTERVAL_MS;
-  }
-
-  if (platform === "whatsapp") {
-    return DEFAULT_WHATSAPP_CATCHUP_INTERVAL_MS;
-  }
-
-  if (platform === "discord") {
-    return DEFAULT_DISCORD_AUTOSYNC_INTERVAL_MS;
-  }
-
-  return DEFAULT_AUTOSYNC_INTERVAL_MS;
+  return DAEMON_CONFIG.autoSyncIntervalMs;
 }
 
 export function shouldSkipConnectedDiscordSchedulerSync(
@@ -545,15 +480,12 @@ export function shouldProjectIngestRunInline(input: {
     input.firstInsertedRowId != null &&
     input.lastInsertedRowId != null &&
     input.insertedRawEvents > 0 &&
-    input.insertedRawEvents <= DEFAULT_INLINE_PROJECTION_MAX_RAW_EVENTS
+    input.insertedRawEvents <= DAEMON_CONFIG.inlineProjectionMaxRawEvents
   );
 }
 
 function getAutoSyncSchedulerTickMs(): number {
-  const configured = Number(process.env.CUED_AUTOSYNC_SCHEDULER_TICK_MS);
-  return Number.isFinite(configured) && configured > 0
-    ? Math.trunc(configured)
-    : DEFAULT_AUTOSYNC_SCHEDULER_TICK_MS;
+  return DAEMON_CONFIG.autoSyncSchedulerTickMs;
 }
 
 function isSqliteBusyError(error: unknown): boolean {
@@ -562,43 +494,27 @@ function isSqliteBusyError(error: unknown): boolean {
 }
 
 function getIngestConcurrency(): number {
-  const configured = Number(process.env.CUED_INGEST_CONCURRENCY ?? DEFAULT_INGEST_CONCURRENCY);
-  return Number.isFinite(configured) && configured > 0 ? configured : DEFAULT_INGEST_CONCURRENCY;
+  return DAEMON_CONFIG.ingestConcurrency;
 }
 
 function getInteractiveAuthTtlMs(): number {
-  const configured = Number(process.env.CUED_INTERACTIVE_AUTH_TTL_MS);
-  return Number.isFinite(configured) && configured > 0
-    ? Math.trunc(configured)
-    : DEFAULT_INTERACTIVE_AUTH_TTL_MS;
+  return DAEMON_CONFIG.interactiveAuth.ttlMs;
 }
 
 function getInteractiveAuthProjectionBatchSize(): number {
-  const configured = Number(process.env.CUED_INTERACTIVE_AUTH_PROJECTION_BATCH_SIZE);
-  return Number.isFinite(configured) && configured > 0
-    ? Math.trunc(configured)
-    : DEFAULT_INTERACTIVE_AUTH_PROJECTION_BATCH_SIZE;
+  return DAEMON_CONFIG.interactiveAuth.projectionBatchSize;
 }
 
 function getInteractiveAuthSyncContinueDelayMs(): number {
-  const configured = Number(process.env.CUED_INTERACTIVE_AUTH_SYNC_CONTINUE_DELAY_MS);
-  return Number.isFinite(configured) && configured >= 0
-    ? Math.trunc(configured)
-    : DEFAULT_INTERACTIVE_AUTH_SYNC_CONTINUE_DELAY_MS;
+  return DAEMON_CONFIG.interactiveAuth.syncContinueDelayMs;
 }
 
 function getInteractiveAuthProjectionContinueDelayMs(): number {
-  const configured = Number(process.env.CUED_INTERACTIVE_AUTH_PROJECTION_CONTINUE_DELAY_MS);
-  return Number.isFinite(configured) && configured >= 0
-    ? Math.trunc(configured)
-    : DEFAULT_INTERACTIVE_AUTH_PROJECTION_CONTINUE_DELAY_MS;
+  return DAEMON_CONFIG.interactiveAuth.projectionContinueDelayMs;
 }
 
 function getProjectionBatchSize(): number {
-  const configured = Number(
-    process.env.CUED_PROJECTION_BATCH_SIZE ?? DEFAULT_PROJECTION_BATCH_SIZE,
-  );
-  return Number.isFinite(configured) && configured > 0 ? configured : DEFAULT_PROJECTION_BATCH_SIZE;
+  return DAEMON_CONFIG.projectionBatchSize;
 }
 
 export function getAdaptiveProjectionBatchSize(
@@ -606,7 +522,7 @@ export function getAdaptiveProjectionBatchSize(
   options?: { maxBatchSize?: number },
 ): number {
   const baseBatchSize = getProjectionBatchSize();
-  const tier = PROJECTION_BACKLOG_TIERS.find(
+  const tier = DAEMON_CONFIG.projectionBacklogTiers.find(
     (candidate) => pendingRawEvents >= candidate.minEvents,
   );
   const adaptiveBatchSize = Math.max(baseBatchSize, tier?.batchSize ?? baseBatchSize);
@@ -663,53 +579,27 @@ export class InteractiveAuthSessions {
 }
 
 function getMessageFtsIndexBatchSize(): number {
-  const configured = Number(
-    process.env.CUED_MESSAGE_FTS_INDEX_BATCH_SIZE ?? DEFAULT_MESSAGE_FTS_INDEX_BATCH_SIZE,
-  );
-  return Number.isFinite(configured) && configured > 0
-    ? configured
-    : DEFAULT_MESSAGE_FTS_INDEX_BATCH_SIZE;
+  return DAEMON_CONFIG.messageFtsIndexBatchSize;
 }
 
 function getRealtimeProjectionEnabled(): boolean {
-  const configured = process.env.CUED_REALTIME_PROJECTION_ENABLED;
-  if (configured == null) {
-    return DEFAULT_REALTIME_PROJECTION_ENABLED;
-  }
-
-  return !["0", "false", "off", "no"].includes(configured.trim().toLowerCase());
+  return DAEMON_CONFIG.realtimeProjectionEnabled;
 }
 
 function getSlackRealtimeEnabled(): boolean {
-  const configured = process.env.CUED_SLACK_REALTIME_ENABLED;
-  if (configured == null) {
-    return DEFAULT_SLACK_REALTIME_ENABLED;
-  }
-
-  return !["0", "false", "off", "no"].includes(configured.trim().toLowerCase());
+  return DAEMON_CONFIG.slackRealtime.enabled;
 }
 
 function getDiscordRealtimeEnabled(): boolean {
-  const configured = process.env.CUED_DISCORD_REALTIME_ENABLED;
-  if (configured == null) {
-    return DEFAULT_DISCORD_REALTIME_ENABLED;
-  }
-
-  return !["0", "false", "off", "no"].includes(configured.trim().toLowerCase());
+  return DAEMON_CONFIG.discordRealtime.enabled;
 }
 
 function getRealtimeProjectionBatchSize(): number {
-  const configured = Number(
-    process.env.CUED_REALTIME_PROJECTION_BATCH_SIZE ?? getProjectionBatchSize(),
-  );
-  return Number.isFinite(configured) && configured > 0 ? configured : getProjectionBatchSize();
+  return DAEMON_CONFIG.realtimeProjectionBatchSize ?? getProjectionBatchSize();
 }
 
 function getSyncContinueDelayMs(): number {
-  const configured = Number(process.env.CUED_SYNC_CONTINUE_DELAY_MS);
-  return Number.isFinite(configured) && configured >= 0
-    ? Math.trunc(configured)
-    : DEFAULT_SYNC_CONTINUE_DELAY_MS;
+  return DAEMON_CONFIG.syncContinueDelayMs;
 }
 
 function getSyncContinueDelayMsForPlatform(platform: Platform): number {
@@ -720,58 +610,37 @@ function getSyncContinueDelayMsForPlatform(platform: Platform): number {
 }
 
 function getSignalReconnectSyncCooldownMs(): number {
-  const configured = Number(process.env.CUED_SIGNAL_RECONNECT_SYNC_COOLDOWN_MS);
-  return Number.isFinite(configured) && configured >= 0
-    ? Math.trunc(configured)
-    : DEFAULT_SIGNAL_RECONNECT_SYNC_COOLDOWN_MS;
+  return DAEMON_CONFIG.signalReconnectSyncCooldownMs;
 }
 
 function getDeferredProjectionCoalesceMs(): number {
-  const configured = Number(
-    process.env.CUED_DEFERRED_PROJECTION_COALESCE_MS ?? DEFAULT_DEFERRED_PROJECTION_COALESCE_MS,
-  );
-  return Number.isFinite(configured) && configured >= 0
-    ? configured
-    : DEFAULT_DEFERRED_PROJECTION_COALESCE_MS;
+  return DAEMON_CONFIG.deferredProjectionCoalesceMs;
 }
 
 function getAutoSyncProjectionBacklogPauseEvents(): number {
-  const configured = Number(process.env.CUED_AUTOSYNC_PROJECTION_BACKLOG_PAUSE_EVENTS);
-  return Number.isFinite(configured) && configured >= 0
-    ? Math.trunc(configured)
-    : DEFAULT_AUTOSYNC_PROJECTION_BACKLOG_PAUSE_EVENTS;
+  return DAEMON_CONFIG.autoSyncProjectionBacklogPauseEvents;
 }
 
 function getProjectionContinueDelayMs(): number {
-  const configured = Number(process.env.CUED_PROJECTION_CONTINUE_DELAY_MS);
-  return Number.isFinite(configured) && configured >= 0
-    ? Math.trunc(configured)
-    : DEFAULT_PROJECTION_CONTINUE_DELAY_MS;
+  return DAEMON_CONFIG.projectionContinueDelayMsOverride ?? DAEMON_CONFIG.projectionContinueDelayMs;
 }
 
 export function getAdaptiveProjectionContinueDelayMs(pendingRawEvents: number): number {
-  const configured = process.env.CUED_PROJECTION_CONTINUE_DELAY_MS;
-  if (configured != null) {
+  if (DAEMON_CONFIG.projectionContinueDelayMsOverride != null) {
     return getProjectionContinueDelayMs();
   }
-  const tier = PROJECTION_BACKLOG_TIERS.find(
+  const tier = DAEMON_CONFIG.projectionBacklogTiers.find(
     (candidate) => pendingRawEvents >= candidate.minEvents && candidate.continueDelayMs != null,
   );
   return tier?.continueDelayMs ?? getProjectionContinueDelayMs();
 }
 
 function getContinuationProjectionIntervalMs(): number {
-  const configured = Number(process.env.CUED_CONTINUATION_PROJECTION_INTERVAL_MS);
-  return Number.isFinite(configured) && configured >= 0
-    ? Math.trunc(configured)
-    : DEFAULT_CONTINUATION_PROJECTION_INTERVAL_MS;
+  return DAEMON_CONFIG.continuationProjectionIntervalMs;
 }
 
 function getContinuationProjectionBacklogEvents(): number {
-  const configured = Number(process.env.CUED_CONTINUATION_PROJECTION_BACKLOG_EVENTS);
-  return Number.isFinite(configured) && configured >= 0
-    ? Math.trunc(configured)
-    : DEFAULT_CONTINUATION_PROJECTION_BACKLOG_EVENTS;
+  return DAEMON_CONFIG.continuationProjectionBacklogEvents;
 }
 
 export function shouldDeferContinuationProjection(input: {
@@ -824,15 +693,16 @@ function runProjectionWorkerProcess(
   projectionBatchSize: number,
 ): Promise<ProjectionWorkerSuccess> {
   return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, [resolveCliEntrypoint(), "__projection-worker"], {
-      stdio: ["ignore", "pipe", "pipe"],
-      env: {
-        ...process.env,
-        CUED_PROJECTION_WORKER_RUN: JSON.stringify(run),
-        CUED_PROJECTION_BATCH_SIZE: String(projectionBatchSize),
+    const child = spawn(
+      process.execPath,
+      [resolveCliEntrypoint(), "__projection-worker", ...getRuntimeConfigArgs()],
+      {
+        stdio: ["pipe", "pipe", "pipe"],
+        env: process.env,
+        detached: false,
       },
-      detached: false,
-    });
+    );
+    child.stdin?.end(JSON.stringify({ run, projectionBatchSize }));
 
     let stdout = "";
     let stderr = "";
@@ -992,8 +862,7 @@ function summarizeRawEventsBySchema(
 }
 
 function getWhatsAppResyncPageBudget(): number {
-  const configured = Number(process.env.CUED_WHATSAPP_RESYNC_PAGE_BUDGET ?? 10);
-  return Number.isFinite(configured) && configured > 0 ? Math.trunc(configured) : 10;
+  return DAEMON_CONFIG.whatsappResyncPageBudget;
 }
 
 async function safeEmitHookEvent(
@@ -1116,7 +985,7 @@ function startIMessageWatcher(
   _db: ReturnType<typeof openCuedDatabase>,
   queueSync: (platform: AdapterPlatform, accountKey: string, trigger: string) => void,
 ): FSWatcher | ChildProcess | null {
-  const nativeBinary = resolveMacOSNativeBinary(process.env.CUED_IMESSAGE_NATIVE_BINARY);
+  const nativeBinary = resolveMacOSNativeBinary();
   if (nativeBinary) {
     const child = spawn(nativeBinary, ["imessage", "watch", "--db-path", DEFAULT_CHAT_DB_PATH], {
       stdio: ["ignore", "pipe", "pipe"],
@@ -1180,8 +1049,8 @@ function startCallHistoryWatcher(
   _db: ReturnType<typeof openCuedDatabase>,
   queueSync: (platform: AdapterPlatform, accountKey: string, trigger: string) => void,
 ): FSWatcher | ChildProcess | null {
-  const nativeBinary = resolveMacOSNativeBinary(process.env.CUED_IMESSAGE_NATIVE_BINARY);
-  const dbPath = process.env.CUED_CALL_HISTORY_DB_PATH || DEFAULT_CALL_HISTORY_DB_PATH;
+  const nativeBinary = resolveMacOSNativeBinary();
+  const dbPath = IMESSAGE_CONFIG.callHistoryDbPath;
   if (nativeBinary) {
     const child = spawn(nativeBinary, ["callhistory", "watch", "--db-path", dbPath], {
       stdio: ["ignore", "pipe", "pipe"],
@@ -1245,7 +1114,7 @@ function startContactsWatcher(
   _db: ReturnType<typeof openCuedDatabase>,
   queueSync: (platform: AdapterPlatform, accountKey: string, trigger: string) => void,
 ): ChildProcess | null {
-  const nativeBinary = resolveMacOSNativeBinary(process.env.CUED_CONTACTS_NATIVE_BINARY);
+  const nativeBinary = resolveMacOSNativeBinary();
   if (!nativeBinary) {
     return null;
   }
@@ -1502,9 +1371,7 @@ async function collectDesiredDiscordSessions(db: ReturnType<typeof openCuedDatab
         credentials: {
           token: secret.token,
         },
-        dmPollIntervalMs: Number.isFinite(Number(process.env.CUED_DISCORD_DM_POLL_MS))
-          ? Number(process.env.CUED_DISCORD_DM_POLL_MS)
-          : DEFAULT_DISCORD_DM_POLL_MS,
+        dmPollIntervalMs: DAEMON_CONFIG.discordRealtime.dmPollMs,
       });
     } catch (error) {
       degraded.push({
@@ -1635,20 +1502,10 @@ async function collectDesiredSlackSessions(db: ReturnType<typeof openCuedDatabas
           token: secret.token,
           cookie: secret.cookie,
         },
-        pollIntervalMs: Number.isFinite(Number(process.env.CUED_SLACK_REALTIME_POLL_MS))
-          ? Number(process.env.CUED_SLACK_REALTIME_POLL_MS)
-          : undefined,
-        userRefreshMs: Number.isFinite(Number(process.env.CUED_SLACK_REALTIME_USER_REFRESH_MS))
-          ? Number(process.env.CUED_SLACK_REALTIME_USER_REFRESH_MS)
-          : undefined,
-        conversationLimit: Number.isFinite(
-          Number(process.env.CUED_SLACK_REALTIME_CONVERSATION_LIMIT),
-        )
-          ? Number(process.env.CUED_SLACK_REALTIME_CONVERSATION_LIMIT)
-          : undefined,
-        messageLimit: Number.isFinite(Number(process.env.CUED_SLACK_REALTIME_MESSAGE_LIMIT))
-          ? Number(process.env.CUED_SLACK_REALTIME_MESSAGE_LIMIT)
-          : undefined,
+        pollIntervalMs: DAEMON_CONFIG.slackRealtime.pollMs,
+        userRefreshMs: DAEMON_CONFIG.slackRealtime.userRefreshMs,
+        conversationLimit: DAEMON_CONFIG.slackRealtime.conversationLimit,
+        messageLimit: DAEMON_CONFIG.slackRealtime.messageLimit,
       });
     } catch (error) {
       degraded.push({
@@ -3980,9 +3837,10 @@ export async function runDaemon(): Promise<void> {
         checkpoint?.source_cursor_json ?? null,
         "sync_checkpoints.source_cursor_json",
       );
-      const envOverrides = {
-        ...buildAdapterInvocationEnv({
+      const adapterInvocation = {
+        ...buildAdapterInvocation({
           platform,
+          accountKey,
           checkpointSourceCursorJson: checkpoint?.source_cursor_json ?? null,
           proofs: selectAdapterInvocationProofs({
             platform,
@@ -3991,7 +3849,7 @@ export async function runDaemon(): Promise<void> {
           }),
         }),
         ...(platform === "whatsapp" && runDetails?.source === "whatsapp_desktop"
-          ? { CUED_WHATSAPP_SYNC_SOURCE: "desktop_db" }
+          ? ({ whatsappSource: "desktop_db" } as const)
           : {}),
       };
 
@@ -4202,9 +4060,9 @@ export async function runDaemon(): Promise<void> {
           platform === "signal"
             ? await runSignalSyncExclusively(
                 accountKey,
-                async () => await runAdapter(platform, accountKey, envOverrides),
+                async () => await runAdapter(platform, adapterInvocation),
               )
-            : await runAdapter(platform, accountKey, envOverrides);
+            : await runAdapter(platform, adapterInvocation);
         adapterFetchMs = now() - adapterStartedAt;
         db.updateRunProgress(currentRun.id, { leaseMs: INGEST_RUN_LEASE_MS, claim: runClaim });
         sourceAccounts = bundle.sourceAccounts as typeof sourceAccounts;

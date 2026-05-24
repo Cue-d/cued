@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
+import { TELEMETRY_CONFIG } from "../core/config.js";
 
-export const TELEMETRY_ENDPOINT =
-  process.env.CUED_TELEMETRY_ENDPOINT ?? "https://cued.so/api/telemetry/events";
+export const TELEMETRY_ENDPOINT = TELEMETRY_CONFIG.endpoint;
 
 export const TELEMETRY_SETTING_KEYS = {
   enabled: "telemetry_enabled",

@@ -46,6 +46,6 @@ The future acceptable shape is:
 - QR or phone login after app credentials are available
 - Keychain/local storage for sessions
 - documented rate-limit and auth-invalidation behavior
-- clean `CUED_HOME` smoke coverage before public enablement
+- clean config-file smoke coverage before public enablement
 
 Do not expose Telegram in onboarding, README, or the public capability matrix until that path works.

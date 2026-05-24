@@ -23,6 +23,7 @@ import {
   CUED_UPDATE_DOWNLOADS_DIR,
   CUED_UPDATE_ROLLBACK_DIR,
   ensureCuedDirs,
+  UPDATE_RELEASE_CONFIG,
 } from "../../core/config.js";
 import { createLogger } from "../../core/logging.js";
 import {
@@ -57,8 +58,8 @@ import type {
 
 const updaterLogger = createLogger("updater");
 const RELEASE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
-const RELEASE_REPO = process.env.CUED_RELEASE_REPO ?? "Cue-d/cued";
-const RELEASE_API_BASE = process.env.CUED_RELEASE_API_BASE ?? "https://api.github.com";
+const RELEASE_REPO = UPDATE_RELEASE_CONFIG.repo;
+const RELEASE_API_BASE = UPDATE_RELEASE_CONFIG.apiBase;
 const RELEASE_ASSET_NAME = "cued-macos-arm64.tar.gz";
 const UPDATE_SHUTDOWN_TIMEOUT_MS = 45_000;
 const UPDATE_HEALTH_TIMEOUT_MS = 90_000;
@@ -521,10 +522,7 @@ function backupDatabaseSnapshot(sourceDbPath: string, destinationPath: string): 
 function runPreflight(stagedAppPath: string, preflightDbPath: string): void {
   const cliPath = join(stagedAppPath, "Contents", "Resources", "cued-cli");
   execFileSync(cliPath, ["update", "preflight", "--db-path", preflightDbPath], {
-    env: {
-      ...process.env,
-      CUED_APP_PATH: stagedAppPath,
-    },
+    env: process.env,
     stdio: "ignore",
   });
 }

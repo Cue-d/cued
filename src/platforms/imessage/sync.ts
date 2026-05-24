@@ -1,5 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
+import { IMESSAGE_CONFIG } from "../../core/config.js";
 import type {
   CallPayload,
   ContactObservationPayload,
@@ -60,11 +61,8 @@ function buildCallConversationLabel(call: {
 
 type IMessageLoader = { kind: "native"; path: string } | { kind: "ts"; path: string };
 
-export function resolveIMessageLoader(
-  env: NodeJS.ProcessEnv = process.env,
-  repoRoot?: string,
-): IMessageLoader {
-  const nativeBinary = resolveMacOSNativeBinary(env.CUED_IMESSAGE_NATIVE_BINARY, repoRoot);
+export function resolveIMessageLoader(repoRoot?: string): IMessageLoader {
+  const nativeBinary = resolveMacOSNativeBinary(repoRoot);
   if (nativeBinary) {
     return {
       kind: "native",
@@ -74,7 +72,7 @@ export function resolveIMessageLoader(
 
   return {
     kind: "ts",
-    path: env.CUED_IMESSAGE_DB_PATH || DEFAULT_CHAT_DB_PATH,
+    path: IMESSAGE_CONFIG.chatDbPath,
   };
 }
 
@@ -153,42 +151,36 @@ export function buildIMessageSyncBundle(options?: {
   sourceCursor?: unknown;
   limit?: number;
   callHistoryPath?: string;
-  env?: NodeJS.ProcessEnv;
   repoRoot?: string;
 }): SyncBundle {
   const limit = options?.limit ?? DEFAULT_IMESSAGE_BATCH_LIMIT;
   const cursor = resolveIMessageSourceCursor(options);
-  const env = options?.env ?? process.env;
-  const loader = resolveIMessageLoader(options?.env ?? process.env, options?.repoRoot);
+  const loader = resolveIMessageLoader(options?.repoRoot);
+  const chatDbPath = options?.path ?? IMESSAGE_CONFIG.chatDbPath;
+  const callHistoryPath = options?.callHistoryPath ?? IMESSAGE_CONFIG.callHistoryDbPath;
   const batch =
     loader.kind === "native"
       ? loadBatchFromNativeBinary(loader.path, {
-          path: options?.path,
+          path: chatDbPath,
           lastRowId: cursor.rowId,
           limit,
         })
       : loadBatchFromTypeScript({
-          path: options?.path,
+          path: chatDbPath,
           lastRowId: cursor.rowId,
           limit,
         });
   const effectiveCallBatch =
     loader.kind === "native"
       ? loadCallBatchFromNativeBinary(loader.path, {
-          callHistoryPath:
-            options?.callHistoryPath ??
-            env.CUED_CALL_HISTORY_DB_PATH ??
-            DEFAULT_CALL_HISTORY_DB_PATH,
-          path: options?.path ?? env.CUED_IMESSAGE_DB_PATH ?? DEFAULT_CHAT_DB_PATH,
+          callHistoryPath,
+          path: chatDbPath,
           afterPk: cursor.callPk,
           limit,
         })
       : loadCallHistoryBatch({
-          path:
-            options?.callHistoryPath ??
-            env.CUED_CALL_HISTORY_DB_PATH ??
-            DEFAULT_CALL_HISTORY_DB_PATH,
-          chatDbPath: options?.path ?? env.CUED_IMESSAGE_DB_PATH ?? DEFAULT_CHAT_DB_PATH,
+          path: callHistoryPath,
+          chatDbPath,
           afterPk: cursor.callPk,
           limit,
         });

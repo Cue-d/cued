@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { openCuedDatabase } from "../db/database.js";
 import {
   buildTelemetryEnvelope,
@@ -166,7 +166,7 @@ describe("telemetry client", () => {
     }
   });
 
-  it("skips sends under Vitest unless an endpoint is explicitly configured", async () => {
+  it("skips sends under Vitest by default", async () => {
     const db = openTempDb();
     try {
       const result = await sendTelemetryEvent(
@@ -186,7 +186,6 @@ describe("telemetry client", () => {
   });
 
   it("aborts telemetry sends that exceed the timeout", async () => {
-    vi.stubEnv("CUED_TELEMETRY_ENDPOINT", "https://example.invalid/telemetry");
     const db = openTempDb();
     try {
       await expect(
@@ -206,11 +205,11 @@ describe("telemetry client", () => {
                   reject(new DOMException("aborted", "AbortError")),
                 );
               })) as typeof fetch,
+            allowInTests: true,
           },
         ),
       ).rejects.toThrow(/aborted/i);
     } finally {
-      vi.unstubAllEnvs();
       db.close();
     }
   });

@@ -214,19 +214,8 @@ function materializeObjectPath(sha256: string, extension: string): string {
   return join(CUED_ATTACHMENTS_OBJECTS_DIR, `${sha256}${normalizedExtension}`);
 }
 
-function parsePositiveInteger(value: string | undefined): number | null {
-  if (!value) {
-    return null;
-  }
-  const parsed = Number.parseInt(value, 10);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
-}
-
 function attachmentDiskReserveBytes(): number {
-  return (
-    parsePositiveInteger(process.env.CUED_ATTACHMENT_DISK_RESERVE_BYTES) ??
-    DEFAULT_ATTACHMENT_DISK_RESERVE_BYTES
-  );
+  return DEFAULT_ATTACHMENT_DISK_RESERVE_BYTES;
 }
 
 function availableBytesForPath(path: string): number | null {

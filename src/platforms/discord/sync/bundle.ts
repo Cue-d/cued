@@ -1,3 +1,4 @@
+import { DISCORD_SYNC_CONFIG } from "../../../core/config.js";
 import type { SourceAccountInput, SyncProofInput } from "../../../core/types/provider.js";
 import { loadIntegrationSecret } from "../../core/secrets/keychain.js";
 import type { SyncBundle } from "../../core/sync.js";
@@ -16,9 +17,6 @@ import {
   buildDiscordMessageEvent,
 } from "./events.js";
 
-const DEFAULT_SYNC_MESSAGE_CHANNEL_LIMIT = 5;
-const DEFAULT_SYNC_MESSAGES_PER_CHANNEL_LIMIT = 50;
-const DEFAULT_SYNC_BACKFILL_PAGE_LIMIT = 2;
 const DISCORD_INCREMENTAL_PAGE_LIMIT = 100;
 
 type DiscordHydrationDiagnostics = {
@@ -119,20 +117,10 @@ export async function buildDiscordSyncBundle(
     sourceCursor?: unknown;
   } = {},
 ): Promise<SyncBundle> {
-  const accountKey = input.accountKey ?? process.env.CUED_ACCOUNT_KEY ?? "default";
+  const accountKey = input.accountKey ?? "default";
   const client = options.client ?? new DiscordApiClient(loadDiscordCredentials(accountKey));
-  const sourceCursor = parseDiscordSyncCursor(
-    options.sourceCursor ??
-      (typeof process.env.CUED_DISCORD_SOURCE_CURSOR === "string"
-        ? JSON.parse(process.env.CUED_DISCORD_SOURCE_CURSOR)
-        : null),
-  );
-  const syncProofState = parseDiscordProofState(
-    options.syncProofs ??
-      (typeof process.env.CUED_DISCORD_SYNC_PROOFS === "string"
-        ? JSON.parse(process.env.CUED_DISCORD_SYNC_PROOFS)
-        : null),
-  );
+  const sourceCursor = parseDiscordSyncCursor(options.sourceCursor ?? null);
+  const syncProofState = parseDiscordProofState(options.syncProofs ?? null);
   const syncMessageChannelLimit =
     options.syncMessageChannelLimit ?? getDiscordSyncMessageChannelLimit();
   const syncMessagesPerChannelLimit =
@@ -691,40 +679,15 @@ function buildDiscordHydrationDiagnostics(input: {
 }
 
 export function getDiscordSyncMessageChannelLimit(): number {
-  return parseNonNegativeInteger(
-    process.env.CUED_DISCORD_SYNC_MESSAGE_CHANNEL_LIMIT,
-    DEFAULT_SYNC_MESSAGE_CHANNEL_LIMIT,
-  );
+  return DISCORD_SYNC_CONFIG.messageChannelLimit;
 }
 
 export function getDiscordSyncMessagesPerChannelLimit(): number {
-  return parsePositiveInteger(
-    process.env.CUED_DISCORD_SYNC_MESSAGES_PER_CHANNEL_LIMIT,
-    DEFAULT_SYNC_MESSAGES_PER_CHANNEL_LIMIT,
-  );
+  return DISCORD_SYNC_CONFIG.messagesPerChannelLimit;
 }
 
 export function getDiscordSyncBackfillPageLimit(): number {
-  return parseNonNegativeInteger(
-    process.env.CUED_DISCORD_SYNC_BACKFILL_PAGE_LIMIT,
-    DEFAULT_SYNC_BACKFILL_PAGE_LIMIT,
-  );
-}
-
-function parseNonNegativeInteger(value: string | undefined, fallback: number): number {
-  if (typeof value !== "string") {
-    return fallback;
-  }
-  const parsed = Number.parseInt(value, 10);
-  return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
-}
-
-function parsePositiveInteger(value: string | undefined, fallback: number): number {
-  if (typeof value !== "string") {
-    return fallback;
-  }
-  const parsed = Number.parseInt(value, 10);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+  return DISCORD_SYNC_CONFIG.backfillPageLimit;
 }
 
 function selectChannelsForMessageHydration(

@@ -1,6 +1,11 @@
 import { execFileSync } from "node:child_process";
-import { mkdirSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import { type BrowserContext, type Cookie, chromium, type Page, type Request } from "playwright";
+import {
+  AUTH_RUNTIME_CONFIG,
+  readFakeAuthResult,
+  stripRuntimeConfigArgs,
+} from "../../../core/config.js";
 import { cuedAuthKeychainService } from "../../../core/identity.js";
 import {
   type ChromiumAuthFailureCode,
@@ -131,12 +136,13 @@ function parseArgs(argv: string[]): WorkerArgs {
 }
 
 function getTimeoutMs(): number {
-  const configured = Number(process.env.CUED_CHROMIUM_AUTH_TIMEOUT_MS ?? 15 * 60_000);
-  return Number.isFinite(configured) && configured > 0 ? configured : 15 * 60_000;
+  return AUTH_RUNTIME_CONFIG.chromiumAuthTimeoutMs;
 }
 
 function getExecutablePath(): string | undefined {
-  return process.env.CUED_CHROMIUM_EXECUTABLE_PATH || undefined;
+  return existsSync(AUTH_RUNTIME_CONFIG.chromiumExecutablePath)
+    ? AUTH_RUNTIME_CONFIG.chromiumExecutablePath
+    : undefined;
 }
 
 function bringAuthBrowserToFront(): void {
@@ -501,11 +507,10 @@ function listOpenPages(context: BrowserContext): Page[] {
 }
 
 function getFakeResult(args: WorkerArgs): WorkerResult | null {
-  const raw = process.env.CUED_FAKE_CHROMIUM_AUTH_RESULT;
-  if (!raw) {
+  const parsed = readFakeAuthResult("chromium");
+  if (!parsed) {
     return null;
   }
-  const parsed = JSON.parse(raw) as Record<string, unknown>;
   return {
     sessionId: args.sessionId,
     platform: args.platform,
@@ -528,7 +533,7 @@ function getFakeResult(args: WorkerArgs): WorkerResult | null {
 }
 
 async function run(): Promise<void> {
-  const args = parseArgs(process.argv.slice(2));
+  const args = parseArgs(stripRuntimeConfigArgs(process.argv.slice(2)));
   const fake = getFakeResult(args);
   if (fake) {
     process.stdout.write(JSON.stringify(fake));

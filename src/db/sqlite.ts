@@ -1,3 +1,4 @@
+import "../core/env.js";
 import { execFileSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { chmodSync, existsSync } from "node:fs";

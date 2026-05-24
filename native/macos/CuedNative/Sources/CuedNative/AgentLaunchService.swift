@@ -289,12 +289,13 @@ enum AgentLaunchService {
   }
 
   private nonisolated static func resolveRepoPath() -> String {
-    let environment = ProcessInfo.processInfo.environment
-    if let configured = trimmedEnvironmentPath(environment, name: "CUED_REPO_PATH"),
+    let config = loadCuedRuntimeConfig()
+    if let configured = trimmedPath(config.repoPath),
        isCuedRepo(configured) {
       return configured
     }
 
+    let environment = ProcessInfo.processInfo.environment
     let home = NSHomeDirectory()
     var candidates = [
       FileManager.default.currentDirectoryPath,

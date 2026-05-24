@@ -50,6 +50,7 @@ export class SlackHelperError extends Error {
 
 export class SlackHelperClient implements SlackTransport {
   private readonly helperPath: string;
+  private readonly apiURL: string | null;
   private readonly spawnImpl: SpawnImpl;
   private readonly retryAttempts: number;
   private readonly retryBaseMs: number;
@@ -58,6 +59,7 @@ export class SlackHelperClient implements SlackTransport {
     private readonly credentials: SlackCredentials,
     options: {
       helperPath?: string | null;
+      apiURL?: string | null;
       spawnImpl?: SpawnImpl;
       retryAttempts?: number;
       retryBaseMs?: number;
@@ -69,6 +71,7 @@ export class SlackHelperClient implements SlackTransport {
     }
 
     this.helperPath = helperPath;
+    this.apiURL = options.apiURL?.trim() || null;
     this.spawnImpl = options.spawnImpl ?? spawn;
     this.retryAttempts = Math.max(1, options.retryAttempts ?? DEFAULT_RETRY_ATTEMPTS);
     this.retryBaseMs = Math.max(0, options.retryBaseMs ?? DEFAULT_RETRY_BASE_MS);
@@ -189,7 +192,8 @@ export class SlackHelperClient implements SlackTransport {
       | "getReplies",
     payload: Record<string, unknown>,
   ): Promise<TResult> {
-    const child = this.spawnImpl(this.helperPath, [command], {
+    const helperArgs = this.apiURL ? ["--api-url", this.apiURL, command] : [command];
+    const child = this.spawnImpl(this.helperPath, helperArgs, {
       stdio: ["pipe", "pipe", "pipe"],
       env: process.env,
     });

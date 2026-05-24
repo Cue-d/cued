@@ -2,45 +2,119 @@ import Foundation
 
 private let permissionRelaunchSetupIntentFilename = "permission-relaunch-setup.intent"
 private let daemonEnvironmentFilename = "daemon.env"
+private let runtimeConfigFilename = "config.json"
+private let daemonEnvironmentAllowlist = Set([
+  "CUED_DB_KEY",
+  "CUED_GOOGLE_OAUTH_CLIENT_FILE",
+  "CUED_BUNDLED_GOOGLE_OAUTH_CLIENT_FILE",
+])
+
+struct CuedRuntimeConfig: Decodable {
+  let home: String?
+  let dbPath: String?
+  let repoPath: String?
+  let skipAutoPrerequisites: Bool?
+}
+
+private struct RuntimeConfigPathSelection {
+  let path: String
+  let explicit: Bool
+}
 
 func trimmedEnvironmentPath(_ environment: [String: String], name: String) -> String? {
-  let value = environment[name]?.trimmingCharacters(in: .whitespacesAndNewlines)
-  return value?.isEmpty == false ? value : nil
+  trimmedPath(environment[name])
+}
+
+func trimmedPath(_ value: String?) -> String? {
+  let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines)
+  return trimmed?.isEmpty == false ? trimmed : nil
+}
+
+func hasExplicitCuedConfigArgument(arguments: [String] = CommandLine.arguments) -> Bool {
+  arguments.contains("--config") || arguments.contains("--cued-config")
+    || arguments.contains { $0.hasPrefix("--config=") || $0.hasPrefix("--cued-config=") }
+}
+
+private func runtimeConfigPathSelection(
+  arguments: [String] = CommandLine.arguments,
+  homeDirectory: String = NSHomeDirectory()
+) -> RuntimeConfigPathSelection {
+  for (index, argument) in arguments.enumerated() {
+    if argument == "--config" || argument == "--cued-config" {
+      if index + 1 < arguments.count, let value = trimmedPath(arguments[index + 1]) {
+        return RuntimeConfigPathSelection(path: value, explicit: true)
+      }
+    }
+    for name in ["--config=", "--cued-config="] {
+      if argument.hasPrefix(name), let value = trimmedPath(String(argument.dropFirst(name.count))) {
+        return RuntimeConfigPathSelection(path: value, explicit: true)
+      }
+    }
+  }
+  return RuntimeConfigPathSelection(path: "\(homeDirectory)/.cued/\(runtimeConfigFilename)", explicit: false)
+}
+
+func configuredCuedConfigPath(
+  arguments: [String] = CommandLine.arguments,
+  homeDirectory: String = NSHomeDirectory()
+) -> String {
+  runtimeConfigPathSelection(arguments: arguments, homeDirectory: homeDirectory).path
+}
+
+func loadCuedRuntimeConfig(
+  arguments: [String] = CommandLine.arguments,
+  homeDirectory: String = NSHomeDirectory()
+) -> CuedRuntimeConfig {
+  let selection = runtimeConfigPathSelection(arguments: arguments, homeDirectory: homeDirectory)
+  let path = selection.path
+  guard FileManager.default.fileExists(atPath: path),
+    let data = FileManager.default.contents(atPath: path),
+    let config = try? JSONDecoder().decode(CuedRuntimeConfig.self, from: data)
+  else {
+    if selection.explicit {
+      let home = URL(fileURLWithPath: path).deletingLastPathComponent().path
+      return CuedRuntimeConfig(home: home, dbPath: nil, repoPath: nil, skipAutoPrerequisites: nil)
+    }
+    return CuedRuntimeConfig(home: nil, dbPath: nil, repoPath: nil, skipAutoPrerequisites: nil)
+  }
+  return config
 }
 
 func configuredCuedHomePath(
-  environment: [String: String],
+  arguments: [String] = CommandLine.arguments,
   homeDirectory: String = NSHomeDirectory()
 ) -> String {
-  if let cuedHome = trimmedEnvironmentPath(environment, name: "CUED_HOME") {
+  let config = loadCuedRuntimeConfig(arguments: arguments, homeDirectory: homeDirectory)
+  if let cuedHome = trimmedPath(config.home) {
     return cuedHome
   }
-  if let dbPath = trimmedEnvironmentPath(environment, name: "CUED_DB_PATH") {
+  if let dbPath = trimmedPath(config.dbPath) {
     return URL(fileURLWithPath: dbPath).deletingLastPathComponent().path
   }
   return "\(homeDirectory)/.cued"
 }
 
 func configuredCuedDBPath(
-  environment: [String: String],
+  arguments: [String] = CommandLine.arguments,
   homeDirectory: String = NSHomeDirectory()
 ) -> String {
-  trimmedEnvironmentPath(environment, name: "CUED_DB_PATH")
-    ?? "\(configuredCuedHomePath(environment: environment, homeDirectory: homeDirectory))/local.db"
+  let config = loadCuedRuntimeConfig(arguments: arguments, homeDirectory: homeDirectory)
+  return trimmedPath(config.dbPath)
+    ?? "\(configuredCuedHomePath(arguments: arguments, homeDirectory: homeDirectory))/local.db"
 }
 
 func configuredDaemonEnvironmentPath(
-  environment: [String: String] = ProcessInfo.processInfo.environment,
+  arguments: [String] = CommandLine.arguments,
   homeDirectory: String = NSHomeDirectory()
 ) -> String {
-  "\(configuredCuedHomePath(environment: environment, homeDirectory: homeDirectory))/\(daemonEnvironmentFilename)"
+  "\(configuredCuedHomePath(arguments: arguments, homeDirectory: homeDirectory))/\(daemonEnvironmentFilename)"
 }
 
 func loadConfiguredDaemonEnvironment(
-  environment: [String: String] = ProcessInfo.processInfo.environment,
+  arguments: [String] = CommandLine.arguments,
   homeDirectory: String = NSHomeDirectory()
 ) -> [String: String] {
-  let path = configuredDaemonEnvironmentPath(environment: environment, homeDirectory: homeDirectory)
+  let path = configuredDaemonEnvironmentPath(arguments: arguments, homeDirectory: homeDirectory)
   guard let contents = try? String(contentsOfFile: path, encoding: .utf8) else {
     return [:]
   }
@@ -57,7 +131,7 @@ func loadConfiguredDaemonEnvironment(
     }
     let key = parts[0].trimmingCharacters(in: .whitespacesAndNewlines)
     let value = parts[1].trimmingCharacters(in: .whitespacesAndNewlines)
-    if key.hasPrefix("CUED_"), key.allSatisfy({ $0.isLetter || $0.isNumber || $0 == "_" }) {
+    if daemonEnvironmentAllowlist.contains(key) {
       values[key] = value
     }
   }
@@ -65,10 +139,10 @@ func loadConfiguredDaemonEnvironment(
 }
 
 func permissionRelaunchSetupIntentPath(
-  environment: [String: String] = ProcessInfo.processInfo.environment,
+  arguments: [String] = CommandLine.arguments,
   homeDirectory: String = NSHomeDirectory()
 ) -> String {
-  "\(configuredCuedHomePath(environment: environment, homeDirectory: homeDirectory))/\(permissionRelaunchSetupIntentFilename)"
+  "\(configuredCuedHomePath(arguments: arguments, homeDirectory: homeDirectory))/\(permissionRelaunchSetupIntentFilename)"
 }
 
 func markPermissionRelaunchSetupIntent() {

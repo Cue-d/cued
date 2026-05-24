@@ -1,8 +1,9 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { IMESSAGE_CONFIG } from "../../core/config.js";
 import { loadCallHistoryBatch } from "./call-history.js";
 import { IMessageReader } from "./reader.js";
 import { buildIMessageSyncBundle, resolveIMessageLoader } from "./sync.js";
@@ -12,8 +13,12 @@ const { DatabaseSync } = require("node:sqlite") as typeof import("node:sqlite");
 
 describe("imessage worker loader resolution", () => {
   const tempDirs: string[] = [];
+  const originalChatDbPath = IMESSAGE_CONFIG.chatDbPath;
+  const originalCallHistoryDbPath = IMESSAGE_CONFIG.callHistoryDbPath;
 
   afterEach(() => {
+    IMESSAGE_CONFIG.chatDbPath = originalChatDbPath;
+    IMESSAGE_CONFIG.callHistoryDbPath = originalCallHistoryDbPath;
     while (tempDirs.length > 0) {
       const dir = tempDirs.pop();
       if (dir) {
@@ -253,30 +258,31 @@ describe("imessage worker loader resolution", () => {
     return dbPath;
   }
 
-  it("prefers explicit native binary overrides", () => {
-    expect(
-      resolveIMessageLoader(
-        {
-          CUED_IMESSAGE_NATIVE_BINARY: "/tmp/CuedNative",
-          CUED_IMESSAGE_DB_PATH: "/tmp/chat.db",
-        },
-        "/tmp/repo",
-      ),
-    ).toEqual({
+  it("finds the compiled native binary when present", () => {
+    const repoRoot = mkdtempSync(join(tmpdir(), "cued-imessage-native-"));
+    tempDirs.push(repoRoot);
+    const releasePath = join(
+      repoRoot,
+      "native",
+      "macos",
+      "CuedNative",
+      ".build",
+      "release",
+      "CuedNative",
+    );
+    mkdirSync(join(releasePath, ".."), { recursive: true });
+    writeFileSync(releasePath, "#!/bin/sh\nexit 0\n");
+    chmodSync(releasePath, 0o755);
+
+    expect(resolveIMessageLoader(repoRoot)).toEqual({
       kind: "native",
-      path: "/tmp/CuedNative",
+      path: releasePath,
     });
   });
 
   it("falls back to the TypeScript reader path without a native binary", () => {
-    expect(
-      resolveIMessageLoader(
-        {
-          CUED_IMESSAGE_DB_PATH: "/tmp/chat.db",
-        },
-        "/tmp/repo",
-      ),
-    ).toEqual({
+    IMESSAGE_CONFIG.chatDbPath = "/tmp/chat.db";
+    expect(resolveIMessageLoader("/tmp/repo")).toEqual({
       kind: "ts",
       path: "/tmp/chat.db",
     });
@@ -286,13 +292,11 @@ describe("imessage worker loader resolution", () => {
     const chatDbPath = createSyntheticChatDb(650);
     const callHistoryPath = createSyntheticCallHistoryDb();
     const repoRoot = createTempDir("cued-imessage-repo-");
-    const env = { CUED_IMESSAGE_DB_PATH: chatDbPath };
 
     const first = buildIMessageSyncBundle({
       path: chatDbPath,
       callHistoryPath,
       limit: 500,
-      env,
       repoRoot,
     });
     expect(first.hasMore).toBe(true);
@@ -308,7 +312,6 @@ describe("imessage worker loader resolution", () => {
       callHistoryPath,
       lastRowId: 500,
       limit: 500,
-      env,
       repoRoot,
     });
     expect(second.hasMore).toBe(false);
@@ -320,13 +323,11 @@ describe("imessage worker loader resolution", () => {
     const chatDbPath = createSyntheticChatDb(650, { filteredRowIds: [500] });
     const callHistoryPath = createSyntheticCallHistoryDb();
     const repoRoot = createTempDir("cued-imessage-repo-");
-    const env = { CUED_IMESSAGE_DB_PATH: chatDbPath };
 
     const first = buildIMessageSyncBundle({
       path: chatDbPath,
       callHistoryPath,
       limit: 500,
-      env,
       repoRoot,
     });
     expect(first.rawEvents.some((event) => event.entityKind === "message")).toBe(true);
@@ -338,7 +339,6 @@ describe("imessage worker loader resolution", () => {
       callHistoryPath,
       lastRowId: 500,
       limit: 500,
-      env,
       repoRoot,
     });
     expect(second.hasMore).toBe(false);
@@ -350,12 +350,10 @@ describe("imessage worker loader resolution", () => {
     const chatDbPath = createSyntheticChatDb(1, { attachmentRowIds: [1] });
     const callHistoryPath = createSyntheticCallHistoryDb();
     const repoRoot = createTempDir("cued-imessage-repo-");
-    const env = { CUED_IMESSAGE_DB_PATH: chatDbPath };
 
     const bundle = buildIMessageSyncBundle({
       path: chatDbPath,
       callHistoryPath,
-      env,
       repoRoot,
     });
 
@@ -391,12 +389,10 @@ describe("imessage worker loader resolution", () => {
       },
     ]);
     const repoRoot = createTempDir("cued-imessage-repo-");
-    const env = { CUED_IMESSAGE_DB_PATH: chatDbPath };
 
     const bundle = buildIMessageSyncBundle({
       path: chatDbPath,
       callHistoryPath,
-      env,
       repoRoot,
     });
 
@@ -431,12 +427,10 @@ describe("imessage worker loader resolution", () => {
       },
     ]);
     const repoRoot = createTempDir("cued-imessage-repo-");
-    const env = { CUED_IMESSAGE_DB_PATH: chatDbPath };
 
     const bundle = buildIMessageSyncBundle({
       path: chatDbPath,
       callHistoryPath,
-      env,
       repoRoot,
     });
 
@@ -568,7 +562,6 @@ describe("imessage worker loader resolution", () => {
     const bundle = buildIMessageSyncBundle({
       path: chatDbPath,
       callHistoryPath,
-      env: { CUED_IMESSAGE_DB_PATH: chatDbPath },
       repoRoot: createTempDir("cued-imessage-repo-"),
     });
 
