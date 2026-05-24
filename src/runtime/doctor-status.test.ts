@@ -20,7 +20,7 @@ import { buildPermissionStatus } from "./doctor.js";
 
 const itDarwin = process.platform === "darwin" ? it : it.skip;
 
-describe("permission status modes", () => {
+describe("permission status", () => {
   const tempDirs: string[] = [];
 
   afterEach(() => {
@@ -43,7 +43,7 @@ describe("permission status modes", () => {
     return db;
   }
 
-  itDarwin("omits removed permission checks in passive mode", async () => {
+  itDarwin("omits removed permission checks", async () => {
     const db = createDb();
     process.env.CUED_CONTACTS_NATIVE_BINARY = "/tmp/cued-native-helper";
     process.env.CUED_IMESSAGE_NATIVE_BINARY = "/tmp/cued-native-helper";
@@ -58,10 +58,7 @@ describe("permission status modes", () => {
       throw new Error(`unexpected command: ${command}`);
     });
 
-    const status = await buildPermissionStatus({
-      mode: "passive",
-      db,
-    });
+    const status = await buildPermissionStatus();
 
     expect(status.permissions.map((permission) => permission.key)).toEqual([
       "contacts",

@@ -32,7 +32,6 @@ import {
 } from "./platforms/core/state/status.js";
 import {
   getPlatformFeatureMatrixRow,
-  getPlatformFutureFeatureNotes,
   getPlatformHelperRequirements,
   getPlatformPermissionRequirements,
   getSupportedHostOsForPlatform,
@@ -137,7 +136,7 @@ Usage:
   cued update install
   cued cli install|status
   cued login-item enable|disable|status
-  cued onboarding complete|snapshot|status [--refresh-managed] [--refresh-permissions]
+  cued onboarding complete|snapshot|status [--refresh-managed]
   cued telemetry status|enable|disable|smoke
   cued skill install-global|status
   cued permissions doctor|status|request [--all|--contacts|--full-disk-access]
@@ -369,7 +368,6 @@ async function handleLocalIntegrationCommand(
       permissionRequirements: getPlatformPermissionRequirements(platform),
       helperRequirements: getPlatformHelperRequirements(platform),
       features: getPlatformFeatureMatrixRow(platform),
-      futureFeatures: getPlatformFutureFeatureNotes(platform),
     }));
   }
 
@@ -689,7 +687,6 @@ async function main(): Promise<void> {
       }
     case "onboarding": {
       const refreshManaged = rest.includes("--refresh-managed");
-      const refreshPermissions = rest.includes("--refresh-permissions");
       let daemonResponse: Awaited<ReturnType<typeof sendDaemonRequest>> | null = null;
       try {
         switch (subcommand) {
@@ -700,7 +697,6 @@ async function main(): Promise<void> {
             daemonResponse = await sendDaemonRequest({
               command: "onboarding-snapshot",
               refreshManagedIntegrations: refreshManaged,
-              refreshPermissions,
             });
             break;
           case "status":
@@ -719,7 +715,7 @@ async function main(): Promise<void> {
       }
 
       const db =
-        subcommand === "snapshot" && !refreshManaged && !refreshPermissions
+        subcommand === "snapshot" && !refreshManaged
           ? openCuedDatabaseReadOnly()
           : openCuedDatabase();
       try {
@@ -737,12 +733,11 @@ async function main(): Promise<void> {
             await sendTelemetryEventSafe(db, "onboarding_started", {
               component: "onboarding",
               operation: "snapshot",
-              stage: refreshPermissions ? "permissions" : refreshManaged ? "managed" : "status",
+              stage: refreshManaged ? "managed" : "status",
             });
             printJson(
               await buildOnboardingSnapshot(db, {
                 refreshManagedIntegrations: refreshManaged,
-                refreshPermissions,
               }),
             );
             return;
@@ -751,7 +746,7 @@ async function main(): Promise<void> {
             return;
           default:
             throw new Error(
-              "Usage: cued onboarding complete | snapshot [--refresh-managed] [--refresh-permissions] | status",
+              "Usage: cued onboarding complete | snapshot [--refresh-managed] | status",
             );
         }
       } finally {
@@ -913,12 +908,7 @@ async function main(): Promise<void> {
             }
             const db = openCuedDatabaseReadOnly();
             try {
-              printJson(
-                await buildPermissionStatus({
-                  mode: "passive",
-                  db,
-                }),
-              );
+              printJson(await buildPermissionStatus());
             } finally {
               db.close();
             }
