@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import type {
   ContactHandleInput,
   ContactObservationPayload,
@@ -8,6 +7,7 @@ import type {
   ReactionPayload,
   TimelineEventPayload,
 } from "../../../core/types/provider.js";
+import { stableId } from "../../core/raw-events/stable-hash.js";
 import type {
   Conversation,
   Message,
@@ -15,10 +15,6 @@ import type {
   ReactionSummary,
   SeenReceipt,
 } from "../api/types.js";
-
-function stableId(seed: string): string {
-  return createHash("sha256").update(seed).digest("hex");
-}
 
 export function normalizeConversationUrn(urn: string): string {
   return urn

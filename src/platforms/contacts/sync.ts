@@ -1,11 +1,12 @@
 import { execFileSync } from "node:child_process";
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import type { ContactObservationPayload } from "../../core/types/provider.js";
 import {
   getMacOSNativeBinaryCandidates,
   resolveMacOSNativeBinary,
 } from "../../runtime/native-binary.js";
+import { providerStableHash } from "../core/raw-events/stable-hash.js";
 import type { SyncBundle } from "../core/sync.js";
 
 export interface ContactRecordInput {
@@ -21,10 +22,6 @@ type ContactsLoader =
   | { kind: "file"; path: string }
   | { kind: "native"; path: string }
   | { kind: "jxa" };
-
-function dedupeKey(seed: string): string {
-  return createHash("sha256").update(seed).digest("hex");
-}
 
 function loadContactsFromFile(path: string): ContactRecordInput[] {
   const parsed = JSON.parse(readFileSync(path, "utf8")) as
@@ -49,7 +46,9 @@ function loadContactsFromFile(path: string): ContactRecordInput[] {
       const emails = contact.emails ?? [];
       const name = contact.displayName?.trim() || "Unknown";
       return {
-        sourceId: dedupeKey(`contacts-cache:${name}:${phones.join(",")}:${emails.join(",")}`),
+        sourceId: providerStableHash(
+          `contacts-cache:${name}:${phones.join(",")}:${emails.join(",")}`,
+        ),
         displayName: name,
         company: contact.company ?? null,
         avatarUrl: contact.avatarUrl ?? null,
@@ -165,7 +164,7 @@ export function buildContactsSyncBundle(): SyncBundle {
       eventKind: "observed",
       externalEntityId: contact.sourceId,
       observedAt: observedBase + index,
-      dedupeKey: dedupeKey(
+      dedupeKey: providerStableHash(
         `contacts:${contact.sourceId}:${contact.displayName}:${(contact.phoneNumbers ?? []).join(",")}:${(contact.emails ?? []).join(",")}`,
       ),
       payload: {

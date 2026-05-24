@@ -41,6 +41,7 @@ import type {
 import { safeParseJson, safeStringifyJson } from "./codecs.js";
 import { MIGRATIONS } from "./migrations.js";
 import * as schema from "./schema.js";
+import { chunkArray, sqlValueList } from "./sql-batch.js";
 import { openSqliteDatabase } from "./sqlite.js";
 
 const {
@@ -536,21 +537,6 @@ function resolveCanonicalContactIdFromAliases(
     current = next;
   }
   throw new Error(`Contact merge alias cycle detected at ${current}`);
-}
-
-function chunkArray<T>(items: readonly T[], size: number): T[][] {
-  const chunks: T[][] = [];
-  for (let index = 0; index < items.length; index += size) {
-    chunks.push(items.slice(index, index + size));
-  }
-  return chunks;
-}
-
-function sqlValueList(values: readonly (string | number)[]) {
-  return sql.join(
-    values.map((value) => sql`${value}`),
-    sql`, `,
-  );
 }
 
 function buildRawEventValues(event: RawEventInput) {

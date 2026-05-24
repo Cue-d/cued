@@ -1,10 +1,10 @@
-import { createHash } from "node:crypto";
 import type {
   ContactHandleInput,
   ContactObservationPayload,
   ConversationObservationPayload,
   MessagePayload,
 } from "../../../core/types/provider.js";
+import { stableId } from "../../core/raw-events/stable-hash.js";
 import type { SyncBundle } from "../../core/sync.js";
 import {
   bestSignalContactName,
@@ -13,10 +13,6 @@ import {
   type SignalGroup,
   type SignalReceivedMessage,
 } from "../cli/client.js";
-
-function stableId(seed: string): string {
-  return createHash("sha256").update(seed).digest("hex");
-}
 
 export function normalizeSignalHandle(value: string): string {
   return value.trim().toLowerCase();

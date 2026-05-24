@@ -1,15 +1,13 @@
-import { createHash } from "node:crypto";
 import type {
   ContactObservationPayload,
   ConversationObservationPayload,
   MessagePayload,
 } from "../../../core/types/provider.js";
+import { providerStableHash } from "../../core/raw-events/stable-hash.js";
 import type { SyncBundle } from "../../core/sync.js";
 import type { GmailMessage, GmailMessagePayload } from "../api/client.js";
 
-export function gmailStableId(seed: string): string {
-  return createHash("sha256").update(seed).digest("hex");
-}
+export const gmailStableId = providerStableHash;
 
 function header(message: GmailMessage, name: string): string | null {
   const match = message.payload?.headers?.find(
