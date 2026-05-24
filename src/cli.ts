@@ -828,7 +828,6 @@ async function main(): Promise<void> {
                 error_code: "cli_smoke",
                 fingerprint: "0123456789abcdef0123456789abcdef",
                 test_event: true,
-                message_count: 1,
               }),
             );
             return;

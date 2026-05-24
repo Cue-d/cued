@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { randomBytes, randomUUID } from "node:crypto";
 import { arch, release } from "node:os";
 import { getCurrentAppVersion, getCurrentReleaseChannel } from "../core/app-metadata.js";
@@ -15,6 +16,7 @@ import {
 
 const TELEMETRY_TIMEOUT_MS = 2_000;
 let sessionId: string | null = null;
+let cachedDarwinProductVersion: string | null | undefined;
 
 function getSessionId(): string {
   sessionId ??= randomUUID();
@@ -29,9 +31,47 @@ function normalizeArch(): TelemetryEnvelope["arch"] {
   return "unknown";
 }
 
-function normalizeOsVersion(): string {
-  const match = release().match(/^(\d+(?:\.\d+){0,2})/);
-  return match?.[1] ?? "0";
+type OsVersionInput = {
+  platform?: NodeJS.Platform;
+  darwinProductVersion?: string | null;
+  kernelRelease?: string;
+};
+
+function normalizeVersionString(value: string): string | null {
+  const match = value.trim().match(/^(\d+(?:\.\d+){0,2})/);
+  return match?.[1] ?? null;
+}
+
+function readDarwinProductVersion(): string | null {
+  if (cachedDarwinProductVersion !== undefined) {
+    return cachedDarwinProductVersion;
+  }
+  try {
+    const value = execFileSync("/usr/bin/sw_vers", ["-productVersion"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+      timeout: 1_000,
+    }).trim();
+    cachedDarwinProductVersion = value.length > 0 ? value : null;
+    return cachedDarwinProductVersion;
+  } catch {
+    cachedDarwinProductVersion = null;
+    return null;
+  }
+}
+
+export function normalizeOsVersion(input: OsVersionInput = {}): string {
+  const platform = input.platform ?? process.platform;
+  if (platform === "darwin") {
+    const productVersion =
+      "darwinProductVersion" in input ? input.darwinProductVersion : readDarwinProductVersion();
+    const normalizedProductVersion = productVersion ? normalizeVersionString(productVersion) : null;
+    if (normalizedProductVersion) {
+      return normalizedProductVersion;
+    }
+  }
+
+  return normalizeVersionString(input.kernelRelease ?? release()) ?? "0";
 }
 
 function getOrCreateSetting(db: CuedDatabase, key: string, createValue: () => string): string {
