@@ -60,9 +60,10 @@ function currentPlatform(): string {
 function readPlaywrightChromiumSpec(): PlaywrightChromiumSpec {
   const packagePath = require.resolve("playwright/package.json");
   const packageRoot = dirname(packagePath);
+  const requireFromPlaywright = createRequire(packagePath);
   const playwrightVersion = (JSON.parse(readFileSync(packagePath, "utf8")) as { version: string })
     .version;
-  const corePackageRoot = dirname(require.resolve("playwright-core/package.json"));
+  const corePackageRoot = dirname(requireFromPlaywright.resolve("playwright-core/package.json"));
   const browsers = JSON.parse(readFileSync(join(corePackageRoot, "browsers.json"), "utf8")) as {
     browsers: Array<{ name: string; revision: string; browserVersion?: string }>;
   };
