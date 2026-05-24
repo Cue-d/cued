@@ -17,7 +17,6 @@ import {
   firstNonEmptyDisplayName,
   isUserRemovedIntegrationRow,
   listIntegrationStates,
-  now,
   upsertManagedIntegrationState,
 } from "./status.js";
 import type { IntegrationStateSummary, ManagedIntegrationState } from "./types.js";
@@ -73,7 +72,7 @@ async function buildSignalManagedState(
       signalCliVersion: inspected.version?.raw ?? null,
       signalLinkedAccount: linkedAccount,
       signalVersionSupported: isSignalCliVersionSupported(inspected.version),
-      lastVerifiedAt: now(),
+      lastVerifiedAt: Date.now(),
     },
   };
 }
@@ -166,7 +165,7 @@ async function buildWhatsAppManagedState(
       whatsappQueuedHistorySyncCount: helperStatus?.queuedHistorySyncCount ?? null,
       whatsappLastHistorySyncError: helperStatus?.lastHistorySyncError ?? null,
       whatsappLastHistoryNotificationAt: helperStatus?.lastHistoryNotificationAt ?? null,
-      lastVerifiedAt: helperStatus ? now() : (previousMetadata.lastVerifiedAt ?? null),
+      lastVerifiedAt: helperStatus ? Date.now() : (previousMetadata.lastVerifiedAt ?? null),
     },
   };
 }

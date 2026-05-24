@@ -1,6 +1,7 @@
-import { runAdapterWorker } from "../../core/adapter-worker.js";
 import { readAdapterInvocationEnv } from "../../core/invocation.js";
+import { runAdapterWorker } from "../../core/utils.js";
 import { LinkedInAuthError } from "../api/request.js";
+
 import { buildLinkedInSyncBundle } from "./bundle.js";
 
 void runAdapterWorker(async () => {

@@ -1,5 +1,5 @@
-import { runAdapterWorker } from "../../core/adapter-worker.js";
 import { readAdapterInvocationEnv } from "../../core/invocation.js";
+import { runAdapterWorker } from "../../core/utils.js";
 import { buildWhatsAppDesktopSyncBundle } from "../desktop.js";
 
 void runAdapterWorker(async () => {

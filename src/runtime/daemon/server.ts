@@ -241,9 +241,6 @@ function writeMenuBarStatusSnapshot(
   writeMenuBarStatusCache(snapshot);
 }
 
-function now(): number {
-  return Date.now();
-}
 
 function getDaemonIdentity(): {
   executablePath: string;
@@ -425,7 +422,7 @@ export async function requestWhatsAppHistoryBackfillOnce(input: {
   historyBackfillRequestedAt: number | null;
   diagnostics: Record<string, unknown>;
 }> {
-  const requestedAt = input.nowMs?.() ?? now();
+  const requestedAt = input.nowMs?.() ?? Date.now();
   try {
     const backfill = await input.request({
       anchors: input.anchors,
@@ -896,7 +893,7 @@ function buildDaemonBusyStatusSnapshot(options: {
     daemon: {
       pid: process.pid,
       started_at: null,
-      updated_at: now(),
+      updated_at: Date.now(),
       status: "running",
       version: DAEMON_VERSION,
       details_json: JSON.stringify(getDaemonIdentity()),
@@ -1533,7 +1530,7 @@ function blockDiscordIntegration(
     metadata: {
       ...metadata,
       lastAuthError: errorSummary,
-      blockedAt: now(),
+      blockedAt: Date.now(),
       blockedReason: "discord_auth_invalidated",
     },
   });
@@ -1825,7 +1822,7 @@ export async function runDaemon(): Promise<void> {
   }
   const db = openedDb;
   const telemetry = new DaemonTelemetryQueue(db);
-  const startedAt = now();
+  const startedAt = Date.now();
   const runOwnerId = `daemon:${process.pid}:${startedAt}`;
   telemetry.enqueue("daemon_started", {
     component: "daemon",
@@ -1886,7 +1883,7 @@ export async function runDaemon(): Promise<void> {
   let isUpdateShutdownRequested = false;
   let updateShutdownRequestedAt: number | null = null;
   let shutdownInitiated = false;
-  const interactiveAuthSessions = new InteractiveAuthSessions(now);
+  const interactiveAuthSessions = new InteractiveAuthSessions(Date.now);
   const bootstrap: DaemonBootstrapSnapshot = {
     state: "starting",
     startedAt,
@@ -2057,7 +2054,7 @@ export async function runDaemon(): Promise<void> {
       syncMode: checkpoint?.sync_mode ?? "incremental",
       sourceCursor,
       rawIngestWatermark: projection.max_raw_event_rowid,
-      lastSuccessAt: now(),
+      lastSuccessAt: Date.now(),
       lastErrorSummary: null,
     });
   };
@@ -2164,7 +2161,7 @@ export async function runDaemon(): Promise<void> {
       syncMode: checkpoint?.sync_mode ?? "incremental",
       sourceCursor,
       rawIngestWatermark: projection.max_raw_event_rowid,
-      lastSuccessAt: now(),
+      lastSuccessAt: Date.now(),
       lastErrorSummary: null,
     });
   };
@@ -2252,7 +2249,7 @@ export async function runDaemon(): Promise<void> {
     accountKey: string,
     event: SlackRealtimeEventEnvelope,
   ): Promise<void> => {
-    const observedAt = now();
+    const observedAt = Date.now();
     switch (event.event) {
       case "contact_upsert":
         await ingestSlackRealtimeRawEvents(
@@ -2310,7 +2307,7 @@ export async function runDaemon(): Promise<void> {
     accountKey: string,
     event: DiscordRealtimeEventEnvelope,
   ): Promise<void> => {
-    const observedAt = now();
+    const observedAt = Date.now();
     switch (event.event) {
       case "contact_upsert":
         await ingestDiscordRealtimeRawEvents(
@@ -2383,7 +2380,7 @@ export async function runDaemon(): Promise<void> {
       syncMode: checkpoint?.sync_mode ?? "incremental",
       sourceCursor,
       rawIngestWatermark: projection.max_raw_event_rowid,
-      lastSuccessAt: now(),
+      lastSuccessAt: Date.now(),
       lastErrorSummary: null,
     });
   };
@@ -2489,7 +2486,7 @@ export async function runDaemon(): Promise<void> {
       syncMode: checkpoint?.sync_mode ?? "incremental",
       sourceCursor,
       rawIngestWatermark: projection.max_raw_event_rowid,
-      lastSuccessAt: now(),
+      lastSuccessAt: Date.now(),
       lastErrorSummary: null,
     });
   };
@@ -2625,7 +2622,7 @@ export async function runDaemon(): Promise<void> {
       syncMode: checkpoint?.sync_mode ?? "incremental",
       sourceCursor,
       rawIngestWatermark: projection.max_raw_event_rowid,
-      lastSuccessAt: now(),
+      lastSuccessAt: Date.now(),
       lastErrorSummary: null,
     });
   };
@@ -2737,7 +2734,7 @@ export async function runDaemon(): Promise<void> {
             chatJID: receipt.chatJID,
             senderJID: message.sender_source_key?.replace(/^whatsapp:/, "") ?? receipt.chatJID,
             fromMe: receipt.fromMe,
-            timestamp: message.sent_at ?? now(),
+            timestamp: message.sent_at ?? Date.now(),
             text: message.content ?? "",
             status: receipt.status ?? message.status ?? null,
             deliveredAt: receipt.deliveredAt ?? message.delivered_at ?? null,
@@ -2768,7 +2765,7 @@ export async function runDaemon(): Promise<void> {
       case "call_delete": {
         const callDelete = event.data as WhatsAppHelperEventEnvelope<"call_delete">["data"];
         const rawEvents = withRawEventAcquisitionMode(
-          [buildWhatsAppCallDeleteEvent(callDelete, accountKey, now())],
+          [buildWhatsAppCallDeleteEvent(callDelete, accountKey, Date.now())],
           "realtime",
         );
         db.upsertSourceAccounts([
@@ -2882,7 +2879,7 @@ export async function runDaemon(): Promise<void> {
     }
     if (activeIngestRuns.size === 0) {
       const nextProjectionRunAt = db.getNextQueuedRunScheduledAt(["project", "rebuild"]);
-      if (nextProjectionRunAt != null && nextProjectionRunAt <= now()) {
+      if (nextProjectionRunAt != null && nextProjectionRunAt <= Date.now()) {
         scheduleProjectionDrain();
         scheduleIngestDrain(QUEUE_DRAIN_RETRY_DELAY_MS);
         return;
@@ -2897,7 +2894,7 @@ export async function runDaemon(): Promise<void> {
       if (!currentRun) {
         const nextClaimableAt = db.getNextClaimableRunAt(["sync", "sync_resume"], "ingesting");
         if (nextClaimableAt != null) {
-          scheduleIngestDrain(Math.max(QUEUE_DRAIN_RETRY_DELAY_MS, nextClaimableAt - now()));
+          scheduleIngestDrain(Math.max(QUEUE_DRAIN_RETRY_DELAY_MS, nextClaimableAt - Date.now()));
         }
         break;
       }
@@ -2915,7 +2912,7 @@ export async function runDaemon(): Promise<void> {
 
   const scheduleIngestDrain = (delayMs = 0) => {
     const normalizedDelayMs = Math.max(0, delayMs);
-    const dueAt = now() + normalizedDelayMs;
+    const dueAt = Date.now() + normalizedDelayMs;
     if (ingestDrainScheduled) {
       if (ingestDrainDueAt != null && ingestDrainDueAt <= dueAt) {
         return;
@@ -2964,13 +2961,13 @@ export async function runDaemon(): Promise<void> {
             [
               buildDiscordConversationEvent({
                 accountKey: message.account_key,
-                observedAt: now(),
+                observedAt: Date.now(),
                 channel: sendResult.channel,
                 currentUser: sendResult.currentUser,
               }),
               buildDiscordMessageEvent({
                 accountKey: message.account_key,
-                observedAt: now(),
+                observedAt: Date.now(),
                 channel: sendResult.channel,
                 message: sendResult.result,
                 currentUserId: sendResult.currentUser.id,
@@ -3094,7 +3091,7 @@ export async function runDaemon(): Promise<void> {
       scheduleProjectionDrain(QUEUE_DRAIN_RETRY_DELAY_MS);
       return;
     }
-    if (now() < authProjectionPausedUntil) {
+    if (Date.now() < authProjectionPausedUntil) {
       scheduleProjectionDrain(PROJECTION_AUTH_RETRY_DELAY_MS);
       return;
     }
@@ -3132,7 +3129,7 @@ export async function runDaemon(): Promise<void> {
         return;
       }
       if (nextScheduledAt != null) {
-        scheduleProjectionDrain(Math.max(QUEUE_DRAIN_RETRY_DELAY_MS, nextScheduledAt - now()));
+        scheduleProjectionDrain(Math.max(QUEUE_DRAIN_RETRY_DELAY_MS, nextScheduledAt - Date.now()));
       }
       return;
     }
@@ -3144,7 +3141,7 @@ export async function runDaemon(): Promise<void> {
 
   const scheduleProjectionDrain = (delayMs = 0) => {
     const normalizedDelayMs = Math.max(0, delayMs);
-    const dueAt = now() + normalizedDelayMs;
+    const dueAt = Date.now() + normalizedDelayMs;
     if (projectionDrainScheduled) {
       if (projectionDrainDueAt != null && projectionDrainDueAt <= dueAt) {
         return;
@@ -3238,7 +3235,7 @@ export async function runDaemon(): Promise<void> {
 
   const scheduleSearchIndexDrain = (delayMs = 0) => {
     const normalizedDelayMs = Math.max(0, delayMs);
-    const dueAt = now() + normalizedDelayMs;
+    const dueAt = Date.now() + normalizedDelayMs;
     if (searchIndexDrainScheduled) {
       if (searchIndexDrainDueAt != null && searchIndexDrainDueAt <= dueAt) {
         return;
@@ -3383,7 +3380,7 @@ export async function runDaemon(): Promise<void> {
         suppressNextSignalReconnectSync.delete(accountKey);
         return;
       }
-      const queuedAt = now();
+      const queuedAt = Date.now();
       const lastQueuedAt = lastSignalReconnectSyncQueuedAt.get(accountKey) ?? 0;
       if (queuedAt - lastQueuedAt < signalReconnectSyncCooldownMs) {
         return;
@@ -3587,7 +3584,7 @@ export async function runDaemon(): Promise<void> {
         db.upsertDaemonState({
           pid: process.pid,
           startedAt,
-          updatedAt: now(),
+          updatedAt: Date.now(),
           status: "running",
           version: DAEMON_VERSION,
           details: daemonIdentity,
@@ -3619,7 +3616,7 @@ export async function runDaemon(): Promise<void> {
           bootstrap,
         });
       });
-      lastMenuBarStatusWrittenAt = now();
+      lastMenuBarStatusWrittenAt = Date.now();
     } catch (error) {
       if (!isSqliteBusyError(error)) {
         daemonLogger.warn("menu bar status cache write failed", { reason, error });
@@ -3640,7 +3637,7 @@ export async function runDaemon(): Promise<void> {
     if (menuBarStatusWriteTimer) {
       return;
     }
-    const elapsedMs = Math.max(0, now() - lastMenuBarStatusWrittenAt);
+    const elapsedMs = Math.max(0, Date.now() - lastMenuBarStatusWrittenAt);
     const delayMs = Math.max(
       MENU_BAR_STATUS_EVENT_DEBOUNCE_MS,
       MENU_BAR_STATUS_EVENT_MIN_INTERVAL_MS - elapsedMs,
@@ -3674,7 +3671,7 @@ export async function runDaemon(): Promise<void> {
         }
         const autoSyncTargets = getAutoSyncTargets(db);
         let queuedAny = false;
-        const queuedAt = now();
+        const queuedAt = Date.now();
         for (const target of autoSyncTargets) {
           if (trigger === "scheduler") {
             const targetKey = `${target.platform}:${target.accountKey}`;
@@ -3748,7 +3745,7 @@ export async function runDaemon(): Promise<void> {
         const queuedProjectionRun = db.getQueuedProjectionRun();
         if (queuedProjectionRun) {
           const projectionDelayMs = options?.delayMs ?? deferredProjectionCoalesceMs;
-          const projectionScheduledAt = now() + Math.max(0, Math.trunc(projectionDelayMs));
+          const projectionScheduledAt = Date.now() + Math.max(0, Math.trunc(projectionDelayMs));
           const existingDetails = parseProjectionRunDetails(queuedProjectionRun.details_json);
           const mergedDetails =
             incomingDetails == null
@@ -3820,7 +3817,7 @@ export async function runDaemon(): Promise<void> {
     }
     const deadlineReached =
       updateShutdownRequestedAt != null &&
-      now() - updateShutdownRequestedAt >= UPDATE_SHUTDOWN_GRACE_MS;
+      Date.now() - updateShutdownRequestedAt >= UPDATE_SHUTDOWN_GRACE_MS;
     if (
       deadlineReached ||
       (activeIngestRuns.size === 0 && !activeOutboundSend && !isProcessingProjection)
@@ -3838,7 +3835,7 @@ export async function runDaemon(): Promise<void> {
     }
 
     isUpdateShutdownRequested = true;
-    updateShutdownRequestedAt = now();
+    updateShutdownRequestedAt = Date.now();
     daemonLogger.info("daemon entering update shutdown", {
       activeIngestRuns: activeIngestRuns.size,
       activeOutboundSend: Boolean(activeOutboundSend),
@@ -3870,7 +3867,7 @@ export async function runDaemon(): Promise<void> {
   };
   const completeBootstrap = (state: DaemonBootstrapSnapshot["state"], error?: unknown) => {
     bootstrap.state = state;
-    bootstrap.finishedAt = now();
+    bootstrap.finishedAt = Date.now();
     bootstrap.error = error ? (error instanceof Error ? error.message : String(error)) : null;
   };
   const runBootstrap = async () => {
@@ -3900,7 +3897,7 @@ export async function runDaemon(): Promise<void> {
   async function processIngestRun(
     currentRun: NonNullable<ReturnType<typeof db.claimNextQueuedRun>>,
   ) {
-    const ingestStartedAt = now();
+    const ingestStartedAt = Date.now();
     const runClaim = { ownerId: currentRun.owner_id, attempt: currentRun.attempt };
     daemonLogger.info("ingest run started", {
       runId: currentRun.id,
@@ -3979,7 +3976,7 @@ export async function runDaemon(): Promise<void> {
           : {}),
       };
 
-      const adapterStartedAt = now();
+      const adapterStartedAt = Date.now();
       let adapterFetchMs = 0;
       let rawEventInsertMs = 0;
       let ingestedCount = 0;
@@ -3990,7 +3987,7 @@ export async function runDaemon(): Promise<void> {
       let bundleSourceCursor: Record<string, unknown> | null = null;
       let bundleContinuation: SyncContinuation | null = null;
       let runDiagnostics: Record<string, unknown> | null = null;
-      let checkpointLastSuccessAt = now();
+      let checkpointLastSuccessAt = Date.now();
       let sourceAccounts: Array<{
         platform: Platform;
         accountKey: string;
@@ -4074,16 +4071,16 @@ export async function runDaemon(): Promise<void> {
           }
         }
         let hasMore = false;
-        let lastCompletedAt = now();
+        let lastCompletedAt = Date.now();
         do {
           db.updateRunProgress(currentRun.id, { leaseMs: INGEST_RUN_LEASE_MS, claim: runClaim });
-          const pageFetchStartedAt = now();
+          const pageFetchStartedAt = Date.now();
           const page = await session.resync({
             cursor,
             sinceMs,
             limit: 1000,
           });
-          adapterFetchMs += now() - pageFetchStartedAt;
+          adapterFetchMs += Date.now() - pageFetchStartedAt;
           pageCount += 1;
           const pageCoverage = summarizeWhatsAppMessageCoverage(page.messages ?? []);
 
@@ -4103,13 +4100,13 @@ export async function runDaemon(): Promise<void> {
             rawEventCount: rawEvents.length,
           });
           resyncCoverage = mergeWhatsAppResyncCoverage(resyncCoverage, pageCoverage);
-          lastCompletedAt = page.completedAt ?? now();
+          lastCompletedAt = page.completedAt ?? Date.now();
           hasMore = page.hasMore;
           cursor = page.nextCursor ?? null;
 
-          const pageInsertStartedAt = now();
+          const pageInsertStartedAt = Date.now();
           const pageInsertResult = db.insertRawEvents(rawEvents);
-          rawEventInsertMs += now() - pageInsertStartedAt;
+          rawEventInsertMs += Date.now() - pageInsertStartedAt;
           db.updateRunProgress(currentRun.id, { leaseMs: INGEST_RUN_LEASE_MS, claim: runClaim });
           insertResult = {
             insertedCount: insertResult.insertedCount + pageInsertResult.insertedCount,
@@ -4168,7 +4165,7 @@ export async function runDaemon(): Promise<void> {
           proof: buildWhatsAppMessagesProof({
             accountKey,
             syncMode: bundleSyncMode,
-            observedAt: now(),
+            observedAt: Date.now(),
             runStartedAt: resyncStartedAt,
             hasMore,
             nextCursor: cursor,
@@ -4187,7 +4184,7 @@ export async function runDaemon(): Promise<void> {
                 async () => await runAdapter(platform, accountKey, envOverrides),
               )
             : await runAdapter(platform, accountKey, envOverrides);
-        adapterFetchMs = now() - adapterStartedAt;
+        adapterFetchMs = Date.now() - adapterStartedAt;
         db.updateRunProgress(currentRun.id, { leaseMs: INGEST_RUN_LEASE_MS, claim: runClaim });
         sourceAccounts = bundle.sourceAccounts as typeof sourceAccounts;
         bundleSourceCursor =
@@ -4200,9 +4197,9 @@ export async function runDaemon(): Promise<void> {
             ? bundle.diagnostics
             : null;
         ingestedCount = bundle.rawEvents.length;
-        const rawEventInsertStartedAt = now();
+        const rawEventInsertStartedAt = Date.now();
         insertResult = db.insertRawEvents(withRawEventAcquisitionMode(bundle.rawEvents, "sync"));
-        rawEventInsertMs = now() - rawEventInsertStartedAt;
+        rawEventInsertMs = Date.now() - rawEventInsertStartedAt;
         const bundleProofs = Array.isArray(bundle.proofs) ? bundle.proofs : [];
         for (const proof of bundleProofs) {
           db.upsertSyncProof({
@@ -4227,12 +4224,12 @@ export async function runDaemon(): Promise<void> {
             });
           }
         }
-        checkpointLastSuccessAt = now();
+        checkpointLastSuccessAt = Date.now();
         runDiagnostics = bundleDiagnostics;
       }
 
       db.upsertSourceAccounts(sourceAccounts);
-      const realtimeProjectionStartedAt = now();
+      const realtimeProjectionStartedAt = Date.now();
       if (
         shouldProjectIngestRunInline({
           platform,
@@ -4251,7 +4248,7 @@ export async function runDaemon(): Promise<void> {
         });
         scheduleSearchIndexDrain();
       }
-      const afterRealtimeProjection = now();
+      const afterRealtimeProjection = Date.now();
       const inboundMessages = collectInboundMessageHookPayloads(
         currentRun.id,
         insertResult.insertedRows,
@@ -4296,7 +4293,7 @@ export async function runDaemon(): Promise<void> {
         bundleSyncMode,
         bundleHasMore,
       );
-      const checkpointStartedAt = now();
+      const checkpointStartedAt = Date.now();
       db.upsertCheckpoint({
         platform: currentRun.platform,
         accountKey,
@@ -4305,7 +4302,7 @@ export async function runDaemon(): Promise<void> {
         rawIngestWatermark: projection.max_raw_event_rowid,
         lastSuccessAt: checkpointLastSuccessAt,
       });
-      const afterCheckpoint = now();
+      const afterCheckpoint = Date.now();
       const timings: IngestTiming = {
         adapterFetchMs,
         rawEventInsertMs,
@@ -4321,7 +4318,7 @@ export async function runDaemon(): Promise<void> {
         const continuationProjectionKey = `${currentRun.platform}:${accountKey}`;
         const lastContinuationProjectionAt =
           lastContinuationProjectionQueuedAt.get(continuationProjectionKey) ?? 0;
-        const projectionDecisionAt = now();
+        const projectionDecisionAt = Date.now();
         const shouldDeferProjection = shouldDeferContinuationProjection({
           hasMore: bundleHasMore,
           pendingRawEvents: projection.pending_raw_events,
@@ -4415,7 +4412,7 @@ export async function runDaemon(): Promise<void> {
         platform,
         run_type: currentRun.run_type,
         trigger: currentRun.trigger,
-        duration_bucket: durationBucket(now() - ingestStartedAt),
+        duration_bucket: durationBucket(Date.now() - ingestStartedAt),
       });
       daemonLogger.info("ingest run completed", {
         runId: currentRun.id,
@@ -4475,7 +4472,7 @@ export async function runDaemon(): Promise<void> {
         platform: currentRun.platform ?? "unknown",
         run_type: currentRun.run_type,
         trigger: currentRun.trigger,
-        duration_bucket: durationBucket(now() - ingestStartedAt),
+        duration_bucket: durationBucket(Date.now() - ingestStartedAt),
         ...errorTelemetryProperties(error, "sync_failed"),
       };
       telemetry.enqueue("helper_failed", {
@@ -4680,7 +4677,7 @@ export async function runDaemon(): Promise<void> {
       requestUpdateShutdown,
       () => isProcessingProjection || activeIngestRuns.size > 0 || activeOutboundSend !== null,
       () => {
-        authProjectionPausedUntil = now() + PROJECTION_AUTH_GRACE_MS;
+        authProjectionPausedUntil = Date.now() + PROJECTION_AUTH_GRACE_MS;
         schedulers.wakeProjection(PROJECTION_AUTH_RETRY_DELAY_MS);
       },
       beginInteractiveAuth,
@@ -4753,7 +4750,7 @@ export async function runDaemon(): Promise<void> {
     db.upsertDaemonState({
       pid: null,
       startedAt,
-      updatedAt: now(),
+      updatedAt: Date.now(),
       status: "stopped",
       version: DAEMON_VERSION,
       details: daemonIdentity,

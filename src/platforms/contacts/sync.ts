@@ -3,8 +3,8 @@ import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import type { ContactObservationPayload } from "../../core/types/provider.js";
 import { resolveMacOSNativeBinary } from "../../runtime/native-binary.js";
-import { providerStableHash } from "../core/raw-events/stable-hash.js";
 import type { SyncBundle } from "../core/sync.js";
+import { providerStableHash } from "../core/utils.js";
 
 export interface ContactRecordInput {
   sourceId: string;

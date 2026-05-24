@@ -1,4 +1,12 @@
+import { createHash } from "node:crypto";
 import type { AdapterWorkerOutput, SyncBundle } from "./sync.js";
+
+export function providerStableHash(seed: string): string {
+  return createHash("sha256").update(seed).digest("hex");
+}
+
+/** Alias used by snapshot builders that already name the helper `stableId`. */
+export const stableId = providerStableHash;
 
 export async function runAdapterWorker(
   build: () => SyncBundle | Promise<SyncBundle>,

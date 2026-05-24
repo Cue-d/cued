@@ -7,8 +7,8 @@ import type {
   ConversationObservationPayload,
   MessagePayload,
 } from "../../../core/types/provider.js";
-import { stableId } from "../../core/raw-events/stable-hash.js";
 import type { SyncBundle } from "../../core/sync.js";
+import { stableId } from "../../core/utils.js";
 import type {
   WhatsAppCallDeleteSnapshot,
   WhatsAppCallSnapshot,

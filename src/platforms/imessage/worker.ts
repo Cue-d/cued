@@ -1,5 +1,5 @@
-import { runAdapterWorker } from "../core/adapter-worker.js";
 import { readAdapterInvocationEnv } from "../core/invocation.js";
+import { runAdapterWorker } from "../core/utils.js";
 import { buildIMessageSyncBundle, DEFAULT_IMESSAGE_BATCH_LIMIT } from "./sync.js";
 
 void runAdapterWorker(async () => {

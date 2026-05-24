@@ -41,8 +41,8 @@ import type {
 import { safeParseJson, safeStringifyJson } from "./codecs.js";
 import { MIGRATIONS } from "./migrations.js";
 import * as schema from "./schema.js";
-import { chunkArray, sqlValueList } from "./sql-batch.js";
 import { openSqliteDatabase } from "./sqlite.js";
+import { chunkArray, sqlValueList } from "./utils.js";
 
 const {
   attachmentCache,
@@ -525,10 +525,6 @@ function toWhatsAppJidFromPhone(value: string): string | null {
 export type LocalDrizzleDatabase = BetterSQLite3Database<typeof schema>;
 const WRITE_BATCH_SIZE = 250;
 
-function now(): number {
-  return Date.now();
-}
-
 function resolveCanonicalContactIdFromAliases(
   contactId: string,
   aliasMap: Map<string, string>,
@@ -623,7 +619,7 @@ export class CuedDatabase {
         }
         this.sqlite
           .prepare("INSERT OR IGNORE INTO schema_migrations (id, applied_at) VALUES (?, ?)")
-          .run(migration.id, now());
+          .run(migration.id, Date.now());
         this.sqlite.exec("COMMIT");
       } catch (error) {
         this.sqlite.exec("ROLLBACK");
@@ -774,7 +770,7 @@ export class CuedDatabase {
     options: { createdBy?: string | null } = {},
   ): PlannedContactMergeDecision[] {
     const planned = this.planContactMergeDecisions(input);
-    const timestamp = now();
+    const timestamp = Date.now();
     return this.sqlite.transaction(() => {
       for (const decision of planned) {
         this.db
@@ -848,13 +844,13 @@ export class CuedDatabase {
       .values({
         key,
         value,
-        updatedAt: now(),
+        updatedAt: Date.now(),
       })
       .onConflictDoUpdate({
         target: appSettings.key,
         set: {
           value,
-          updatedAt: now(),
+          updatedAt: Date.now(),
         },
       })
       .run();
@@ -879,7 +875,7 @@ export class CuedDatabase {
     this.setAppSetting(APP_SETTING_KEYS.onboardingCompletedVersion, version);
   }
 
-  markReleaseCheck(at = now()): void {
+  markReleaseCheck(at = Date.now()): void {
     this.setAppSetting(APP_SETTING_KEYS.lastReleaseCheckAt, String(at));
   }
 
@@ -928,7 +924,7 @@ export class CuedDatabase {
       return null;
     }
     return {
-      at: now(),
+      at: Date.now(),
       stage: "unknown",
       message: raw,
       targetVersion: null,
@@ -978,7 +974,7 @@ export class CuedDatabase {
         ) ??
         (byKey.get(APP_SETTING_KEYS.updateLastError)
           ? {
-              at: now(),
+              at: Date.now(),
               stage: "unknown",
               message: byKey.get(APP_SETTING_KEYS.updateLastError) ?? "",
               targetVersion: null,
@@ -1206,7 +1202,7 @@ export class CuedDatabase {
 
   upsertSyncProof(input: { platform: Platform; accountKey: string; proof: SyncProofInput }): void {
     assertKnownSyncProofKindContract(input.platform, input.proof);
-    const timestamp = now();
+    const timestamp = Date.now();
     const scopeId = buildSyncScopeId(
       input.platform,
       input.accountKey,
@@ -1557,7 +1553,7 @@ export class CuedDatabase {
       projection_watermark: 0,
       last_projected_at: null,
       last_rebuild_at: null,
-      updated_at: now(),
+      updated_at: Date.now(),
     };
     if (options.initialize !== false) {
       this.upsertProjectionState({
@@ -1579,7 +1575,7 @@ export class CuedDatabase {
       projectionWatermark: input.projectionWatermark,
       lastProjectedAt: input.lastProjectedAt ?? null,
       lastRebuildAt: input.lastRebuildAt ?? null,
-      updatedAt: now(),
+      updatedAt: Date.now(),
     };
 
     this.db
@@ -1824,7 +1820,7 @@ export class CuedDatabase {
     metadata?: unknown;
   }): void {
     const id = `${input.platform}:${input.accountKey}`;
-    const timestamp = now();
+    const timestamp = Date.now();
     const values = {
       id,
       platform: input.platform,
@@ -1888,7 +1884,7 @@ export class CuedDatabase {
       .update(integrationStates)
       .set({
         enabled: enabled ? 1 : 0,
-        updatedAt: now(),
+        updatedAt: Date.now(),
       })
       .where(
         and(eq(integrationStates.platform, platform), eq(integrationStates.accountKey, accountKey)),
@@ -1990,7 +1986,7 @@ export class CuedDatabase {
     errorSummary?: string | null;
   }): string {
     const id = input.id ?? randomUUID();
-    const timestamp = input.requestedAt ?? now();
+    const timestamp = input.requestedAt ?? Date.now();
     this.db
       .insert(authSessions)
       .values({
@@ -2046,7 +2042,7 @@ export class CuedDatabase {
             ? current.result_summary_json
             : safeStringifyJson(input.resultSummary),
         errorSummary: input.errorSummary === undefined ? current.error_summary : input.errorSummary,
-        updatedAt: now(),
+        updatedAt: Date.now(),
       })
       .where(eq(authSessions.id, input.id))
       .run();
@@ -2067,7 +2063,7 @@ export class CuedDatabase {
       .set({
         accountKey: input.accountKey,
         integrationStateId: input.integrationStateId,
-        updatedAt: now(),
+        updatedAt: Date.now(),
       })
       .where(eq(authSessions.id, input.id))
       .run();
@@ -2141,7 +2137,7 @@ export class CuedDatabase {
     metadata?: unknown;
   }): string {
     const id = randomUUID();
-    const timestamp = now();
+    const timestamp = Date.now();
     this.db
       .insert(outboundMessages)
       .values({
@@ -2177,7 +2173,7 @@ export class CuedDatabase {
     const contactId = input.contactId.trim();
     const body = input.body.trim();
     const sourceKind = (input.sourceKind ?? "agent").trim() || "agent";
-    const timestamp = now();
+    const timestamp = Date.now();
     const confidence =
       typeof input.confidence === "number" && Number.isFinite(input.confidence)
         ? Math.trunc(input.confidence)
@@ -2312,7 +2308,7 @@ export class CuedDatabase {
   }
 
   markContactMemoryStale(id: string, staleAt: number | null = null): ContactMemoryRow | null {
-    const timestamp = staleAt ?? now();
+    const timestamp = staleAt ?? Date.now();
     this.db
       .update(contactMemories)
       .set({ staleAt: timestamp, updatedAt: timestamp })
@@ -2918,7 +2914,7 @@ export class CuedDatabase {
     expiresAt?: number | null;
     lastError?: string | null;
   }): string {
-    const timestamp = now();
+    const timestamp = Date.now();
     const existing = this.getAttachmentCacheEntry(input.attachmentId, input.variant);
     const id = existing?.id ?? randomUUID();
     this.db
@@ -2958,7 +2954,7 @@ export class CuedDatabase {
     return id;
   }
 
-  touchAttachmentCacheEntry(attachmentId: string, variant: string, accessedAt = now()): void {
+  touchAttachmentCacheEntry(attachmentId: string, variant: string, accessedAt = Date.now()): void {
     this.db
       .update(attachmentCache)
       .set({
@@ -3034,7 +3030,7 @@ export class CuedDatabase {
     filename?: string | null;
     title?: string | null;
   }): void {
-    const timestamp = now();
+    const timestamp = Date.now();
     const existing = this.getAttachmentContent(input.attachmentId);
     this.db.transaction((tx) => {
       tx.insert(attachmentContent)
@@ -3156,11 +3152,11 @@ export class CuedDatabase {
         ? and(
             eq(outboundMessages.status, "pending"),
             eq(outboundMessages.platform, platform),
-            sql`${outboundMessages.scheduledFor} <= ${now()}`,
+            sql`${outboundMessages.scheduledFor} <= ${Date.now()}`,
           )
         : and(
             eq(outboundMessages.status, "pending"),
-            sql`${outboundMessages.scheduledFor} <= ${now()}`,
+            sql`${outboundMessages.scheduledFor} <= ${Date.now()}`,
           );
 
       const row = tx
@@ -3195,8 +3191,8 @@ export class CuedDatabase {
         .set({
           status: "sending",
           attemptCount: row.attempt_count + 1,
-          startedAt: now(),
-          updatedAt: now(),
+          startedAt: Date.now(),
+          updatedAt: Date.now(),
         })
         .where(eq(outboundMessages.id, row.id))
         .run();
@@ -3205,8 +3201,8 @@ export class CuedDatabase {
         ...row,
         status: "sending",
         attempt_count: row.attempt_count + 1,
-        started_at: now(),
-        updated_at: now(),
+        started_at: Date.now(),
+        updated_at: Date.now(),
       };
     });
   }
@@ -3216,8 +3212,8 @@ export class CuedDatabase {
       .update(outboundMessages)
       .set({
         status: "sent",
-        finishedAt: now(),
-        updatedAt: now(),
+        finishedAt: Date.now(),
+        updatedAt: Date.now(),
         lastError: null,
       })
       .where(eq(outboundMessages.id, id))
@@ -3248,9 +3244,9 @@ export class CuedDatabase {
       .update(outboundMessages)
       .set({
         status: shouldRetry ? "pending" : "failed",
-        scheduledFor: shouldRetry ? now() + (input.retryDelayMs ?? 5_000) : now(),
-        finishedAt: shouldRetry ? null : now(),
-        updatedAt: now(),
+        scheduledFor: shouldRetry ? Date.now() + (input.retryDelayMs ?? 5_000) : Date.now(),
+        finishedAt: shouldRetry ? null : Date.now(),
+        updatedAt: Date.now(),
         lastError: input.error,
       })
       .where(eq(outboundMessages.id, input.id))
@@ -3284,7 +3280,7 @@ export class CuedDatabase {
         return 0;
       }
 
-      const finishedAt = now();
+      const finishedAt = Date.now();
       for (const run of stuckRuns) {
         tx.update(syncRuns)
           .set({
@@ -3310,7 +3306,7 @@ export class CuedDatabase {
   }
 
   recoverInProgressRuns(errorCode = "daemon_recovered"): number {
-    const timestamp = now();
+    const timestamp = Date.now();
     const result = this.db
       .update(syncRuns)
       .set({
@@ -3336,7 +3332,7 @@ export class CuedDatabase {
     delayMs?: number;
   }): string {
     const id = randomUUID();
-    const queuedAt = now();
+    const queuedAt = Date.now();
     const scheduledAt =
       input.scheduledAt ??
       (input.delayMs != null && Number.isFinite(input.delayMs)
@@ -3381,7 +3377,7 @@ export class CuedDatabase {
       return [];
     }
 
-    const queuedAt = now();
+    const queuedAt = Date.now();
     const runIds: string[] = [];
     this.db.transaction((tx) => {
       for (const chunk of chunkArray(inputs, WRITE_BATCH_SIZE)) {
@@ -3432,7 +3428,7 @@ export class CuedDatabase {
     delayMs?: number;
   }): string {
     const id = randomUUID();
-    const queuedAt = now();
+    const queuedAt = Date.now();
     const scheduledAt =
       input.scheduledAt ??
       (input.delayMs != null && Number.isFinite(input.delayMs)
@@ -3465,7 +3461,7 @@ export class CuedDatabase {
   }
 
   claimNextJob(input: { ownerId: string; leaseMs: number; kinds?: JobKind[] }): QueuedJob | null {
-    const timestamp = now();
+    const timestamp = Date.now();
     const kindPredicate =
       input.kinds && input.kinds.length > 0 ? inArray(jobs.kind, input.kinds) : sql`1 = 1`;
     const claimablePredicate = and(
@@ -3543,7 +3539,7 @@ export class CuedDatabase {
       leaseMs?: number;
     },
   ): void {
-    const timestamp = now();
+    const timestamp = Date.now();
     this.db
       .update(jobs)
       .set({
@@ -3559,7 +3555,7 @@ export class CuedDatabase {
   }
 
   completeJob(jobId: string, progress?: unknown): void {
-    const timestamp = now();
+    const timestamp = Date.now();
     this.db
       .update(jobs)
       .set({
@@ -3581,7 +3577,7 @@ export class CuedDatabase {
       retryAt?: number | null;
     },
   ): void {
-    const timestamp = now();
+    const timestamp = Date.now();
     const retryAt = input.retryAt ?? null;
     this.db
       .update(jobs)
@@ -3607,7 +3603,7 @@ export class CuedDatabase {
     if (uniqueMessageIds.length === 0) {
       return 0;
     }
-    const timestamp = now();
+    const timestamp = Date.now();
     let changed = 0;
     this.db.transaction((tx) => {
       for (const chunk of chunkArray(uniqueMessageIds, WRITE_BATCH_SIZE)) {
@@ -3641,7 +3637,7 @@ export class CuedDatabase {
 
   claimMessageFtsIndexBatch(limit: number): MessageFtsIndexQueueRow[] {
     const normalizedLimit = Math.max(1, Math.trunc(limit));
-    const timestamp = now();
+    const timestamp = Date.now();
     return this.sqlite.transaction(() => {
       const rows = this.db
         .select({
@@ -3691,7 +3687,7 @@ export class CuedDatabase {
       .update(messageFtsIndexQueue)
       .set({
         status: "queued",
-        updatedAt: now(),
+        updatedAt: Date.now(),
         lastError: null,
       })
       .where(
@@ -3723,7 +3719,7 @@ export class CuedDatabase {
       .update(messageFtsIndexQueue)
       .set({
         status: "failed",
-        updatedAt: now(),
+        updatedAt: Date.now(),
         lastError: error instanceof Error ? error.message : String(error),
       })
       .where(inArray(messageFtsIndexQueue.messageId, ids))
@@ -3917,7 +3913,7 @@ export class CuedDatabase {
     nextStatus: SyncRunStatus = "ingesting",
     options: { ownerId?: string; leaseMs?: number } = {},
   ): QueuedSyncRun | null {
-    const timestamp = now();
+    const timestamp = Date.now();
     return this.db.transaction((tx) => {
       const typePredicate =
         runTypes && runTypes.length > 0 ? inArray(syncRuns.runType, runTypes) : sql`1 = 1`;
@@ -4083,7 +4079,7 @@ export class CuedDatabase {
     runId: string,
     input: { details?: unknown; leaseMs?: number; claim?: SyncRunClaim } = {},
   ): boolean {
-    const timestamp = now();
+    const timestamp = Date.now();
     const result = this.db
       .update(syncRuns)
       .set({
@@ -4110,18 +4106,18 @@ export class CuedDatabase {
       details === undefined
         ? {
             status: "completed",
-            finishedAt: now(),
+            finishedAt: Date.now(),
             ownerId: null,
             leaseExpiresAt: null,
-            lastProgressAt: now(),
+            lastProgressAt: Date.now(),
             errorCode: null,
           }
         : {
             status: "completed",
-            finishedAt: now(),
+            finishedAt: Date.now(),
             ownerId: null,
             leaseExpiresAt: null,
-            lastProgressAt: now(),
+            lastProgressAt: Date.now(),
             errorCode: null,
             detailsJson: safeStringifyJson(details),
           };
@@ -4200,18 +4196,18 @@ export class CuedDatabase {
         details === undefined
           ? {
               status: "failed",
-              finishedAt: now(),
+              finishedAt: Date.now(),
               ownerId: null,
               leaseExpiresAt: null,
-              lastProgressAt: now(),
+              lastProgressAt: Date.now(),
               errorCode: errorCode ?? null,
             }
           : {
               status: "failed",
-              finishedAt: now(),
+              finishedAt: Date.now(),
               ownerId: null,
               leaseExpiresAt: null,
-              lastProgressAt: now(),
+              lastProgressAt: Date.now(),
               errorCode: errorCode ?? null,
               detailsJson: safeStringifyJson(details),
             };
@@ -4235,7 +4231,7 @@ export class CuedDatabase {
           errorCode: errorCode ?? null,
           errorMessage,
           detailsJson: safeStringifyJson(details),
-          createdAt: now(),
+          createdAt: Date.now(),
         })
         .run();
     });
@@ -4281,7 +4277,7 @@ export class CuedDatabase {
     status?: string;
     metadata?: unknown;
   }): void {
-    const timestamp = now();
+    const timestamp = Date.now();
     const values = {
       id: `${input.platform}:${input.accountKey}`,
       platform: input.platform,
@@ -4321,7 +4317,7 @@ export class CuedDatabase {
       return;
     }
 
-    const timestamp = now();
+    const timestamp = Date.now();
     this.db.transaction((tx) => {
       for (const chunk of chunkArray(inputs, WRITE_BATCH_SIZE)) {
         tx.insert(sourceAccounts)
@@ -4360,7 +4356,7 @@ export class CuedDatabase {
     lastSuccessAt?: number | null;
     lastErrorSummary?: string | null;
   }): void {
-    const timestamp = now();
+    const timestamp = Date.now();
     const values = {
       id: `${input.platform}:${input.accountKey}`,
       platform: input.platform,
@@ -4401,9 +4397,9 @@ export class CuedDatabase {
     this.db
       .update(syncCheckpoints)
       .set({
-        lastErrorAt: now(),
+        lastErrorAt: Date.now(),
         lastErrorSummary: errorSummary,
-        updatedAt: now(),
+        updatedAt: Date.now(),
       })
       .where(
         and(eq(syncCheckpoints.platform, platform), eq(syncCheckpoints.accountKey, accountKey)),
@@ -4538,13 +4534,13 @@ export class CuedDatabase {
         normalizedSchema: event.normalized_schema,
         sourceVersion: event.source_version,
         errorMessage: error instanceof Error ? error.message : String(error),
-        failedAt: now(),
+        failedAt: Date.now(),
       })
       .onConflictDoUpdate({
         target: rawEventProjectionFailures.rawEventRowId,
         set: {
           errorMessage: error instanceof Error ? error.message : String(error),
-          failedAt: now(),
+          failedAt: Date.now(),
         },
       })
       .run();
