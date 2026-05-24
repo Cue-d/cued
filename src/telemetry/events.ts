@@ -104,7 +104,7 @@ const safePropertyKeys = new Set([
 ]);
 
 const deniedKeyPattern =
-  /(account|address|attachment|body|call|contact|content|conversation|cookie|count|email|file|handle|host|message|name|path|phone|query|row|sql|subject|text|token|url|user|workspace)/i;
+  /(account|address|attachment|body|call|contact|content|conversation|cookie|email|file|handle|host|message|name|path|phone|query|row|sql|subject|text|token|url|user|workspace)/i;
 const safeValuePattern = /^[a-z0-9_.:-]{1,80}$/i;
 const versionPattern = /^[0-9A-Za-z.+-]{1,48}$/;
 const fingerprintPattern = /^[0-9a-f]{16,128}$/i;

@@ -3,7 +3,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { openCuedDatabase } from "../db/database.js";
-import { buildTelemetryEnvelope, sendTelemetryEvent, setTelemetryEnabled } from "./client.js";
+import {
+  buildTelemetryEnvelope,
+  normalizeOsVersion,
+  sendTelemetryEvent,
+  setTelemetryEnabled,
+} from "./client.js";
 import { durationBucket, errorTelemetryProperties } from "./context.js";
 import { buildTelemetryFingerprint, sanitizeTelemetryProperties } from "./events.js";
 
@@ -22,11 +27,12 @@ afterEach(() => {
 });
 
 describe("telemetry client", () => {
-  it("drops PII-shaped and count-shaped properties", () => {
+  it("drops non-allowlisted PII-shaped and count-shaped properties", () => {
     expect(
       sanitizeTelemetryProperties({
         platform: "imessage",
         error_code: "permission_denied",
+        restart_count_bucket: "retry_4_plus",
         message_count: 10,
         email: "a@example.com",
         local_path: "/Users/theo/.cued/local.db",
@@ -34,7 +40,38 @@ describe("telemetry client", () => {
     ).toEqual({
       platform: "imessage",
       error_code: "permission_denied",
+      restart_count_bucket: "retry_4_plus",
     });
+  });
+
+  it("uses the macOS product version instead of the Darwin kernel version", () => {
+    expect(
+      normalizeOsVersion({
+        platform: "darwin",
+        darwinProductVersion: "26.5",
+        kernelRelease: "25.5.0",
+      }),
+    ).toBe("26.5");
+  });
+
+  it("falls back to the kernel release when the macOS product version is unavailable", () => {
+    expect(
+      normalizeOsVersion({
+        platform: "darwin",
+        darwinProductVersion: null,
+        kernelRelease: "25.5.0",
+      }),
+    ).toBe("25.5.0");
+  });
+
+  it("falls back to the kernel release when the macOS product version is malformed", () => {
+    expect(
+      normalizeOsVersion({
+        platform: "darwin",
+        darwinProductVersion: "not-a-version",
+        kernelRelease: "25.5.0",
+      }),
+    ).toBe("25.5.0");
   });
 
   it("generates and persists an anonymous install id", () => {
