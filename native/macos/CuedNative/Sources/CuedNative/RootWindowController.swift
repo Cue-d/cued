@@ -278,11 +278,7 @@ final class RootWindowController: NSWindowController {
     guard let result = daemonSupervisor.runCLI(arguments: arguments) else {
       return nil
     }
-    guard result.status == 0,
-          let data = result.stdout.data(using: .utf8) else {
-      return nil
-    }
-    return try? JSONDecoder().decode(type, from: data)
+    return decodeCLIJSON(type, status: result.status, stdout: result.stdout)
   }
 
   private nonisolated static func fastRootSnapshot(
@@ -870,10 +866,6 @@ final class RootWindowController: NSWindowController {
       return false
     }
     return !pendingLivePermissionKeys.isDisjoint(with: liveRefreshPermissionKeys)
-  }
-
-  private func trackLivePermissionRequests(flags: [String]) {
-    trackLivePermissionKeys(permissionKeys(for: flags))
   }
 
   private func trackLivePermissionKeys(_ keys: Set<String>) {
