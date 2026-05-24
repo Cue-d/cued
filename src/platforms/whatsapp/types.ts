@@ -170,20 +170,6 @@ export type WhatsAppHelperCommand =
       command: "status";
     };
 
-export interface WhatsAppHelperStatusResult {
-  accountJid?: string | null;
-  pushName?: string | null;
-  connected?: boolean;
-  helperVersion?: string | null;
-  lastHistorySyncAt?: number | null;
-  lastHistorySyncType?: string | null;
-  lastHistoryChunkOrder?: number | null;
-  lastHistoryProgress?: number | null;
-  queuedHistorySyncCount?: number | null;
-  lastHistorySyncError?: string | null;
-  lastHistoryNotificationAt?: number | null;
-}
-
 export interface WhatsAppHelperSendResult {
   messageID: string;
   chatJID: string;

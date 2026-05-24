@@ -1,5 +1,5 @@
 import type { PlatformCapabilitySummary } from "../../../core/platform-capabilities.js";
-import type { AuthSessionRow, IntegrationStateRow } from "../../../db/database.js";
+import type { IntegrationStateRow } from "../../../db/database.js";
 import type {
   AuthSessionState,
   ConnectionKind,
@@ -98,4 +98,3 @@ export interface CompletedAuthSessionInput {
 }
 
 export type IntegrationRowLike = Pick<IntegrationStateRow, "metadata_json" | "launch_strategy">;
-export type AuthSessionRowLike = AuthSessionRow;

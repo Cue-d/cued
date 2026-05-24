@@ -241,14 +241,6 @@ export function newGetRequest(
   return new AuthedRequest(url, cookies, options).withMethod("GET");
 }
 
-export function newPostRequest(
-  url: string,
-  cookies: Cookie[],
-  options?: RequestOptions,
-): AuthedRequest {
-  return new AuthedRequest(url, cookies, options).withMethod("POST");
-}
-
 export function newMessagingGraphQLRequest(
   cookies: Cookie[],
   queryId: keyof typeof GRAPHQL_QUERY_IDS,
