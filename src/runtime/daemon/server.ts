@@ -23,7 +23,7 @@ import {
   type RawEventAcquisitionMode,
 } from "../../core/types/provider.js";
 import { safeParseJsonRecord, safeParseJsonStringArray } from "../../db/codecs.js";
-import { type CuedDatabase, type OutboundMessageRow, openCuedDatabase } from "../../db/database.js";
+import { type CuedDatabase, openCuedDatabase } from "../../db/database.js";
 import {
   buildAdapterInvocationEnv,
   selectAdapterInvocationProofs,
@@ -35,10 +35,7 @@ import { refreshLocalIntegrationStates } from "../../platforms/core/state/local-
 import { refreshManagedIntegrationStates } from "../../platforms/core/state/refresh.js";
 import { getIntegrationSummary } from "../../platforms/core/state/status.js";
 import type { SyncContinuation } from "../../platforms/core/sync.js";
-import {
-  DiscordApiClient,
-  isDiscordAuthInvalidationError,
-} from "../../platforms/discord/api/client.js";
+import { isDiscordAuthInvalidationError } from "../../platforms/discord/api/client.js";
 import {
   type DiscordRealtimeEventEnvelope,
   type DiscordRealtimeStatus,
@@ -49,7 +46,6 @@ import {
   buildDiscordConversationEvent,
   buildDiscordMessageEvent,
 } from "../../platforms/discord/sync/events.js";
-import { isDiscordDmChannel } from "../../platforms/discord/types.js";
 import { GmailClient } from "../../platforms/gmail/api/client.js";
 import { DEFAULT_CALL_HISTORY_DB_PATH } from "../../platforms/imessage/call-history.js";
 import { DEFAULT_CHAT_DB_PATH } from "../../platforms/imessage/reader.js";
@@ -65,7 +61,6 @@ import {
   isSignalCliVersionSupported,
   readSignalLinkedAccount,
 } from "../../platforms/signal/cli/binary.js";
-import { SignalCliClient } from "../../platforms/signal/cli/client.js";
 import {
   type SignalRealtimeStatus,
   SignalRealtimeSupervisor,
@@ -199,8 +194,6 @@ const QUEUE_DRAIN_RETRY_DELAY_MS = 1_000;
 const INGEST_RUN_LEASE_MS = 15 * 60_000;
 const PROJECTION_WORKER_TIMEOUT_MS = 30 * 60_000;
 const PROJECTION_RUN_LEASE_MS = PROJECTION_WORKER_TIMEOUT_MS + 5 * 60_000;
-const SIGNAL_SEND_SESSION_WAIT_MS = 3_000;
-const SIGNAL_SEND_ECHO_TIMEOUT_MS = 5_000;
 const WHATSAPP_SEND_SESSION_WAIT_MS = 3_000;
 const daemonLogger = createLogger("daemon");
 const hooksLogger = createLogger("hooks");
@@ -239,10 +232,6 @@ function getFallbackAppStatusMetadata(): {
     releaseChannel: getCurrentReleaseChannel(),
     install: null,
   };
-}
-
-function isOutboundSendEnabled(): boolean {
-  return false;
 }
 
 function writeMenuBarStatusSnapshot(
@@ -292,7 +281,6 @@ function getDaemonIdentity(): {
 
 type QueueSchedulers = {
   wakeIngest: (delayMs?: number) => void;
-  wakeOutbound: () => void;
   wakeProjection: (delayMs?: number) => void;
   wakeSearchIndex: (delayMs?: number) => void;
 };
@@ -349,15 +337,6 @@ type LinkedInDesiredSession = {
   serviceVersion: string | null;
   realtimeQueryMap: string;
   realtimeRecipeMap: string;
-};
-
-type PendingSignalEcho = {
-  accountKey: string;
-  threadId: string | null;
-  text: string;
-  timestamp: number;
-  timeout: NodeJS.Timeout;
-  outboundMessageId: string;
 };
 
 function getConfiguredAutoSyncPlatforms(): AdapterPlatform[] | null {
@@ -520,14 +499,6 @@ export function shouldSkipConnectedDiscordSchedulerSync(
   status: DiscordRealtimeStatus | null,
 ): boolean {
   return targetPlatform === "discord" && trigger === "scheduler" && status?.state === "connected";
-}
-
-export function shouldDrainOutboundQueue(input: {
-  outboundSendEnabled: boolean;
-  isUpdateShutdownRequested: boolean;
-  activeOutboundSend: unknown;
-}): boolean {
-  return input.outboundSendEnabled && !input.isUpdateShutdownRequested && !input.activeOutboundSend;
 }
 
 export function shouldProjectIngestRunInline(input: {
@@ -997,12 +968,7 @@ function getWhatsAppResyncPageBudget(): number {
 }
 
 async function safeEmitHookEvent(
-  event:
-    | "integration.authenticated"
-    | "sync.completed"
-    | "sync.failed"
-    | "message.sent"
-    | "message.received",
+  event: "integration.authenticated" | "sync.completed" | "sync.failed" | "message.received",
   payload: Record<string, unknown>,
 ): Promise<void> {
   try {
@@ -1019,34 +985,6 @@ async function emitAuthenticatedHook(
 ): Promise<void> {
   await safeEmitHookEvent("integration.authenticated", {
     integration: getIntegrationSummary(db, platform, accountKey),
-  });
-}
-
-async function emitMessageSentHook(
-  message: OutboundMessageRow,
-  details: {
-    transport: string;
-    sentAt: number;
-    providerMessageId?: string | null;
-    conversationExternalId?: string | null;
-  },
-): Promise<void> {
-  await safeEmitHookEvent("message.sent", {
-    outboundMessage: {
-      id: message.id,
-      platform: message.platform,
-      accountKey: message.account_key,
-      target: message.target,
-      threadId: message.thread_id,
-      text: message.text,
-      createdAt: message.created_at,
-    },
-    delivery: {
-      transport: details.transport,
-      sentAt: details.sentAt,
-      providerMessageId: details.providerMessageId ?? null,
-      conversationExternalId: details.conversationExternalId ?? null,
-    },
   });
 }
 
@@ -1294,88 +1232,6 @@ function isInboundMessageEvent(rawEvent: Record<string, unknown>): boolean {
     typeof (rawEvent.payload as Record<string, unknown>).senderSourceKey === "string" &&
     ((rawEvent.payload as Record<string, unknown>).senderSourceKey as string).length > 0
   );
-}
-
-function resolveSignalTarget(message: OutboundMessageRow): {
-  recipient?: string;
-  groupId?: string;
-} {
-  const threadId = message.thread_id ?? "";
-  const target = message.target;
-  if (threadId.startsWith("group:")) {
-    return { groupId: threadId.slice("group:".length) };
-  }
-  if (target.startsWith("group:")) {
-    return { groupId: target.slice("group:".length) };
-  }
-  return { recipient: target };
-}
-
-function isRetryableSignalSendError(message: string): boolean {
-  const normalized = message.toLowerCase();
-  if (
-    normalized.includes("invalid") ||
-    normalized.includes("unregistered") ||
-    normalized.includes("not found") ||
-    normalized.includes("malformed")
-  ) {
-    return false;
-  }
-  return true;
-}
-
-async function sendSignalOutboundMessage(
-  message: OutboundMessageRow,
-  signalRealtime: SignalRealtimeSupervisor,
-): Promise<{ transport: "session" | "fallback"; timestamp: number }> {
-  const target = resolveSignalTarget(message);
-  const session = signalRealtime.getSession(message.account_key);
-  if (session?.isConnected()) {
-    const result = await session.sendMessage(message.text, target);
-    return {
-      transport: "session",
-      timestamp: result.timestamp,
-    };
-  }
-
-  const waitedSession = await signalRealtime.waitForConnected(
-    message.account_key,
-    SIGNAL_SEND_SESSION_WAIT_MS,
-  );
-  if (waitedSession?.isConnected()) {
-    const result = await waitedSession.sendMessage(message.text, target);
-    return {
-      transport: "session",
-      timestamp: result.timestamp,
-    };
-  }
-
-  const inspected = await inspectSignalCli();
-  if (!inspected.cliPath) {
-    throw new Error("Bundled Signal helper was not found");
-  }
-  if (!isSignalCliVersionSupported(inspected.version)) {
-    throw new Error(
-      `Bundled Signal helper is too old or invalid (${inspected.version?.raw ?? "unknown"})`,
-    );
-  }
-
-  const configDir = getSignalConfigDir(message.account_key);
-  const account = readSignalLinkedAccount(configDir);
-  if (!account) {
-    throw new Error(`Signal account is not linked for '${message.account_key}'`);
-  }
-
-  const client = new SignalCliClient({
-    account,
-    cliPath: inspected.cliPath,
-    configDir,
-  });
-  const result = await client.sendMessage(message.text, target);
-  return {
-    transport: "fallback",
-    timestamp: result.timestamp,
-  };
 }
 
 async function collectDesiredSignalSessions(db: ReturnType<typeof openCuedDatabase>): Promise<{
@@ -1873,12 +1729,10 @@ export async function runDaemon(): Promise<void> {
     { child: ChildProcess; platform: Platform; accountKey: string }
   >();
   const activeIngestRuns = new Map<string, Promise<void>>();
-  let activeOutboundSend: Promise<void> | null = null;
   let isProcessingProjection = false;
   let isProcessingSearchIndex = false;
   let authProjectionPausedUntil = 0;
   let ingestDrainScheduled = false;
-  let outboundDrainScheduled = false;
   let projectionDrainScheduled = false;
   let searchIndexDrainScheduled = false;
   let ingestDrainTimer: NodeJS.Timeout | null = null;
@@ -1890,7 +1744,6 @@ export async function runDaemon(): Promise<void> {
   const lastAutoSyncQueuedAt = new Map<string, number>();
   const lastSignalReconnectSyncQueuedAt = new Map<string, number>();
   const lastContinuationProjectionQueuedAt = new Map<string, number>();
-  const pendingSignalSendEchoes = new Map<string, PendingSignalEcho[]>();
   const projectionMessageHooks = new ProjectionMessageHookBarrier();
   const suppressNextSignalReconnectSync = new Set<string>();
   const nativeWatchers = new Map<
@@ -1917,31 +1770,6 @@ export async function runDaemon(): Promise<void> {
     startedAt,
     finishedAt: null,
     error: null,
-  };
-
-  const clearSignalSendEcho = (
-    accountKey: string,
-    matcher: (echo: PendingSignalEcho) => boolean,
-  ) => {
-    const echoes = pendingSignalSendEchoes.get(accountKey);
-    if (!echoes || echoes.length === 0) {
-      return;
-    }
-
-    const remaining: PendingSignalEcho[] = [];
-    for (const echo of echoes) {
-      if (matcher(echo)) {
-        clearTimeout(echo.timeout);
-        continue;
-      }
-      remaining.push(echo);
-    }
-
-    if (remaining.length === 0) {
-      pendingSignalSendEchoes.delete(accountKey);
-      return;
-    }
-    pendingSignalSendEchoes.set(accountKey, remaining);
   };
 
   const queueMessageReceivedHooks = (
@@ -2031,42 +1859,6 @@ export async function runDaemon(): Promise<void> {
     await projectionMessageHooks.releaseCompletedRange(range, async (payload) => {
       await safeEmitHookEvent("message.received", payload);
     });
-  };
-
-  const scheduleSignalSendEchoCatchup = (message: OutboundMessageRow, timestamp: number) => {
-    const threadId = message.thread_id ?? null;
-    const pending: PendingSignalEcho = {
-      accountKey: message.account_key,
-      threadId,
-      text: message.text,
-      timestamp,
-      outboundMessageId: message.id,
-      timeout: setTimeout(() => {
-        clearSignalSendEcho(
-          message.account_key,
-          (candidate) => candidate.outboundMessageId === message.id,
-        );
-        if (!db.hasQueuedOrRunningRun(message.platform, message.account_key)) {
-          db.queueSyncRun({
-            platform: message.platform,
-            accountKey: message.account_key,
-            runType: "sync",
-            trigger: "signal_send_echo_timeout",
-            details: {
-              source: message.platform,
-              accountKey: message.account_key,
-              trigger: "signal_send_echo_timeout",
-              outboundMessageId: message.id,
-            },
-          });
-          schedulers.wakeIngest();
-        }
-      }, SIGNAL_SEND_ECHO_TIMEOUT_MS),
-    };
-
-    const existing = pendingSignalSendEchoes.get(message.account_key) ?? [];
-    existing.push(pending);
-    pendingSignalSendEchoes.set(message.account_key, existing);
   };
 
   const updateSlackCheckpointFromRealtime = (accountKey: string) => {
@@ -2581,19 +2373,6 @@ export async function runDaemon(): Promise<void> {
         updateSignalCheckpointFromRealtime(accountKey);
       }
 
-      for (const message of messages) {
-        if (message.isFromMe) {
-          const normalizedThreadId = message.threadId;
-          const normalizedText = message.text.trim();
-          clearSignalSendEcho(accountKey, (echo) => {
-            const sameThread = !echo.threadId || echo.threadId === normalizedThreadId;
-            const sameText = echo.text.trim() === normalizedText;
-            const nearTimestamp = Math.abs(echo.timestamp - message.sentAt) < 30_000;
-            return sameThread && sameText && nearTimestamp;
-          });
-        }
-      }
-
       const inboundMessages = collectInboundMessageHookPayloads(
         `signal_realtime:${accountKey}`,
         insertResult.insertedRows,
@@ -2833,62 +2612,6 @@ export async function runDaemon(): Promise<void> {
     }
   };
 
-  const sendWhatsAppOutboundMessage = async (
-    message: OutboundMessageRow,
-    realtime: WhatsAppRealtimeSupervisor,
-  ): Promise<{
-    transport: "session";
-    result: { messageID: string; chatJID: string; timestamp: number };
-  }> => {
-    const session =
-      realtime.getSession(message.account_key) ??
-      (await realtime.waitForConnected(message.account_key, WHATSAPP_SEND_SESSION_WAIT_MS));
-    if (!session?.isConnected()) {
-      throw new Error(`WhatsApp session is not connected for '${message.account_key}'`);
-    }
-
-    return {
-      transport: "session",
-      result: await session.sendText(message.target, message.text),
-    };
-  };
-
-  const sendDiscordOutboundMessage = async (
-    message: OutboundMessageRow,
-    realtime: DiscordRealtimeSupervisor,
-  ): Promise<{
-    transport: "session" | "fallback";
-    result: Awaited<ReturnType<DiscordApiClient["sendMessage"]>>;
-    currentUser: Awaited<ReturnType<DiscordApiClient["getCurrentUser"]>>;
-    channel: Awaited<ReturnType<DiscordApiClient["getChannel"]>>;
-  }> => {
-    const secret = loadIntegrationSecret("discord", message.account_key).secret;
-    if (typeof secret.token !== "string" || secret.token.trim().length === 0) {
-      throw new Error(`Discord integration '${message.account_key}' is missing a token`);
-    }
-
-    const client = new DiscordApiClient({ token: secret.token });
-    const session = realtime.getSession(message.account_key);
-    const transport = session?.isConnected() ? "session" : "fallback";
-    const [currentUser, channel] = await Promise.all([
-      client.getCurrentUser(),
-      client.getChannel(message.target),
-    ]);
-    if (!isDiscordDmChannel(channel)) {
-      throw new Error(`Discord DM-only mode cannot send to non-DM target '${message.target}'`);
-    }
-    const result = session?.isConnected()
-      ? await session.sendMessage(message.target, message.text)
-      : await client.sendMessage(message.target, message.text);
-
-    return {
-      transport,
-      result,
-      currentUser,
-      channel,
-    };
-  };
-
   const drainIngestQueue = () => {
     ingestDrainScheduled = false;
     ingestDrainDueAt = null;
@@ -2955,149 +2678,6 @@ export async function runDaemon(): Promise<void> {
       ingestDrainTimer = null;
       drainIngestQueue();
     }, normalizedDelayMs);
-  };
-
-  const drainOutboundQueue = () => {
-    outboundDrainScheduled = false;
-    if (
-      !shouldDrainOutboundQueue({
-        outboundSendEnabled: isOutboundSendEnabled(),
-        isUpdateShutdownRequested,
-        activeOutboundSend,
-      })
-    ) {
-      return;
-    }
-
-    const message = db.claimNextOutboundMessage();
-    if (!message) {
-      return;
-    }
-
-    activeOutboundSend = (async () => {
-      try {
-        if (message.platform === "discord") {
-          const sendResult = await sendDiscordOutboundMessage(message, discordRealtime);
-          await ingestDiscordRealtimeRawEvents(
-            message.account_key,
-            [
-              buildDiscordConversationEvent({
-                accountKey: message.account_key,
-                observedAt: now(),
-                channel: sendResult.channel,
-                currentUser: sendResult.currentUser,
-              }),
-              buildDiscordMessageEvent({
-                accountKey: message.account_key,
-                observedAt: now(),
-                channel: sendResult.channel,
-                message: sendResult.result,
-                currentUserId: sendResult.currentUser.id,
-              }),
-            ],
-            `discord_send:${message.id}`,
-            sendResult.currentUser.global_name?.trim() || sendResult.currentUser.username,
-          );
-          db.completeOutboundMessage(message.id);
-          await emitMessageSentHook(message, {
-            transport: sendResult.transport,
-            sentAt: Date.parse(sendResult.result.timestamp),
-            providerMessageId: sendResult.result.id,
-            conversationExternalId: sendResult.result.channel_id,
-          });
-          return;
-        }
-
-        if (message.platform === "signal") {
-          const sendResult = await sendSignalOutboundMessage(message, signalRealtime);
-          db.completeOutboundMessage(message.id);
-          await emitMessageSentHook(message, {
-            transport: sendResult.transport,
-            sentAt: sendResult.timestamp,
-          });
-          if (sendResult.transport === "session") {
-            scheduleSignalSendEchoCatchup(message, sendResult.timestamp);
-            return;
-          }
-          if (!db.hasQueuedOrRunningRun(message.platform, message.account_key)) {
-            db.queueSyncRun({
-              platform: message.platform,
-              accountKey: message.account_key,
-              runType: "sync",
-              trigger: "outbound_send_completed",
-              details: {
-                source: message.platform,
-                accountKey: message.account_key,
-                trigger: "outbound_send_completed",
-                outboundMessageId: message.id,
-              },
-            });
-            scheduleIngestDrain();
-          }
-          return;
-        }
-
-        if (message.platform === "whatsapp") {
-          const sendResult = await sendWhatsAppOutboundMessage(message, whatsAppRealtime);
-          db.completeOutboundMessage(message.id);
-          await emitMessageSentHook(message, {
-            transport: sendResult.transport,
-            sentAt: sendResult.result.timestamp,
-            providerMessageId: sendResult.result.messageID,
-            conversationExternalId: sendResult.result.chatJID,
-          });
-          return;
-        }
-        db.failOutboundMessage({
-          id: message.id,
-          retryable: false,
-          error: `Unsupported outbound platform: ${message.platform}`,
-        });
-        return;
-      } catch (error) {
-        const messageText = error instanceof Error ? error.message : String(error);
-        const resolvedLogger =
-          message.platform === "discord"
-            ? discordLogger
-            : message.platform === "signal"
-              ? signalLogger
-              : whatsAppLogger;
-        resolvedLogger.warn("outbound send failed", {
-          accountKey: message.account_key,
-          outboundMessageId: message.id,
-          error: messageText,
-        });
-        if (message.platform === "discord" && isDiscordAuthInvalidationError(error)) {
-          blockDiscordIntegration(db, message.account_key, messageText);
-          requestDiscordRealtimeReconcile();
-        }
-        db.failOutboundMessage({
-          id: message.id,
-          retryable:
-            message.platform === "signal"
-              ? isRetryableSignalSendError(messageText)
-              : message.platform === "discord"
-                ? !isDiscordAuthInvalidationError(error)
-                : true,
-          error: messageText,
-        });
-      } finally {
-        activeOutboundSend = null;
-        scheduleOutboundDrain();
-        maybeFinishUpdateShutdown();
-      }
-    })();
-  };
-
-  const scheduleOutboundDrain = () => {
-    if (!isOutboundSendEnabled()) {
-      return;
-    }
-    if (outboundDrainScheduled) {
-      return;
-    }
-    outboundDrainScheduled = true;
-    setImmediate(drainOutboundQueue);
   };
 
   const drainProjectionQueue = () => {
@@ -3282,7 +2862,6 @@ export async function runDaemon(): Promise<void> {
 
   const schedulers = {
     wakeIngest: scheduleIngestDrain,
-    wakeOutbound: scheduleOutboundDrain,
     wakeProjection: scheduleProjectionDrain,
     wakeSearchIndex: scheduleSearchIndexDrain,
   };
@@ -3817,8 +3396,6 @@ export async function runDaemon(): Promise<void> {
       return null;
     }
   };
-  scheduleOutboundDrain();
-
   const stopRealtimeAndWatchers = () => {
     for (const watcher of nativeWatchers.values()) {
       stopNativeWatcher(watcher);
@@ -3838,10 +3415,7 @@ export async function runDaemon(): Promise<void> {
     const deadlineReached =
       updateShutdownRequestedAt != null &&
       now() - updateShutdownRequestedAt >= UPDATE_SHUTDOWN_GRACE_MS;
-    if (
-      deadlineReached ||
-      (activeIngestRuns.size === 0 && !activeOutboundSend && !isProcessingProjection)
-    ) {
+    if (deadlineReached || (activeIngestRuns.size === 0 && !isProcessingProjection)) {
       shutdown();
     }
   };
@@ -3858,7 +3432,6 @@ export async function runDaemon(): Promise<void> {
     updateShutdownRequestedAt = now();
     daemonLogger.info("daemon entering update shutdown", {
       activeIngestRuns: activeIngestRuns.size,
-      activeOutboundSend: Boolean(activeOutboundSend),
       isProcessingProjection,
     });
     stopRealtimeAndWatchers();
@@ -4285,29 +3858,6 @@ export async function runDaemon(): Promise<void> {
           : null,
         inboundMessages,
       );
-      if (platform === "signal") {
-        for (const rawEvent of insertResult.insertedEvents) {
-          if (rawEvent.entityKind !== "message" || rawEvent.eventKind !== "created") {
-            continue;
-          }
-          const payload = rawEvent.payload as Record<string, unknown>;
-          if (payload.isFromMe !== true || typeof payload.content !== "string") {
-            continue;
-          }
-          const sourceConversationKey =
-            typeof payload.sourceConversationKey === "string"
-              ? payload.sourceConversationKey.replace(/^signal:/, "")
-              : null;
-          const sentAt = typeof payload.sentAt === "number" ? payload.sentAt : 0;
-          clearSignalSendEcho(accountKey, (echo) => {
-            const sameThread = !echo.threadId || echo.threadId === sourceConversationKey;
-            const sameText = echo.text.trim() === payload.content;
-            const nearTimestamp = sentAt > 0 ? Math.abs(echo.timestamp - sentAt) < 30_000 : true;
-            return sameThread && sameText && nearTimestamp;
-          });
-        }
-      }
-
       const projection = db.getProjectionBacklog();
       const checkpointSyncMode = resolveCheckpointSyncMode(
         currentRun.run_type,
@@ -4683,7 +4233,7 @@ export async function runDaemon(): Promise<void> {
       },
       reconcileLocalWatchers,
       requestUpdateShutdown,
-      () => isProcessingProjection || activeIngestRuns.size > 0 || activeOutboundSend !== null,
+      () => isProcessingProjection || activeIngestRuns.size > 0,
       () => {
         authProjectionPausedUntil = now() + PROJECTION_AUTH_GRACE_MS;
         schedulers.wakeProjection(PROJECTION_AUTH_RETRY_DELAY_MS);
@@ -4749,11 +4299,6 @@ export async function runDaemon(): Promise<void> {
       session.child.kill("SIGTERM");
     }
     activeAuthSessions.clear();
-    for (const echoes of pendingSignalSendEchoes.values()) {
-      for (const echo of echoes) {
-        clearTimeout(echo.timeout);
-      }
-    }
     projectionMessageHooks.clear();
     db.upsertDaemonState({
       pid: null,
