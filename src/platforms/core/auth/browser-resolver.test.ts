@@ -1,12 +1,18 @@
-import { describe, expect, it } from "vitest";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+import { afterEach, describe, expect, it } from "vitest";
 import {
   type BrowserCandidate,
   formatMissingChromiumAuthBrowserError,
+  listAvailableChromiumAuthBrowsers,
   listInstalledChromiumAuthBrowsers,
   resolveChromiumAuthBrowser,
 } from "./browser-resolver.js";
+import { installManagedChromiumBrowser } from "./managed-browser.js";
 
 describe("resolveChromiumAuthBrowser", () => {
+  const tempDirs: string[] = [];
   const candidates: BrowserCandidate[] = [
     {
       name: "Missing",
@@ -19,6 +25,38 @@ describe("resolveChromiumAuthBrowser", () => {
       appBundleIdentifier: "test.shell",
     },
   ];
+
+  afterEach(() => {
+    while (tempDirs.length > 0) {
+      rmSync(tempDirs.pop()!, { recursive: true, force: true });
+    }
+  });
+
+  function tempDir(prefix: string): string {
+    const dir = mkdtempSync(join(tmpdir(), prefix));
+    tempDirs.push(dir);
+    return dir;
+  }
+
+  async function installFakeManagedBrowser(root: string): Promise<BrowserCandidate> {
+    return installManagedChromiumBrowser({
+      env: { CUED_MANAGED_BROWSER_DIR: root },
+      installChromium: async ({ destinationRoot }) => {
+        const executablePath = join(
+          destinationRoot,
+          "chromium",
+          "Chromium.app",
+          "Contents",
+          "MacOS",
+          "Chromium",
+        );
+        mkdirSync(dirname(executablePath), { recursive: true });
+        writeFileSync(executablePath, "");
+      },
+      resolveExecutablePath: async ({ browserRoot }) =>
+        join(browserRoot, "chromium", "Chromium.app", "Contents", "MacOS", "Chromium"),
+    });
+  }
 
   it("uses an explicit executable path override", () => {
     expect(
@@ -57,8 +95,23 @@ describe("resolveChromiumAuthBrowser", () => {
     ]);
   });
 
+  it("appends an installed managed Chromium after local browsers", async () => {
+    const managedRoot = tempDir("cued-managed-browser-resolver-");
+    const managedBrowser = await installFakeManagedBrowser(managedRoot);
+
+    expect(
+      listAvailableChromiumAuthBrowsers({ CUED_MANAGED_BROWSER_DIR: managedRoot }, [
+        candidates[0]!,
+        candidates[1]!,
+      ]),
+    ).toEqual([candidates[1], managedBrowser]);
+  });
+
   it("returns null when no candidate exists", () => {
-    expect(resolveChromiumAuthBrowser({}, [candidates[0]!])).toBeNull();
+    const managedRoot = tempDir("cued-managed-browser-missing-");
+    expect(
+      resolveChromiumAuthBrowser({ CUED_MANAGED_BROWSER_DIR: managedRoot }, [candidates[0]!]),
+    ).toBeNull();
     expect(formatMissingChromiumAuthBrowserError()).toContain("No supported browser");
   });
 });

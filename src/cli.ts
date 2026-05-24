@@ -29,6 +29,10 @@ import {
   installMacOSApp,
   resolveInstalledAppPath,
 } from "./macos/install.js";
+import {
+  getManagedChromiumStatus,
+  installManagedChromiumBrowser,
+} from "./platforms/core/auth/managed-browser.js";
 import { IntegrationAuthService } from "./platforms/core/auth/service.js";
 import {
   getIntegrationSummary,
@@ -142,6 +146,7 @@ Usage:
   cued login-item enable|disable|status
   cued onboarding complete|snapshot|status [--refresh-managed] [--refresh-permissions]
   cued telemetry status|enable|disable|smoke
+  cued browser status|install
   cued skill install-global|status
   cued permissions doctor|status|request [--all|--contacts|--full-disk-access]
   cued sql <query>
@@ -776,6 +781,17 @@ async function main(): Promise<void> {
           return;
         default:
           throw new Error("Usage: cued skill install-global | status");
+      }
+    case "browser":
+      switch (subcommand) {
+        case "status":
+          printJson(getManagedChromiumStatus());
+          return;
+        case "install":
+          printJson(await installManagedChromiumBrowser());
+          return;
+        default:
+          throw new Error("Usage: cued browser status | install");
       }
     case "telemetry": {
       const db = openCuedDatabase();

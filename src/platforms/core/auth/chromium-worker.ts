@@ -5,8 +5,9 @@ import { cuedAuthKeychainService } from "../../../core/identity.js";
 import {
   type BrowserCandidate,
   formatMissingChromiumAuthBrowserError,
-  listInstalledChromiumAuthBrowsers,
+  listAvailableChromiumAuthBrowsers,
 } from "./browser-resolver.js";
+import { installManagedChromiumBrowser } from "./managed-browser.js";
 
 declare const localStorage: {
   getItem(key: string): string | null;
@@ -49,12 +50,18 @@ const REQUIRED_ARGS = new Set([
   "--launch-target",
 ]);
 
+const DEFAULT_LAUNCH_TARGETS: Record<Platform, string> = {
+  slack: "https://slack.com/signin",
+  linkedin: "https://www.linkedin.com/login",
+  discord: "https://discord.com/login",
+};
+
 function parseArgs(argv: string[]): WorkerArgs {
   const values = new Map<string, string>();
   for (let index = 0; index < argv.length; index += 2) {
     const key = argv[index];
     const value = argv[index + 1];
-    if (!REQUIRED_ARGS.has(key) || !value) {
+    if (!REQUIRED_ARGS.has(key) || value == null) {
       throw new Error(`Invalid argument sequence at ${key ?? "end"}`);
     }
     values.set(key, value);
@@ -70,7 +77,7 @@ function parseArgs(argv: string[]): WorkerArgs {
     accountKey: values.get("--account-key")!,
     sessionId: values.get("--session-id")!,
     profileDir: values.get("--profile-dir")!,
-    launchTarget: values.get("--launch-target")!,
+    launchTarget: values.get("--launch-target") || DEFAULT_LAUNCH_TARGETS[platform],
   };
 }
 
@@ -467,6 +474,18 @@ function getFakeResult(args: WorkerArgs): WorkerResult | null {
   };
 }
 
+async function launchBrowserCandidate(
+  browser: BrowserCandidate,
+  profileDir: string,
+): Promise<BrowserContext> {
+  return chromium.launchPersistentContext(profileDir, {
+    headless: false,
+    executablePath: browser.executablePath,
+    args: ["--disable-blink-features=AutomationControlled"],
+    viewport: { width: 1280, height: 900 },
+  });
+}
+
 async function run(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
   const fake = getFakeResult(args);
@@ -476,9 +495,9 @@ async function run(): Promise<void> {
   }
 
   mkdirSync(args.profileDir, { recursive: true });
-  const browsers = listInstalledChromiumAuthBrowsers();
+  const browsers = listAvailableChromiumAuthBrowsers();
   if (browsers.length === 0) {
-    throw new Error(formatMissingChromiumAuthBrowserError());
+    browsers.push(await installManagedChromiumBrowser());
   }
 
   let context: BrowserContext | null = null;
@@ -487,12 +506,7 @@ async function run(): Promise<void> {
   try {
     for (const candidate of browsers) {
       try {
-        context = await chromium.launchPersistentContext(args.profileDir, {
-          headless: false,
-          executablePath: candidate.executablePath,
-          args: ["--disable-blink-features=AutomationControlled"],
-          viewport: { width: 1280, height: 900 },
-        });
+        context = await launchBrowserCandidate(candidate, args.profileDir);
         browser = candidate;
         break;
       } catch (error) {
@@ -503,7 +517,18 @@ async function run(): Promise<void> {
     }
 
     if (!context || !browser) {
-      throw new Error(`Could not launch a supported browser. ${launchErrors.join(" ")}`);
+      const managedBrowser = await installManagedChromiumBrowser({ force: true });
+      try {
+        context = await launchBrowserCandidate(managedBrowser, args.profileDir);
+        browser = managedBrowser;
+      } catch (error) {
+        launchErrors.push(
+          `${managedBrowser.name}: ${error instanceof Error ? error.message : String(error)}`,
+        );
+        throw new Error(
+          `${formatMissingChromiumAuthBrowserError()} ${launchErrors.join(" ")}`.trim(),
+        );
+      }
     }
 
     let page = firstOpenPage(context) ?? (await context.newPage());
