@@ -82,6 +82,9 @@ function dropMessageReactionSourceKeyIfNeeded(db: MigrationDatabase): void {
 
     DROP TABLE message_reactions;
     ALTER TABLE message_reactions_reduced RENAME TO message_reactions;
+
+    CREATE INDEX IF NOT EXISTS idx_message_reactions_message
+    ON message_reactions(message_id, is_active);
   `);
 }
 

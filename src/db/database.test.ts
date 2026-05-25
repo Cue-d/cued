@@ -1387,6 +1387,9 @@ describe("CuedDatabase", () => {
     const messageReactionColumns = (
       sql.prepare("PRAGMA table_info(message_reactions)").all() as Array<{ name: string }>
     ).map((column) => column.name);
+    const messageReactionIndex = sql
+      .prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND name = ?")
+      .get("idx_message_reactions_message");
 
     expect(rawEventColumns).toEqual(expect.arrayContaining(["normalized_schema"]));
     expect(rawEventColumns).not.toEqual(
@@ -1415,6 +1418,7 @@ describe("CuedDatabase", () => {
     expect(timelineColumns).toContain("call_provider");
     expect(timelineColumns).toContain("call_direction");
     expect(messageReactionColumns).not.toContain("source_reaction_key");
+    expect(messageReactionIndex).toEqual({ name: "idx_message_reactions_message" });
     expect(
       sql.prepare("SELECT is_active FROM conversations WHERE id = ?").get("legacy-conversation"),
     ).toEqual({ is_active: 0 });
