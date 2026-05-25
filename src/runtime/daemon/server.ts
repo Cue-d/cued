@@ -58,7 +58,6 @@ import {
 } from "../../platforms/discord/sync/events.js";
 import { isDiscordDmChannel } from "../../platforms/discord/types.js";
 import { GmailClient } from "../../platforms/gmail/api/client.js";
-import { DEFAULT_CHAT_DB_PATH } from "../../platforms/imessage/reader.js";
 import { loadLinkedInSessionSecret } from "../../platforms/linkedin/auth/session-store.js";
 import { buildLinkedInRawEventsFromRealtimeEnvelope } from "../../platforms/linkedin/realtime/events.js";
 import {
@@ -985,9 +984,10 @@ function startIMessageWatcher(
   _db: ReturnType<typeof openCuedDatabase>,
   queueSync: (platform: AdapterPlatform, accountKey: string, trigger: string) => void,
 ): FSWatcher | ChildProcess | null {
+  const chatDbPath = IMESSAGE_CONFIG.chatDbPath;
   const nativeBinary = resolveMacOSNativeBinary();
   if (nativeBinary) {
-    const child = spawn(nativeBinary, ["imessage", "watch", "--db-path", DEFAULT_CHAT_DB_PATH], {
+    const child = spawn(nativeBinary, ["imessage", "watch", "--db-path", chatDbPath], {
       stdio: ["ignore", "pipe", "pipe"],
       env: process.env,
     });
@@ -1023,12 +1023,9 @@ function startIMessageWatcher(
   }
 
   try {
-    const targetDir = dirname(DEFAULT_CHAT_DB_PATH);
-    const watchedNames = new Set([
-      basename(DEFAULT_CHAT_DB_PATH),
-      `${basename(DEFAULT_CHAT_DB_PATH)}-wal`,
-      `${basename(DEFAULT_CHAT_DB_PATH)}-shm`,
-    ]);
+    const targetDir = dirname(chatDbPath);
+    const chatDbName = basename(chatDbPath);
+    const watchedNames = new Set([chatDbName, `${chatDbName}-wal`, `${chatDbName}-shm`]);
 
     return watch(targetDir, (_eventType, filename) => {
       if (!filename) {
