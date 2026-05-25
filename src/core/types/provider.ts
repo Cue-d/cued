@@ -1,9 +1,4 @@
-import type {
-  ConversationType,
-  Platform,
-  RawEventEntityKind,
-  SyncMode,
-} from "../../platforms/core/types.js";
+import type { ConversationType, Platform, RawEventEntityKind } from "../../platforms/core/types.js";
 
 export * from "../../platforms/core/types.js";
 
@@ -22,7 +17,6 @@ export interface ContactObservationPayload {
   sourceEntityKey: string;
   fields: ContactFields;
   handles: ContactHandleInput[];
-  sourceProfileUrl?: string | null;
 }
 
 export interface ConversationParticipantInput {
@@ -34,11 +28,6 @@ export interface ConversationObservationPayload {
   sourceConversationKey: string;
   conversationType: ConversationType;
   displayName?: string | null;
-  nativeConversationKey?: string | null;
-  service?: string | null;
-  topic?: string | null;
-  unreadCount?: number | null;
-  removalReason?: string | null;
   participants: ConversationParticipantInput[];
 }
 
@@ -48,15 +37,10 @@ export interface MessagePayload {
   senderSourceKey: string | null;
   sentAt: number;
   content: string;
-  service?: string | null;
   status?: string | null;
   isFromMe?: boolean;
   deliveredAt?: number | null;
   readAt?: number | null;
-  editedAt?: number | null;
-  deletedAt?: number | null;
-  replyToSourceMessageKey?: string | null;
-  isEdited?: boolean;
   isDeleted?: boolean;
   attachments?: Array<Record<string, unknown>>;
 }
@@ -66,7 +50,6 @@ export interface ReactionPayload {
   sourceConversationKey: string;
   reactorSourceKey: string | null;
   emoji: string;
-  reactionType?: string | null;
   timestamp: number;
   isActive: boolean;
 }
@@ -74,10 +57,7 @@ export interface ReactionPayload {
 export interface ParticipantPayload {
   sourceConversationKey: string;
   participantSourceKey: string;
-  eventAt: number;
   isSelf?: boolean;
-  role?: string | null;
-  metadata?: Record<string, unknown>;
 }
 
 export interface TimelineEventPayload {
@@ -88,7 +68,7 @@ export interface TimelineEventPayload {
   subjectSourceKey?: string | null;
   eventAt: number;
   text?: string | null;
-  metadata?: Record<string, unknown>;
+  systemKind?: string | null;
 }
 
 export const CALL_PROVIDER_VALUES = [
@@ -124,20 +104,13 @@ export interface CallPayload {
   sourceCallKey: string;
   sourceConversationKey: string;
   provider: CallProvider;
-  providerCallType?: string | null;
   direction: CallDirection;
   medium: CallMedium;
   status: CallStatus;
   startedAt: number;
-  answeredAt?: number | null;
-  endedAt?: number | null;
   durationSeconds?: number | null;
   initiatorSourceKey?: string | null;
   primaryRemoteSourceKey?: string | null;
-  remoteAddress?: string | null;
-  remoteDisplayName?: string | null;
-  disconnectedCause?: string | null;
-  metadata?: Record<string, unknown>;
 }
 
 export type RawEventPayload =
@@ -190,35 +163,22 @@ export type SyncProofKind = StandardSyncProofKind | (string & {});
 export interface SyncScopeInput {
   kind: SyncScopeKind;
   key: string;
-  parent?: {
-    kind: SyncScopeKind;
-    key: string;
-  } | null;
-  displayName?: string | null;
-  metadata?: Record<string, unknown> | null;
 }
 
 export interface SyncProofInput {
   scope: SyncScopeInput;
   proofKind: SyncProofKind;
   status: SyncProofStatus;
-  syncMode?: SyncMode | null;
   observedAt: number;
-  runStartedAt?: number | null;
-  completedAt?: number | null;
-  freshUntil?: number | null;
   resumeCursor?: unknown;
   coverage?: Record<string, unknown> | null;
   stats?: Record<string, unknown> | null;
-  error?: unknown;
 }
 
 export const RAW_EVENT_ACQUISITION_MODE_VALUES = ["sync", "realtime"] as const;
 export type RawEventAcquisitionMode = (typeof RAW_EVENT_ACQUISITION_MODE_VALUES)[number];
 
 export interface RawEventProvenance {
-  providerApiVersion?: string | null;
-  adapterVersion?: string | null;
   acquisitionMode?: RawEventAcquisitionMode | null;
 }
 
@@ -228,17 +188,14 @@ export interface ProviderRawEventInput<TPayload = RawEventPayload> {
   accountKey: string;
   entityKind: RawEventEntityKind;
   eventKind: string;
-  externalEventId?: string | null;
   externalEntityId?: string | null;
   conversationExternalId?: string | null;
   occurredAt?: number | null;
   observedAt: number;
-  cursor?: unknown;
   dedupeKey: string;
   payload: TPayload;
   normalizedSchema?: string | null;
   provenance?: RawEventProvenance | null;
-  sourceVersion?: string | null;
 }
 
 const contactFieldNameSet = new Set<string>(CONTACT_FIELD_NAME_VALUES);
@@ -249,20 +206,6 @@ export function buildNormalizedRawEventSchema(
   version = 1,
 ): string {
   return `${entityKind}.${eventKind}@${version}`;
-}
-
-export function normalizeRawEventProvenance(
-  input: Partial<RawEventProvenance> | null | undefined,
-): RawEventProvenance | null {
-  const normalized: RawEventProvenance = {
-    providerApiVersion: input?.providerApiVersion ?? null,
-    adapterVersion: input?.adapterVersion ?? null,
-    acquisitionMode: input?.acquisitionMode ?? null,
-  };
-
-  return normalized.providerApiVersion || normalized.adapterVersion || normalized.acquisitionMode
-    ? normalized
-    : null;
 }
 
 export function resolveRawEventNormalizedSchema(

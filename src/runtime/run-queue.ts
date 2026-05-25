@@ -9,7 +9,6 @@ import { rebuildProjectedState } from "./projection/projector.js";
 
 type RunQueueSchedulers = {
   wakeIngest?: () => void;
-  wakeOutbound?: () => void;
   wakeProjection?: () => void;
 };
 
@@ -41,61 +40,6 @@ export class RunQueueService {
       )
       .map((integration) => `${integration.platform}:${integration.account_key}`);
     return [...new Set(authenticatedTargets)];
-  }
-
-  queueMessageSend(input: {
-    platform: string;
-    target: string;
-    text: string;
-    accountKey?: string;
-  }): {
-    queued: true;
-    messageId: string;
-  } {
-    if (
-      input.platform !== "signal" &&
-      input.platform !== "whatsapp" &&
-      input.platform !== "discord"
-    ) {
-      throw new Error(`Unsupported outbound platform: ${input.platform}`);
-    }
-    if (input.target.trim().length === 0 || input.text.trim().length === 0) {
-      throw new Error(`${input.platform} send requires a target and non-empty text`);
-    }
-
-    const resolved =
-      input.platform === "signal"
-        ? this.db.resolveSignalSendTarget(input.target.trim())
-        : input.platform === "whatsapp"
-          ? this.db.resolveWhatsAppSendTarget(input.target.trim())
-          : this.db.resolveDiscordSendTarget(input.target.trim());
-    if (!resolved) {
-      throw new Error(`Unable to resolve ${input.platform} target: ${input.target.trim()}`);
-    }
-
-    const messageId = this.db.queueOutboundMessage({
-      platform: input.platform,
-      accountKey: input.accountKey ?? getDefaultAccountKeyForPlatform(input.platform),
-      target: resolved.target,
-      threadId: resolved.threadId,
-      text: input.text,
-      metadata: {
-        originalTarget: input.target.trim(),
-        resolvedTarget: resolved.target,
-        resolvedThreadId: resolved.threadId,
-        resolution: resolved.resolution,
-        matchedContactIds: "matchedContactIds" in resolved ? resolved.matchedContactIds : undefined,
-        matchedConversationId:
-          "matchedConversationId" in resolved ? resolved.matchedConversationId : undefined,
-        matchedName: resolved.matchedName,
-      },
-    });
-    this.schedulers.wakeOutbound?.();
-
-    return {
-      queued: true,
-      messageId,
-    };
   }
 
   queueSyncRun(source?: string): {

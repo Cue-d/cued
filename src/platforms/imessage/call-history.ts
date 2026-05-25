@@ -45,14 +45,11 @@ export interface ImsCallRecord {
   remoteAddress: string | null;
   remoteDisplayName: string | null;
   provider: CallProvider;
-  providerCallType: string | null;
   direction: CallDirection;
   medium: CallMedium;
   status: CallStatus;
   startedAt: number;
-  endedAt: number | null;
   durationSeconds: number | null;
-  disconnectedCause: string | null;
   syntheticConversation: boolean;
 }
 
@@ -234,8 +231,6 @@ export function loadCallHistoryBatch(options?: {
         typeof row.date_value === "number" && Number.isFinite(row.date_value)
           ? Math.round((row.date_value + APPLE_EPOCH_OFFSET) * 1000)
           : 0;
-      const endedAt =
-        typeof durationSeconds === "number" ? startedAt + durationSeconds * 1000 : null;
       return {
         pk: row.pk,
         sourceCallKey: row.unique_id?.trim() || `callhistory:${row.pk}`,
@@ -244,10 +239,6 @@ export function loadCallHistoryBatch(options?: {
         remoteAddress,
         remoteDisplayName: row.name?.trim() || null,
         provider,
-        providerCallType:
-          typeof row.call_type === "number" && Number.isFinite(row.call_type)
-            ? String(row.call_type)
-            : null,
         direction,
         medium: normalizeCallMedium(provider, row.call_type),
         status: normalizeCallStatus(
@@ -257,12 +248,7 @@ export function loadCallHistoryBatch(options?: {
           durationSeconds,
         ),
         startedAt,
-        endedAt,
         durationSeconds,
-        disconnectedCause:
-          typeof row.disconnected_cause === "number" && Number.isFinite(row.disconnected_cause)
-            ? String(row.disconnected_cause)
-            : null,
         syntheticConversation: conversationChatId === null,
       } satisfies ImsCallRecord;
     });

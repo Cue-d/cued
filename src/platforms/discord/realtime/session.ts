@@ -61,11 +61,6 @@ export interface DiscordRealtimeSessionLike {
   stop(): void;
   getStatus(): DiscordRealtimeStatus;
   isConnected(): boolean;
-  sendMessage(
-    channelId: string,
-    text: string,
-    options?: { replyToMessageId?: string | null },
-  ): Promise<DiscordMessage>;
 }
 
 export interface DiscordRealtimeSupervisorSessionInput {
@@ -195,14 +190,6 @@ export class DiscordRealtimeSession implements DiscordRealtimeSessionLike {
 
   isConnected(): boolean {
     return this.status.state === "connected";
-  }
-
-  async sendMessage(
-    channelId: string,
-    text: string,
-    options: { replyToMessageId?: string | null } = {},
-  ): Promise<DiscordMessage> {
-    return await this.client.sendMessage(channelId, text, options);
   }
 
   private async bootstrap(): Promise<void> {

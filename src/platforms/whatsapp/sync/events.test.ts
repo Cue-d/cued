@@ -57,7 +57,6 @@ describe("whatsapp events", () => {
         sourceMessageKey: "12016824050@s.whatsapp.net:wamid-1",
         senderSourceKey: "whatsapp:12016824050@s.whatsapp.net",
         content: "hello",
-        service: "whatsapp",
       }),
     );
     expect(
@@ -121,7 +120,6 @@ describe("whatsapp events", () => {
             durationSeconds: 61,
             status: "completed",
             medium: "audio",
-            providerCallType: "regular",
           },
         ],
       },
@@ -138,17 +136,14 @@ describe("whatsapp events", () => {
       platform: "whatsapp",
       entityKind: "call",
       eventKind: "observed",
-      sourceVersion: "whatsapp-v1",
       payload: {
         sourceCallKey: "12016824050@s.whatsapp.net:call-1",
         sourceConversationKey: "whatsapp:12016824050@s.whatsapp.net",
         provider: "whatsapp",
-        providerCallType: "regular",
         direction: "incoming",
         medium: "audio",
         status: "completed",
         durationSeconds: 61,
-        endedAt: 1_710_000_062_000,
       },
     });
   });
@@ -176,7 +171,7 @@ describe("whatsapp events", () => {
     });
   });
 
-  it("maps WhatsApp reply, forward, and revoke metadata onto message payloads", () => {
+  it("maps WhatsApp reply and revoke state onto message payloads", () => {
     const rawEvents = buildWhatsAppRawEventsFromSnapshot({
       accountKey: "default",
       snapshot: {
@@ -188,10 +183,6 @@ describe("whatsapp events", () => {
             fromMe: false,
             timestamp: 1_710_000_002_000,
             text: "reply",
-            replyToMessageID: "wamid-parent",
-            replyToSenderJID: "15551234567@s.whatsapp.net",
-            isForwarded: true,
-            forwardingScore: 2,
             status: "delivered",
           },
           {
@@ -211,20 +202,11 @@ describe("whatsapp events", () => {
     const messageEvents = rawEvents.filter((event) => event.entityKind === "message");
     expect(messageEvents[0]?.payload).toMatchObject({
       sourceMessageKey: "12016824050@s.whatsapp.net:wamid-reply",
-      replyToSourceMessageKey: "12016824050@s.whatsapp.net:wamid-parent",
       isDeleted: false,
-      providerMetadata: {
-        whatsapp: {
-          isForwarded: true,
-          forwardingScore: 2,
-          replyToSenderJID: "15551234567@s.whatsapp.net",
-        },
-      },
     });
     expect(messageEvents[1]?.payload).toMatchObject({
       sourceMessageKey: "12016824050@s.whatsapp.net:wamid-revoked",
       isDeleted: true,
-      deletedAt: 1_710_000_003_000,
     });
     expect(messageEvents[1]?.eventKind).toBe("deleted");
   });

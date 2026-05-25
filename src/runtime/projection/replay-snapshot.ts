@@ -18,7 +18,6 @@ export type CanonicalProjectionSnapshot = {
       platform: string;
       accountKey: string;
       sourceEntityKey: string;
-      profileUrl: string | null;
     }>;
   }>;
   conversations: Array<{
@@ -28,13 +27,8 @@ export type CanonicalProjectionSnapshot = {
     sourceConversationKey: string;
     type: string;
     isActive: number;
-    removalReason: string | null;
     name: string | null;
-    lastMessageId: string | null;
-    lastMessageAt: number | null;
-    lastMessagePreview: string | null;
     participantNames: string | null;
-    unreadCount: number;
   }>;
   conversationParticipants: Array<{
     conversationId: string;
@@ -55,12 +49,7 @@ export type CanonicalProjectionSnapshot = {
     content: string | null;
     status: string | null;
     readAt: number | null;
-    editedAt: number | null;
-    isEdited: number;
     isFromMe: number;
-    attachmentCount: number;
-    reactionCount: number;
-    replyToMessageId: string | null;
   }>;
   messageAttachments: Array<{
     id: string;
@@ -70,14 +59,12 @@ export type CanonicalProjectionSnapshot = {
     title: string | null;
     localPath: string | null;
     remoteUrl: string | null;
-    availabilityStatus: string | null;
   }>;
   messageReactions: Array<{
     id: string;
     messageId: string;
     emoji: string;
     isActive: number;
-    reactorName: string | null;
   }>;
   timelineEvents: Array<{
     id: string;
@@ -124,9 +111,8 @@ export function readCanonicalProjectionSnapshot(db: CuedDatabase): CanonicalProj
     platform: string;
     account_key: string;
     source_entity_key: string;
-    profile_url: string | null;
   }>(sql`
-    SELECT contact_id, platform, account_key, source_entity_key, profile_url
+    SELECT contact_id, platform, account_key, source_entity_key
     FROM contact_sources
     ORDER BY contact_id ASC, platform ASC, account_key ASC, source_entity_key ASC
   `);
@@ -138,15 +124,10 @@ export function readCanonicalProjectionSnapshot(db: CuedDatabase): CanonicalProj
     source_conversation_key: string;
     type: string;
     is_active: number;
-    removal_reason: string | null;
     name: string | null;
-    last_message_id: string | null;
-    last_message_at: number | null;
-    last_message_preview: string | null;
     participant_names: string | null;
-    unread_count: number;
   }>(sql`
-    SELECT id, platform, account_key, source_conversation_key, type, is_active, removal_reason, name, last_message_id, last_message_at, last_message_preview, participant_names, unread_count
+    SELECT id, platform, account_key, source_conversation_key, type, is_active, name, participant_names
     FROM conversations
     ORDER BY id ASC
   `);
@@ -163,14 +144,9 @@ export function readCanonicalProjectionSnapshot(db: CuedDatabase): CanonicalProj
     content: string | null;
     status: string | null;
     read_at: number | null;
-    edited_at: number | null;
-    is_edited: number;
     is_from_me: number;
-    attachment_count: number;
-    reaction_count: number;
-    reply_to_message_id: string | null;
   }>(sql`
-    SELECT id, platform, account_key, platform_message_id, conversation_id, sender_name, conversation_name, sent_at, content, status, read_at, edited_at, is_edited, is_from_me, attachment_count, reaction_count, reply_to_message_id
+    SELECT id, platform, account_key, platform_message_id, conversation_id, sender_name, conversation_name, sent_at, content, status, read_at, is_from_me
     FROM messages
     ORDER BY id ASC
   `);
@@ -195,9 +171,8 @@ export function readCanonicalProjectionSnapshot(db: CuedDatabase): CanonicalProj
     title: string | null;
     local_path: string | null;
     remote_url: string | null;
-    availability_status: string | null;
   }>(sql`
-    SELECT id, message_id, source_attachment_key, filename, title, local_path, remote_url, availability_status
+    SELECT id, message_id, source_attachment_key, filename, title, local_path, remote_url
     FROM message_attachments
     ORDER BY id ASC
   `);
@@ -207,9 +182,8 @@ export function readCanonicalProjectionSnapshot(db: CuedDatabase): CanonicalProj
     message_id: string;
     emoji: string;
     is_active: number;
-    reactor_name: string | null;
   }>(sql`
-    SELECT id, message_id, emoji, is_active, reactor_name
+    SELECT id, message_id, emoji, is_active
     FROM message_reactions
     ORDER BY id ASC
   `);
@@ -257,7 +231,6 @@ export function readCanonicalProjectionSnapshot(db: CuedDatabase): CanonicalProj
           platform: source.platform,
           accountKey: source.account_key,
           sourceEntityKey: source.source_entity_key,
-          profileUrl: source.profile_url,
         })),
     })),
     conversations: conversations.map((conversation) => ({
@@ -267,13 +240,8 @@ export function readCanonicalProjectionSnapshot(db: CuedDatabase): CanonicalProj
       sourceConversationKey: conversation.source_conversation_key,
       type: conversation.type,
       isActive: conversation.is_active,
-      removalReason: conversation.removal_reason,
       name: conversation.name,
-      lastMessageId: conversation.last_message_id,
-      lastMessageAt: conversation.last_message_at,
-      lastMessagePreview: conversation.last_message_preview,
       participantNames: conversation.participant_names,
-      unreadCount: conversation.unread_count,
     })),
     conversationParticipants: conversationParticipants.map((participant) => ({
       conversationId: participant.conversation_id,
@@ -294,12 +262,7 @@ export function readCanonicalProjectionSnapshot(db: CuedDatabase): CanonicalProj
       content: message.content,
       status: message.status,
       readAt: message.read_at,
-      editedAt: message.edited_at,
-      isEdited: message.is_edited,
       isFromMe: message.is_from_me,
-      attachmentCount: message.attachment_count,
-      reactionCount: message.reaction_count,
-      replyToMessageId: message.reply_to_message_id,
     })),
     messageAttachments: messageAttachments.map((attachment) => ({
       id: attachment.id,
@@ -309,14 +272,12 @@ export function readCanonicalProjectionSnapshot(db: CuedDatabase): CanonicalProj
       title: attachment.title,
       localPath: attachment.local_path,
       remoteUrl: attachment.remote_url,
-      availabilityStatus: attachment.availability_status,
     })),
     messageReactions: messageReactions.map((reaction) => ({
       id: reaction.id,
       messageId: reaction.message_id,
       emoji: reaction.emoji,
       isActive: reaction.is_active,
-      reactorName: reaction.reactor_name,
     })),
     timelineEvents: timelineEvents.map((event) => ({
       id: event.id,

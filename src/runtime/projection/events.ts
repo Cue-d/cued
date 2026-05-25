@@ -148,10 +148,6 @@ function buildSystemMessagePayload(
     return {
       ...timelinePayload,
       eventKind: "system_message",
-      metadata: {
-        ...(timelinePayload.metadata ?? {}),
-        legacyEventKind,
-      },
     };
   }
 
@@ -172,10 +168,6 @@ function buildSystemMessagePayload(
       eventKind: "system_message",
       eventAt: Number(messagePayload.sentAt),
       text: typeof messagePayload.content === "string" ? messagePayload.content : null,
-      metadata: {
-        legacyEventKind,
-        sourceMessageKey: messagePayload.sourceMessageKey,
-      },
     };
   }
 
@@ -211,11 +203,6 @@ function buildParticipantPayload(
   return {
     sourceConversationKey: timelinePayload.sourceConversationKey,
     participantSourceKey,
-    eventAt: timelinePayload.eventAt,
-    metadata: {
-      ...(timelinePayload.metadata ?? {}),
-      legacyTimelineEventKind: timelinePayload.eventKind,
-    },
   };
 }
 

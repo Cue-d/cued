@@ -57,10 +57,6 @@ export interface SignalReceivedMessage {
   attachments: Array<Record<string, unknown>>;
 }
 
-export interface SignalSendResult {
-  timestamp: number;
-}
-
 export interface SignalLinkHandle {
   child: ChildProcess;
   provisioningUri: Promise<string>;
@@ -508,35 +504,6 @@ export class SignalCliClient {
     return parseJsonObjects(stdout)
       .map((value, index) => toSignalMessage(value, this.account, index))
       .filter((value): value is SignalReceivedMessage => value !== null);
-  }
-
-  async sendMessage(
-    text: string,
-    target: { recipient?: string; groupId?: string },
-  ): Promise<SignalSendResult> {
-    const message = text.trim();
-    if (message.length === 0) {
-      throw new Error("Signal message text is required");
-    }
-
-    const args = this.accountArgs(["send", "-m", message]);
-    if (target.groupId) {
-      args.push("-g", target.groupId);
-    } else if (target.recipient) {
-      args.push(target.recipient);
-    } else {
-      throw new Error("Signal message requires a recipient or groupId");
-    }
-
-    const { stdout } = await execFileAsync(this.cliPath, args, {
-      timeout: 20_000,
-      maxBuffer: 2 * 1024 * 1024,
-    });
-
-    const timestampMatch = stdout.match(/\d{10,16}/);
-    return {
-      timestamp: timestampMatch ? Number(timestampMatch[0]) : Date.now(),
-    };
   }
 
   accountArgs(args: string[]): string[] {

@@ -56,7 +56,6 @@ describe("buildLinkedInRawEventsFromRealtimeEnvelope", () => {
                       groupChat: false,
                       read: true,
                       categories: ["PRIMARY_INBOX"],
-                      unreadCount: 0,
                       conversationParticipants: [selfParticipant, peerParticipant],
                     },
                   },
@@ -110,7 +109,6 @@ describe("buildLinkedInRawEventsFromRealtimeEnvelope", () => {
                       groupChat: true,
                       read: true,
                       categories: ["PRIMARY_INBOX"],
-                      unreadCount: 0,
                       conversationParticipants: [selfParticipant, peerParticipant],
                     },
                   },
@@ -156,7 +154,6 @@ describe("buildLinkedInRawEventsFromRealtimeEnvelope", () => {
                     groupChat: false,
                     read: true,
                     categories: ["ARCHIVED"],
-                    unreadCount: 0,
                     conversationParticipants: [selfParticipant, peerParticipant],
                   },
                 },
@@ -178,7 +175,6 @@ describe("buildLinkedInRawEventsFromRealtimeEnvelope", () => {
       )?.payload,
     ).toEqual(
       expect.objectContaining({
-        removalReason: "archived",
         participants: expect.arrayContaining([
           expect.objectContaining({
             sourceEntityKey: "linkedin:urn:li:member:SELF123",
@@ -220,7 +216,6 @@ describe("buildLinkedInRawEventsFromRealtimeEnvelope", () => {
                     groupChat: false,
                     read: true,
                     categories: ["PRIMARY_INBOX"],
-                    unreadCount: 0,
                     conversationParticipants: [selfParticipant, peerParticipant],
                   },
                 },

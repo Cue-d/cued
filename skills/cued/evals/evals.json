@@ -101,10 +101,10 @@
       "expected_output": "A prioritized list of conversations with unread messages, ranked by importance signals like relationship strength and message volume.",
       "files": [],
       "expectations": [
-        "Queried conversations where unread_count > 0",
-        "Filtered to conversations where the last message was NOT sent by the user (is_from_me = 0)",
+        "Queried unread inbound messages where read_at IS NULL and is_from_me = 0",
+        "Grouped unread messages by conversation and checked the latest unread sender",
         "Ordered by some importance signal (message frequency, recency, or DM vs group)",
-        "Returned conversation names, platforms, unread counts, and last message previews",
+        "Returned conversation names, platforms, unread message counts, and latest unread message previews",
         "Distinguished between DM and group conversations, prioritizing DMs"
       ]
     },
@@ -266,7 +266,7 @@
       "files": [],
       "expectations": [
         "Skill was triggered by a generic message check without mentioning 'cued'",
-        "Queried recent messages or conversations with unread_count > 0",
+        "Queried recent messages and unread inbound messages using read_at IS NULL",
         "Returned conversation names, platforms, and message previews",
         "Ordered by recency"
       ]
@@ -305,7 +305,7 @@
         "Skill was triggered by a contact info lookup without mentioning 'cued'",
         "Searched contacts for 'Sarah Chen'",
         "Queried contact_handles for type = 'phone' and type = 'linkedin'",
-        "Checked contact_sources for profile_url containing linkedin",
+        "Checked contact_handles and contact_sources source_entity_key values for LinkedIn identifiers",
         "Returned the handle values"
       ]
     },
@@ -396,7 +396,7 @@
         "Identified a bounded set of contacts or duplicate clusters with missing or sparse profile fields",
         "Structured the output as independent per-contact or per-cluster enrichment tasks rather than one monolithic pass",
         "Searched contact_handles for email, phone, linkedin, and other relevant handle types",
-        "Checked contact_sources.profile_url and related metadata for enrichment signals",
+        "Checked contact_handles and contact_sources source_entity_key values for enrichment signals",
         "Pulled enrichment candidates from duplicate records or cross-platform matches in local data",
         "Returned only enrichments supported by local evidence",
         "Did not claim that data had already been updated unless a real command was run"
@@ -421,7 +421,7 @@
       "expected_output": "A list of contacts with latent enrichment opportunities from existing local metadata, including LinkedIn URLs/handles, company names, and other profile fields that can be surfaced.",
       "files": [],
       "expectations": [
-        "Queried contact_sources for profile_url and platform metadata that imply enrichable profile details",
+        "Queried contact_handles and contact_sources source_entity_key values that imply enrichable profile details",
         "Queried contact_handles for linkedin, email, phone, and other relevant handle types",
         "Matched local metadata back to the canonical contact",
         "Returned concrete field/value enrichments rather than vague suggestions",

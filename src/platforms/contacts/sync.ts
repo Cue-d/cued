@@ -188,7 +188,6 @@ export function buildContactsSyncBundle(): SyncBundle {
           })),
         ],
       } satisfies ContactObservationPayload,
-      sourceVersion: "contacts-v1",
     })),
     sourceCursor: { snapshotAt: observedBase },
     syncMode: "full",

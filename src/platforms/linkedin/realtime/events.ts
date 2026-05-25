@@ -79,7 +79,7 @@ function userIsConversationMember(conversation: Conversation, userEntityUrn: str
   );
 }
 
-function removalReason(conversation: Conversation, userEntityUrn: string): string | null {
+function conversationRemovalKind(conversation: Conversation, userEntityUrn: string): string | null {
   if (isSpamConversation(conversation)) {
     return "spam";
   }
@@ -117,7 +117,7 @@ export function buildLinkedInRawEventsFromRealtimeEnvelope(input: {
       if (!conversation) {
         return [];
       }
-      const reason = removalReason(conversation, input.userEntityUrn);
+      const reason = conversationRemovalKind(conversation, input.userEntityUrn);
       if (reason) {
         return buildLinkedInConversationRemovalEvents({
           accountKey: input.accountKey,
@@ -158,7 +158,7 @@ export function buildLinkedInRawEventsFromRealtimeEnvelope(input: {
         return [];
       }
       const reason = message.conversation
-        ? removalReason(message.conversation, input.userEntityUrn)
+        ? conversationRemovalKind(message.conversation, input.userEntityUrn)
         : null;
       if (reason) {
         return buildLinkedInConversationRemovalEvents({
@@ -206,7 +206,7 @@ export function buildLinkedInRawEventsFromRealtimeEnvelope(input: {
         return [];
       }
       const reason = reaction.message.conversation
-        ? removalReason(reaction.message.conversation, input.userEntityUrn)
+        ? conversationRemovalKind(reaction.message.conversation, input.userEntityUrn)
         : null;
       if (reason) {
         return buildLinkedInConversationRemovalEvents({
@@ -255,7 +255,7 @@ export function buildLinkedInRawEventsFromRealtimeEnvelope(input: {
         return [];
       }
       const reason = receipt.message.conversation
-        ? removalReason(receipt.message.conversation, input.userEntityUrn)
+        ? conversationRemovalKind(receipt.message.conversation, input.userEntityUrn)
         : null;
       if (reason) {
         return buildLinkedInConversationRemovalEvents({

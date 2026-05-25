@@ -191,15 +191,10 @@ export async function buildGmailSyncBundle(
           scope: {
             kind: "account",
             key: "all_mail_except_spam_trash",
-            displayName: "All Gmail mail except spam and trash",
-            metadata: { emailAddress },
           },
           proofKind: "messages",
           status: hasMore ? "running" : "complete",
-          syncMode: "incremental",
           observedAt,
-          runStartedAt: cursor.startedAt ?? observedAt,
-          completedAt: hasMore ? null : observedAt,
           resumeCursor: hasMore ? sourceCursor : null,
           coverage: {
             emailAddress,
@@ -306,15 +301,10 @@ export async function buildGmailSyncBundle(
         scope: {
           kind: "account",
           key: "all_mail_except_spam_trash",
-          displayName: "All Gmail mail except spam and trash",
-          metadata: { emailAddress },
         },
         proofKind: "messages",
         status: historicalSyncComplete ? "complete" : "running",
-        syncMode: "full",
         observedAt,
-        runStartedAt: startedAt,
-        completedAt: historicalSyncComplete ? observedAt : null,
         resumeCursor: hasMore ? sourceCursor : null,
         coverage: {
           emailAddress,

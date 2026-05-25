@@ -232,7 +232,6 @@ export function buildIMessageSyncBundle(options?: {
           },
         ],
       } satisfies ContactObservationPayload,
-      sourceVersion: "imessage-v1",
     });
   }
 
@@ -251,12 +250,10 @@ export function buildIMessageSyncBundle(options?: {
         sourceConversationKey: String(chat.id),
         conversationType: chat.isGroup ? "group" : "dm",
         displayName: chat.displayName ?? null,
-        nativeConversationKey: chat.identifier,
         participants: chat.participants.map((participant) => ({
           sourceEntityKey: `imessage:${participant.identifier}`,
         })),
       } satisfies ConversationObservationPayload,
-      sourceVersion: "imessage-v1",
     });
   }
 
@@ -278,11 +275,9 @@ export function buildIMessageSyncBundle(options?: {
         senderSourceKey: message.sender ? `imessage:${message.sender.identifier}` : null,
         sentAt: message.timestamp * 1000,
         content: message.text ?? "",
-        service: message.sender?.service ?? "iMessage",
         status: message.status,
         isFromMe: message.isFromMe,
         readAt: message.readAt ? message.readAt * 1000 : null,
-        isEdited: false,
         isDeleted: false,
         attachments: message.attachments.map((attachment) => ({
           id: attachment.guid,
@@ -292,18 +287,9 @@ export function buildIMessageSyncBundle(options?: {
           mime_type: attachment.mimeType,
           size_bytes: attachment.totalBytes,
           access_kind: attachment.filename ? "local_path" : "none",
-          availability_status: attachment.filename ? "available" : "metadata_only",
           access_ref: attachment.filename ? { path: attachment.filename } : null,
-          provider_metadata: {
-            uti: attachment.uti,
-            isSticker: attachment.isSticker,
-            hideAttachment: attachment.hideAttachment,
-            ckRecordId: attachment.ckRecordId,
-            sourceFilename: attachment.filename,
-          },
         })),
       } satisfies MessagePayload,
-      sourceVersion: "imessage-v1",
     });
 
     for (const reaction of message.reactions) {
@@ -328,7 +314,6 @@ export function buildIMessageSyncBundle(options?: {
           timestamp: reaction.timestamp * 1000,
           isActive: true,
         } satisfies ReactionPayload,
-        sourceVersion: "imessage-v1",
       });
     }
   }
@@ -361,7 +346,6 @@ export function buildIMessageSyncBundle(options?: {
               ]
             : [],
         } satisfies ContactObservationPayload,
-        sourceVersion: "imessage-v1",
       });
     }
 
@@ -383,10 +367,8 @@ export function buildIMessageSyncBundle(options?: {
           sourceConversationKey: call.sourceConversationKey,
           conversationType: "dm",
           displayName,
-          service: call.provider,
           participants: call.remoteSourceKey ? [{ sourceEntityKey: call.remoteSourceKey }] : [],
         } satisfies ConversationObservationPayload,
-        sourceVersion: "imessage-v1",
       });
     }
 
@@ -405,23 +387,14 @@ export function buildIMessageSyncBundle(options?: {
         sourceCallKey: call.sourceCallKey,
         sourceConversationKey: call.sourceConversationKey,
         provider: call.provider,
-        providerCallType: call.providerCallType,
         direction: call.direction,
         medium: call.medium,
         status: call.status,
         startedAt: call.startedAt,
-        endedAt: call.endedAt,
         durationSeconds: call.durationSeconds,
         initiatorSourceKey: call.direction === "incoming" ? call.remoteSourceKey : null,
         primaryRemoteSourceKey: call.remoteSourceKey,
-        remoteAddress: call.remoteAddress,
-        remoteDisplayName: call.remoteDisplayName,
-        disconnectedCause: call.disconnectedCause,
-        metadata: {
-          syntheticConversation: call.syntheticConversation,
-        },
       } satisfies CallPayload,
-      sourceVersion: "imessage-v1",
     });
   }
 

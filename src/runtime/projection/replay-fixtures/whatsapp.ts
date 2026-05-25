@@ -42,11 +42,9 @@ export const whatsappReplayFixtures: ProjectionReplayFixture[] = [
           senderSourceKey: whatsappSourceEntityKey(dmPeer),
           sentAt: 1_713_000_000_000,
           content: "hello from WhatsApp",
-          service: "whatsapp",
           status: "delivered",
           isFromMe: false,
         },
-        sourceVersion: "whatsapp-v1",
       }),
       fixtureEvent({
         id: "whatsapp_dm_chat",
@@ -60,11 +58,8 @@ export const whatsappReplayFixtures: ProjectionReplayFixture[] = [
           sourceConversationKey: whatsappSourceConversationKey(dmPeer),
           conversationType: "dm",
           displayName: null,
-          nativeConversationKey: dmPeer,
-          service: "whatsapp",
           participants: [{ sourceEntityKey: whatsappSourceEntityKey(dmPeer) }],
         },
-        sourceVersion: "whatsapp-v1",
       }),
       fixtureEvent({
         id: "whatsapp_dm_contact",
@@ -84,7 +79,6 @@ export const whatsappReplayFixtures: ProjectionReplayFixture[] = [
             { type: "phone", value: "+12016824050", deterministic: true },
           ],
         },
-        sourceVersion: "whatsapp-v1",
       }),
     ],
   },
@@ -94,7 +88,6 @@ export const whatsappReplayFixtures: ProjectionReplayFixture[] = [
       expect(snapshot.contacts.map((contact) => contact.name).sort()).toEqual(["Alice", "Bob"]);
       expect(snapshot.conversations[0]).toMatchObject({
         name: "Study Group",
-        unreadCount: 1,
       });
       expect(snapshot.messages).toHaveLength(2);
       const inbound = snapshot.messages.find((message) => message.content === "agenda attached");
@@ -102,7 +95,6 @@ export const whatsappReplayFixtures: ProjectionReplayFixture[] = [
       expect(inbound).toMatchObject({
         senderName: "Alice",
         conversationName: "Study Group",
-        attachmentCount: 1,
         isFromMe: 0,
       });
       expect(outbound).toMatchObject({
@@ -114,7 +106,6 @@ export const whatsappReplayFixtures: ProjectionReplayFixture[] = [
         filename: "agenda.pdf",
         title: "Agenda",
         remoteUrl: "https://example.com/agenda.pdf",
-        availabilityStatus: "available",
       });
     },
     events: [
@@ -130,14 +121,11 @@ export const whatsappReplayFixtures: ProjectionReplayFixture[] = [
           sourceConversationKey: whatsappSourceConversationKey(studyGroup),
           conversationType: "group",
           displayName: "Study Group",
-          nativeConversationKey: studyGroup,
-          service: "whatsapp",
           participants: [
             { sourceEntityKey: whatsappSourceEntityKey(studyGroupAlice) },
             { sourceEntityKey: whatsappSourceEntityKey(studyGroupBob) },
           ],
         },
-        sourceVersion: "whatsapp-v1",
       }),
       fixtureEvent({
         id: "whatsapp_group_contact_alice",
@@ -157,7 +145,6 @@ export const whatsappReplayFixtures: ProjectionReplayFixture[] = [
             { type: "phone", value: "+15551234567", deterministic: true },
           ],
         },
-        sourceVersion: "whatsapp-v1",
       }),
       fixtureEvent({
         id: "whatsapp_group_contact_bob",
@@ -177,7 +164,6 @@ export const whatsappReplayFixtures: ProjectionReplayFixture[] = [
             { type: "phone", value: "+15557654321", deterministic: true },
           ],
         },
-        sourceVersion: "whatsapp-v1",
       }),
       fixtureEvent({
         id: "whatsapp_group_message_attachment",
@@ -193,7 +179,6 @@ export const whatsappReplayFixtures: ProjectionReplayFixture[] = [
           senderSourceKey: whatsappSourceEntityKey(studyGroupAlice),
           sentAt: 1_713_010_000_250,
           content: "agenda attached",
-          service: "whatsapp",
           status: "delivered",
           isFromMe: false,
           attachments: [
@@ -204,16 +189,11 @@ export const whatsappReplayFixtures: ProjectionReplayFixture[] = [
               filename: "agenda.pdf",
               title: "Agenda",
               remote_url: "https://example.com/agenda.pdf",
-              availability_status: "available",
               mime_type: "application/pdf",
               size_bytes: 0,
-              provider_metadata: {
-                note: "meeting agenda",
-              },
             },
           ],
         },
-        sourceVersion: "whatsapp-v1",
       }),
       fixtureEvent({
         id: "whatsapp_group_message_fromme",
@@ -229,11 +209,9 @@ export const whatsappReplayFixtures: ProjectionReplayFixture[] = [
           senderSourceKey: null,
           sentAt: 1_713_010_000_350,
           content: "thanks, got it",
-          service: "whatsapp",
           status: "sent",
           isFromMe: true,
         },
-        sourceVersion: "whatsapp-v1",
       }),
     ],
   },
@@ -244,7 +222,6 @@ export const whatsappReplayFixtures: ProjectionReplayFixture[] = [
       expect(snapshot.contacts[0]?.name).toBe("Irene");
       expect(snapshot.conversations[0]).toMatchObject({
         name: "Irene",
-        unreadCount: 2,
       });
       expect(snapshot.messages).toHaveLength(3);
       const reply = snapshot.messages.find((message) => message.content === "on my way");
@@ -253,7 +230,6 @@ export const whatsappReplayFixtures: ProjectionReplayFixture[] = [
         conversationName: "Irene",
         isFromMe: 1,
       });
-      expect(reply?.replyToMessageId).toBeTruthy();
     },
     events: [
       fixtureEvent({
@@ -268,11 +244,8 @@ export const whatsappReplayFixtures: ProjectionReplayFixture[] = [
           sourceConversationKey: whatsappSourceConversationKey(irene),
           conversationType: "dm",
           displayName: null,
-          nativeConversationKey: irene,
-          service: "whatsapp",
           participants: [{ sourceEntityKey: whatsappSourceEntityKey(irene) }],
         },
-        sourceVersion: "whatsapp-v1",
       }),
       fixtureEvent({
         id: "whatsapp_dm_fromme_parent_message",
@@ -288,11 +261,9 @@ export const whatsappReplayFixtures: ProjectionReplayFixture[] = [
           senderSourceKey: whatsappSourceEntityKey(irene),
           sentAt: 1_713_020_000_025,
           content: "where are you?",
-          service: "whatsapp",
           status: "delivered",
           isFromMe: false,
         },
-        sourceVersion: "whatsapp-v1",
       }),
       fixtureEvent({
         id: "whatsapp_dm_fromme_reply_message",
@@ -308,12 +279,9 @@ export const whatsappReplayFixtures: ProjectionReplayFixture[] = [
           senderSourceKey: null,
           sentAt: 1_713_020_000_050,
           content: "on my way",
-          service: "whatsapp",
           status: "sent",
           isFromMe: true,
-          replyToSourceMessageKey: `${irene}:wamid-dm-parent`,
         },
-        sourceVersion: "whatsapp-v1",
       }),
       fixtureEvent({
         id: "whatsapp_dm_fromme_contact",
@@ -333,7 +301,6 @@ export const whatsappReplayFixtures: ProjectionReplayFixture[] = [
             { type: "phone", value: "+14155550123", deterministic: true },
           ],
         },
-        sourceVersion: "whatsapp-v1",
       }),
       fixtureEvent({
         id: "whatsapp_dm_followup_message",
@@ -349,11 +316,9 @@ export const whatsappReplayFixtures: ProjectionReplayFixture[] = [
           senderSourceKey: whatsappSourceEntityKey(irene),
           sentAt: 1_713_020_000_250,
           content: "see you soon",
-          service: "whatsapp",
           status: "delivered",
           isFromMe: false,
         },
-        sourceVersion: "whatsapp-v1",
       }),
     ],
   },
@@ -365,10 +330,6 @@ export const whatsappReplayFixtures: ProjectionReplayFixture[] = [
         sourceEventKey: `${irene}:call-1`,
         subjectSourceKey: whatsappSourceEntityKey(irene),
         text: "WhatsApp call • 1m 1s",
-      });
-      expect(snapshot.conversations[0]).toMatchObject({
-        lastMessagePreview: "WhatsApp call • 1m 1s",
-        lastMessageAt: 1_713_030_000_000,
       });
     },
     events: [
@@ -390,7 +351,6 @@ export const whatsappReplayFixtures: ProjectionReplayFixture[] = [
             { type: "phone", value: "+14155550123", deterministic: true },
           ],
         },
-        sourceVersion: "whatsapp-v1",
       }),
       fixtureEvent({
         id: "whatsapp_call_chat",
@@ -404,11 +364,8 @@ export const whatsappReplayFixtures: ProjectionReplayFixture[] = [
           sourceConversationKey: whatsappSourceConversationKey(irene),
           conversationType: "dm",
           displayName: "Irene",
-          nativeConversationKey: irene,
-          service: "whatsapp",
           participants: [{ sourceEntityKey: whatsappSourceEntityKey(irene) }],
         },
-        sourceVersion: "whatsapp-v1",
       }),
       fixtureEvent({
         id: "whatsapp_call",
@@ -422,17 +379,14 @@ export const whatsappReplayFixtures: ProjectionReplayFixture[] = [
           sourceCallKey: `${irene}:call-1`,
           sourceConversationKey: whatsappSourceConversationKey(irene),
           provider: "whatsapp",
-          providerCallType: "regular",
           direction: "outgoing",
           medium: "audio",
           status: "completed",
           startedAt: 1_713_030_000_000,
-          endedAt: 1_713_030_061_000,
           durationSeconds: 61,
           initiatorSourceKey: null,
           primaryRemoteSourceKey: whatsappSourceEntityKey(irene),
         },
-        sourceVersion: "whatsapp-v1",
       }),
     ],
   },

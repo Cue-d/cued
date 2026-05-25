@@ -47,14 +47,6 @@ function toAttachmentMetadata(message: SlackMessage): Array<Record<string, unkno
         file.url_private_download || file.url_private
           ? { url: file.url_private_download ?? file.url_private }
           : null,
-      preview_ref:
-        file.thumb_480 || file.thumb_360 ? { url: file.thumb_480 ?? file.thumb_360 } : null,
-      availability_status:
-        file.url_private_download || file.url_private ? "available" : "metadata_only",
-      provider_metadata: {
-        id: file.id,
-        prettyType: file.pretty_type ?? null,
-      },
     });
   }
   for (const attachment of message.attachments ?? []) {
@@ -71,18 +63,6 @@ function toAttachmentMetadata(message: SlackMessage): Array<Record<string, unkno
         attachment.title_link || attachment.image_url || attachment.thumb_url
           ? { url: attachment.title_link ?? attachment.image_url ?? attachment.thumb_url }
           : null,
-      preview_ref:
-        attachment.image_url || attachment.thumb_url
-          ? { url: attachment.image_url ?? attachment.thumb_url }
-          : null,
-      availability_status:
-        attachment.title_link || attachment.image_url || attachment.thumb_url
-          ? "available"
-          : "metadata_only",
-      provider_metadata: {
-        footer: attachment.footer ?? null,
-        ts: attachment.ts ?? null,
-      },
     });
   }
   return attachments;
@@ -151,7 +131,6 @@ export function buildSlackContactEvents(
             : []),
         ],
       } satisfies ContactObservationPayload,
-      sourceVersion: "slack-v1",
     };
   });
 }
@@ -190,14 +169,11 @@ export function buildSlackConversationEvent(input: {
         usersById,
         input.displayName ?? null,
       ),
-      nativeConversationKey: input.conversation.id,
-      service: "slack",
       participants: input.memberIds.map((memberId) => ({
         sourceEntityKey: slackSourceKey(input.teamId, memberId),
         isSelf: memberId === input.selfUserId,
       })),
     } satisfies ConversationObservationPayload,
-    sourceVersion: "slack-v1",
   };
 }
 
@@ -246,19 +222,11 @@ export function buildSlackMessageEvents(input: {
             )
             .filter(Boolean)
             .join("\n"),
-        service: "slack",
         status: null,
         isFromMe: senderUserId === input.selfUserId,
-        editedAt: slackTimestampMs(message.edited?.ts),
-        isEdited: Boolean(message.edited?.ts),
         isDeleted: false,
-        replyToSourceMessageKey:
-          message.thread_ts && message.thread_ts !== message.ts
-            ? slackMessageKey(input.teamId, input.conversationId, message.thread_ts)
-            : null,
         attachments,
       } satisfies MessagePayload,
-      sourceVersion: "slack-v1",
     });
 
     for (const reaction of message.reactions ?? []) {
@@ -288,7 +256,6 @@ export function buildSlackMessageEvents(input: {
             timestamp: messageTsMs,
             isActive: true,
           } satisfies ReactionPayload,
-          sourceVersion: "slack-v1",
         });
       }
     }

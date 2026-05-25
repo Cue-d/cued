@@ -37,7 +37,6 @@ describe("buildLinkedInSyncBundle", () => {
                 groupChat: false,
                 read: true,
                 categories: ["PRIMARY_INBOX"],
-                unreadCount: 0,
                 conversationParticipants: [
                   {
                     entityURN: "urn:li:fsd_profile:SELF123",
@@ -139,7 +138,6 @@ describe("buildLinkedInSyncBundle", () => {
         sourceMessageKey: "linkedin:urn:li:fsd_message:MSG123",
         senderSourceKey: "linkedin:urn:li:member:ACoAAA1",
         content: "Let’s catch up next week.",
-        service: "linkedin",
         isFromMe: false,
       }),
     );
@@ -156,7 +154,6 @@ describe("buildLinkedInSyncBundle", () => {
           groupChat: false,
           read: true,
           categories: ["PRIMARY_INBOX"],
-          unreadCount: 0,
           conversationParticipants: [
             {
               entityURN: "urn:li:fsd_profile:SELF123",
@@ -201,7 +198,6 @@ describe("buildLinkedInSyncBundle", () => {
                 groupChat: false,
                 read: true,
                 categories: ["PRIMARY_INBOX"],
-                unreadCount: 0,
                 conversationParticipants: [
                   {
                     entityURN: "urn:li:fsd_profile:SELF123",
@@ -272,7 +268,6 @@ describe("buildLinkedInSyncBundle", () => {
             groupChat: false,
             read: true,
             categories: ["PRIMARY_INBOX"],
-            unreadCount: 0,
             conversationParticipants: [
               {
                 entityURN: "urn:li:fsd_profile:SELF123",
@@ -321,7 +316,6 @@ describe("buildLinkedInSyncBundle", () => {
                 groupChat: false,
                 read: true,
                 categories: ["PRIMARY_INBOX"],
-                unreadCount: 0,
                 conversationParticipants: [
                   {
                     entityURN: "urn:li:fsd_profile:SELF123",
@@ -356,7 +350,6 @@ describe("buildLinkedInSyncBundle", () => {
                 groupChat: false,
                 read: true,
                 categories: ["PRIMARY_INBOX"],
-                unreadCount: 0,
                 conversationParticipants: [
                   {
                     entityURN: "urn:li:fsd_profile:SELF123",
@@ -429,7 +422,6 @@ describe("buildLinkedInSyncBundle", () => {
                 groupChat: false,
                 read: true,
                 categories: ["PRIMARY_INBOX"],
-                unreadCount: 0,
                 conversationParticipants: [
                   {
                     entityURN: "urn:li:fsd_profile:SELF123",
@@ -457,7 +449,6 @@ describe("buildLinkedInSyncBundle", () => {
                 groupChat: false,
                 read: true,
                 categories: ["SPAM"],
-                unreadCount: 0,
                 conversationParticipants: [],
               },
             ],
@@ -569,15 +560,6 @@ describe("buildLinkedInSyncBundle", () => {
       ),
     ).toBe(true);
     expect(
-      bundle.rawEvents.find(
-        (event) => event.entityKind === "conversation" && event.eventKind === "removed",
-      )?.payload,
-    ).toEqual(
-      expect.objectContaining({
-        removalReason: "deleted",
-      }),
-    );
-    expect(
       bundle.rawEvents.some(
         (event) => event.entityKind === "timeline_event" && event.eventKind === "system_message",
       ),
@@ -589,8 +571,6 @@ describe("buildLinkedInSyncBundle", () => {
     );
     expect(messageEvent?.payload).toEqual(
       expect.objectContaining({
-        replyToSourceMessageKey: "linkedin:urn:li:fsd_message:MSG_PARENT",
-        isEdited: true,
         attachments: [
           expect.objectContaining({
             kind: "file",
@@ -651,7 +631,6 @@ describe("buildLinkedInSyncBundle", () => {
                 groupChat: false,
                 read: true,
                 categories: ["PRIMARY_INBOX"],
-                unreadCount: 0,
                 conversationParticipants: [
                   {
                     entityURN: "urn:li:fsd_profile:SELF123",
@@ -723,7 +702,6 @@ describe("buildLinkedInSyncBundle", () => {
                 groupChat: false,
                 read: true,
                 categories: ["INBOX", "PRIMARY_INBOX"],
-                unreadCount: 0,
                 conversationParticipants: [
                   {
                     entityURN: "urn:li:msg_messagingParticipant:urn:li:fsd_profile:SELF123",
@@ -835,7 +813,6 @@ describe("buildLinkedInSyncBundle", () => {
                 groupChat: false,
                 read: true,
                 categories: ["INBOX", "PRIMARY_INBOX"],
-                unreadCount: 0,
                 conversationParticipants: [
                   {
                     entityURN: "urn:li:msg_messagingParticipant:urn:li:fsd_profile:SELF123",
@@ -916,7 +893,6 @@ describe("buildLinkedInSyncBundle", () => {
       groupChat: false,
       read: true,
       categories: ["PRIMARY_INBOX"],
-      unreadCount: 0,
       conversationParticipants: [
         {
           entityURN: "urn:li:fsd_profile:SELF123",

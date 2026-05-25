@@ -236,19 +236,15 @@ describe("whatsapp desktop import", () => {
     ]);
     expect(bundle.rawEvents.find((event) => event.entityKind === "message")).toMatchObject({
       platform: "whatsapp",
-      sourceVersion: "whatsapp-v1",
       provenance: {
         acquisitionMode: "sync",
-        adapterVersion: "whatsapp-desktop-db",
       },
     });
     expect(bundle.proofs?.[0]).toEqual(
       expect.objectContaining({
         proofKind: "messages",
         status: "complete",
-        scope: expect.objectContaining({
-          metadata: { source: "desktop_db" },
-        }),
+        scope: { kind: "account", key: "default" },
         coverage: expect.objectContaining({
           source: "desktop_db",
           newestMessageAt: 1_700_000_040_000,

@@ -19,8 +19,6 @@ const APPLE_EPOCH_SECONDS = 978_307_200;
 type DesktopChatRow = {
   jid: string;
   name: string;
-  last_message_date: number | null;
-  unread_count: number;
   raw_session_type: number;
 };
 
@@ -154,7 +152,6 @@ export function buildWhatsAppDesktopSyncBundle(
       provenance: {
         ...event.provenance,
         acquisitionMode: "sync" as const,
-        adapterVersion: "whatsapp-desktop-db",
       },
     }));
 
@@ -172,17 +169,10 @@ export function buildWhatsAppDesktopSyncBundle(
       scope: {
         kind: "account",
         key: accountKey,
-        displayName: "WhatsApp Desktop",
-        metadata: {
-          source: "desktop_db",
-        },
       },
       proofKind: "messages",
       status: "complete",
-      syncMode: "full",
       observedAt: observedBase,
-      runStartedAt: observedBase,
-      completedAt,
       coverage: {
         source: "desktop_db",
         oldestMessageAt: inspected.oldestMessageAt,
@@ -304,8 +294,6 @@ function readChats(
       SELECT
         COALESCE(ZCONTACTJID, '') AS jid,
         COALESCE(ZPARTNERNAME, '') AS name,
-        ZLASTMESSAGEDATE AS last_message_date,
-        COALESCE(ZUNREADCOUNT, 0) AS unread_count,
         COALESCE(ZSESSIONTYPE, 0) AS raw_session_type
       FROM ZWACHATSESSION
     `)
@@ -417,11 +405,6 @@ function readMessages(
                   local_path: mediaPath,
                   remote_url: row.media_url || null,
                   size_bytes: row.media_size || null,
-                  availability_status: mediaPath ? "available" : "metadata_only",
-                  provider_metadata: {
-                    source: "desktop_db",
-                    rawType: row.raw_type,
-                  },
                 },
               ]
             : [],

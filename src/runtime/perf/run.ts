@@ -42,9 +42,6 @@ function perfRawEvent(input: ProviderRawEventInput): ProviderRawEventInput {
   return {
     ...input,
     normalizedSchema: buildNormalizedRawEventSchema(input.entityKind, input.eventKind),
-    provenance: {
-      adapterVersion: "perf-harness@1",
-    },
   };
 }
 
@@ -389,7 +386,6 @@ function createLinkedInClientFixture(conversationCount: number, messagesPerConve
     groupChat: false,
     read: true,
     categories: ["PRIMARY_INBOX"],
-    unreadCount: 0,
     conversationParticipants: [
       {
         entityURN: "urn:li:fsd_profile:SELF",
@@ -502,7 +498,6 @@ function buildProjectionReplayEvents(): ProviderRawEventInput[] {
             { type: "email", value: `perf-${conversationIndex}@example.com`, deterministic: true },
           ],
         },
-        sourceVersion: "perf-v1",
       }),
     );
     rawEvents.push(
@@ -517,10 +512,8 @@ function buildProjectionReplayEvents(): ProviderRawEventInput[] {
         payload: {
           sourceConversationKey: `perf-conversation-${conversationIndex}`,
           conversationType: "dm",
-          service: "linkedin",
           participants: [{ sourceEntityKey: `contacts:${conversationIndex}` }],
         },
-        sourceVersion: "perf-v1",
       }),
     );
 
@@ -540,10 +533,8 @@ function buildProjectionReplayEvents(): ProviderRawEventInput[] {
             senderSourceKey: `contacts:${conversationIndex}`,
             sentAt: baseObservedAt + conversationIndex * 100 + messageIndex,
             content: `Projection perf message ${conversationIndex}-${messageIndex}`,
-            service: "linkedin",
             isFromMe: false,
           },
-          sourceVersion: "perf-v1",
         }),
       );
     }
@@ -581,7 +572,6 @@ function buildIncrementalProjectionEvents(
             },
           ],
         },
-        sourceVersion: "perf-v1",
       }),
     );
     rawEvents.push(
@@ -598,7 +588,6 @@ function buildIncrementalProjectionEvents(
           conversationType: "dm",
           participants: [{ sourceEntityKey: `contacts:${conversationIndex}` }],
         },
-        sourceVersion: "perf-v1",
       }),
     );
 
@@ -618,10 +607,8 @@ function buildIncrementalProjectionEvents(
             senderSourceKey: `contacts:${conversationIndex}`,
             sentAt: baseObservedAt + conversationIndex * 100 + messageIndex,
             content: `Incremental message ${conversationIndex}-${messageIndex}`,
-            service: "linkedin",
             isFromMe: false,
           },
-          sourceVersion: "perf-v1",
         }),
       );
     }

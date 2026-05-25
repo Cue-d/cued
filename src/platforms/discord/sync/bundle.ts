@@ -11,7 +11,6 @@ import type { DiscordMessage, DiscordStoredCredentials, DiscordUser } from "../t
 import { discordDisplayName, isDiscordDmChannel } from "../types.js";
 import {
   buildDiscordContactEvent,
-  buildDiscordConversationDisplayName,
   buildDiscordConversationEvent,
   buildDiscordMessageEvent,
 } from "./events.js";
@@ -416,13 +415,10 @@ function buildDiscordSyncProofs(input: {
       scope: {
         kind: "account",
         key: input.currentUser.id,
-        displayName: discordDisplayName(input.currentUser),
       },
       proofKind: "discovery",
       status: "complete",
-      syncMode: "incremental",
       observedAt: input.observedAt,
-      completedAt: input.observedAt,
       stats: {
         discoveredDmCount: input.channels.length,
       },
@@ -438,28 +434,16 @@ function buildDiscordSyncProofs(input: {
 
   for (const channel of input.channels) {
     const latestMessageId = input.nextChannelCursor[channel.id]?.latestMessageId ?? null;
-    const displayName = buildDiscordConversationDisplayName(channel, input.currentUser);
     const scope = {
       kind: "conversation" as const,
       key: channel.id,
-      parent: {
-        kind: "account" as const,
-        key: input.currentUser.id,
-      },
-      displayName,
-      metadata: {
-        type: channel.type,
-        dmOnly: true,
-      },
     };
 
     proofs.push({
       scope,
       proofKind: "discovery",
       status: "complete",
-      syncMode: "incremental",
       observedAt: input.observedAt,
-      completedAt: input.observedAt,
       coverage: {
         latestMessageId,
       },
@@ -473,9 +457,7 @@ function buildDiscordSyncProofs(input: {
         scope,
         proofKind: "latest_messages",
         status: "failed",
-        syncMode: "incremental",
         observedAt: input.observedAt,
-        completedAt: null,
         resumeCursor: latestMessageId
           ? {
               latestMessageId,
@@ -487,10 +469,6 @@ function buildDiscordSyncProofs(input: {
         },
         stats: {
           hydratedThisRun: false,
-        },
-        error: {
-          message: input.hydrationError,
-          retryAfterMs: input.hydrationRetryAfterMs,
         },
       });
       continue;
@@ -504,9 +482,7 @@ function buildDiscordSyncProofs(input: {
         scope,
         proofKind: "latest_messages",
         status: "complete",
-        syncMode: "incremental",
         observedAt: input.observedAt,
-        completedAt: input.observedAt,
         coverage: {
           latestMessageId,
           previousLatestMessageId: proofPreviousLatestMessageId,
@@ -541,9 +517,7 @@ function buildDiscordSyncProofs(input: {
       scope,
       proofKind: "messages",
       status: historyComplete ? "complete" : "running",
-      syncMode: "incremental",
       observedAt: input.observedAt,
-      completedAt: historyComplete ? input.observedAt : null,
       resumeCursor: historyComplete
         ? null
         : {
@@ -590,9 +564,7 @@ function buildDiscordBackfillProof(input: {
     scope: input.scope,
     proofKind: "messages",
     status,
-    syncMode: "incremental",
     observedAt: input.observedAt,
-    completedAt: status === "complete" ? input.observedAt : null,
     resumeCursor:
       status === "complete"
         ? null
@@ -608,13 +580,6 @@ function buildDiscordBackfillProof(input: {
       messageLimit: DISCORD_INCREMENTAL_PAGE_LIMIT,
       backfill: true,
     },
-    error: input.backfilled.error
-      ? {
-          message: input.backfilled.error,
-          retryAfterMs: input.backfilled.retryAfterMs,
-          rateLimited: input.backfilled.rateLimited,
-        }
-      : null,
   };
 }
 

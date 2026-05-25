@@ -41,8 +41,6 @@ type RawEventRow = {
   entity_kind: string;
   event_kind: string;
   normalized_schema: string | null;
-  provenance_json: string | null;
-  source_version: string | null;
   observed_at: number;
   payload_json: string;
 };
@@ -62,10 +60,7 @@ type ProjectionCache = {
 type ProjectionChangeSet = {
   dirtyContactIds: Set<string>;
   dirtyConversationIds: Set<string>;
-  dirtyConversationSummaryIds: Set<string>;
   dirtyMessageIds: Set<string>;
-  touchedAttachments: boolean;
-  touchedReactions: boolean;
 };
 
 type ProjectableRawEvent = Pick<
@@ -81,15 +76,7 @@ type ProjectableRawEvent = Pick<
 
 type RawEventNormalizationContext = Pick<
   RawEventRow,
-  | "rowid"
-  | "id"
-  | "platform"
-  | "account_key"
-  | "entity_kind"
-  | "event_kind"
-  | "normalized_schema"
-  | "provenance_json"
-  | "source_version"
+  "rowid" | "id" | "platform" | "account_key" | "entity_kind" | "event_kind" | "normalized_schema"
 >;
 
 type ProjectionOverview = {
@@ -150,7 +137,7 @@ function inferHandleFromSourceEntityKey(
 }
 
 function inferTimelineSystemKind(payload: TimelineEventPayload): string {
-  const systemKind = payload.metadata?.systemKind;
+  const systemKind = payload.systemKind;
   return typeof systemKind === "string" && systemKind.trim().length > 0
     ? systemKind.trim()
     : "provider_notice";
@@ -414,10 +401,6 @@ function boolToInt(value: boolean | undefined | null): number {
   return value ? 1 : 0;
 }
 
-function hasStringValue(value: string | null | undefined): value is string {
-  return typeof value === "string" && value.length > 0;
-}
-
 function normalizeAttachmentObject(value: unknown): Record<string, unknown> | null {
   return typeof value === "object" && value !== null ? (value as Record<string, unknown>) : null;
 }
@@ -510,9 +493,6 @@ function inferAttachmentProjection(attachment: Record<string, unknown>): {
   remoteUrl: string | null;
   accessKind: string | null;
   accessRefJson: string | null;
-  previewRefJson: string | null;
-  availabilityStatus: string | null;
-  providerMetadataJson: string | null;
 } {
   const localPath =
     normalizeText(attachment.local_path) ??
@@ -524,7 +504,6 @@ function inferAttachmentProjection(attachment: Record<string, unknown>): {
     normalizeText(attachment.download_url);
   const explicitAccessKind = normalizeText(attachment.access_kind);
   const explicitAccessRef = normalizeAttachmentObject(attachment.access_ref);
-  const explicitPreviewRef = normalizeAttachmentObject(attachment.preview_ref);
   const providerFetchRef =
     normalizeAttachmentObject(attachment.provider_fetch) ??
     normalizeAttachmentObject(attachment.download_ref);
@@ -548,33 +527,12 @@ function inferAttachmentProjection(attachment: Record<string, unknown>): {
           : accessKind === "remote_url" && remoteUrl
             ? JSON.stringify({ url: remoteUrl })
             : null;
-  const previewRefJson =
-    explicitPreviewRef != null
-      ? JSON.stringify(explicitPreviewRef)
-      : (normalizeText(attachment.previewUrl) ??
-          normalizeText(attachment.preview_url) ??
-          normalizeText(attachment.thumb_url) ??
-          normalizeText(attachment.image_url))
-        ? JSON.stringify({
-            url:
-              normalizeText(attachment.previewUrl) ??
-              normalizeText(attachment.preview_url) ??
-              normalizeText(attachment.thumb_url) ??
-              normalizeText(attachment.image_url),
-          })
-        : null;
-  const availabilityStatus =
-    normalizeText(attachment.availability_status) ?? (accessKind ? "available" : "metadata_only");
-  const providerMetadata = normalizeAttachmentObject(attachment.provider_metadata);
 
   return {
     localPath,
     remoteUrl,
     accessKind,
     accessRefJson,
-    previewRefJson,
-    availabilityStatus,
-    providerMetadataJson: JSON.stringify(providerMetadata ?? attachment),
   };
 }
 
@@ -686,26 +644,6 @@ function describeRawEventContext(event: RawEventNormalizationContext): string {
   if (event.normalized_schema) {
     parts.push(`schema ${event.normalized_schema}`);
   }
-  if (event.source_version) {
-    parts.push(`sourceVersion ${event.source_version}`);
-  }
-
-  if (event.provenance_json) {
-    try {
-      const provenance = JSON.parse(event.provenance_json) as {
-        providerApiVersion?: string | null;
-        acquisitionMode?: string | null;
-      };
-      if (provenance.providerApiVersion) {
-        parts.push(`providerApiVersion ${provenance.providerApiVersion}`);
-      }
-      if (provenance.acquisitionMode) {
-        parts.push(`acquisitionMode ${provenance.acquisitionMode}`);
-      }
-    } catch {
-      parts.push("invalid provenance");
-    }
-  }
 
   return parts.join(", ");
 }
@@ -714,10 +652,7 @@ function createProjectionChangeSet(): ProjectionChangeSet {
   return {
     dirtyContactIds: new Set<string>(),
     dirtyConversationIds: new Set<string>(),
-    dirtyConversationSummaryIds: new Set<string>(),
     dirtyMessageIds: new Set<string>(),
-    touchedAttachments: false,
-    touchedReactions: false,
   };
 }
 
@@ -750,14 +685,9 @@ function mergeProjectionChangeSet(target: ProjectionChangeSet, source: Projectio
   for (const id of source.dirtyConversationIds) {
     target.dirtyConversationIds.add(id);
   }
-  for (const id of source.dirtyConversationSummaryIds) {
-    target.dirtyConversationSummaryIds.add(id);
-  }
   for (const id of source.dirtyMessageIds) {
     target.dirtyMessageIds.add(id);
   }
-  target.touchedAttachments ||= source.touchedAttachments;
-  target.touchedReactions ||= source.touchedReactions;
 }
 
 function buildOverview(db: CuedDatabase): {
@@ -944,18 +874,10 @@ function ensureConversationStub(
       platform,
       accountKey,
       sourceConversationKey,
-      nativeConversationKey: null,
       type: "dm",
       isActive: 1,
-      removalReason: null,
-      service: null,
       name: null,
-      topic: null,
       participantNames: null,
-      lastMessageId: null,
-      lastMessageAt: null,
-      lastMessagePreview: null,
-      unreadCount: 0,
       createdAt: observedAt,
       updatedAt: observedAt,
     })
@@ -997,19 +919,12 @@ function ensureMessageStub(
       senderName: null,
       conversationName: null,
       sentAt: observedAt,
-      service: null,
       status: null,
       isFromMe: 0,
       content: null,
       deliveredAt: null,
       readAt: null,
-      editedAt: null,
-      deletedAt: null,
-      replyToMessageId: null,
       isDeleted: 0,
-      isEdited: 0,
-      attachmentCount: 0,
-      reactionCount: 0,
       createdAt: observedAt,
       updatedAt: observedAt,
     })
@@ -1069,8 +984,6 @@ function upsertProjectionState(
   conn: LocalDbExecutor,
   input: {
     projectionWatermark: number;
-    lastProjectedAt: number | null;
-    lastRebuildAt?: number | null;
   },
 ): void {
   conn
@@ -1078,16 +991,12 @@ function upsertProjectionState(
     .values({
       singletonKey: "global",
       projectionWatermark: input.projectionWatermark,
-      lastProjectedAt: input.lastProjectedAt,
-      lastRebuildAt: input.lastRebuildAt ?? null,
       updatedAt: Date.now(),
     })
     .onConflictDoUpdate({
       target: projectionState.singletonKey,
       set: {
         projectionWatermark: sql`MAX(${projectionState.projectionWatermark}, ${input.projectionWatermark})`,
-        lastProjectedAt: input.lastProjectedAt,
-        lastRebuildAt: input.lastRebuildAt ?? sql`${projectionState.lastRebuildAt}`,
         updatedAt: Date.now(),
       },
     })
@@ -1208,18 +1117,11 @@ function projectContactObservation(
       platform: event.platform,
       accountKey: event.account_key,
       sourceEntityKey: payload.sourceEntityKey,
-      profileUrl: normalizeText(payload.sourceProfileUrl ?? null),
-      metadataJson: null,
-      firstSeenAt: event.observed_at,
-      lastSeenAt: event.observed_at,
     })
     .onConflictDoUpdate({
       target: contactSources.id,
       set: {
         contactId,
-        profileUrl: normalizeText(payload.sourceProfileUrl ?? null),
-        metadataJson: null,
-        lastSeenAt: event.observed_at,
       },
     })
     .run();
@@ -1234,8 +1136,6 @@ function projectContactObservation(
         type: handle.type,
         value: handle.value,
         normalizedValue,
-        platform: event.platform,
-        accountKey: event.account_key,
         isDeterministic: handle.deterministic ? 1 : 0,
         createdAt: event.observed_at,
         updatedAt: event.observed_at,
@@ -1244,8 +1144,6 @@ function projectContactObservation(
         target: contactHandles.id,
         set: {
           value: handle.value,
-          platform: event.platform,
-          accountKey: event.account_key,
           isDeterministic: handle.deterministic ? 1 : 0,
           updatedAt: event.observed_at,
         },
@@ -1274,35 +1172,16 @@ function projectConversationObservation(
 
   const conversationSet: {
     updatedAt: number;
-    nativeConversationKey?: string | null;
     type: "dm" | "group";
     isActive: number;
-    removalReason?: string | null;
-    service?: string | null;
     name?: string | null;
-    topic?: string | null;
-    unreadCount?: number;
   } = {
     updatedAt: event.observed_at,
     type: payload.conversationType,
     isActive: event.event_kind === "removed" ? 0 : 1,
-    removalReason:
-      event.event_kind === "removed" ? normalizeText(payload.removalReason ?? null) : null,
   };
-  if (payload.nativeConversationKey !== undefined) {
-    conversationSet.nativeConversationKey = normalizeText(payload.nativeConversationKey);
-  }
-  if (payload.service !== undefined) {
-    conversationSet.service = normalizeText(payload.service);
-  }
   if (payload.displayName !== undefined) {
     conversationSet.name = normalizeText(payload.displayName);
-  }
-  if (payload.topic !== undefined) {
-    conversationSet.topic = normalizeText(payload.topic);
-  }
-  if (payload.unreadCount !== undefined && payload.unreadCount !== null) {
-    conversationSet.unreadCount = payload.unreadCount;
   }
 
   conn.update(conversations).set(conversationSet).where(eq(conversations.id, conversationId)).run();
@@ -1318,7 +1197,6 @@ function projectConversationObservation(
       .update(conversationParticipants)
       .set({
         isActive: 0,
-        leftAt: event.observed_at,
         updatedAt: event.observed_at,
       })
       .where(eq(conversationParticipants.conversationId, conversationId))
@@ -1345,11 +1223,8 @@ function projectConversationObservation(
         contactId,
         sourceParticipantKey: participant.sourceEntityKey,
         participantName: cache.contactNameMap.get(contactId) ?? null,
-        role: null,
         isSelf: boolToInt(participant.isSelf),
         isActive: event.event_kind === "removed" ? 0 : 1,
-        joinedAt: event.observed_at,
-        leftAt: event.event_kind === "removed" ? event.observed_at : null,
         updatedAt: event.observed_at,
       })
       .onConflictDoUpdate({
@@ -1362,7 +1237,6 @@ function projectConversationObservation(
           participantName: cache.contactNameMap.get(contactId) ?? null,
           isSelf: boolToInt(participant.isSelf),
           isActive: event.event_kind === "removed" ? 0 : 1,
-          leftAt: event.event_kind === "removed" ? event.observed_at : null,
           updatedAt: event.observed_at,
         },
       })
@@ -1393,13 +1267,11 @@ function projectMessageEvent(
     conn
       .update(messages)
       .set({
-        deletedAt: payload.deletedAt ?? payload.sentAt ?? event.observed_at,
         isDeleted: 1,
         updatedAt: event.observed_at,
       })
       .where(eq(messages.id, messageId))
       .run();
-    changes.dirtyConversationSummaryIds.add(conversationId);
     changes.dirtyMessageIds.add(messageId);
     return;
   }
@@ -1413,17 +1285,6 @@ function projectMessageEvent(
     event.observed_at,
   );
   const senderName = resolveProjectedSenderName(conn, cache, conversationId, senderContactId);
-  const replyToMessageId = hasStringValue(payload.replyToSourceMessageKey)
-    ? ensureMessageStub(
-        conn,
-        cache,
-        event.platform,
-        event.account_key,
-        payload.sourceConversationKey,
-        payload.replyToSourceMessageKey,
-        event.observed_at,
-      ).messageId
-    : null;
 
   conn
     .update(messages)
@@ -1437,37 +1298,29 @@ function projectMessageEvent(
       senderName,
       conversationName: cache.conversationNameMap.get(conversationId) ?? null,
       sentAt: payload.sentAt,
-      service: normalizeText(payload.service ?? null),
       status: normalizeText(payload.status ?? null),
       isFromMe: boolToInt(payload.isFromMe),
       content: resolveProjectedMessageContent(payload),
       deliveredAt: payload.deliveredAt ?? null,
       readAt: payload.readAt ?? null,
-      editedAt: payload.editedAt ?? null,
-      deletedAt: payload.deletedAt ?? null,
-      replyToMessageId,
       isDeleted: boolToInt(payload.isDeleted),
-      isEdited: boolToInt(payload.isEdited),
       updatedAt: event.observed_at,
     })
     .where(eq(messages.id, messageId))
     .run();
 
-  changes.dirtyConversationSummaryIds.add(conversationId);
   changes.dirtyMessageIds.add(messageId);
 
-  projectMessageAttachments(conn, changes, event, payload, messageId);
+  projectMessageAttachments(conn, event, payload, messageId);
 }
 
 function projectMessageAttachments(
   conn: LocalDbExecutor,
-  changes: ProjectionChangeSet,
   event: ProjectableRawEvent,
   payload: MessagePayload,
   messageId: string,
 ): void {
   const desiredAttachmentIds = new Set<string>();
-  let removedAttachment = false;
   for (const [index, attachment] of (payload.attachments ?? []).entries()) {
     const normalizedAttachment = normalizeAttachmentObject(attachment) ?? {};
     const explicitSourceAttachmentKey = normalizeText(normalizedAttachment.sourceAttachmentKey);
@@ -1507,10 +1360,6 @@ function projectMessageAttachments(
           normalizeText(normalizedAttachment.text),
         accessKind: inferred.accessKind,
         accessRefJson: inferred.accessRefJson,
-        previewRefJson: inferred.previewRefJson,
-        availabilityStatus: inferred.availabilityStatus,
-        providerMetadataJson: inferred.providerMetadataJson,
-        metadataJson: JSON.stringify(normalizedAttachment),
         createdAt: event.observed_at,
         updatedAt: event.observed_at,
       })
@@ -1535,10 +1384,6 @@ function projectMessageAttachments(
             normalizeText(normalizedAttachment.text),
           accessKind: inferred.accessKind,
           accessRefJson: inferred.accessRefJson,
-          previewRefJson: inferred.previewRefJson,
-          availabilityStatus: inferred.availabilityStatus,
-          providerMetadataJson: inferred.providerMetadataJson,
-          metadataJson: JSON.stringify(normalizedAttachment),
           updatedAt: event.observed_at,
         },
       })
@@ -1559,10 +1404,6 @@ function projectMessageAttachments(
       WHERE attachment_id = ${existingAttachment.id}
     `);
     conn.delete(messageAttachments).where(eq(messageAttachments.id, existingAttachment.id)).run();
-    removedAttachment = true;
-  }
-  if (payload.attachments !== undefined || removedAttachment) {
-    changes.touchedAttachments = true;
   }
 }
 
@@ -1582,15 +1423,6 @@ function projectReactionEvent(
     payload.sourceMessageKey,
     event.observed_at,
   );
-  const reactorContactId = resolveOrEnsureContact(
-    conn,
-    cache,
-    event.platform,
-    event.account_key,
-    payload.reactorSourceKey,
-    event.observed_at,
-  );
-
   conn
     .insert(messageReactions)
     .values({
@@ -1601,12 +1433,8 @@ function projectReactionEvent(
       messageId,
       platform: event.platform,
       accountKey: event.account_key,
-      sourceReactionKey: `${payload.sourceMessageKey}:${payload.reactorSourceKey ?? "__me__"}:${payload.emoji}`,
-      reactorContactId,
       reactorSourceKey: payload.reactorSourceKey,
-      reactorName: reactorContactId ? (cache.contactNameMap.get(reactorContactId) ?? null) : null,
       emoji: payload.emoji,
-      reactionType: normalizeText(payload.reactionType ?? null),
       isActive: boolToInt(payload.isActive),
       createdAt: payload.timestamp,
       updatedAt: event.observed_at,
@@ -1614,17 +1442,13 @@ function projectReactionEvent(
     .onConflictDoUpdate({
       target: messageReactions.id,
       set: {
-        reactorContactId,
         reactorSourceKey: payload.reactorSourceKey,
-        reactorName: reactorContactId ? (cache.contactNameMap.get(reactorContactId) ?? null) : null,
-        reactionType: normalizeText(payload.reactionType ?? null),
         isActive: boolToInt(payload.isActive),
         updatedAt: event.observed_at,
       },
     })
     .run();
 
-  changes.touchedReactions = true;
   changes.dirtyMessageIds.add(messageId);
 }
 
@@ -1655,9 +1479,6 @@ function projectParticipantEvent(
     return;
   }
 
-  const joinedAt = event.event_kind === "joined" ? payload.eventAt : null;
-  const leftAt = event.event_kind === "left" ? payload.eventAt : null;
-
   conn
     .insert(conversationParticipants)
     .values({
@@ -1665,11 +1486,8 @@ function projectParticipantEvent(
       contactId,
       sourceParticipantKey: payload.participantSourceKey,
       participantName: cache.contactNameMap.get(contactId) ?? null,
-      role: normalizeText(payload.role ?? null),
       isSelf: boolToInt(payload.isSelf),
       isActive: event.event_kind === "left" ? 0 : 1,
-      joinedAt,
-      leftAt,
       updatedAt: event.observed_at,
     })
     .onConflictDoUpdate({
@@ -1680,18 +1498,14 @@ function projectParticipantEvent(
       ],
       set: {
         participantName: cache.contactNameMap.get(contactId) ?? null,
-        role: normalizeText(payload.role ?? null),
         isSelf: boolToInt(payload.isSelf),
         isActive: event.event_kind === "left" ? 0 : 1,
-        joinedAt: joinedAt ?? sql`${conversationParticipants.joinedAt}`,
-        leftAt,
         updatedAt: event.observed_at,
       },
     })
     .run();
 
   changes.dirtyConversationIds.add(conversationId);
-  changes.dirtyConversationSummaryIds.add(conversationId);
 }
 
 function projectTimelineEvent(
@@ -1748,13 +1562,6 @@ function projectTimelineEvent(
       systemKind: inferTimelineSystemKind(payload),
       callProvider: null,
       callDirection: null,
-      callStatus: null,
-      callMedium: null,
-      callStartedAt: null,
-      callEndedAt: null,
-      callDurationSeconds: null,
-      callDisconnectedCause: null,
-      metadataJson: payload.metadata ? JSON.stringify(payload.metadata) : null,
       createdAt: event.observed_at,
       updatedAt: event.observed_at,
     })
@@ -1771,20 +1578,12 @@ function projectTimelineEvent(
         systemKind: inferTimelineSystemKind(payload),
         callProvider: null,
         callDirection: null,
-        callStatus: null,
-        callMedium: null,
-        callStartedAt: null,
-        callEndedAt: null,
-        callDurationSeconds: null,
-        callDisconnectedCause: null,
-        metadataJson: payload.metadata ? JSON.stringify(payload.metadata) : null,
         updatedAt: event.observed_at,
       },
     })
     .run();
 
   changes.dirtyConversationIds.add(conversationId);
-  changes.dirtyConversationSummaryIds.add(conversationId);
 }
 
 function projectCallEvent(
@@ -1819,16 +1618,6 @@ function projectCallEvent(
     event.observed_at,
   );
 
-  const metadata = {
-    ...(payload.metadata ?? {}),
-    providerCallType: payload.providerCallType ?? null,
-    answeredAt: payload.answeredAt ?? null,
-    endedAt: payload.endedAt ?? null,
-    disconnectedCause: payload.disconnectedCause ?? null,
-    remoteAddress: payload.remoteAddress ?? null,
-    remoteDisplayName: payload.remoteDisplayName ?? null,
-  };
-
   conn
     .insert(timelineEvents)
     .values({
@@ -1851,13 +1640,6 @@ function projectCallEvent(
       systemKind: "call",
       callProvider: payload.provider,
       callDirection: payload.direction,
-      callStatus: payload.status,
-      callMedium: payload.medium,
-      callStartedAt: payload.startedAt,
-      callEndedAt: payload.endedAt ?? null,
-      callDurationSeconds: payload.durationSeconds ?? null,
-      callDisconnectedCause: payload.disconnectedCause ?? null,
-      metadataJson: JSON.stringify(metadata),
       createdAt: event.observed_at,
       updatedAt: event.observed_at,
     })
@@ -1874,20 +1656,12 @@ function projectCallEvent(
         systemKind: "call",
         callProvider: payload.provider,
         callDirection: payload.direction,
-        callStatus: payload.status,
-        callMedium: payload.medium,
-        callStartedAt: payload.startedAt,
-        callEndedAt: payload.endedAt ?? null,
-        callDurationSeconds: payload.durationSeconds ?? null,
-        callDisconnectedCause: payload.disconnectedCause ?? null,
-        metadataJson: JSON.stringify(metadata),
         updatedAt: event.observed_at,
       },
     })
     .run();
 
   changes.dirtyConversationIds.add(conversationId);
-  changes.dirtyConversationSummaryIds.add(conversationId);
 }
 
 function projectCallDeleteEvent(
@@ -1920,88 +1694,6 @@ function projectCallDeleteEvent(
   `);
 
   changes.dirtyConversationIds.add(conversationId);
-  changes.dirtyConversationSummaryIds.add(conversationId);
-}
-
-function refreshConversationSummariesForIds(
-  conn: LocalDbExecutor,
-  conversationIds: Set<string>,
-): void {
-  const latestMessageId = sql`(
-    SELECT m.id
-    FROM messages m
-    WHERE m.conversation_id = conversations.id
-    ORDER BY m.sent_at DESC, m.updated_at DESC, m.id DESC
-    LIMIT 1
-  )`;
-  const latestMessageAt = sql`(
-    SELECT m.sent_at
-    FROM messages m
-    WHERE m.conversation_id = conversations.id
-    ORDER BY m.sent_at DESC, m.updated_at DESC, m.id DESC
-    LIMIT 1
-  )`;
-  const latestMessagePreview = sql`(
-    SELECT m.content
-    FROM messages m
-    WHERE m.conversation_id = conversations.id
-    ORDER BY m.sent_at DESC, m.updated_at DESC, m.id DESC
-    LIMIT 1
-  )`;
-  const latestSystemMessageAt = sql`(
-    SELECT te.event_at
-    FROM timeline_events te
-    WHERE te.conversation_id = conversations.id
-      AND te.event_kind = 'system_message'
-    ORDER BY te.event_at DESC, te.updated_at DESC, te.id DESC
-    LIMIT 1
-  )`;
-  const latestSystemMessagePreview = sql`(
-    SELECT te.text
-    FROM timeline_events te
-    WHERE te.conversation_id = conversations.id
-      AND te.event_kind = 'system_message'
-    ORDER BY te.event_at DESC, te.updated_at DESC, te.id DESC
-    LIMIT 1
-  )`;
-  for (const chunk of chunkArray([...conversationIds], SQL_CHUNK_SIZE)) {
-    conn.run(sql`
-      UPDATE conversations
-      SET
-        last_message_id = CASE
-          WHEN ${latestSystemMessageAt} IS NOT NULL
-            AND (${latestMessageAt} IS NULL OR ${latestSystemMessageAt} > ${latestMessageAt})
-          THEN NULL
-          ELSE ${latestMessageId}
-        END,
-        last_message_at = CASE
-          WHEN ${latestSystemMessageAt} IS NOT NULL
-            AND (${latestMessageAt} IS NULL OR ${latestSystemMessageAt} > ${latestMessageAt})
-          THEN ${latestSystemMessageAt}
-          ELSE ${latestMessageAt}
-        END,
-        last_message_preview = CASE
-          WHEN ${latestSystemMessageAt} IS NOT NULL
-            AND (${latestMessageAt} IS NULL OR ${latestSystemMessageAt} > ${latestMessageAt})
-          THEN ${latestSystemMessagePreview}
-          ELSE ${latestMessagePreview}
-        END,
-        unread_count = (
-          CASE
-            WHEN conversations.is_active = 0 THEN 0
-            ELSE (
-              SELECT COUNT(*)
-              FROM messages m
-              WHERE m.conversation_id = conversations.id
-                AND m.is_from_me = 0
-                AND m.is_deleted = 0
-                AND m.read_at IS NULL
-            )
-          END
-        )
-      WHERE id IN (${sqlValueList(chunk)})
-    `);
-  }
 }
 
 function refreshContactFanoutForIds(conn: LocalDbExecutor, contactIds: Set<string>): void {
@@ -2026,13 +1718,6 @@ function refreshContactFanoutForIds(conn: LocalDbExecutor, contactIds: Set<strin
         SELECT name FROM contacts WHERE id = timeline_events.actor_contact_id
       )
       WHERE actor_contact_id IN (${sqlValueList(chunk)})
-    `);
-    conn.run(sql`
-      UPDATE message_reactions
-      SET reactor_name = (
-        SELECT name FROM contacts WHERE id = message_reactions.reactor_contact_id
-      )
-      WHERE reactor_contact_id IN (${sqlValueList(chunk)})
     `);
   }
 }
@@ -2225,35 +1910,6 @@ function expandDirtyMessageIds(conn: LocalDbExecutor, changes: ProjectionChangeS
   }
 }
 
-function refreshAttachmentCountsForIds(conn: LocalDbExecutor, messageIds: Set<string>): void {
-  for (const chunk of chunkArray([...messageIds], SQL_CHUNK_SIZE)) {
-    conn.run(sql`
-      UPDATE messages
-      SET attachment_count = (
-        SELECT COUNT(*)
-        FROM message_attachments ma
-        WHERE ma.message_id = messages.id
-      )
-      WHERE id IN (${sqlValueList(chunk)})
-    `);
-  }
-}
-
-function refreshReactionCountsForIds(conn: LocalDbExecutor, messageIds: Set<string>): void {
-  for (const chunk of chunkArray([...messageIds], SQL_CHUNK_SIZE)) {
-    conn.run(sql`
-      UPDATE messages
-      SET reaction_count = (
-        SELECT COUNT(*)
-        FROM message_reactions mr
-        WHERE mr.message_id = messages.id
-          AND mr.is_active = 1
-      )
-      WHERE id IN (${sqlValueList(chunk)})
-    `);
-  }
-}
-
 function finalizeDeferredProjection(
   conn: LocalDbExecutor,
   cache: ProjectionCache,
@@ -2274,25 +1930,10 @@ function finalizeDeferredProjection(
     syncConversationNameCache(conn, cache, changes.dirtyConversationIds);
     refreshMessageSenderNamesForIds(conn, changes.dirtyConversationIds);
     refreshMessageConversationNamesForIds(conn, changes.dirtyConversationIds);
-    for (const conversationId of changes.dirtyConversationIds) {
-      changes.dirtyConversationSummaryIds.add(conversationId);
-    }
-  }
-
-  if (changes.dirtyConversationSummaryIds.size > 0) {
-    refreshConversationSummariesForIds(conn, changes.dirtyConversationSummaryIds);
   }
 
   if (!options?.initialProjection) {
     expandDirtyMessageIds(conn, changes);
-  }
-  if (changes.dirtyMessageIds.size > 0) {
-    if (changes.touchedAttachments) {
-      refreshAttachmentCountsForIds(conn, changes.dirtyMessageIds);
-    }
-    if (changes.touchedReactions) {
-      refreshReactionCountsForIds(conn, changes.dirtyMessageIds);
-    }
   }
 }
 
@@ -2325,7 +1966,6 @@ function projectEventBatch(
     mode: ProjectionMode;
     rawEvents: RawEventRow[];
     projectionWatermark: number | null;
-    lastRebuildAt?: number | null;
     initialProjection?: boolean;
     resetCache?: boolean;
     clearState?: boolean;
@@ -2358,10 +1998,7 @@ function projectEventBatch(
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       db.quarantineRawEventProjectionFailure(
-        {
-          ...event,
-          entity_kind: event.entity_kind as RawEventEntityKind,
-        },
+        event,
         new Error(`Failed to normalize raw event (${describeRawEventContext(event)}): ${message}`),
       );
       continue;
@@ -2380,7 +2017,6 @@ function projectEventBatch(
   const projectionFailures: Array<{ event: RawEventRow; error: unknown }> = [];
 
   db.orm().transaction((tx) => {
-    const projectedAt = Date.now();
     if (input.clearState) {
       clearProjectedState(tx);
     }
@@ -2425,21 +2061,13 @@ function projectEventBatch(
     if (input.projectionWatermark != null) {
       upsertProjectionState(tx, {
         projectionWatermark: input.projectionWatermark,
-        lastProjectedAt: projectedAt,
-        lastRebuildAt: input.lastRebuildAt,
       });
     }
   });
   for (const failure of projectionFailures) {
-    db.quarantineRawEventProjectionFailure(
-      {
-        ...failure.event,
-        entity_kind: failure.event.entity_kind as RawEventEntityKind,
-      },
-      failure.error,
-    );
+    db.quarantineRawEventProjectionFailure(failure.event, failure.error);
   }
-  db.enqueueMessageFtsIndex(changes.dirtyMessageIds, `projection:${input.mode}`);
+  db.enqueueMessageFtsIndex(changes.dirtyMessageIds);
   return shapedEvents.length - projectionFailures.length;
 }
 
@@ -2492,7 +2120,6 @@ function projectRangeInternal(
     mode: input.mode,
     rawEvents,
     projectionWatermark: committedProjectionWatermark,
-    lastRebuildAt: input.mode === "rebuild" ? Date.now() : undefined,
     initialProjection:
       input.mode !== "realtime" && currentProjectionState.projection_watermark === 0,
   });
@@ -2628,7 +2255,6 @@ export function rebuildProjectedState(
       mode: "rebuild",
       rawEvents: [],
       projectionWatermark: 0,
-      lastRebuildAt: Date.now(),
       resetCache: true,
       clearState: true,
     });
@@ -2643,7 +2269,6 @@ export function rebuildProjectedState(
     };
   }
 
-  const lastRebuildAt = Date.now();
   let rawEvents = firstRawEvents;
   let appliedRawEvents = 0;
   let projectionWatermark = 0;
@@ -2654,7 +2279,6 @@ export function rebuildProjectedState(
       mode: "rebuild",
       rawEvents,
       projectionWatermark,
-      lastRebuildAt,
       initialProjection: clearState,
       resetCache: clearState,
       clearState,

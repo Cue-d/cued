@@ -12,7 +12,6 @@ export const slackReplayFixtures: ProjectionReplayFixture[] = [
       expect(snapshot.conversations[0]).toMatchObject({
         name: "Slack User",
         participantNames: "Slack User",
-        unreadCount: 1,
       });
       expect(snapshot.messages).toHaveLength(1);
       expect(snapshot.messages[0]).toMatchObject({
@@ -32,10 +31,8 @@ export const slackReplayFixtures: ProjectionReplayFixture[] = [
         payload: {
           sourceConversationKey: "slack:T0A9C9RHZ9T:C123",
           conversationType: "dm",
-          service: "slack",
           participants: [{ sourceEntityKey: "slack:T0A9C9RHZ9T:U123" }],
         },
-        sourceVersion: "slack-v1",
       }),
       fixtureEvent({
         id: "slack_message_before_contact",
@@ -51,10 +48,8 @@ export const slackReplayFixtures: ProjectionReplayFixture[] = [
           senderSourceKey: "slack:T0A9C9RHZ9T:U123",
           sentAt: 1_710_099_999_500,
           content: "hello from slack",
-          service: "slack",
           isFromMe: false,
         },
-        sourceVersion: "slack-v1",
       }),
       fixtureEvent({
         id: "slack_contact_after",
@@ -71,7 +66,6 @@ export const slackReplayFixtures: ProjectionReplayFixture[] = [
           },
           handles: [{ type: "slack_user", value: "U123", deterministic: true }],
         },
-        sourceVersion: "slack-v1",
       }),
     ],
   },
@@ -83,7 +77,6 @@ export const slackReplayFixtures: ProjectionReplayFixture[] = [
       expect(snapshot.conversations).toHaveLength(1);
       expect(snapshot.conversations[0]).toMatchObject({
         name: "Jordan Slack",
-        unreadCount: 2,
       });
       expect(snapshot.messages).toHaveLength(2);
       const reply = snapshot.messages.find(
@@ -91,13 +84,10 @@ export const slackReplayFixtures: ProjectionReplayFixture[] = [
       );
       expect(reply).toMatchObject({
         senderName: "Jordan Slack",
-        attachmentCount: 1,
       });
-      expect(reply?.replyToMessageId).toBeTruthy();
       expect(snapshot.messageAttachments[0]).toMatchObject({
         filename: "deck.pdf",
         remoteUrl: "https://files.example.com/deck.pdf",
-        availabilityStatus: "available",
       });
     },
     events: [
@@ -112,10 +102,8 @@ export const slackReplayFixtures: ProjectionReplayFixture[] = [
         payload: {
           sourceConversationKey: "slack:T0A9C9RHZ9T:C777",
           conversationType: "dm",
-          service: "slack",
           participants: [{ sourceEntityKey: "slack:T0A9C9RHZ9T:U777" }],
         },
-        sourceVersion: "slack-v1",
       }),
       fixtureEvent({
         id: "slack_thread_parent",
@@ -131,10 +119,8 @@ export const slackReplayFixtures: ProjectionReplayFixture[] = [
           senderSourceKey: "slack:T0A9C9RHZ9T:U777",
           sentAt: 1_710_200_000_050,
           content: "Can you review the deck?",
-          service: "slack",
           isFromMe: false,
         },
-        sourceVersion: "slack-v1",
       }),
       fixtureEvent({
         id: "slack_thread_reply",
@@ -150,9 +136,7 @@ export const slackReplayFixtures: ProjectionReplayFixture[] = [
           senderSourceKey: "slack:T0A9C9RHZ9T:U777",
           sentAt: 1_710_200_000_150,
           content: "Uploaded the latest file.",
-          service: "slack",
           isFromMe: false,
-          replyToSourceMessageKey: "slack:T0A9C9RHZ9T:C777:1710200000.000100",
           attachments: [
             {
               kind: "file",
@@ -164,16 +148,9 @@ export const slackReplayFixtures: ProjectionReplayFixture[] = [
               previewUrl: "https://files.example.com/deck-thumb.png",
               access_kind: "remote_url",
               access_ref: { url: "https://files.example.com/deck.pdf" },
-              preview_ref: { url: "https://files.example.com/deck-thumb.png" },
-              availability_status: "available",
-              provider_metadata: {
-                id: "F777",
-                prettyType: "PDF",
-              },
             },
           ],
         },
-        sourceVersion: "slack-v1",
       }),
       fixtureEvent({
         id: "slack_thread_contact_after",
@@ -190,7 +167,6 @@ export const slackReplayFixtures: ProjectionReplayFixture[] = [
           },
           handles: [{ type: "slack_user", value: "U777", deterministic: true }],
         },
-        sourceVersion: "slack-v1",
       }),
     ],
   },

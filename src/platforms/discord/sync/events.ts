@@ -57,7 +57,6 @@ export function buildDiscordContactEvent(input: {
         },
       ],
     } satisfies ContactObservationPayload,
-    sourceVersion: "discord-v1",
   };
 }
 
@@ -93,12 +92,8 @@ export function buildDiscordConversationEvent(input: {
       sourceConversationKey: discordConversationSourceKey(input.channel.id),
       conversationType: input.channel.type === 3 ? "group" : "dm",
       displayName,
-      nativeConversationKey: input.channel.id,
-      service: "discord",
-      topic: input.channel.topic ?? null,
       participants,
     } satisfies ConversationObservationPayload,
-    sourceVersion: "discord-v1",
   };
 }
 
@@ -126,11 +121,6 @@ export function buildDiscordMessageEvent(input: {
       height: attachment.height ?? null,
       access_kind: attachment.url ? "remote_url" : "none",
       access_ref: attachment.url ? { url: attachment.url } : null,
-      preview_ref: attachment.proxy_url ? { url: attachment.proxy_url } : null,
-      availability_status: attachment.url ? "available" : "metadata_only",
-      provider_metadata: {
-        proxyUrl: attachment.proxy_url ?? null,
-      },
     })) ?? [];
   const fallbackContent =
     attachments
@@ -158,20 +148,10 @@ export function buildDiscordMessageEvent(input: {
           : discordSourceKey(input.message.author.id),
       sentAt,
       content: input.message.content || fallbackContent,
-      service: "discord",
       status: null,
       isFromMe: input.message.author.id === input.currentUserId,
-      editedAt: discordTimestampMs(input.message.edited_timestamp),
-      isEdited: Boolean(input.message.edited_timestamp),
-      replyToSourceMessageKey: input.message.message_reference?.message_id
-        ? discordMessageSourceKey(
-            input.message.message_reference.channel_id ?? input.message.channel_id,
-            input.message.message_reference.message_id,
-          )
-        : null,
       attachments,
     } satisfies MessagePayload,
-    sourceVersion: "discord-v1",
   };
 }
 

@@ -91,31 +91,6 @@ describe("whatsapp realtime", () => {
       }),
     );
 
-    const sendPromise = session.sendText("12016824050@s.whatsapp.net", "ping");
-    expect(JSON.parse(child.stdinWrites[0]!.trim())).toEqual({
-      id: 1,
-      command: "sendText",
-      target: "12016824050@s.whatsapp.net",
-      text: "ping",
-    });
-
-    child.stdout.write(
-      `${JSON.stringify({
-        id: 1,
-        ok: true,
-        result: {
-          messageID: "wamid-2",
-          chatJID: "12016824050@s.whatsapp.net",
-          timestamp: 123,
-        },
-      })}\n`,
-    );
-
-    await expect(sendPromise).resolves.toEqual({
-      messageID: "wamid-2",
-      chatJID: "12016824050@s.whatsapp.net",
-      timestamp: 123,
-    });
     expect(parseWhatsAppHelperLine('{"event":"connected","data":{"accountJid":"x"}}')).toEqual({
       event: "connected",
       data: {
@@ -142,10 +117,6 @@ describe("whatsapp realtime", () => {
     session.start();
     child.emit("spawn");
     expect(session.getStatus().state).toBe("connecting");
-    await expect(session.sendText("12016824050@s.whatsapp.net", "ping")).rejects.toThrowError(
-      "WhatsApp realtime session is not connected",
-    );
-
     child.stdout.write(
       `${JSON.stringify({
         event: "connected",
@@ -298,13 +269,6 @@ describe("whatsapp realtime", () => {
         },
         isConnected() {
           return true;
-        },
-        async sendText() {
-          return {
-            messageID: "wamid-1",
-            chatJID: "12016824050@s.whatsapp.net",
-            timestamp: 1,
-          };
         },
         async downloadMedia() {
           return {

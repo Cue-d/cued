@@ -8,11 +8,12 @@ export const HOOK_EVENT_NAMES = [
   "integration.authenticated",
   "sync.completed",
   "sync.failed",
-  "message.sent",
   "message.received",
 ] as const;
 
 export type HookEventName = (typeof HOOK_EVENT_NAMES)[number];
+
+const DEPRECATED_HOOK_EVENT_NAMES = ["message.sent"] as const;
 
 export interface HookDefinition {
   event: HookEventName;
@@ -57,6 +58,10 @@ function isHookEventName(value: string): value is HookEventName {
   return (HOOK_EVENT_NAMES as readonly string[]).includes(value);
 }
 
+function isDeprecatedHookEventName(value: string): boolean {
+  return (DEPRECATED_HOOK_EVENT_NAMES as readonly string[]).includes(value);
+}
+
 function resolveCommandPath(command: string): string | null {
   try {
     return execFileSync("sh", ["-lc", `command -v ${shellQuote(command)}`], {
@@ -81,7 +86,11 @@ function detectOpenClaw(): { detected: boolean; path: string | null } {
   return { detected: path !== null, path };
 }
 
-function normalizeHook(raw: Record<string, unknown>): HookDefinition {
+function normalizeHook(raw: Record<string, unknown>): HookDefinition | null {
+  if (typeof raw.event === "string" && isDeprecatedHookEventName(raw.event)) {
+    return null;
+  }
+
   const event = typeof raw.event === "string" && isHookEventName(raw.event) ? raw.event : null;
   if (!event) {
     throw new Error(`Unsupported hook event: ${String(raw.event)}`);
@@ -117,7 +126,10 @@ export function loadHooksConfig(): { path: string; exists: boolean; hooks: HookD
 
   const raw = parse(readFileSync(CUED_HOOKS_PATH, "utf8")) as HookConfigFile;
   const hooks = Array.isArray(raw.hooks)
-    ? raw.hooks.map((hook) => normalizeHook(hook as unknown as Record<string, unknown>))
+    ? raw.hooks.flatMap((hook) => {
+        const normalized = normalizeHook(hook as unknown as Record<string, unknown>);
+        return normalized ? [normalized] : [];
+      })
     : [];
   return { path: CUED_HOOKS_PATH, exists: true, hooks };
 }
@@ -143,12 +155,6 @@ function buildSampleHooks(openClaw: { detected: boolean; path: string | null }):
         enabled: false,
         command: "/bin/sh",
         args: ["-lc", "cat >/tmp/cued-hook-sync-failed.json"],
-      },
-      {
-        event: "message.sent",
-        enabled: false,
-        command: "/bin/sh",
-        args: ["-lc", "cat >/tmp/cued-hook-message-sent.json"],
       },
       {
         event: "message.received",

@@ -319,10 +319,8 @@ describe("updater service", () => {
       dbBackupPath: "/tmp/local.db",
       releaseUrl: null,
     });
-    db.recordAppMetadata({
-      version: "0.1.0",
-      releaseChannel: "stable",
-    });
+    db.setAppSetting("installed_app_version", "0.1.0");
+    db.setAppSetting("release_channel", "stable");
     db.close();
 
     expect(runUpdateHelperHealthCheck(dbPath, "0.2.0")).toBe(true);
@@ -331,7 +329,7 @@ describe("updater service", () => {
 
     const reopened = new CuedDatabase(dbPath);
     expect(reopened.getPendingRollbackState()).toBeNull();
-    expect(reopened.getUpdateLastError()?.message).toBe("restored");
+    expect(reopened.getAppMetadata().updateLastError?.message).toBe("restored");
     expect(reopened.getAppMetadata().installedAppVersion).toBe("0.1.0");
     expect(reopened.getAppMetadata().releaseChannel).toBe("stable");
     reopened.close();

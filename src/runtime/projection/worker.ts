@@ -97,13 +97,7 @@ export async function runProjectionWorker(run: QueuedSyncRun): Promise<Projectio
       projectedRangeEnd,
     };
   } catch (error) {
-    db.failRun(
-      run.id,
-      error instanceof Error ? error.message : String(error),
-      undefined,
-      null,
-      runClaim,
-    );
+    db.failRun(run.id, error instanceof Error ? error.message : String(error), undefined, runClaim);
     throw error;
   } finally {
     db.close();

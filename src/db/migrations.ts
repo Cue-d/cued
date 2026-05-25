@@ -32,15 +32,57 @@ function addColumnIfMissing(db: MigrationDatabase, tableName: string, definition
   db.exec(`ALTER TABLE ${tableName} ADD COLUMN ${definition}`);
 }
 
-function buildSyncScopeId(
-  platform: string,
-  accountKey: string,
-  scopeKind: string,
-  scopeKey: string,
-): string {
-  return `scope:${Buffer.from(JSON.stringify([platform, accountKey, scopeKind, scopeKey])).toString(
-    "base64url",
-  )}`;
+function dropColumnIfExists(db: MigrationDatabase, tableName: string, columnName: string): void {
+  if (!columnExists(db, tableName, columnName)) {
+    return;
+  }
+  db.exec(`ALTER TABLE ${tableName} DROP COLUMN ${columnName}`);
+}
+
+function dropMessageReactionSourceKeyIfNeeded(db: MigrationDatabase): void {
+  if (!columnExists(db, "message_reactions", "source_reaction_key")) {
+    return;
+  }
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS message_reactions_reduced (
+      id TEXT PRIMARY KEY,
+      message_id TEXT NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+      platform TEXT NOT NULL,
+      account_key TEXT NOT NULL,
+      reactor_source_key TEXT,
+      emoji TEXT NOT NULL,
+      is_active INTEGER NOT NULL DEFAULT 1,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+
+    INSERT OR REPLACE INTO message_reactions_reduced (
+      id,
+      message_id,
+      platform,
+      account_key,
+      reactor_source_key,
+      emoji,
+      is_active,
+      created_at,
+      updated_at
+    )
+    SELECT
+      id,
+      message_id,
+      platform,
+      account_key,
+      reactor_source_key,
+      emoji,
+      is_active,
+      created_at,
+      updated_at
+    FROM message_reactions;
+
+    DROP TABLE message_reactions;
+    ALTER TABLE message_reactions_reduced RENAME TO message_reactions;
+  `);
 }
 
 function buildSyncProofId(
@@ -62,14 +104,95 @@ function stringifyJson(value: unknown): string | null {
   return JSON.stringify(value);
 }
 
-function migrateSlackBackfillProofsToGeneric(db: MigrationDatabase): void {
-  if (
-    !tableExists(db, "slack_backfill_proofs") ||
-    !tableExists(db, "sync_scopes") ||
-    !tableExists(db, "sync_proofs")
-  ) {
+function collapseSyncProofScopesIfNeeded(db: MigrationDatabase): void {
+  if (!tableExists(db, "sync_proofs")) {
     return;
   }
+  if (columnExists(db, "sync_proofs", "scope_kind")) {
+    db.exec(`
+      DROP INDEX IF EXISTS idx_sync_scopes_lookup;
+      DROP INDEX IF EXISTS idx_sync_scopes_parent;
+      DROP TABLE IF EXISTS sync_scopes;
+    `);
+    return;
+  }
+  if (!columnExists(db, "sync_proofs", "scope_id")) {
+    return;
+  }
+
+  db.exec(`
+    DROP INDEX IF EXISTS idx_sync_proofs_lookup;
+    DROP INDEX IF EXISTS idx_sync_proofs_status;
+
+    CREATE TABLE IF NOT EXISTS sync_proofs_reduced (
+      id TEXT PRIMARY KEY,
+      platform TEXT NOT NULL,
+      account_key TEXT NOT NULL,
+      scope_kind TEXT NOT NULL,
+      scope_key TEXT NOT NULL,
+      proof_kind TEXT NOT NULL,
+      status TEXT NOT NULL,
+      last_observed_at INTEGER NOT NULL,
+      resume_cursor_json TEXT,
+      coverage_json TEXT,
+      stats_json TEXT,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      UNIQUE(platform, account_key, scope_kind, scope_key, proof_kind)
+    );
+
+    INSERT OR REPLACE INTO sync_proofs_reduced (
+      id,
+      platform,
+      account_key,
+      scope_kind,
+      scope_key,
+      proof_kind,
+      status,
+      last_observed_at,
+      resume_cursor_json,
+      coverage_json,
+      stats_json,
+      created_at,
+      updated_at
+    )
+    SELECT
+      sync_proofs.id,
+      sync_proofs.platform,
+      sync_proofs.account_key,
+      COALESCE(sync_scopes.scope_kind, 'account'),
+      COALESCE(sync_scopes.scope_key, sync_proofs.account_key),
+      sync_proofs.proof_kind,
+      sync_proofs.status,
+      sync_proofs.last_observed_at,
+      sync_proofs.resume_cursor_json,
+      sync_proofs.coverage_json,
+      sync_proofs.stats_json,
+      sync_proofs.created_at,
+      sync_proofs.updated_at
+    FROM sync_proofs
+    LEFT JOIN sync_scopes ON sync_scopes.id = sync_proofs.scope_id;
+
+    DROP TABLE sync_proofs;
+    ALTER TABLE sync_proofs_reduced RENAME TO sync_proofs;
+
+    CREATE INDEX IF NOT EXISTS idx_sync_proofs_lookup
+    ON sync_proofs(platform, account_key, scope_kind, scope_key, proof_kind);
+
+    CREATE INDEX IF NOT EXISTS idx_sync_proofs_status
+    ON sync_proofs(platform, account_key, status, updated_at);
+
+    DROP INDEX IF EXISTS idx_sync_scopes_lookup;
+    DROP INDEX IF EXISTS idx_sync_scopes_parent;
+    DROP TABLE IF EXISTS sync_scopes;
+  `);
+}
+
+function migrateSlackBackfillProofsToGeneric(db: MigrationDatabase): void {
+  if (!tableExists(db, "slack_backfill_proofs") || !tableExists(db, "sync_proofs")) {
+    return;
+  }
+  collapseSyncProofScopesIfNeeded(db);
 
   const rows = db.prepare("SELECT * FROM slack_backfill_proofs").all() as Array<{
     account_key: string;
@@ -100,54 +223,25 @@ function migrateSlackBackfillProofsToGeneric(db: MigrationDatabase): void {
     return;
   }
 
-  const upsertScope = db.prepare(`
-    INSERT INTO sync_scopes (
-      id,
-      platform,
-      account_key,
-      scope_kind,
-      scope_key,
-      parent_scope_id,
-      display_name,
-      metadata_json,
-      first_discovered_at,
-      last_observed_at,
-      created_at,
-      updated_at
-    ) VALUES (?, 'slack', ?, 'conversation', ?, NULL, ?, ?, ?, ?, ?, ?)
-    ON CONFLICT(platform, account_key, scope_kind, scope_key) DO UPDATE SET
-      display_name = excluded.display_name,
-      metadata_json = excluded.metadata_json,
-      first_discovered_at = MIN(sync_scopes.first_discovered_at, excluded.first_discovered_at),
-      last_observed_at = MAX(sync_scopes.last_observed_at, excluded.last_observed_at),
-      updated_at = MAX(sync_scopes.updated_at, excluded.updated_at)
-  `);
   const upsertProof = db.prepare(`
     INSERT INTO sync_proofs (
       id,
       platform,
       account_key,
-      scope_id,
+      scope_kind,
+      scope_key,
       proof_kind,
       status,
-      sync_mode,
-      run_started_at,
       last_observed_at,
-      completed_at,
-      fresh_until,
       resume_cursor_json,
       coverage_json,
       stats_json,
-      error_json,
       created_at,
       updated_at
-    ) VALUES (?, 'slack', ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, NULL, ?, ?)
-    ON CONFLICT(platform, account_key, scope_id, proof_kind) DO UPDATE SET
+    ) VALUES (?, 'slack', ?, 'conversation', ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(platform, account_key, scope_kind, scope_key, proof_kind) DO UPDATE SET
       status = excluded.status,
-      sync_mode = excluded.sync_mode,
-      run_started_at = excluded.run_started_at,
       last_observed_at = MAX(sync_proofs.last_observed_at, excluded.last_observed_at),
-      completed_at = COALESCE(sync_proofs.completed_at, excluded.completed_at),
       resume_cursor_json = excluded.resume_cursor_json,
       coverage_json = excluded.coverage_json,
       stats_json = excluded.stats_json,
@@ -155,35 +249,17 @@ function migrateSlackBackfillProofsToGeneric(db: MigrationDatabase): void {
   `);
 
   for (const row of rows) {
-    const scopeId = buildSyncScopeId("slack", row.account_key, "conversation", row.conversation_id);
     const firstDiscoveredAt = row.first_discovered_at ?? row.last_observed_at;
     const updatedAt = row.updated_at ?? row.last_observed_at;
-    upsertScope.run(
-      scopeId,
-      row.account_key,
-      row.conversation_id,
-      row.conversation_name,
-      stringifyJson({
-        teamId: row.team_id,
-        conversationFamily: row.conversation_family,
-      }),
-      firstDiscoveredAt,
-      row.last_observed_at,
-      firstDiscoveredAt,
-      updatedAt,
-    );
 
     const messagesComplete = row.history_complete === 1 || row.conversation_phase !== "history";
     upsertProof.run(
       buildSyncProofId("slack", row.account_key, "conversation", row.conversation_id, "messages"),
       row.account_key,
-      scopeId,
+      row.conversation_id,
       "messages",
       messagesComplete ? "complete" : "running",
-      row.sync_mode,
-      row.scan_started_at,
       row.last_observed_at,
-      messagesComplete ? (row.history_complete_at ?? row.last_observed_at) : null,
       messagesComplete
         ? null
         : stringifyJson({
@@ -211,13 +287,10 @@ function migrateSlackBackfillProofsToGeneric(db: MigrationDatabase): void {
       upsertProof.run(
         buildSyncProofId("slack", row.account_key, "conversation", row.conversation_id, "replies"),
         row.account_key,
-        scopeId,
+        row.conversation_id,
         "replies",
         repliesComplete ? "complete" : "running",
-        row.sync_mode,
-        row.scan_started_at,
         row.last_observed_at,
-        repliesComplete ? (row.replies_complete_at ?? row.last_observed_at) : null,
         repliesComplete
           ? null
           : stringifyJson({
@@ -368,9 +441,6 @@ function repairLegacyMessageAttachmentsIfNeeded(db: MigrationDatabase): void {
 
   addColumnIfMissing(db, "message_attachments", "access_kind TEXT");
   addColumnIfMissing(db, "message_attachments", "access_ref_json TEXT");
-  addColumnIfMissing(db, "message_attachments", "preview_ref_json TEXT");
-  addColumnIfMissing(db, "message_attachments", "availability_status TEXT");
-  addColumnIfMissing(db, "message_attachments", "provider_metadata_json TEXT");
 
   db.exec(`
     UPDATE message_attachments
@@ -384,50 +454,13 @@ function repairLegacyMessageAttachmentsIfNeeded(db: MigrationDatabase): void {
         WHEN local_path IS NOT NULL AND trim(local_path) <> '' THEN json_object('path', local_path)
         WHEN remote_url IS NOT NULL AND trim(remote_url) <> '' THEN json_object('url', remote_url)
         ELSE NULL
-      END,
-      availability_status = CASE
-        WHEN local_path IS NOT NULL AND trim(local_path) <> '' THEN 'available'
-        WHEN remote_url IS NOT NULL AND trim(remote_url) <> '' THEN 'available'
-        ELSE 'metadata_only'
-      END,
-      provider_metadata_json = COALESCE(provider_metadata_json, metadata_json)
+      END
     WHERE access_kind IS NULL;
   `);
 }
 
 function ensureLegacySupportTables(db: MigrationDatabase): void {
   db.exec(`
-    CREATE TABLE IF NOT EXISTS slack_backfill_proofs (
-      id TEXT PRIMARY KEY,
-      account_key TEXT NOT NULL,
-      team_id TEXT NOT NULL,
-      conversation_id TEXT NOT NULL,
-      conversation_name TEXT,
-      conversation_family TEXT NOT NULL,
-      sync_mode TEXT NOT NULL,
-      scan_started_at INTEGER NOT NULL,
-      known_conversation_count INTEGER NOT NULL,
-      conversation_phase TEXT NOT NULL,
-      history_complete INTEGER NOT NULL DEFAULT 0,
-      history_cursor TEXT,
-      thread_root_count INTEGER NOT NULL DEFAULT 0,
-      completed_thread_count INTEGER NOT NULL DEFAULT 0,
-      pending_thread_count INTEGER NOT NULL DEFAULT 0,
-      active_thread_ts TEXT,
-      replies_cursor TEXT,
-      oldest_message_ts TEXT,
-      newest_message_ts TEXT,
-      first_discovered_at INTEGER NOT NULL,
-      history_complete_at INTEGER,
-      replies_complete_at INTEGER,
-      last_observed_at INTEGER NOT NULL,
-      updated_at INTEGER NOT NULL,
-      UNIQUE(account_key, conversation_id)
-    );
-
-    CREATE INDEX IF NOT EXISTS idx_slack_backfill_proofs_account_phase
-    ON slack_backfill_proofs(account_key, conversation_phase, updated_at);
-
     CREATE TABLE IF NOT EXISTS attachment_cache (
       id TEXT PRIMARY KEY,
       attachment_id TEXT NOT NULL REFERENCES message_attachments(id) ON DELETE CASCADE,
@@ -554,11 +587,7 @@ function rebuildMessagesFtsArtifacts(db: MigrationDatabase): void {
       AFTER INSERT ON message_attachments
       BEGIN
         UPDATE messages
-        SET
-          attachment_count = (
-            SELECT COUNT(*) FROM message_attachments WHERE message_id = NEW.message_id
-          ),
-          updated_at = MAX(updated_at, NEW.updated_at)
+        SET updated_at = MAX(updated_at, NEW.updated_at)
         WHERE id = NEW.message_id;
         DELETE FROM messages_fts
         WHERE rowid IN (SELECT rowid FROM messages WHERE id = NEW.message_id);
@@ -572,11 +601,7 @@ function rebuildMessagesFtsArtifacts(db: MigrationDatabase): void {
       AFTER UPDATE ON message_attachments
       BEGIN
         UPDATE messages
-        SET
-          attachment_count = (
-            SELECT COUNT(*) FROM message_attachments WHERE message_id = NEW.message_id
-          ),
-          updated_at = MAX(updated_at, NEW.updated_at)
+        SET updated_at = MAX(updated_at, NEW.updated_at)
         WHERE id = NEW.message_id;
         DELETE FROM messages_fts
         WHERE rowid IN (SELECT rowid FROM messages WHERE id = NEW.message_id);
@@ -589,51 +614,12 @@ function rebuildMessagesFtsArtifacts(db: MigrationDatabase): void {
       CREATE TRIGGER trg_message_attachments_deleted
       AFTER DELETE ON message_attachments
       BEGIN
-        UPDATE messages
-        SET attachment_count = (
-          SELECT COUNT(*) FROM message_attachments WHERE message_id = OLD.message_id
-        )
-        WHERE id = OLD.message_id;
         DELETE FROM messages_fts
         WHERE rowid IN (SELECT rowid FROM messages WHERE id = OLD.message_id);
         INSERT INTO messages_fts (rowid, message_id, sender_name, conversation_name, participant_names, attachment_text, content)
         SELECT message_rowid, message_id, sender_name, conversation_name, participant_names, attachment_text, content
         FROM message_fts_source
         WHERE message_id = OLD.message_id;
-      END;
-    `);
-  }
-
-  if (tableExists(db, "message_reactions")) {
-    db.exec(`
-      CREATE TRIGGER trg_message_reactions_inserted
-      AFTER INSERT ON message_reactions
-      BEGIN
-        UPDATE messages
-        SET reaction_count = (
-          SELECT COUNT(*) FROM message_reactions WHERE message_id = NEW.message_id AND is_active = 1
-        )
-        WHERE id = NEW.message_id;
-      END;
-
-      CREATE TRIGGER trg_message_reactions_updated
-      AFTER UPDATE ON message_reactions
-      BEGIN
-        UPDATE messages
-        SET reaction_count = (
-          SELECT COUNT(*) FROM message_reactions WHERE message_id = NEW.message_id AND is_active = 1
-        )
-        WHERE id = NEW.message_id;
-      END;
-
-      CREATE TRIGGER trg_message_reactions_deleted
-      AFTER DELETE ON message_reactions
-      BEGIN
-        UPDATE messages
-        SET reaction_count = (
-          SELECT COUNT(*) FROM message_reactions WHERE message_id = OLD.message_id AND is_active = 1
-        )
-        WHERE id = OLD.message_id;
       END;
     `);
   }
@@ -659,10 +645,6 @@ function rebuildMessagesFtsArtifacts(db: MigrationDatabase): void {
         UPDATE timeline_events
         SET actor_name = NEW.name
         WHERE actor_contact_id = NEW.id;
-
-        UPDATE message_reactions
-        SET reactor_name = NEW.name
-        WHERE reactor_contact_id = NEW.id;
 
         UPDATE conversations
         SET participant_names = (
@@ -865,8 +847,6 @@ export const MIGRATIONS: Migration[] = [
         platform TEXT NOT NULL,
         account_key TEXT NOT NULL,
         display_name TEXT,
-        status TEXT NOT NULL DEFAULT 'active',
-        metadata_json TEXT,
         created_at INTEGER NOT NULL,
         updated_at INTEGER NOT NULL,
         UNIQUE(platform, account_key)
@@ -879,50 +859,28 @@ export const MIGRATIONS: Migration[] = [
         source_cursor_json TEXT,
         raw_ingest_watermark INTEGER NOT NULL DEFAULT 0,
         sync_mode TEXT NOT NULL DEFAULT 'full',
-        last_full_sync_at INTEGER,
         last_success_at INTEGER,
-        last_error_at INTEGER,
         last_error_summary TEXT,
         created_at INTEGER NOT NULL,
         updated_at INTEGER NOT NULL,
         UNIQUE(platform, account_key)
       );
 
-      CREATE TABLE IF NOT EXISTS sync_scopes (
+      CREATE TABLE IF NOT EXISTS sync_proofs (
         id TEXT PRIMARY KEY,
         platform TEXT NOT NULL,
         account_key TEXT NOT NULL,
         scope_kind TEXT NOT NULL,
         scope_key TEXT NOT NULL,
-        parent_scope_id TEXT REFERENCES sync_scopes(id) ON DELETE CASCADE,
-        display_name TEXT,
-        metadata_json TEXT,
-        first_discovered_at INTEGER NOT NULL,
-        last_observed_at INTEGER NOT NULL,
-        created_at INTEGER NOT NULL,
-        updated_at INTEGER NOT NULL,
-        UNIQUE(platform, account_key, scope_kind, scope_key)
-      );
-
-      CREATE TABLE IF NOT EXISTS sync_proofs (
-        id TEXT PRIMARY KEY,
-        platform TEXT NOT NULL,
-        account_key TEXT NOT NULL,
-        scope_id TEXT NOT NULL REFERENCES sync_scopes(id) ON DELETE CASCADE,
         proof_kind TEXT NOT NULL,
         status TEXT NOT NULL,
-        sync_mode TEXT,
-        run_started_at INTEGER,
         last_observed_at INTEGER NOT NULL,
-        completed_at INTEGER,
-        fresh_until INTEGER,
         resume_cursor_json TEXT,
         coverage_json TEXT,
         stats_json TEXT,
-        error_json TEXT,
         created_at INTEGER NOT NULL,
         updated_at INTEGER NOT NULL,
-        UNIQUE(platform, account_key, scope_id, proof_kind)
+        UNIQUE(platform, account_key, scope_kind, scope_key, proof_kind)
       );
 
       CREATE TABLE IF NOT EXISTS sync_runs (
@@ -939,79 +897,22 @@ export const MIGRATIONS: Migration[] = [
         attempt INTEGER NOT NULL DEFAULT 0,
         owner_id TEXT,
         lease_expires_at INTEGER,
-        last_progress_at INTEGER,
-        error_code TEXT,
         details_json TEXT
-      );
-
-      CREATE TABLE IF NOT EXISTS jobs (
-        id TEXT PRIMARY KEY,
-        kind TEXT NOT NULL,
-        platform TEXT,
-        account_key TEXT,
-        priority INTEGER NOT NULL,
-        status TEXT NOT NULL,
-        trigger TEXT NOT NULL,
-        queued_at INTEGER NOT NULL,
-        scheduled_at INTEGER NOT NULL,
-        started_at INTEGER,
-        finished_at INTEGER,
-        attempt INTEGER NOT NULL DEFAULT 0,
-        owner_id TEXT,
-        lease_expires_at INTEGER,
-        last_progress_at INTEGER,
-        checkpoint_json TEXT,
-        progress_json TEXT,
-        error_json TEXT
       );
 
       CREATE TABLE IF NOT EXISTS sync_run_errors (
         id TEXT PRIMARY KEY,
-        sync_run_id TEXT NOT NULL REFERENCES sync_runs(id) ON DELETE CASCADE,
         platform TEXT,
         account_key TEXT,
-        error_code TEXT,
         error_message TEXT NOT NULL,
-        details_json TEXT,
         created_at INTEGER NOT NULL
       );
 
       CREATE TABLE IF NOT EXISTS message_fts_index_queue (
         message_id TEXT PRIMARY KEY,
-        reason TEXT NOT NULL,
         status TEXT NOT NULL,
-        attempt INTEGER NOT NULL DEFAULT 0,
         queued_at INTEGER NOT NULL,
-        updated_at INTEGER NOT NULL,
-        last_error TEXT
-      );
-
-      CREATE TABLE IF NOT EXISTS slack_backfill_proofs (
-        id TEXT PRIMARY KEY,
-        account_key TEXT NOT NULL,
-        team_id TEXT NOT NULL,
-        conversation_id TEXT NOT NULL,
-        conversation_name TEXT,
-        conversation_family TEXT NOT NULL,
-        sync_mode TEXT NOT NULL,
-        scan_started_at INTEGER NOT NULL,
-        known_conversation_count INTEGER NOT NULL,
-        conversation_phase TEXT NOT NULL,
-        history_complete INTEGER NOT NULL DEFAULT 0,
-        history_cursor TEXT,
-        thread_root_count INTEGER NOT NULL DEFAULT 0,
-        completed_thread_count INTEGER NOT NULL DEFAULT 0,
-        pending_thread_count INTEGER NOT NULL DEFAULT 0,
-        active_thread_ts TEXT,
-        replies_cursor TEXT,
-        oldest_message_ts TEXT,
-        newest_message_ts TEXT,
-        first_discovered_at INTEGER NOT NULL,
-        history_complete_at INTEGER,
-        replies_complete_at INTEGER,
-        last_observed_at INTEGER NOT NULL,
-        updated_at INTEGER NOT NULL,
-        UNIQUE(account_key, conversation_id)
+        updated_at INTEGER NOT NULL
       );
 
       CREATE TABLE IF NOT EXISTS daemon_state (
@@ -1033,14 +934,12 @@ export const MIGRATIONS: Migration[] = [
       CREATE TABLE IF NOT EXISTS projection_state (
         singleton_key TEXT PRIMARY KEY CHECK (singleton_key = 'global'),
         projection_watermark INTEGER NOT NULL DEFAULT 0,
-        last_projected_at INTEGER,
-        last_rebuild_at INTEGER,
         updated_at INTEGER NOT NULL
       );
 
       INSERT OR IGNORE INTO projection_state (
-        singleton_key, projection_watermark, last_projected_at, last_rebuild_at, updated_at
-      ) VALUES ('global', 0, NULL, NULL, strftime('%s','now') * 1000);
+        singleton_key, projection_watermark, updated_at
+      ) VALUES ('global', 0, strftime('%s','now') * 1000);
 
       CREATE TABLE IF NOT EXISTS raw_events (
         id TEXT PRIMARY KEY,
@@ -1048,17 +947,13 @@ export const MIGRATIONS: Migration[] = [
         account_key TEXT NOT NULL,
         entity_kind TEXT NOT NULL,
         event_kind TEXT NOT NULL,
-        external_event_id TEXT,
         external_entity_id TEXT,
         conversation_external_id TEXT,
         occurred_at INTEGER,
         observed_at INTEGER NOT NULL,
-        cursor_json TEXT,
         dedupe_key TEXT NOT NULL,
         payload_json TEXT NOT NULL,
         normalized_schema TEXT,
-        provenance_json TEXT,
-        source_version TEXT,
         UNIQUE(platform, account_key, dedupe_key)
       );
 
@@ -1079,8 +974,6 @@ export const MIGRATIONS: Migration[] = [
         type TEXT NOT NULL,
         value TEXT NOT NULL,
         normalized_value TEXT NOT NULL,
-        platform TEXT,
-        account_key TEXT,
         is_deterministic INTEGER NOT NULL DEFAULT 0,
         created_at INTEGER NOT NULL,
         updated_at INTEGER NOT NULL
@@ -1092,10 +985,6 @@ export const MIGRATIONS: Migration[] = [
         platform TEXT NOT NULL,
         account_key TEXT NOT NULL,
         source_entity_key TEXT NOT NULL,
-        profile_url TEXT,
-        metadata_json TEXT,
-        first_seen_at INTEGER NOT NULL,
-        last_seen_at INTEGER NOT NULL,
         UNIQUE(platform, account_key, source_entity_key)
       );
 
@@ -1119,18 +1008,10 @@ export const MIGRATIONS: Migration[] = [
         platform TEXT NOT NULL,
         account_key TEXT NOT NULL,
         source_conversation_key TEXT NOT NULL,
-        native_conversation_key TEXT,
         type TEXT NOT NULL,
         is_active INTEGER NOT NULL DEFAULT 1,
-        removal_reason TEXT,
-        service TEXT,
         name TEXT,
-        topic TEXT,
         participant_names TEXT,
-        last_message_id TEXT,
-        last_message_at INTEGER,
-        last_message_preview TEXT,
-        unread_count INTEGER NOT NULL DEFAULT 0,
         created_at INTEGER NOT NULL,
         updated_at INTEGER NOT NULL,
         UNIQUE(platform, account_key, source_conversation_key)
@@ -1141,11 +1022,8 @@ export const MIGRATIONS: Migration[] = [
         contact_id TEXT NOT NULL REFERENCES contacts(id) ON DELETE CASCADE,
         source_participant_key TEXT,
         participant_name TEXT,
-        role TEXT,
         is_self INTEGER NOT NULL DEFAULT 0,
         is_active INTEGER NOT NULL DEFAULT 1,
-        joined_at INTEGER,
-        left_at INTEGER,
         updated_at INTEGER NOT NULL,
         PRIMARY KEY (conversation_id, contact_id, source_participant_key)
       );
@@ -1161,19 +1039,12 @@ export const MIGRATIONS: Migration[] = [
         sender_name TEXT,
         conversation_name TEXT,
         sent_at INTEGER NOT NULL,
-        service TEXT,
         status TEXT,
         is_from_me INTEGER NOT NULL DEFAULT 0,
         content TEXT,
         delivered_at INTEGER,
         read_at INTEGER,
-        edited_at INTEGER,
-        deleted_at INTEGER,
-        reply_to_message_id TEXT REFERENCES messages(id) ON DELETE SET NULL,
         is_deleted INTEGER NOT NULL DEFAULT 0,
-        is_edited INTEGER NOT NULL DEFAULT 0,
-        attachment_count INTEGER NOT NULL DEFAULT 0,
-        reaction_count INTEGER NOT NULL DEFAULT 0,
         created_at INTEGER NOT NULL,
         updated_at INTEGER NOT NULL,
         UNIQUE(platform, account_key, platform_message_id)
@@ -1195,10 +1066,6 @@ export const MIGRATIONS: Migration[] = [
         text_content TEXT,
         access_kind TEXT,
         access_ref_json TEXT,
-        preview_ref_json TEXT,
-        availability_status TEXT,
-        provider_metadata_json TEXT,
-        metadata_json TEXT,
         created_at INTEGER NOT NULL,
         updated_at INTEGER NOT NULL,
         UNIQUE(platform, account_key, source_attachment_key)
@@ -1209,16 +1076,11 @@ export const MIGRATIONS: Migration[] = [
         message_id TEXT NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
         platform TEXT NOT NULL,
         account_key TEXT NOT NULL,
-        source_reaction_key TEXT NOT NULL,
-        reactor_contact_id TEXT REFERENCES contacts(id) ON DELETE SET NULL,
         reactor_source_key TEXT,
-        reactor_name TEXT,
         emoji TEXT NOT NULL,
-        reaction_type TEXT,
         is_active INTEGER NOT NULL DEFAULT 1,
         created_at INTEGER NOT NULL,
-        updated_at INTEGER NOT NULL,
-        UNIQUE(platform, account_key, source_reaction_key)
+        updated_at INTEGER NOT NULL
       );
 
       CREATE TABLE IF NOT EXISTS attachment_cache (
@@ -1268,13 +1130,6 @@ export const MIGRATIONS: Migration[] = [
         system_kind TEXT,
         call_provider TEXT,
         call_direction TEXT,
-        call_status TEXT,
-        call_medium TEXT,
-        call_started_at INTEGER,
-        call_duration_seconds INTEGER,
-        call_ended_at INTEGER,
-        call_disconnected_cause TEXT,
-        metadata_json TEXT,
         created_at INTEGER NOT NULL,
         updated_at INTEGER NOT NULL,
         UNIQUE(platform, account_key, source_event_key)
@@ -1318,24 +1173,6 @@ export const MIGRATIONS: Migration[] = [
         updated_at INTEGER NOT NULL
       );
 
-      CREATE TABLE IF NOT EXISTS outbound_messages (
-        id TEXT PRIMARY KEY,
-        platform TEXT NOT NULL,
-        account_key TEXT NOT NULL,
-        target TEXT NOT NULL,
-        thread_id TEXT,
-        text TEXT NOT NULL,
-        status TEXT NOT NULL,
-        attempt_count INTEGER NOT NULL DEFAULT 0,
-        scheduled_for INTEGER NOT NULL,
-        started_at INTEGER,
-        finished_at INTEGER,
-        last_error TEXT,
-        metadata_json TEXT,
-        created_at INTEGER NOT NULL,
-        updated_at INTEGER NOT NULL
-      );
-
       CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
         message_id UNINDEXED,
         sender_name,
@@ -1358,14 +1195,8 @@ export const MIGRATIONS: Migration[] = [
       CREATE INDEX IF NOT EXISTS idx_sync_checkpoints_lookup
       ON sync_checkpoints(platform, account_key);
 
-      CREATE INDEX IF NOT EXISTS idx_sync_scopes_lookup
-      ON sync_scopes(platform, account_key, scope_kind, scope_key);
-
-      CREATE INDEX IF NOT EXISTS idx_sync_scopes_parent
-      ON sync_scopes(parent_scope_id, updated_at);
-
       CREATE INDEX IF NOT EXISTS idx_sync_proofs_lookup
-      ON sync_proofs(platform, account_key, scope_id, proof_kind);
+      ON sync_proofs(platform, account_key, scope_kind, scope_key, proof_kind);
 
       CREATE INDEX IF NOT EXISTS idx_sync_proofs_status
       ON sync_proofs(platform, account_key, status, updated_at);
@@ -1375,15 +1206,6 @@ export const MIGRATIONS: Migration[] = [
 
       CREATE INDEX IF NOT EXISTS idx_sync_runs_platform_account_status_queue
       ON sync_runs(platform, account_key, status, scheduled_at, queued_at);
-
-      CREATE INDEX IF NOT EXISTS idx_jobs_claim
-      ON jobs(status, scheduled_at, priority, queued_at);
-
-      CREATE INDEX IF NOT EXISTS idx_jobs_owner_lease
-      ON jobs(owner_id, lease_expires_at);
-
-      CREATE INDEX IF NOT EXISTS idx_jobs_platform_account_status
-      ON jobs(platform, account_key, status, scheduled_at);
 
       CREATE INDEX IF NOT EXISTS idx_message_fts_index_queue_status
       ON message_fts_index_queue(status, queued_at);
@@ -1395,7 +1217,7 @@ export const MIGRATIONS: Migration[] = [
       ON raw_events(platform, entity_kind, event_kind, normalized_schema);
 
       CREATE INDEX IF NOT EXISTS idx_contact_handles_lookup
-      ON contact_handles(type, normalized_value, account_key);
+      ON contact_handles(type, normalized_value);
 
       CREATE INDEX IF NOT EXISTS idx_contact_sources_contact
       ON contact_sources(contact_id, platform, account_key);
@@ -1421,9 +1243,6 @@ export const MIGRATIONS: Migration[] = [
 
       CREATE INDEX IF NOT EXISTS idx_timeline_events_actor_contact
       ON timeline_events(actor_contact_id);
-
-      CREATE INDEX IF NOT EXISTS idx_message_reactions_reactor_contact
-      ON message_reactions(reactor_contact_id);
 
       CREATE INDEX IF NOT EXISTS idx_conversations_lookup
       ON conversations(platform, account_key, source_conversation_key);
@@ -1470,15 +1289,6 @@ export const MIGRATIONS: Migration[] = [
 
       CREATE INDEX IF NOT EXISTS idx_auth_sessions_state
       ON auth_sessions(state, requested_at DESC);
-
-      CREATE INDEX IF NOT EXISTS idx_outbound_messages_status_scheduled
-      ON outbound_messages(status, scheduled_for, created_at);
-
-      CREATE INDEX IF NOT EXISTS idx_outbound_messages_platform_account_status
-      ON outbound_messages(platform, account_key, status, scheduled_for);
-
-      CREATE INDEX IF NOT EXISTS idx_slack_backfill_proofs_account_phase
-      ON slack_backfill_proofs(account_key, conversation_phase, updated_at);
 
       CREATE VIEW IF NOT EXISTS message_fts_source AS
       SELECT
@@ -1529,11 +1339,7 @@ export const MIGRATIONS: Migration[] = [
       AFTER INSERT ON message_attachments
       BEGIN
         UPDATE messages
-        SET
-          attachment_count = (
-            SELECT COUNT(*) FROM message_attachments WHERE message_id = NEW.message_id
-          ),
-          updated_at = MAX(updated_at, NEW.updated_at)
+        SET updated_at = MAX(updated_at, NEW.updated_at)
         WHERE id = NEW.message_id;
         DELETE FROM messages_fts
         WHERE rowid IN (SELECT rowid FROM messages WHERE id = NEW.message_id);
@@ -1547,11 +1353,7 @@ export const MIGRATIONS: Migration[] = [
       AFTER UPDATE ON message_attachments
       BEGIN
         UPDATE messages
-        SET
-          attachment_count = (
-            SELECT COUNT(*) FROM message_attachments WHERE message_id = NEW.message_id
-          ),
-          updated_at = MAX(updated_at, NEW.updated_at)
+        SET updated_at = MAX(updated_at, NEW.updated_at)
         WHERE id = NEW.message_id;
         DELETE FROM messages_fts
         WHERE rowid IN (SELECT rowid FROM messages WHERE id = NEW.message_id);
@@ -1564,47 +1366,12 @@ export const MIGRATIONS: Migration[] = [
       CREATE TRIGGER IF NOT EXISTS trg_message_attachments_deleted
       AFTER DELETE ON message_attachments
       BEGIN
-        UPDATE messages
-        SET attachment_count = (
-          SELECT COUNT(*) FROM message_attachments WHERE message_id = OLD.message_id
-        )
-        WHERE id = OLD.message_id;
         DELETE FROM messages_fts
         WHERE rowid IN (SELECT rowid FROM messages WHERE id = OLD.message_id);
         INSERT INTO messages_fts (rowid, message_id, sender_name, conversation_name, participant_names, attachment_text, content)
         SELECT message_rowid, message_id, sender_name, conversation_name, participant_names, attachment_text, content
         FROM message_fts_source
         WHERE message_id = OLD.message_id;
-      END;
-
-      CREATE TRIGGER IF NOT EXISTS trg_message_reactions_inserted
-      AFTER INSERT ON message_reactions
-      BEGIN
-        UPDATE messages
-        SET reaction_count = (
-          SELECT COUNT(*) FROM message_reactions WHERE message_id = NEW.message_id AND is_active = 1
-        )
-        WHERE id = NEW.message_id;
-      END;
-
-      CREATE TRIGGER IF NOT EXISTS trg_message_reactions_updated
-      AFTER UPDATE ON message_reactions
-      BEGIN
-        UPDATE messages
-        SET reaction_count = (
-          SELECT COUNT(*) FROM message_reactions WHERE message_id = NEW.message_id AND is_active = 1
-        )
-        WHERE id = NEW.message_id;
-      END;
-
-      CREATE TRIGGER IF NOT EXISTS trg_message_reactions_deleted
-      AFTER DELETE ON message_reactions
-      BEGIN
-        UPDATE messages
-        SET reaction_count = (
-          SELECT COUNT(*) FROM message_reactions WHERE message_id = OLD.message_id AND is_active = 1
-        )
-        WHERE id = OLD.message_id;
       END;
 
       CREATE TRIGGER IF NOT EXISTS trg_contacts_name_updated
@@ -1621,10 +1388,6 @@ export const MIGRATIONS: Migration[] = [
         UPDATE timeline_events
         SET actor_name = NEW.name
         WHERE actor_contact_id = NEW.id;
-
-        UPDATE message_reactions
-        SET reactor_name = NEW.name
-        WHERE reactor_contact_id = NEW.id;
 
         UPDATE conversations
         SET participant_names = (
@@ -1779,22 +1542,19 @@ export const MIGRATIONS: Migration[] = [
     id: "0002_upgrade_existing_schema_columns",
     apply: (db) => {
       addColumnIfMissing(db, "raw_events", "normalized_schema TEXT");
-      addColumnIfMissing(db, "raw_events", "provenance_json TEXT");
       addColumnIfMissing(db, "conversations", "is_active INTEGER NOT NULL DEFAULT 1");
       addColumnIfMissing(db, "conversations", "removal_reason TEXT");
       db.exec(`
         CREATE TABLE IF NOT EXISTS projection_state (
           singleton_key TEXT PRIMARY KEY CHECK (singleton_key = 'global'),
           projection_watermark INTEGER NOT NULL DEFAULT 0,
-          last_projected_at INTEGER,
-          last_rebuild_at INTEGER,
           updated_at INTEGER NOT NULL
         )
       `);
       db.exec(`
         INSERT OR IGNORE INTO projection_state (
-          singleton_key, projection_watermark, last_projected_at, last_rebuild_at, updated_at
-        ) VALUES ('global', 0, NULL, NULL, strftime('%s','now') * 1000)
+          singleton_key, projection_watermark, updated_at
+        ) VALUES ('global', 0, strftime('%s','now') * 1000)
       `);
       if (columnExists(db, "conversations", "subtype")) {
         db.exec(`
@@ -1842,7 +1602,6 @@ export const MIGRATIONS: Migration[] = [
       db.exec(`
         CREATE TABLE IF NOT EXISTS contact_merge_decisions (
           id TEXT PRIMARY KEY,
-          decision_type TEXT NOT NULL,
           primary_contact_id TEXT NOT NULL,
           secondary_contact_id TEXT NOT NULL,
           canonical_contact_id TEXT NOT NULL,
@@ -1887,51 +1646,25 @@ export const MIGRATIONS: Migration[] = [
     id: "0007_add_generic_sync_proof_tables",
     apply: (db) => {
       db.exec(`
-        CREATE TABLE IF NOT EXISTS sync_scopes (
+        CREATE TABLE IF NOT EXISTS sync_proofs (
           id TEXT PRIMARY KEY,
           platform TEXT NOT NULL,
           account_key TEXT NOT NULL,
           scope_kind TEXT NOT NULL,
           scope_key TEXT NOT NULL,
-          parent_scope_id TEXT REFERENCES sync_scopes(id) ON DELETE CASCADE,
-          display_name TEXT,
-          metadata_json TEXT,
-          first_discovered_at INTEGER NOT NULL,
-          last_observed_at INTEGER NOT NULL,
-          created_at INTEGER NOT NULL,
-          updated_at INTEGER NOT NULL,
-          UNIQUE(platform, account_key, scope_kind, scope_key)
-        );
-
-        CREATE TABLE IF NOT EXISTS sync_proofs (
-          id TEXT PRIMARY KEY,
-          platform TEXT NOT NULL,
-          account_key TEXT NOT NULL,
-          scope_id TEXT NOT NULL REFERENCES sync_scopes(id) ON DELETE CASCADE,
           proof_kind TEXT NOT NULL,
           status TEXT NOT NULL,
-          sync_mode TEXT,
-          run_started_at INTEGER,
           last_observed_at INTEGER NOT NULL,
-          completed_at INTEGER,
-          fresh_until INTEGER,
           resume_cursor_json TEXT,
           coverage_json TEXT,
           stats_json TEXT,
-          error_json TEXT,
           created_at INTEGER NOT NULL,
           updated_at INTEGER NOT NULL,
-          UNIQUE(platform, account_key, scope_id, proof_kind)
+          UNIQUE(platform, account_key, scope_kind, scope_key, proof_kind)
         );
 
-        CREATE INDEX IF NOT EXISTS idx_sync_scopes_lookup
-        ON sync_scopes(platform, account_key, scope_kind, scope_key);
-
-        CREATE INDEX IF NOT EXISTS idx_sync_scopes_parent
-        ON sync_scopes(parent_scope_id, updated_at);
-
         CREATE INDEX IF NOT EXISTS idx_sync_proofs_lookup
-        ON sync_proofs(platform, account_key, scope_id, proof_kind);
+        ON sync_proofs(platform, account_key, scope_kind, scope_key, proof_kind);
 
         CREATE INDEX IF NOT EXISTS idx_sync_proofs_status
         ON sync_proofs(platform, account_key, status, updated_at);
@@ -1960,12 +1693,6 @@ export const MIGRATIONS: Migration[] = [
           ON timeline_events(actor_contact_id);
         `);
       }
-      if (tableExists(db, "message_reactions")) {
-        db.exec(`
-          CREATE INDEX IF NOT EXISTS idx_message_reactions_reactor_contact
-          ON message_reactions(reactor_contact_id);
-        `);
-      }
     },
   },
   {
@@ -1977,12 +1704,6 @@ export const MIGRATIONS: Migration[] = [
       addColumnIfMissing(db, "timeline_events", "system_kind TEXT");
       addColumnIfMissing(db, "timeline_events", "call_provider TEXT");
       addColumnIfMissing(db, "timeline_events", "call_direction TEXT");
-      addColumnIfMissing(db, "timeline_events", "call_status TEXT");
-      addColumnIfMissing(db, "timeline_events", "call_medium TEXT");
-      addColumnIfMissing(db, "timeline_events", "call_started_at INTEGER");
-      addColumnIfMissing(db, "timeline_events", "call_duration_seconds INTEGER");
-      addColumnIfMissing(db, "timeline_events", "call_ended_at INTEGER");
-      addColumnIfMissing(db, "timeline_events", "call_disconnected_cause TEXT");
       db.exec(`
         UPDATE timeline_events
         SET system_kind = COALESCE(system_kind, 'provider_notice')
@@ -1999,7 +1720,6 @@ export const MIGRATIONS: Migration[] = [
         "sync_checkpoints",
         "source_accounts",
         "sync_proofs",
-        "sync_scopes",
         "sync_runs",
         "sync_run_errors",
       ]) {
@@ -2062,53 +1782,14 @@ export const MIGRATIONS: Migration[] = [
     },
   },
   {
-    id: "0014_jobs_table",
-    apply: (db) => {
-      db.exec(`
-        CREATE TABLE IF NOT EXISTS jobs (
-          id TEXT PRIMARY KEY,
-          kind TEXT NOT NULL,
-          platform TEXT,
-          account_key TEXT,
-          priority INTEGER NOT NULL,
-          status TEXT NOT NULL,
-          trigger TEXT NOT NULL,
-          queued_at INTEGER NOT NULL,
-          scheduled_at INTEGER NOT NULL,
-          started_at INTEGER,
-          finished_at INTEGER,
-          attempt INTEGER NOT NULL DEFAULT 0,
-          owner_id TEXT,
-          lease_expires_at INTEGER,
-          last_progress_at INTEGER,
-          checkpoint_json TEXT,
-          progress_json TEXT,
-          error_json TEXT
-        );
-
-        CREATE INDEX IF NOT EXISTS idx_jobs_claim
-        ON jobs(status, scheduled_at, priority, queued_at);
-
-        CREATE INDEX IF NOT EXISTS idx_jobs_owner_lease
-        ON jobs(owner_id, lease_expires_at);
-
-        CREATE INDEX IF NOT EXISTS idx_jobs_platform_account_status
-        ON jobs(platform, account_key, status, scheduled_at);
-      `);
-    },
-  },
-  {
     id: "0015_message_fts_index_queue",
     apply: (db) => {
       db.exec(`
         CREATE TABLE IF NOT EXISTS message_fts_index_queue (
           message_id TEXT PRIMARY KEY,
-          reason TEXT NOT NULL,
           status TEXT NOT NULL,
-          attempt INTEGER NOT NULL DEFAULT 0,
           queued_at INTEGER NOT NULL,
-          updated_at INTEGER NOT NULL,
-          last_error TEXT
+          updated_at INTEGER NOT NULL
         );
 
         CREATE INDEX IF NOT EXISTS idx_message_fts_index_queue_status
@@ -2175,8 +1856,6 @@ export const MIGRATIONS: Migration[] = [
       addColumnIfMissing(db, "sync_runs", "attempt INTEGER NOT NULL DEFAULT 0");
       addColumnIfMissing(db, "sync_runs", "owner_id TEXT");
       addColumnIfMissing(db, "sync_runs", "lease_expires_at INTEGER");
-      addColumnIfMissing(db, "sync_runs", "last_progress_at INTEGER");
-      addColumnIfMissing(db, "sync_runs", "error_code TEXT");
       db.exec(`
         UPDATE sync_runs
         SET attempt = COALESCE(attempt, 0)
@@ -2187,9 +1866,7 @@ export const MIGRATIONS: Migration[] = [
           status = 'queued',
           scheduled_at = strftime('%s','now') * 1000,
           owner_id = NULL,
-          lease_expires_at = NULL,
-          last_progress_at = COALESCE(last_progress_at, started_at, queued_at),
-          error_code = 'daemon_recovered'
+          lease_expires_at = NULL
         WHERE status IN ('ingesting', 'projecting');
 
         DROP INDEX IF EXISTS idx_sync_runs_status_type_queue;
@@ -2213,20 +1890,232 @@ export const MIGRATIONS: Migration[] = [
       db.exec(`
         CREATE TABLE IF NOT EXISTS raw_event_projection_failures (
           raw_event_rowid INTEGER PRIMARY KEY,
-          raw_event_id TEXT NOT NULL,
-          platform TEXT NOT NULL,
-          account_key TEXT NOT NULL,
-          entity_kind TEXT NOT NULL,
-          event_kind TEXT NOT NULL,
-          normalized_schema TEXT,
-          source_version TEXT,
-          error_message TEXT NOT NULL,
-          failed_at INTEGER NOT NULL
+          error_message TEXT NOT NULL
         );
-
-        CREATE INDEX IF NOT EXISTS idx_raw_event_projection_failures_platform
-        ON raw_event_projection_failures(platform, account_key, failed_at);
       `);
+    },
+  },
+  {
+    id: "0021_drop_outbound_messages",
+    apply: (db) => {
+      db.exec(`
+        DROP INDEX IF EXISTS idx_outbound_messages_status_scheduled;
+        DROP INDEX IF EXISTS idx_outbound_messages_platform_account_status;
+        DROP TABLE IF EXISTS outbound_messages;
+      `);
+    },
+  },
+  {
+    id: "0022_drop_jobs",
+    apply: (db) => {
+      db.exec(`
+        DROP INDEX IF EXISTS idx_jobs_claim;
+        DROP INDEX IF EXISTS idx_jobs_owner_lease;
+        DROP INDEX IF EXISTS idx_jobs_platform_account_status;
+        DROP TABLE IF EXISTS jobs;
+      `);
+    },
+  },
+  {
+    id: "0023_drop_dead_db_subfields",
+    apply: (db) => {
+      collapseSyncProofScopesIfNeeded(db);
+      dropColumnIfExists(db, "contact_merge_decisions", "decision_type");
+      dropColumnIfExists(db, "sync_checkpoints", "last_full_sync_at");
+      dropColumnIfExists(db, "sync_checkpoints", "last_error_at");
+      dropColumnIfExists(db, "sync_proofs", "sync_mode");
+      dropColumnIfExists(db, "sync_proofs", "run_started_at");
+      dropColumnIfExists(db, "sync_proofs", "completed_at");
+      dropColumnIfExists(db, "sync_proofs", "fresh_until");
+      dropColumnIfExists(db, "sync_proofs", "error_json");
+      db.exec(`
+        DROP INDEX IF EXISTS idx_slack_backfill_proofs_account_phase;
+        DROP TABLE IF EXISTS slack_backfill_proofs;
+      `);
+    },
+  },
+  {
+    id: "0024_drop_source_account_dead_fields",
+    apply: (db) => {
+      dropColumnIfExists(db, "source_accounts", "status");
+      dropColumnIfExists(db, "source_accounts", "metadata_json");
+    },
+  },
+  {
+    id: "0025_reduce_raw_event_projection_failures",
+    apply: (db) => {
+      db.exec("DROP INDEX IF EXISTS idx_raw_event_projection_failures_platform");
+      dropColumnIfExists(db, "raw_event_projection_failures", "entity_kind");
+      dropColumnIfExists(db, "raw_event_projection_failures", "event_kind");
+      dropColumnIfExists(db, "raw_event_projection_failures", "normalized_schema");
+      dropColumnIfExists(db, "raw_event_projection_failures", "source_version");
+      dropColumnIfExists(db, "raw_event_projection_failures", "failed_at");
+    },
+  },
+  {
+    id: "0026_drop_message_fts_queue_reason",
+    apply: (db) => {
+      dropColumnIfExists(db, "message_fts_index_queue", "reason");
+    },
+  },
+  {
+    id: "0027_drop_contact_source_metadata",
+    apply: (db) => {
+      dropColumnIfExists(db, "contact_sources", "metadata_json");
+    },
+  },
+  {
+    id: "0028_drop_participant_history_fields",
+    apply: (db) => {
+      dropColumnIfExists(db, "conversation_participants", "role");
+      dropColumnIfExists(db, "conversation_participants", "joined_at");
+      dropColumnIfExists(db, "conversation_participants", "left_at");
+    },
+  },
+  {
+    id: "0029_drop_timeline_unused_call_fields",
+    apply: (db) => {
+      dropColumnIfExists(db, "timeline_events", "call_status");
+      dropColumnIfExists(db, "timeline_events", "call_medium");
+      dropColumnIfExists(db, "timeline_events", "call_started_at");
+      dropColumnIfExists(db, "timeline_events", "call_duration_seconds");
+      dropColumnIfExists(db, "timeline_events", "call_ended_at");
+      dropColumnIfExists(db, "timeline_events", "call_disconnected_cause");
+      dropColumnIfExists(db, "timeline_events", "metadata_json");
+    },
+  },
+  {
+    id: "0030_drop_reaction_type",
+    apply: (db) => {
+      dropColumnIfExists(db, "message_reactions", "reaction_type");
+    },
+  },
+  {
+    id: "0031_drop_reaction_contact_name_fields",
+    apply: (db) => {
+      db.exec("DROP INDEX IF EXISTS idx_message_reactions_reactor_contact");
+      dropColumnIfExists(db, "message_reactions", "reactor_contact_id");
+      dropColumnIfExists(db, "message_reactions", "reactor_name");
+    },
+  },
+  {
+    id: "0032_drop_attachment_unused_metadata_fields",
+    apply: (db) => {
+      dropColumnIfExists(db, "message_attachments", "preview_ref_json");
+      dropColumnIfExists(db, "message_attachments", "availability_status");
+      dropColumnIfExists(db, "message_attachments", "provider_metadata_json");
+      dropColumnIfExists(db, "message_attachments", "metadata_json");
+    },
+  },
+  {
+    id: "0033_drop_contact_source_seen_timestamps",
+    apply: (db) => {
+      dropColumnIfExists(db, "contact_sources", "first_seen_at");
+      dropColumnIfExists(db, "contact_sources", "last_seen_at");
+    },
+  },
+  {
+    id: "0034_drop_conversation_unused_fields",
+    apply: (db) => {
+      dropColumnIfExists(db, "conversations", "native_conversation_key");
+      dropColumnIfExists(db, "conversations", "topic");
+    },
+  },
+  {
+    id: "0035_drop_projection_state_unused_timestamps",
+    apply: (db) => {
+      dropColumnIfExists(db, "projection_state", "last_projected_at");
+      dropColumnIfExists(db, "projection_state", "last_rebuild_at");
+    },
+  },
+  {
+    id: "0036_drop_sync_run_unused_fields",
+    apply: (db) => {
+      dropColumnIfExists(db, "sync_runs", "last_progress_at");
+      dropColumnIfExists(db, "sync_runs", "error_code");
+      dropColumnIfExists(db, "sync_run_errors", "sync_run_id");
+      dropColumnIfExists(db, "sync_run_errors", "error_code");
+      dropColumnIfExists(db, "sync_run_errors", "details_json");
+    },
+  },
+  {
+    id: "0037_drop_message_fts_unused_fields",
+    apply: (db) => {
+      dropColumnIfExists(db, "message_fts_index_queue", "attempt");
+      dropColumnIfExists(db, "message_fts_index_queue", "last_error");
+    },
+  },
+  {
+    id: "0038_drop_contact_handle_origin_fields",
+    apply: (db) => {
+      if (!tableExists(db, "contact_handles")) {
+        return;
+      }
+      db.exec("DROP INDEX IF EXISTS idx_contact_handles_lookup");
+      dropColumnIfExists(db, "contact_handles", "platform");
+      dropColumnIfExists(db, "contact_handles", "account_key");
+      db.exec(`
+        CREATE INDEX IF NOT EXISTS idx_contact_handles_lookup
+        ON contact_handles(type, normalized_value);
+      `);
+    },
+  },
+  {
+    id: "0039_drop_contact_source_profile_url",
+    apply: (db) => {
+      dropColumnIfExists(db, "contact_sources", "profile_url");
+    },
+  },
+  {
+    id: "0040_reduce_raw_event_projection_failures_to_rowid",
+    apply: (db) => {
+      dropColumnIfExists(db, "raw_event_projection_failures", "raw_event_id");
+      dropColumnIfExists(db, "raw_event_projection_failures", "platform");
+      dropColumnIfExists(db, "raw_event_projection_failures", "account_key");
+    },
+  },
+  {
+    id: "0041_drop_unused_conversation_message_fields",
+    apply: (db) => {
+      dropColumnIfExists(db, "conversations", "removal_reason");
+      dropColumnIfExists(db, "conversations", "service");
+      dropColumnIfExists(db, "messages", "service");
+      dropColumnIfExists(db, "messages", "edited_at");
+      dropColumnIfExists(db, "messages", "deleted_at");
+      dropColumnIfExists(db, "messages", "reply_to_message_id");
+      dropColumnIfExists(db, "messages", "is_edited");
+    },
+  },
+  {
+    id: "0042_drop_unused_raw_event_audit_fields",
+    apply: (db) => {
+      dropColumnIfExists(db, "raw_events", "external_event_id");
+      dropColumnIfExists(db, "raw_events", "cursor_json");
+      dropColumnIfExists(db, "raw_events", "source_version");
+    },
+  },
+  {
+    id: "0043_drop_unused_projection_summary_fields",
+    apply: (db) => {
+      dropSynchronousMessageFtsTriggers(db);
+      dropColumnIfExists(db, "conversations", "last_message_id");
+      dropColumnIfExists(db, "conversations", "last_message_at");
+      dropColumnIfExists(db, "conversations", "last_message_preview");
+      dropColumnIfExists(db, "conversations", "unread_count");
+      dropColumnIfExists(db, "messages", "attachment_count");
+      dropColumnIfExists(db, "messages", "reaction_count");
+    },
+  },
+  {
+    id: "0044_drop_unused_raw_event_provenance_json",
+    apply: (db) => {
+      dropColumnIfExists(db, "raw_events", "provenance_json");
+    },
+  },
+  {
+    id: "0045_drop_message_reaction_source_key",
+    apply: (db) => {
+      dropMessageReactionSourceKeyIfNeeded(db);
     },
   },
 ];

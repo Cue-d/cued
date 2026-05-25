@@ -51,10 +51,6 @@ function collectAttachmentParts(
       size_bytes: payload.body?.size ?? null,
       access_kind: attachmentId ? "provider_fetch" : "none",
       access_ref: attachmentId ? { messageId, attachmentId } : null,
-      availability_status: attachmentId ? "available" : "metadata_only",
-      provider_metadata: {
-        partId: payload.partId ?? null,
-      },
     });
   }
 
@@ -175,7 +171,6 @@ export function buildGmailRawEvents(input: {
           },
           handles: [{ type: "email", value: participant.email, deterministic: true }],
         } satisfies ContactObservationPayload,
-        sourceVersion: "gmail-v1",
       });
     }
 
@@ -210,7 +205,6 @@ export function buildGmailRawEvents(input: {
       accountKey: input.accountKey,
       entityKind: "message",
       eventKind: "created",
-      externalEventId: message.id,
       externalEntityId: message.id,
       conversationExternalId: message.threadId,
       occurredAt: sentAt,
@@ -222,11 +216,9 @@ export function buildGmailRawEvents(input: {
         senderSourceKey: sourceKey(sender),
         sentAt,
         content: subject ? `Subject: ${subject}\n\n${content}` : content,
-        service: "gmail",
         isFromMe: sender === selfEmail,
         attachments,
       } satisfies MessagePayload,
-      sourceVersion: "gmail-v1",
     });
   }
 
@@ -244,14 +236,11 @@ export function buildGmailRawEvents(input: {
         sourceConversationKey: conversation.conversationKey,
         conversationType: conversation.participants.size > 2 ? "group" : "dm",
         displayName: conversation.subject,
-        nativeConversationKey: threadId,
-        service: "gmail",
         participants: [...conversation.participants.values()].map((participant) => ({
           sourceEntityKey: sourceKey(participant.email),
           isSelf: participant.email === selfEmail,
         })),
       } satisfies ConversationObservationPayload,
-      sourceVersion: "gmail-v1",
     });
   }
 

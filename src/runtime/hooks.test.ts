@@ -49,7 +49,7 @@ describe("hooks service", () => {
     expect(typeof doctor.openClawPath === "string" || doctor.openClawPath === null).toBe(true);
     expect(contents).toContain("sync.completed");
     expect(contents).toContain("sync.failed");
-    expect(contents).toContain("message.sent");
+    expect(contents).toContain("message.received");
   });
 
   it("runs enabled subprocess hooks with JSON stdin", async () => {
@@ -77,5 +77,36 @@ args = ["-lc", "cat > ${join(home, "hook-payload.json")}"]
     const payload = readFileSync(join(home, "hook-payload.json"), "utf8");
     expect(payload).toContain('"event": "sync.completed"');
     expect(payload).toContain('"runId": "123"');
+  });
+
+  it("ignores deprecated message.sent hooks from existing configs", async () => {
+    const home = setTempHome();
+    const { doctorHooksConfig, loadHooksConfig } = await loadHooksService();
+    const hooksDir = join(home, ".cued");
+    mkdirSync(hooksDir, { recursive: true });
+
+    writeFileSync(
+      join(hooksDir, "hooks.toml"),
+      `version = 1
+
+[[hooks]]
+event = "message.sent"
+enabled = false
+command = "/bin/sh"
+
+[[hooks]]
+event = "message.received"
+enabled = true
+command = "/bin/sh"
+`,
+      "utf8",
+    );
+
+    const config = loadHooksConfig();
+    expect(config.hooks.map((hook) => hook.event)).toEqual(["message.received"]);
+
+    const doctor = doctorHooksConfig();
+    expect(doctor.valid).toBe(true);
+    expect(doctor.hooks.map((hook) => hook.event)).toEqual(["message.received"]);
   });
 });

@@ -167,7 +167,6 @@ describe("buildDiscordSyncBundle", () => {
     expect(findDiscordProof(bundle, "account", "u-self", "discovery")).toEqual(
       expect.objectContaining({
         status: "complete",
-        completedAt: expect.any(Number),
         stats: {
           discoveredDmCount: 3,
         },
@@ -318,17 +317,12 @@ describe("buildDiscordSyncBundle", () => {
     expect(findDiscordProof(bundle, "conversation", "dm-2", "latest_messages")).toEqual(
       expect.objectContaining({
         status: "failed",
-        completedAt: null,
         resumeCursor: {
           latestMessageId: "200",
         },
         coverage: {
           latestMessageId: "200",
           previousLatestMessageId: null,
-        },
-        error: {
-          message: "Discord API rate limited",
-          retryAfterMs: null,
         },
       }),
     );
@@ -818,11 +812,6 @@ describe("buildDiscordSyncBundle", () => {
         status: "failed",
         resumeCursor: {
           before: "250",
-        },
-        error: {
-          message: "Discord backfill cursor did not advance before '250'",
-          retryAfterMs: null,
-          rateLimited: false,
         },
       }),
     );

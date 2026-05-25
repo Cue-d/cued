@@ -30,10 +30,8 @@ export const imessageReplayFixtures: ProjectionReplayFixture[] = [
           sourceConversationKey: "42",
           conversationType: "dm",
           displayName: null,
-          nativeConversationKey: "chat-42",
           participants: [{ sourceEntityKey: "imessage:+15551230000" }],
         },
-        sourceVersion: "imessage-v1",
       }),
       fixtureEvent({
         id: "imessage_message_dm_late_contact",
@@ -52,15 +50,12 @@ export const imessageReplayFixtures: ProjectionReplayFixture[] = [
           senderSourceKey: "imessage:+15551230000",
           sentAt: 1_710_199_999_500,
           content: "late contact should still resolve",
-          service: "iMessage",
           status: "delivered",
           isFromMe: false,
           readAt: null,
-          isEdited: false,
           isDeleted: false,
           attachments: [],
         },
-        sourceVersion: "imessage-v1",
       }),
       fixtureEvent({
         id: "imessage_contact_dm_late_contact",
@@ -89,7 +84,6 @@ export const imessageReplayFixtures: ProjectionReplayFixture[] = [
             },
           ],
         },
-        sourceVersion: "imessage-v1",
       }),
     ],
   },
@@ -104,12 +98,10 @@ export const imessageReplayFixtures: ProjectionReplayFixture[] = [
       });
       expect(snapshot.messages[0]).toMatchObject({
         senderName: "Ava Email",
-        attachmentCount: 1,
       });
       expect(snapshot.messageAttachments[0]).toMatchObject({
         filename: "agenda.pdf",
         localPath: "/Users/test/Library/Messages/Attachments/agenda.pdf",
-        availabilityStatus: "available",
       });
     },
     events: [
@@ -140,7 +132,6 @@ export const imessageReplayFixtures: ProjectionReplayFixture[] = [
             },
           ],
         },
-        sourceVersion: "imessage-v1",
       }),
       fixtureEvent({
         id: "imessage_conversation_attachment",
@@ -154,10 +145,8 @@ export const imessageReplayFixtures: ProjectionReplayFixture[] = [
           sourceConversationKey: "84",
           conversationType: "dm",
           displayName: null,
-          nativeConversationKey: "chat-84",
           participants: [{ sourceEntityKey: "imessage:ava@example.com" }],
         },
-        sourceVersion: "imessage-v1",
       }),
       fixtureEvent({
         id: "imessage_message_attachment",
@@ -176,11 +165,9 @@ export const imessageReplayFixtures: ProjectionReplayFixture[] = [
           senderSourceKey: "imessage:ava@example.com",
           sentAt: 1_710_210_000_020,
           content: "see attached",
-          service: "iMessage",
           status: "delivered",
           isFromMe: false,
           readAt: null,
-          isEdited: false,
           isDeleted: false,
           attachments: [
             {
@@ -191,21 +178,12 @@ export const imessageReplayFixtures: ProjectionReplayFixture[] = [
               mime_type: "application/pdf",
               size_bytes: 4096,
               access_kind: "local_path",
-              availability_status: "available",
               access_ref: {
                 path: "/Users/test/Library/Messages/Attachments/agenda.pdf",
-              },
-              provider_metadata: {
-                uti: "com.adobe.pdf",
-                isSticker: false,
-                hideAttachment: false,
-                ckRecordId: null,
-                sourceFilename: "/Users/test/Library/Messages/Attachments/agenda.pdf",
               },
             },
           ],
         },
-        sourceVersion: "imessage-v1",
       }),
     ],
   },
@@ -223,11 +201,9 @@ export const imessageReplayFixtures: ProjectionReplayFixture[] = [
       expect(snapshot.messages[0]).toMatchObject({
         senderName: "Avery Example",
         conversationName: "Family",
-        reactionCount: 1,
       });
       expect(snapshot.messageReactions[0]).toMatchObject({
         emoji: "❤️",
-        reactorName: "Jordan Example",
         isActive: 1,
       });
     },
@@ -244,13 +220,11 @@ export const imessageReplayFixtures: ProjectionReplayFixture[] = [
           sourceConversationKey: "126",
           conversationType: "group",
           displayName: "Family",
-          nativeConversationKey: "chat-126",
           participants: [
             { sourceEntityKey: "imessage:+15550000001" },
             { sourceEntityKey: "imessage:+15550000002" },
           ],
         },
-        sourceVersion: "imessage-v1",
       }),
       fixtureEvent({
         id: "imessage_message_reaction",
@@ -269,15 +243,12 @@ export const imessageReplayFixtures: ProjectionReplayFixture[] = [
           senderSourceKey: "imessage:+15550000001",
           sentAt: 1_710_220_000_010,
           content: "dinner at 7?",
-          service: "iMessage",
           status: "delivered",
           isFromMe: false,
           readAt: null,
-          isEdited: false,
           isDeleted: false,
           attachments: [],
         },
-        sourceVersion: "imessage-v1",
       }),
       fixtureEvent({
         id: "imessage_reaction_added",
@@ -298,7 +269,6 @@ export const imessageReplayFixtures: ProjectionReplayFixture[] = [
           timestamp: 1_710_220_000_015,
           isActive: true,
         },
-        sourceVersion: "imessage-v1",
       }),
       fixtureEvent({
         id: "imessage_contact_sender",
@@ -319,7 +289,6 @@ export const imessageReplayFixtures: ProjectionReplayFixture[] = [
             { type: "imessage_handle", value: "+15550000001", deterministic: true },
           ],
         },
-        sourceVersion: "imessage-v1",
       }),
       fixtureEvent({
         id: "imessage_contact_reactor",
@@ -340,7 +309,6 @@ export const imessageReplayFixtures: ProjectionReplayFixture[] = [
             { type: "imessage_handle", value: "+15550000002", deterministic: true },
           ],
         },
-        sourceVersion: "imessage-v1",
       }),
     ],
   },

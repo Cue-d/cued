@@ -130,14 +130,11 @@ struct CallHistoryRecord: Encodable {
   let remoteAddress: String?
   let remoteDisplayName: String?
   let provider: String
-  let providerCallType: String?
   let direction: String
   let medium: String
   let status: String
   let startedAt: Int
-  let endedAt: Int?
   let durationSeconds: Int?
-  let disconnectedCause: String?
   let syntheticConversation: Bool
 }
 
@@ -1020,13 +1017,6 @@ struct Command {
         } else {
           0
         }
-      let endedAt: Int? =
-        if let durationSeconds {
-          startedAt + durationSeconds * 1000
-        } else {
-          nil
-        }
-
       return CallHistoryRecord(
         pk: row.pk,
         sourceCallKey: nilIfEmpty(row.uniqueID) ?? "callhistory:\(row.pk)",
@@ -1035,7 +1025,6 @@ struct Command {
         remoteAddress: remoteAddress,
         remoteDisplayName: nilIfEmpty(row.name),
         provider: provider,
-        providerCallType: row.callType.map(String.init),
         direction: direction,
         medium: normalizeCallMedium(provider: provider, callType: row.callType),
         status: normalizeCallStatus(
@@ -1045,9 +1034,7 @@ struct Command {
           durationSeconds: durationSeconds
         ),
         startedAt: startedAt,
-        endedAt: endedAt,
         durationSeconds: durationSeconds,
-        disconnectedCause: row.disconnectedCause.map(String.init),
         syntheticConversation: chatID == nil
       )
     }

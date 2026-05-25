@@ -161,7 +161,6 @@ describe("WhatsApp sync proof helpers", () => {
     });
 
     expect(proof.status).toBe("complete");
-    expect(proof.syncMode).toBe("full");
     expect(proof.resumeCursor).toBeNull();
     expect(proof.coverage).toMatchObject({
       oldestMessageAt: 10,

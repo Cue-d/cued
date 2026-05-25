@@ -479,19 +479,25 @@ echo '{"token":"xoxc-test","cookie":"cookie-test","teamId":"T123","teamName":"Ac
         { source_conversation_key: "slack:T123:G_TEAM" },
       ]);
 
-      const firstMessages = db.orm().all<{ content: string | null; reaction_count: number }>(sql`
-        SELECT content, reaction_count
+      const firstMessages = db.orm().all<{ content: string | null }>(sql`
+        SELECT content
         FROM messages
         ORDER BY content ASC
       `);
       expect(firstMessages).toEqual([
-        { content: "Hi Ava", reaction_count: 0 },
-        { content: "Kickoff notes", reaction_count: 0 },
-        { content: "Older context", reaction_count: 0 },
-        { content: "Reply one", reaction_count: 0 },
-        { content: "Reply two", reaction_count: 0 },
-        { content: "Weekly sync", reaction_count: 1 },
+        { content: "Hi Ava" },
+        { content: "Kickoff notes" },
+        { content: "Older context" },
+        { content: "Reply one" },
+        { content: "Reply two" },
+        { content: "Weekly sync" },
       ]);
+      expect(
+        db.orm().get<{ count: number }>(sql`
+          SELECT COUNT(*) AS count
+          FROM message_reactions
+        `),
+      ).toEqual({ count: 1 });
 
       const attachmentRows = db.orm().all<{ source_attachment_key: string }>(sql`
         SELECT source_attachment_key

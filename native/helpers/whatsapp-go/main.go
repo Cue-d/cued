@@ -69,37 +69,31 @@ type chatSnapshot struct {
 }
 
 type attachmentSnapshot struct {
-	ID           string                 `json:"id"`
-	Kind         string                 `json:"kind"`
-	Filename     *string                `json:"filename,omitempty"`
-	MimeType     *string                `json:"mime_type,omitempty"`
-	SizeBytes    *int64                 `json:"size_bytes,omitempty"`
-	Text         *string                `json:"text,omitempty"`
-	AccessKind   string                 `json:"access_kind"`
-	AccessRef    map[string]interface{} `json:"access_ref,omitempty"`
-	Availability string                 `json:"availability_status,omitempty"`
-	ProviderMeta map[string]interface{} `json:"provider_metadata,omitempty"`
+	ID         string                 `json:"id"`
+	Kind       string                 `json:"kind"`
+	Filename   *string                `json:"filename,omitempty"`
+	MimeType   *string                `json:"mime_type,omitempty"`
+	SizeBytes  *int64                 `json:"size_bytes,omitempty"`
+	Text       *string                `json:"text,omitempty"`
+	AccessKind string                 `json:"access_kind"`
+	AccessRef  map[string]interface{} `json:"access_ref,omitempty"`
 }
 
 type messageSnapshot struct {
-	MessageID       string               `json:"messageID"`
-	ChatJID         string               `json:"chatJID"`
-	SenderJID       *string              `json:"senderJID,omitempty"`
-	ParticipantJID  *string              `json:"participantJID,omitempty"`
-	FromMe          bool                 `json:"fromMe"`
-	Timestamp       int64                `json:"timestamp"`
-	Text            string               `json:"text"`
-	PushName        *string              `json:"pushName,omitempty"`
-	Status          *string              `json:"status,omitempty"`
-	DeliveredAt     *int64               `json:"deliveredAt,omitempty"`
-	ReadAt          *int64               `json:"readAt,omitempty"`
-	ReplyToID       *string              `json:"replyToMessageID,omitempty"`
-	ReplyToSender   *string              `json:"replyToSenderJID,omitempty"`
-	IsForwarded     bool                 `json:"isForwarded,omitempty"`
-	ForwardingScore *uint32              `json:"forwardingScore,omitempty"`
-	Revoked         bool                 `json:"revoked,omitempty"`
-	MessageProto    *string              `json:"messageProtoBase64,omitempty"`
-	Attachments     []attachmentSnapshot `json:"attachments,omitempty"`
+	MessageID      string               `json:"messageID"`
+	ChatJID        string               `json:"chatJID"`
+	SenderJID      *string              `json:"senderJID,omitempty"`
+	ParticipantJID *string              `json:"participantJID,omitempty"`
+	FromMe         bool                 `json:"fromMe"`
+	Timestamp      int64                `json:"timestamp"`
+	Text           string               `json:"text"`
+	PushName       *string              `json:"pushName,omitempty"`
+	Status         *string              `json:"status,omitempty"`
+	DeliveredAt    *int64               `json:"deliveredAt,omitempty"`
+	ReadAt         *int64               `json:"readAt,omitempty"`
+	Revoked        bool                 `json:"revoked,omitempty"`
+	MessageProto   *string              `json:"messageProtoBase64,omitempty"`
+	Attachments    []attachmentSnapshot `json:"attachments,omitempty"`
 }
 
 type downloadableMessageSnapshot struct {
@@ -128,7 +122,6 @@ type callSnapshot struct {
 	DurationSeconds *int64  `json:"durationSeconds,omitempty"`
 	Status          string  `json:"status"`
 	Medium          string  `json:"medium"`
-	ProviderType    *string `json:"providerCallType,omitempty"`
 }
 
 type callDeleteSnapshot struct {
@@ -158,8 +151,6 @@ type eventEnvelope struct {
 type commandEnvelope struct {
 	ID              int                     `json:"id"`
 	Command         string                  `json:"command"`
-	Target          string                  `json:"target,omitempty"`
-	Text            string                  `json:"text,omitempty"`
 	Cursor          string                  `json:"cursor,omitempty"`
 	SinceMS         *int64                  `json:"sinceMs,omitempty"`
 	Limit           int                     `json:"limit,omitempty"`
@@ -403,10 +394,6 @@ func openSyncCache(storeDir string) (*syncCache, error) {
 			status TEXT,
 			delivered_at INTEGER,
 			read_at INTEGER,
-			reply_to_message_id TEXT,
-			reply_to_sender_jid TEXT,
-			is_forwarded INTEGER NOT NULL DEFAULT 0,
-			forwarding_score INTEGER,
 			revoked INTEGER NOT NULL DEFAULT 0,
 			updated_at INTEGER NOT NULL,
 			PRIMARY KEY (chat_jid, message_id)
@@ -429,7 +416,6 @@ func openSyncCache(storeDir string) (*syncCache, error) {
 			duration_seconds INTEGER,
 			status TEXT NOT NULL,
 			medium TEXT NOT NULL,
-			provider_call_type TEXT,
 			updated_at INTEGER NOT NULL,
 			PRIMARY KEY (chat_jid, call_id)
 		)`,
@@ -453,10 +439,6 @@ func openSyncCache(storeDir string) (*syncCache, error) {
 		name       string
 		definition string
 	}{
-		{name: "reply_to_message_id", definition: "TEXT"},
-		{name: "reply_to_sender_jid", definition: "TEXT"},
-		{name: "is_forwarded", definition: "INTEGER NOT NULL DEFAULT 0"},
-		{name: "forwarding_score", definition: "INTEGER"},
 		{name: "revoked", definition: "INTEGER NOT NULL DEFAULT 0"},
 	} {
 		if err := ensureSQLiteColumn(db, "messages", column.name, column.definition); err != nil {
@@ -867,7 +849,7 @@ func (c *syncCache) queryMessages(
 		_ = tx.Rollback()
 	}()
 
-	selectQuery := `SELECT chat_jid, message_id, sender_jid, participant_jid, from_me, timestamp, text, push_name, status, delivered_at, read_at, reply_to_message_id, reply_to_sender_jid, is_forwarded, forwarding_score, revoked FROM messages`
+	selectQuery := `SELECT chat_jid, message_id, sender_jid, participant_jid, from_me, timestamp, text, push_name, status, delivered_at, read_at, revoked FROM messages`
 	args := []any{}
 	if cursor == nil || cursor.SnapshotUpdatedAt <= 0 {
 		return nil, nil, false, errors.New("invalid resync cursor")
@@ -901,11 +883,11 @@ func (c *syncCache) queryMessages(
 	for rows.Next() {
 		var chatJID string
 		var messageID string
-		var senderJID, participantJID, pushName, status, replyToID, replyToSender sql.NullString
-		var fromMe, isForwarded, revoked int64
+		var senderJID, participantJID, pushName, status sql.NullString
+		var fromMe, revoked int64
 		var timestamp int64
 		var text string
-		var deliveredAt, readAt, forwardingScore sql.NullInt64
+		var deliveredAt, readAt sql.NullInt64
 		if err := rows.Scan(
 			&chatJID,
 			&messageID,
@@ -918,10 +900,6 @@ func (c *syncCache) queryMessages(
 			&status,
 			&deliveredAt,
 			&readAt,
-			&replyToID,
-			&replyToSender,
-			&isForwarded,
-			&forwardingScore,
 			&revoked,
 		); err != nil {
 			return nil, nil, false, err
@@ -950,17 +928,6 @@ func (c *syncCache) queryMessages(
 		}
 		if readAt.Valid {
 			message.ReadAt = int64Ptr(readAt.Int64)
-		}
-		if replyToID.Valid {
-			message.ReplyToID = stringPtr(replyToID.String)
-		}
-		if replyToSender.Valid {
-			message.ReplyToSender = stringPtr(replyToSender.String)
-		}
-		message.IsForwarded = isForwarded == 1
-		if forwardingScore.Valid {
-			score := uint32(forwardingScore.Int64)
-			message.ForwardingScore = &score
 		}
 		message.Revoked = revoked == 1
 		messages = append(messages, message)
@@ -993,7 +960,7 @@ func (c *syncCache) queryCalls(
 	cursor *resyncCursor,
 	limit int,
 ) ([]callSnapshot, *string, bool, error) {
-	query := `SELECT call_id, chat_jid, initiator_jid, remote_jid, from_me, timestamp, duration_seconds, status, medium, provider_call_type FROM calls`
+	query := `SELECT call_id, chat_jid, initiator_jid, remote_jid, from_me, timestamp, duration_seconds, status, medium FROM calls`
 	args := []any{}
 	if cursor == nil || cursor.SnapshotUpdatedAt <= 0 {
 		return nil, nil, false, errors.New("invalid resync cursor")
@@ -1029,7 +996,7 @@ func (c *syncCache) queryCalls(
 	var calls []callSnapshot
 	for rows.Next() {
 		var call callSnapshot
-		var initiatorJID, remoteJID, providerType sql.NullString
+		var initiatorJID, remoteJID sql.NullString
 		var fromMe int64
 		var durationSeconds sql.NullInt64
 		if err := rows.Scan(
@@ -1042,7 +1009,6 @@ func (c *syncCache) queryCalls(
 			&durationSeconds,
 			&call.Status,
 			&call.Medium,
-			&providerType,
 		); err != nil {
 			return nil, nil, false, err
 		}
@@ -1054,9 +1020,6 @@ func (c *syncCache) queryCalls(
 		}
 		if durationSeconds.Valid {
 			call.DurationSeconds = int64Ptr(durationSeconds.Int64)
-		}
-		if providerType.Valid {
-			call.ProviderType = stringPtr(providerType.String)
 		}
 		call.FromMe = fromMe == 1
 		calls = append(calls, call)
@@ -1126,9 +1089,8 @@ func upsertMessageTx(tx *sql.Tx, message messageSnapshot, updatedAt int64) error
 	_, err := tx.Exec(
 		`INSERT INTO messages (
 		   chat_jid, message_id, sender_jid, participant_jid, from_me, timestamp, text, push_name,
-		   status, delivered_at, read_at, reply_to_message_id, reply_to_sender_jid, is_forwarded,
-		   forwarding_score, revoked, updated_at
-		 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		   status, delivered_at, read_at, revoked, updated_at
+		 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		 ON CONFLICT(chat_jid, message_id) DO UPDATE SET
 		   sender_jid = excluded.sender_jid,
 		   participant_jid = excluded.participant_jid,
@@ -1139,10 +1101,6 @@ func upsertMessageTx(tx *sql.Tx, message messageSnapshot, updatedAt int64) error
 		   status = excluded.status,
 		   delivered_at = COALESCE(excluded.delivered_at, messages.delivered_at),
 		   read_at = COALESCE(excluded.read_at, messages.read_at),
-		   reply_to_message_id = excluded.reply_to_message_id,
-		   reply_to_sender_jid = excluded.reply_to_sender_jid,
-		   is_forwarded = excluded.is_forwarded,
-		   forwarding_score = excluded.forwarding_score,
 		   revoked = excluded.revoked,
 		   updated_at = excluded.updated_at`,
 		normalizeJID(message.ChatJID),
@@ -1156,10 +1114,6 @@ func upsertMessageTx(tx *sql.Tx, message messageSnapshot, updatedAt int64) error
 		nullableString(message.Status),
 		nullableInt64(message.DeliveredAt),
 		nullableInt64(message.ReadAt),
-		nullableString(message.ReplyToID),
-		nullableString(message.ReplyToSender),
-		boolToInt(message.IsForwarded),
-		nullableUint32(message.ForwardingScore),
 		boolToInt(message.Revoked),
 		updatedAt,
 	)
@@ -1170,8 +1124,8 @@ func upsertCallTx(tx *sql.Tx, call callSnapshot, updatedAt int64) error {
 	_, err := tx.Exec(
 		`INSERT INTO calls (
 		   chat_jid, call_id, initiator_jid, remote_jid, from_me, timestamp, duration_seconds,
-		   status, medium, provider_call_type, updated_at
-		 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		   status, medium, updated_at
+		 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		 ON CONFLICT(chat_jid, call_id) DO UPDATE SET
 		   initiator_jid = excluded.initiator_jid,
 		   remote_jid = excluded.remote_jid,
@@ -1180,7 +1134,6 @@ func upsertCallTx(tx *sql.Tx, call callSnapshot, updatedAt int64) error {
 		   duration_seconds = COALESCE(excluded.duration_seconds, calls.duration_seconds),
 		   status = excluded.status,
 		   medium = excluded.medium,
-		   provider_call_type = excluded.provider_call_type,
 		   updated_at = excluded.updated_at`,
 		normalizeJID(call.ChatJID),
 		call.CallID,
@@ -1191,7 +1144,6 @@ func upsertCallTx(tx *sql.Tx, call callSnapshot, updatedAt int64) error {
 		nullableInt64(call.DurationSeconds),
 		call.Status,
 		call.Medium,
-		nullableString(call.ProviderType),
 		updatedAt,
 	)
 	return err
@@ -1745,9 +1697,6 @@ func (r *helperRuntime) readCommands(ctx context.Context, errs chan<- error) {
 		case "downloadMedia":
 			result, err := r.downloadMedia(ctx, command.ChatJID, command.MessageID, command.AttachmentIndex)
 			r.writeResponse(command.ID, err == nil, result, err)
-		case "sendText":
-			result, err := r.sendText(ctx, command.Target, command.Text)
-			r.writeResponse(command.ID, err == nil, result, err)
 		default:
 			r.writeResponse(command.ID, false, nil, fmt.Errorf("unsupported command: %s", command.Command))
 		}
@@ -1846,42 +1795,6 @@ doneWaiting:
 		return result, errors.New("all history backfill requests failed")
 	}
 	return result, nil
-}
-
-func (r *helperRuntime) sendText(ctx context.Context, target string, text string) (map[string]interface{}, error) {
-	targetJID, err := types.ParseJID(target)
-	if err != nil {
-		return nil, err
-	}
-
-	message := &waProto.Message{
-		Conversation: proto.String(text),
-	}
-	resp, err := r.client.SendMessage(ctx, targetJID, message)
-	if err != nil {
-		return nil, err
-	}
-
-	chatJID := normalizeJID(targetJID.String())
-	messageID := resp.ID
-	timestamp := time.Now().UnixMilli()
-	snapshot := messageSnapshot{
-		MessageID:   messageID,
-		ChatJID:     chatJID,
-		SenderJID:   stringPtr(jidString(r.client.Store.ID)),
-		FromMe:      true,
-		Timestamp:   timestamp,
-		Text:        text,
-		Status:      stringPtr("sent"),
-		Attachments: []attachmentSnapshot{},
-	}
-	r.state.setMessage(snapshot)
-
-	return map[string]interface{}{
-		"messageID": messageID,
-		"chatJID":   chatJID,
-		"timestamp": timestamp,
-	}, nil
 }
 
 func (r *helperRuntime) downloadMedia(ctx context.Context, chatJID string, messageID string, attachmentIndex int) (map[string]interface{}, error) {
@@ -2252,25 +2165,20 @@ func messageFromEvent(event *events.Message) messageSnapshot {
 		status = "sent"
 	}
 	attachments, messageProto := attachmentsFromMessage(messageID, chatJID, effectiveMessage)
-	replyToID, replyToSender, isForwarded, forwardingScore := messageContextMetadata(effectiveMessage)
 	revoked := messageRevoked(effectiveMessage)
 	return messageSnapshot{
-		MessageID:       messageID,
-		ChatJID:         chatJID,
-		SenderJID:       stringPtr(senderJID),
-		ParticipantJID:  participantJID,
-		FromMe:          event.Info.IsFromMe,
-		Timestamp:       event.Info.Timestamp.UnixMilli(),
-		Text:            extractText(effectiveMessage),
-		PushName:        pushName,
-		Status:          &status,
-		ReplyToID:       replyToID,
-		ReplyToSender:   replyToSender,
-		IsForwarded:     isForwarded,
-		ForwardingScore: forwardingScore,
-		Revoked:         revoked,
-		MessageProto:    messageProto,
-		Attachments:     attachments,
+		MessageID:      messageID,
+		ChatJID:        chatJID,
+		SenderJID:      stringPtr(senderJID),
+		ParticipantJID: participantJID,
+		FromMe:         event.Info.IsFromMe,
+		Timestamp:      event.Info.Timestamp.UnixMilli(),
+		Text:           extractText(effectiveMessage),
+		PushName:       pushName,
+		Status:         &status,
+		Revoked:        revoked,
+		MessageProto:   messageProto,
+		Attachments:    attachments,
 	}
 }
 
@@ -2301,10 +2209,6 @@ func attachmentsFromMessage(messageID string, chatJID string, message *waProto.M
 				"chatJID":         chatJID,
 				"messageID":       messageID,
 				"attachmentIndex": 0,
-			},
-			Availability: "available",
-			ProviderMeta: map[string]interface{}{
-				"kind": kind,
 			},
 		}
 	}
@@ -2573,22 +2477,6 @@ func contextInfoFromMessage(message *waProto.Message) *waProto.ContextInfo {
 	return nil
 }
 
-func messageContextMetadata(message *waProto.Message) (*string, *string, bool, *uint32) {
-	contextInfo := contextInfoFromMessage(message)
-	if contextInfo == nil {
-		return nil, nil, false, nil
-	}
-	var replyToID *string
-	if stanzaID := strings.TrimSpace(contextInfo.GetStanzaID()); stanzaID != "" {
-		replyToID = stringPtr(stanzaID)
-	}
-	var replyToSender *string
-	if participant := normalizeJID(contextInfo.GetParticipant()); participant != "" {
-		replyToSender = stringPtr(participant)
-	}
-	return replyToID, replyToSender, contextInfo.GetIsForwarded(), uint32PtrOrNil(contextInfo.GetForwardingScore())
-}
-
 func messageRevoked(message *waProto.Message) bool {
 	_, ok := revokedMessageKey(message)
 	return ok
@@ -2663,26 +2551,21 @@ func historyMessageSnapshot(
 		status = "sent"
 	}
 	attachments, messageProto := attachmentsFromMessage(messageID, normalizedChatJID, effectiveMessage)
-	replyToID, replyToSender, isForwarded, forwardingScore := messageContextMetadata(effectiveMessage)
 	revoked := messageRevoked(effectiveMessage)
 
 	return messageSnapshot{
-		MessageID:       messageID,
-		ChatJID:         normalizedChatJID,
-		SenderJID:       stringPtr(sender),
-		ParticipantJID:  participantJID,
-		FromMe:          fromMe,
-		Timestamp:       int64(webMsg.GetMessageTimestamp()) * 1000,
-		Text:            extractText(effectiveMessage),
-		PushName:        emptyToNil(webMsg.GetPushName()),
-		Status:          stringPtr(status),
-		ReplyToID:       replyToID,
-		ReplyToSender:   replyToSender,
-		IsForwarded:     isForwarded,
-		ForwardingScore: forwardingScore,
-		Revoked:         revoked,
-		MessageProto:    messageProto,
-		Attachments:     attachments,
+		MessageID:      messageID,
+		ChatJID:        normalizedChatJID,
+		SenderJID:      stringPtr(sender),
+		ParticipantJID: participantJID,
+		FromMe:         fromMe,
+		Timestamp:      int64(webMsg.GetMessageTimestamp()) * 1000,
+		Text:           extractText(effectiveMessage),
+		PushName:       emptyToNil(webMsg.GetPushName()),
+		Status:         stringPtr(status),
+		Revoked:        revoked,
+		MessageProto:   messageProto,
+		Attachments:    attachments,
 	}, true
 }
 
@@ -2762,7 +2645,6 @@ func callSnapshotFromRecord(client *whatsmeow.Client, record *waSyncAction.CallL
 		DurationSeconds: int64PtrIfPositive(record.GetDuration()),
 		Status:          callStatus(record.GetCallResult()),
 		Medium:          callMedium(record.GetIsVideo()),
-		ProviderType:    stringPtr(strings.ToLower(record.GetCallType().String())),
 	}, true
 }
 
@@ -3065,13 +2947,6 @@ func nullableInt64(value *int64) interface{} {
 		return nil
 	}
 	return *value
-}
-
-func nullableUint32(value *uint32) interface{} {
-	if value == nil {
-		return nil
-	}
-	return int64(*value)
 }
 
 func boolToInt(value bool) int {

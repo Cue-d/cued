@@ -87,27 +87,6 @@ describe("signal realtime", () => {
       }),
     );
 
-    const sendPromise = session.sendMessage("Ping", { recipient: "+14155550123" });
-    expect(child.stdinWrites).toHaveLength(1);
-    expect(JSON.parse(child.stdinWrites[0]!.trim())).toEqual({
-      jsonrpc: "2.0",
-      id: 1,
-      method: "send",
-      params: {
-        message: "Ping",
-        recipient: ["+14155550123"],
-      },
-    });
-
-    child.stdout.write(
-      `${JSON.stringify({
-        jsonrpc: "2.0",
-        id: 1,
-        result: { timestamp: 123 },
-      })}\n`,
-    );
-
-    await expect(sendPromise).resolves.toEqual({ timestamp: 123 });
     expect(parseSignalJsonRpcLine('{"jsonrpc":"2.0","method":"receive"}')).toEqual({
       jsonrpc: "2.0",
       method: "receive",
@@ -246,9 +225,6 @@ describe("signal realtime", () => {
         },
         isConnected() {
           return true;
-        },
-        async sendMessage() {
-          return { timestamp: 1 };
         },
       }),
     });

@@ -192,19 +192,21 @@ describe("RunQueueService", () => {
     db.upsertSourceAccounts([
       { platform: "imessage", accountKey: "local", displayName: "Messages" },
     ]);
-    db.insertRawEvent({
-      id: "imessage-reset-raw",
-      platform: "imessage",
-      accountKey: "local",
-      entityKind: "message",
-      eventKind: "created",
-      observedAt: Date.now(),
-      dedupeKey: "imessage-reset-raw",
-      payload: {
-        sourceMessageKey: "imessage:m1",
-        sourceConversationKey: "imessage:c1",
+    db.insertRawEvents([
+      {
+        id: "imessage-reset-raw",
+        platform: "imessage",
+        accountKey: "local",
+        entityKind: "message",
+        eventKind: "created",
+        observedAt: Date.now(),
+        dedupeKey: "imessage-reset-raw",
+        payload: {
+          sourceMessageKey: "imessage:m1",
+          sourceConversationKey: "imessage:c1",
+        },
       },
-    });
+    ]);
 
     const queue = new RunQueueService(db);
     const result = queue.resetSource("imessage");
@@ -222,36 +224,38 @@ describe("RunQueueService", () => {
 
   it("records a manual contact merge and rebuilds projected state immediately", () => {
     const db = createDb();
-    db.insertRawEvent({
-      id: "contact-primary",
-      platform: "contacts",
-      accountKey: "local",
-      entityKind: "contact",
-      eventKind: "observed",
-      observedAt: 1,
-      dedupeKey: "contacts:primary",
-      payload: {
-        sourceEntityKey: "contacts:primary",
-        fields: { display_name: "Ava Chen" },
-        handles: [{ type: "phone", value: "+1 (555) 123-4567", deterministic: true }],
+    db.insertRawEvents([
+      {
+        id: "contact-primary",
+        platform: "contacts",
+        accountKey: "local",
+        entityKind: "contact",
+        eventKind: "observed",
+        observedAt: 1,
+        dedupeKey: "contacts:primary",
+        payload: {
+          sourceEntityKey: "contacts:primary",
+          fields: { display_name: "Ava Chen" },
+          handles: [{ type: "phone", value: "+1 (555) 123-4567", deterministic: true }],
+        },
       },
-      sourceVersion: "contacts-v1",
-    });
-    db.insertRawEvent({
-      id: "contact-secondary",
-      platform: "linkedin",
-      accountKey: "default",
-      entityKind: "contact",
-      eventKind: "observed",
-      observedAt: 2,
-      dedupeKey: "linkedin:secondary",
-      payload: {
-        sourceEntityKey: "linkedin:secondary",
-        fields: { display_name: "Ava Chen" },
-        handles: [{ type: "linkedin", value: "urn:li:person:ava-chen", deterministic: true }],
+    ]);
+    db.insertRawEvents([
+      {
+        id: "contact-secondary",
+        platform: "linkedin",
+        accountKey: "default",
+        entityKind: "contact",
+        eventKind: "observed",
+        observedAt: 2,
+        dedupeKey: "linkedin:secondary",
+        payload: {
+          sourceEntityKey: "linkedin:secondary",
+          fields: { display_name: "Ava Chen" },
+          handles: [{ type: "linkedin", value: "urn:li:person:ava-chen", deterministic: true }],
+        },
       },
-      sourceVersion: "linkedin-v1",
-    });
+    ]);
 
     rebuildProjectedState(db);
     const contacts = db.orm().all<{ id: string }>(sql`
@@ -289,27 +293,28 @@ describe("RunQueueService", () => {
       ["contact-b", "linkedin", "urn:li:person:ava-chen"],
       ["contact-c", "slack", "ava@example.com"],
     ] as const) {
-      db.insertRawEvent({
-        id,
-        platform,
-        accountKey: "default",
-        entityKind: "contact",
-        eventKind: "observed",
-        observedAt: 1,
-        dedupeKey: `${platform}:${id}`,
-        payload: {
-          sourceEntityKey: `${platform}:${id}`,
-          fields: { display_name: "Ava Chen" },
-          handles: [
-            {
-              type: platform === "contacts" ? "phone" : platform,
-              value: handle,
-              deterministic: true,
-            },
-          ],
+      db.insertRawEvents([
+        {
+          id,
+          platform,
+          accountKey: "default",
+          entityKind: "contact",
+          eventKind: "observed",
+          observedAt: 1,
+          dedupeKey: `${platform}:${id}`,
+          payload: {
+            sourceEntityKey: `${platform}:${id}`,
+            fields: { display_name: "Ava Chen" },
+            handles: [
+              {
+                type: platform === "contacts" ? "phone" : platform,
+                value: handle,
+                deterministic: true,
+              },
+            ],
+          },
         },
-        sourceVersion: `${platform}-v1`,
-      });
+      ]);
     }
 
     rebuildProjectedState(db);
@@ -345,7 +350,9 @@ describe("RunQueueService", () => {
         expect.objectContaining({ canonicalContactId: contacts[0]!.id }),
       ],
     });
-    expect(db.listContactMergeDecisions()).toEqual([]);
+    expect(
+      db.orm().get<{ count: number }>(sql`SELECT COUNT(*) AS count FROM contact_merge_decisions`),
+    ).toEqual({ count: 0 });
     expect(db.getOverview().contacts).toBe(3);
 
     const applied = queue.mergeContactsBatch({
@@ -372,7 +379,9 @@ describe("RunQueueService", () => {
         projectionWatermark: 3,
       }),
     });
-    expect(db.listContactMergeDecisions()).toHaveLength(2);
+    expect(
+      db.orm().get<{ count: number }>(sql`SELECT COUNT(*) AS count FROM contact_merge_decisions`),
+    ).toEqual({ count: 2 });
     expect(db.getOverview().contacts).toBe(1);
 
     db.close();

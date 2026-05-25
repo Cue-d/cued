@@ -116,18 +116,9 @@ describe("slack worker lib", () => {
         senderSourceKey: "slack:T123:U_BEN",
         content: "Hi from Slack",
         isFromMe: false,
-        service: "slack",
         attachments: expect.any(Array),
       }),
     );
-    expect(
-      bundle.rawEvents.some(
-        (event) =>
-          event.entityKind === "message" &&
-          (event.payload as Record<string, unknown>).replyToSourceMessageKey ===
-            "slack:T123:D123:1710000000.000100",
-      ),
-    ).toBe(true);
     expect(listedTypes).toEqual(["im,mpim"]);
     expect(historyOldestValues).toEqual([""]);
     expect(repliesOldestValues).toEqual([""]);
@@ -508,12 +499,6 @@ describe("slack worker lib", () => {
       expect.objectContaining({
         proofKind: "messages",
         status: "blocked",
-        error: {
-          code: "not_in_channel",
-          message: "not_in_channel",
-          retryable: false,
-          kind: "slack_api",
-        },
       }),
     ]);
     expect(bundle.rawEvents.some((event) => event.entityKind === "conversation")).toBe(true);
@@ -595,12 +580,6 @@ describe("slack worker lib", () => {
           completedThreadCount: 0,
           pendingThreadCount: 1,
         }),
-        error: {
-          code: "missing_scope",
-          message: "missing_scope",
-          retryable: false,
-          kind: "slack_api",
-        },
       }),
     ]);
   });
@@ -704,12 +683,6 @@ describe("slack worker lib", () => {
           completedThreadCount: 1,
           pendingThreadCount: 0,
         }),
-        error: {
-          code: "not_in_channel",
-          message: "not_in_channel",
-          retryable: false,
-          kind: "slack_api",
-        },
       }),
     ]);
   });

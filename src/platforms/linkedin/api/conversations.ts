@@ -182,7 +182,6 @@ function parseConversation(raw: RawConversation): Conversation {
     read: raw.read ?? true,
     messages,
     categories: raw.categories ?? [],
-    unreadCount: raw.read === false ? 1 : 0,
   };
 }
 

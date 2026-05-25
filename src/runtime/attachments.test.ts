@@ -118,10 +118,9 @@ describe("attachment service", () => {
       .prepare(
         `
         INSERT INTO conversations (
-          id, platform, account_key, source_conversation_key, native_conversation_key, type, is_active,
-          service, name, topic, participant_names, last_message_id, last_message_at, last_message_preview,
-          unread_count, created_at, updated_at
-        ) VALUES (?, 'imessage', 'local', ?, NULL, 'dm', 1, 'iMessage', ?, NULL, '', NULL, NULL, NULL, 0, ?, ?)
+          id, platform, account_key, source_conversation_key, type, is_active,
+          name, participant_names, created_at, updated_at
+        ) VALUES (?, 'imessage', 'local', ?, 'dm', 1, ?, '', ?, ?)
       `,
       )
       .run("conversation-1", "source-conversation-1", "Thread", timestamp, timestamp);
@@ -130,10 +129,10 @@ describe("attachment service", () => {
         `
         INSERT INTO messages (
           id, platform, account_key, platform_message_id, conversation_id, sender_contact_id,
-          sender_source_key, sender_name, conversation_name, sent_at, service, status, is_from_me,
-          content, delivered_at, read_at, edited_at, deleted_at, reply_to_message_id, is_deleted,
-          is_edited, attachment_count, reaction_count, created_at, updated_at
-        ) VALUES (?, 'imessage', 'local', ?, ?, NULL, NULL, 'Ben', 'Thread', ?, 'iMessage', 'delivered', 0, 'hello', NULL, NULL, NULL, NULL, NULL, 0, 0, 1, 0, ?, ?)
+          sender_source_key, sender_name, conversation_name, sent_at, status, is_from_me,
+          content, delivered_at, read_at, is_deleted,
+          created_at, updated_at
+        ) VALUES (?, 'imessage', 'local', ?, ?, NULL, NULL, 'Ben', 'Thread', ?, 'delivered', 0, 'hello', NULL, NULL, 0, ?, ?)
       `,
       )
       .run("message-1", "platform-message-1", "conversation-1", timestamp, timestamp, timestamp);
@@ -143,8 +142,8 @@ describe("attachment service", () => {
         INSERT INTO message_attachments (
           id, message_id, platform, account_key, source_attachment_key, kind, mime_type, filename,
           title, local_path, remote_url, size_bytes, text_content, access_kind, access_ref_json,
-          preview_ref_json, availability_status, provider_metadata_json, metadata_json, created_at, updated_at
-        ) VALUES (?, ?, 'imessage', 'local', ?, 'file', 'text/plain', 'note.txt', 'Note', ?, NULL, ?, NULL, 'local_path', ?, NULL, 'available', '{}', '{}', ?, ?)
+          created_at, updated_at
+        ) VALUES (?, ?, 'imessage', 'local', ?, 'file', 'text/plain', 'note.txt', 'Note', ?, NULL, ?, NULL, 'local_path', ?, ?, ?)
       `,
       )
       .run(
@@ -201,10 +200,9 @@ describe("attachment service", () => {
       .prepare(
         `
         INSERT INTO conversations (
-          id, platform, account_key, source_conversation_key, native_conversation_key, type, is_active,
-          service, name, topic, participant_names, last_message_id, last_message_at, last_message_preview,
-          unread_count, created_at, updated_at
-        ) VALUES (?, 'gmail', 'default', ?, NULL, 'dm', 1, 'Gmail', ?, NULL, '', NULL, NULL, NULL, 0, ?, ?)
+          id, platform, account_key, source_conversation_key, type, is_active,
+          name, participant_names, created_at, updated_at
+        ) VALUES (?, 'gmail', 'default', ?, 'dm', 1, ?, '', ?, ?)
       `,
       )
       .run(
@@ -219,10 +217,10 @@ describe("attachment service", () => {
         `
         INSERT INTO messages (
           id, platform, account_key, platform_message_id, conversation_id, sender_contact_id,
-          sender_source_key, sender_name, conversation_name, sent_at, service, status, is_from_me,
-          content, delivered_at, read_at, edited_at, deleted_at, reply_to_message_id, is_deleted,
-          is_edited, attachment_count, reaction_count, created_at, updated_at
-        ) VALUES (?, 'gmail', 'default', ?, ?, NULL, NULL, 'Ben', 'Thread', ?, 'Gmail', NULL, 0, 'hello', NULL, NULL, NULL, NULL, NULL, 0, 0, 1, 0, ?, ?)
+          sender_source_key, sender_name, conversation_name, sent_at, status, is_from_me,
+          content, delivered_at, read_at, is_deleted,
+          created_at, updated_at
+        ) VALUES (?, 'gmail', 'default', ?, ?, NULL, NULL, 'Ben', 'Thread', ?, NULL, 0, 'hello', NULL, NULL, 0, ?, ?)
       `,
       )
       .run(
@@ -239,8 +237,8 @@ describe("attachment service", () => {
         INSERT INTO message_attachments (
           id, message_id, platform, account_key, source_attachment_key, kind, mime_type, filename,
           title, local_path, remote_url, size_bytes, text_content, access_kind, access_ref_json,
-          preview_ref_json, availability_status, provider_metadata_json, metadata_json, created_at, updated_at
-        ) VALUES (?, ?, 'gmail', 'default', ?, 'file', 'application/vnd.google-apps.document', 'remote-doc.gdoc', 'Remote Doc', NULL, NULL, ?, NULL, 'provider_fetch', ?, NULL, 'available', '{}', '{}', ?, ?)
+          created_at, updated_at
+        ) VALUES (?, ?, 'gmail', 'default', ?, 'file', 'application/vnd.google-apps.document', 'remote-doc.gdoc', 'Remote Doc', NULL, NULL, ?, NULL, 'provider_fetch', ?, ?, ?)
       `,
       )
       .run(
@@ -297,10 +295,9 @@ describe("attachment service", () => {
       .prepare(
         `
         INSERT INTO conversations (
-          id, platform, account_key, source_conversation_key, native_conversation_key, type, is_active,
-          service, name, topic, participant_names, last_message_id, last_message_at, last_message_preview,
-          unread_count, created_at, updated_at
-        ) VALUES (?, 'imessage', 'local', ?, NULL, 'dm', 1, 'iMessage', ?, NULL, '', NULL, NULL, NULL, 0, ?, ?)
+          id, platform, account_key, source_conversation_key, type, is_active,
+          name, participant_names, created_at, updated_at
+        ) VALUES (?, 'imessage', 'local', ?, 'dm', 1, ?, '', ?, ?)
       `,
       )
       .run("conversation-variant", "source-conversation-variant", "Thread", timestamp, timestamp);
@@ -309,10 +306,10 @@ describe("attachment service", () => {
         `
         INSERT INTO messages (
           id, platform, account_key, platform_message_id, conversation_id, sender_contact_id,
-          sender_source_key, sender_name, conversation_name, sent_at, service, status, is_from_me,
-          content, delivered_at, read_at, edited_at, deleted_at, reply_to_message_id, is_deleted,
-          is_edited, attachment_count, reaction_count, created_at, updated_at
-        ) VALUES (?, 'imessage', 'local', ?, ?, NULL, NULL, 'Ben', 'Thread', ?, 'iMessage', 'delivered', 0, 'hello', NULL, NULL, NULL, NULL, NULL, 0, 0, 1, 0, ?, ?)
+          sender_source_key, sender_name, conversation_name, sent_at, status, is_from_me,
+          content, delivered_at, read_at, is_deleted,
+          created_at, updated_at
+        ) VALUES (?, 'imessage', 'local', ?, ?, NULL, NULL, 'Ben', 'Thread', ?, 'delivered', 0, 'hello', NULL, NULL, 0, ?, ?)
       `,
       )
       .run(
@@ -329,8 +326,8 @@ describe("attachment service", () => {
         INSERT INTO message_attachments (
           id, message_id, platform, account_key, source_attachment_key, kind, mime_type, filename,
           title, local_path, remote_url, size_bytes, text_content, access_kind, access_ref_json,
-          preview_ref_json, availability_status, provider_metadata_json, metadata_json, created_at, updated_at
-        ) VALUES (?, ?, 'imessage', 'local', ?, 'file', 'text/plain', 'variant.txt', 'Variant', ?, NULL, ?, NULL, 'local_path', ?, NULL, 'available', '{}', '{}', ?, ?)
+          created_at, updated_at
+        ) VALUES (?, ?, 'imessage', 'local', ?, 'file', 'text/plain', 'variant.txt', 'Variant', ?, NULL, ?, NULL, 'local_path', ?, ?, ?)
       `,
       )
       .run(
@@ -382,10 +379,9 @@ describe("attachment service", () => {
       .prepare(
         `
         INSERT INTO conversations (
-          id, platform, account_key, source_conversation_key, native_conversation_key, type, is_active,
-          service, name, topic, participant_names, last_message_id, last_message_at, last_message_preview,
-          unread_count, created_at, updated_at
-        ) VALUES (?, 'imessage', 'local', ?, NULL, 'dm', 1, 'iMessage', ?, NULL, '', NULL, NULL, NULL, 0, ?, ?)
+          id, platform, account_key, source_conversation_key, type, is_active,
+          name, participant_names, created_at, updated_at
+        ) VALUES (?, 'imessage', 'local', ?, 'dm', 1, ?, '', ?, ?)
       `,
       )
       .run("conversation-2", "source-conversation-2", "Thread", timestamp, timestamp);
@@ -394,10 +390,10 @@ describe("attachment service", () => {
         `
         INSERT INTO messages (
           id, platform, account_key, platform_message_id, conversation_id, sender_contact_id,
-          sender_source_key, sender_name, conversation_name, sent_at, service, status, is_from_me,
-          content, delivered_at, read_at, edited_at, deleted_at, reply_to_message_id, is_deleted,
-          is_edited, attachment_count, reaction_count, created_at, updated_at
-        ) VALUES (?, 'imessage', 'local', ?, ?, NULL, NULL, 'Ben', 'Thread', ?, 'iMessage', 'delivered', 0, 'hello', NULL, NULL, NULL, NULL, NULL, 0, 0, 1, 0, ?, ?)
+          sender_source_key, sender_name, conversation_name, sent_at, status, is_from_me,
+          content, delivered_at, read_at, is_deleted,
+          created_at, updated_at
+        ) VALUES (?, 'imessage', 'local', ?, ?, NULL, NULL, 'Ben', 'Thread', ?, 'delivered', 0, 'hello', NULL, NULL, 0, ?, ?)
       `,
       )
       .run("message-2", "platform-message-2", "conversation-2", timestamp, timestamp, timestamp);
@@ -407,8 +403,8 @@ describe("attachment service", () => {
         INSERT INTO message_attachments (
           id, message_id, platform, account_key, source_attachment_key, kind, mime_type, filename,
           title, local_path, remote_url, size_bytes, text_content, access_kind, access_ref_json,
-          preview_ref_json, availability_status, provider_metadata_json, metadata_json, created_at, updated_at
-        ) VALUES (?, ?, 'imessage', 'local', ?, 'file', 'text/plain', 'note.txt', 'Note', ?, NULL, ?, NULL, 'local_path', ?, NULL, 'available', '{}', '{}', ?, ?)
+          created_at, updated_at
+        ) VALUES (?, ?, 'imessage', 'local', ?, 'file', 'text/plain', 'note.txt', 'Note', ?, NULL, ?, NULL, 'local_path', ?, ?, ?)
       `,
       )
       .run(
@@ -447,10 +443,9 @@ describe("attachment service", () => {
       .prepare(
         `
         INSERT INTO conversations (
-          id, platform, account_key, source_conversation_key, native_conversation_key, type, is_active,
-          service, name, topic, participant_names, last_message_id, last_message_at, last_message_preview,
-          unread_count, created_at, updated_at
-        ) VALUES (?, 'imessage', 'local', ?, NULL, 'dm', 1, 'iMessage', ?, NULL, '', NULL, NULL, NULL, 0, ?, ?)
+          id, platform, account_key, source_conversation_key, type, is_active,
+          name, participant_names, created_at, updated_at
+        ) VALUES (?, 'imessage', 'local', ?, 'dm', 1, ?, '', ?, ?)
       `,
       )
       .run("conversation-3", "source-conversation-3", "Thread", timestamp, timestamp);
@@ -459,10 +454,10 @@ describe("attachment service", () => {
         `
         INSERT INTO messages (
           id, platform, account_key, platform_message_id, conversation_id, sender_contact_id,
-          sender_source_key, sender_name, conversation_name, sent_at, service, status, is_from_me,
-          content, delivered_at, read_at, edited_at, deleted_at, reply_to_message_id, is_deleted,
-          is_edited, attachment_count, reaction_count, created_at, updated_at
-        ) VALUES (?, 'imessage', 'local', ?, ?, NULL, NULL, 'Ben', 'Thread', ?, 'iMessage', 'delivered', 0, 'hello', NULL, NULL, NULL, NULL, NULL, 0, 0, 1, 0, ?, ?)
+          sender_source_key, sender_name, conversation_name, sent_at, status, is_from_me,
+          content, delivered_at, read_at, is_deleted,
+          created_at, updated_at
+        ) VALUES (?, 'imessage', 'local', ?, ?, NULL, NULL, 'Ben', 'Thread', ?, 'delivered', 0, 'hello', NULL, NULL, 0, ?, ?)
       `,
       )
       .run("message-3", "platform-message-3", "conversation-3", timestamp, timestamp, timestamp);
@@ -472,8 +467,8 @@ describe("attachment service", () => {
         INSERT INTO message_attachments (
           id, message_id, platform, account_key, source_attachment_key, kind, mime_type, filename,
           title, local_path, remote_url, size_bytes, text_content, access_kind, access_ref_json,
-          preview_ref_json, availability_status, provider_metadata_json, metadata_json, created_at, updated_at
-        ) VALUES (?, ?, 'imessage', 'local', ?, 'file', 'text/plain', 'missing.txt', 'Missing', ?, NULL, ?, NULL, 'local_path', ?, NULL, 'available', '{}', '{}', ?, ?)
+          created_at, updated_at
+        ) VALUES (?, ?, 'imessage', 'local', ?, 'file', 'text/plain', 'missing.txt', 'Missing', ?, NULL, ?, NULL, 'local_path', ?, ?, ?)
       `,
       )
       .run(
@@ -512,10 +507,9 @@ describe("attachment service", () => {
       .prepare(
         `
         INSERT INTO conversations (
-          id, platform, account_key, source_conversation_key, native_conversation_key, type, is_active,
-          service, name, topic, participant_names, last_message_id, last_message_at, last_message_preview,
-          unread_count, created_at, updated_at
-        ) VALUES (?, 'discord', 'default', ?, NULL, 'dm', 1, 'Discord', ?, NULL, '', NULL, NULL, NULL, 0, ?, ?)
+          id, platform, account_key, source_conversation_key, type, is_active,
+          name, participant_names, created_at, updated_at
+        ) VALUES (?, 'discord', 'default', ?, 'dm', 1, ?, '', ?, ?)
       `,
       )
       .run("conversation-remote", "source-conversation-remote", "Thread", timestamp, timestamp);
@@ -524,10 +518,10 @@ describe("attachment service", () => {
         `
         INSERT INTO messages (
           id, platform, account_key, platform_message_id, conversation_id, sender_contact_id,
-          sender_source_key, sender_name, conversation_name, sent_at, service, status, is_from_me,
-          content, delivered_at, read_at, edited_at, deleted_at, reply_to_message_id, is_deleted,
-          is_edited, attachment_count, reaction_count, created_at, updated_at
-        ) VALUES (?, 'discord', 'default', ?, ?, NULL, NULL, 'Ben', 'Thread', ?, 'Discord', NULL, 0, 'hello', NULL, NULL, NULL, NULL, NULL, 0, 0, 1, 0, ?, ?)
+          sender_source_key, sender_name, conversation_name, sent_at, status, is_from_me,
+          content, delivered_at, read_at, is_deleted,
+          created_at, updated_at
+        ) VALUES (?, 'discord', 'default', ?, ?, NULL, NULL, 'Ben', 'Thread', ?, NULL, 0, 'hello', NULL, NULL, 0, ?, ?)
       `,
       )
       .run(
@@ -544,8 +538,8 @@ describe("attachment service", () => {
         INSERT INTO message_attachments (
           id, message_id, platform, account_key, source_attachment_key, kind, mime_type, filename,
           title, local_path, remote_url, size_bytes, text_content, access_kind, access_ref_json,
-          preview_ref_json, availability_status, provider_metadata_json, metadata_json, created_at, updated_at
-        ) VALUES (?, ?, 'discord', 'default', ?, 'file', 'text/plain', 'note.txt', 'Note', NULL, ?, NULL, NULL, 'remote_url', ?, NULL, 'available', '{}', '{}', ?, ?)
+          created_at, updated_at
+        ) VALUES (?, ?, 'discord', 'default', ?, 'file', 'text/plain', 'note.txt', 'Note', NULL, ?, NULL, NULL, 'remote_url', ?, ?, ?)
       `,
       )
       .run(
@@ -577,10 +571,9 @@ describe("attachment service", () => {
       .prepare(
         `
         INSERT INTO conversations (
-          id, platform, account_key, source_conversation_key, native_conversation_key, type, is_active,
-          service, name, topic, participant_names, last_message_id, last_message_at, last_message_preview,
-          unread_count, created_at, updated_at
-        ) VALUES (?, 'discord', 'default', ?, NULL, 'dm', 1, 'Discord', ?, NULL, '', NULL, NULL, NULL, 0, ?, ?)
+          id, platform, account_key, source_conversation_key, type, is_active,
+          name, participant_names, created_at, updated_at
+        ) VALUES (?, 'discord', 'default', ?, 'dm', 1, ?, '', ?, ?)
       `,
       )
       .run("conversation-private", "source-conversation-private", "Thread", timestamp, timestamp);
@@ -589,10 +582,10 @@ describe("attachment service", () => {
         `
         INSERT INTO messages (
           id, platform, account_key, platform_message_id, conversation_id, sender_contact_id,
-          sender_source_key, sender_name, conversation_name, sent_at, service, status, is_from_me,
-          content, delivered_at, read_at, edited_at, deleted_at, reply_to_message_id, is_deleted,
-          is_edited, attachment_count, reaction_count, created_at, updated_at
-        ) VALUES (?, 'discord', 'default', ?, ?, NULL, NULL, 'Ben', 'Thread', ?, 'Discord', NULL, 0, 'hello', NULL, NULL, NULL, NULL, NULL, 0, 0, 1, 0, ?, ?)
+          sender_source_key, sender_name, conversation_name, sent_at, status, is_from_me,
+          content, delivered_at, read_at, is_deleted,
+          created_at, updated_at
+        ) VALUES (?, 'discord', 'default', ?, ?, NULL, NULL, 'Ben', 'Thread', ?, NULL, 0, 'hello', NULL, NULL, 0, ?, ?)
       `,
       )
       .run(
@@ -609,8 +602,8 @@ describe("attachment service", () => {
         INSERT INTO message_attachments (
           id, message_id, platform, account_key, source_attachment_key, kind, mime_type, filename,
           title, local_path, remote_url, size_bytes, text_content, access_kind, access_ref_json,
-          preview_ref_json, availability_status, provider_metadata_json, metadata_json, created_at, updated_at
-        ) VALUES (?, ?, 'discord', 'default', ?, 'file', 'text/plain', 'note.txt', 'Note', NULL, ?, NULL, NULL, 'remote_url', ?, NULL, 'available', '{}', '{}', ?, ?)
+          created_at, updated_at
+        ) VALUES (?, ?, 'discord', 'default', ?, 'file', 'text/plain', 'note.txt', 'Note', NULL, ?, NULL, NULL, 'remote_url', ?, ?, ?)
       `,
       )
       .run(
@@ -638,10 +631,9 @@ describe("attachment service", () => {
       .prepare(
         `
         INSERT INTO conversations (
-          id, platform, account_key, source_conversation_key, native_conversation_key, type, is_active,
-          service, name, topic, participant_names, last_message_id, last_message_at, last_message_preview,
-          unread_count, created_at, updated_at
-        ) VALUES (?, 'discord', 'default', ?, NULL, 'dm', 1, 'Discord', ?, NULL, '', NULL, NULL, NULL, 0, ?, ?)
+          id, platform, account_key, source_conversation_key, type, is_active,
+          name, participant_names, created_at, updated_at
+        ) VALUES (?, 'discord', 'default', ?, 'dm', 1, ?, '', ?, ?)
       `,
       )
       .run(
@@ -656,10 +648,10 @@ describe("attachment service", () => {
         `
         INSERT INTO messages (
           id, platform, account_key, platform_message_id, conversation_id, sender_contact_id,
-          sender_source_key, sender_name, conversation_name, sent_at, service, status, is_from_me,
-          content, delivered_at, read_at, edited_at, deleted_at, reply_to_message_id, is_deleted,
-          is_edited, attachment_count, reaction_count, created_at, updated_at
-        ) VALUES (?, 'discord', 'default', ?, ?, NULL, NULL, 'Ben', 'Thread', ?, 'Discord', NULL, 0, 'hello', NULL, NULL, NULL, NULL, NULL, 0, 0, 1, 0, ?, ?)
+          sender_source_key, sender_name, conversation_name, sent_at, status, is_from_me,
+          content, delivered_at, read_at, is_deleted,
+          created_at, updated_at
+        ) VALUES (?, 'discord', 'default', ?, ?, NULL, NULL, 'Ben', 'Thread', ?, NULL, 0, 'hello', NULL, NULL, 0, ?, ?)
       `,
       )
       .run(
@@ -676,8 +668,8 @@ describe("attachment service", () => {
         INSERT INTO message_attachments (
           id, message_id, platform, account_key, source_attachment_key, kind, mime_type, filename,
           title, local_path, remote_url, size_bytes, text_content, access_kind, access_ref_json,
-          preview_ref_json, availability_status, provider_metadata_json, metadata_json, created_at, updated_at
-        ) VALUES (?, ?, 'discord', 'default', ?, 'file', 'text/plain', 'note.txt', 'Note', NULL, ?, NULL, NULL, 'remote_url', ?, NULL, 'available', '{}', '{}', ?, ?)
+          created_at, updated_at
+        ) VALUES (?, ?, 'discord', 'default', ?, 'file', 'text/plain', 'note.txt', 'Note', NULL, ?, NULL, NULL, 'remote_url', ?, ?, ?)
       `,
       )
       .run(
@@ -706,10 +698,9 @@ describe("attachment service", () => {
       .prepare(
         `
         INSERT INTO conversations (
-          id, platform, account_key, source_conversation_key, native_conversation_key, type, is_active,
-          service, name, topic, participant_names, last_message_id, last_message_at, last_message_preview,
-          unread_count, created_at, updated_at
-        ) VALUES (?, 'discord', 'default', ?, NULL, 'dm', 1, 'Discord', ?, NULL, '', NULL, NULL, NULL, 0, ?, ?)
+          id, platform, account_key, source_conversation_key, type, is_active,
+          name, participant_names, created_at, updated_at
+        ) VALUES (?, 'discord', 'default', ?, 'dm', 1, ?, '', ?, ?)
       `,
       )
       .run(
@@ -724,10 +715,10 @@ describe("attachment service", () => {
         `
         INSERT INTO messages (
           id, platform, account_key, platform_message_id, conversation_id, sender_contact_id,
-          sender_source_key, sender_name, conversation_name, sent_at, service, status, is_from_me,
-          content, delivered_at, read_at, edited_at, deleted_at, reply_to_message_id, is_deleted,
-          is_edited, attachment_count, reaction_count, created_at, updated_at
-        ) VALUES (?, 'discord', 'default', ?, ?, NULL, NULL, 'Ben', 'Thread', ?, 'Discord', NULL, 0, 'hello', NULL, NULL, NULL, NULL, NULL, 0, 0, 1, 0, ?, ?)
+          sender_source_key, sender_name, conversation_name, sent_at, status, is_from_me,
+          content, delivered_at, read_at, is_deleted,
+          created_at, updated_at
+        ) VALUES (?, 'discord', 'default', ?, ?, NULL, NULL, 'Ben', 'Thread', ?, NULL, 0, 'hello', NULL, NULL, 0, ?, ?)
       `,
       )
       .run(
@@ -744,8 +735,8 @@ describe("attachment service", () => {
         INSERT INTO message_attachments (
           id, message_id, platform, account_key, source_attachment_key, kind, mime_type, filename,
           title, local_path, remote_url, size_bytes, text_content, access_kind, access_ref_json,
-          preview_ref_json, availability_status, provider_metadata_json, metadata_json, created_at, updated_at
-        ) VALUES (?, ?, 'discord', 'default', ?, 'file', 'text/plain', 'note.txt', 'Note', NULL, ?, NULL, NULL, 'remote_url', ?, NULL, 'available', '{}', '{}', ?, ?)
+          created_at, updated_at
+        ) VALUES (?, ?, 'discord', 'default', ?, 'file', 'text/plain', 'note.txt', 'Note', NULL, ?, NULL, NULL, 'remote_url', ?, ?, ?)
       `,
       )
       .run(
@@ -786,10 +777,9 @@ describe("attachment service", () => {
       .prepare(
         `
         INSERT INTO conversations (
-          id, platform, account_key, source_conversation_key, native_conversation_key, type, is_active,
-          service, name, topic, participant_names, last_message_id, last_message_at, last_message_preview,
-          unread_count, created_at, updated_at
-        ) VALUES (?, 'imessage', 'local', ?, NULL, 'dm', 1, 'iMessage', ?, NULL, '', NULL, NULL, NULL, 0, ?, ?)
+          id, platform, account_key, source_conversation_key, type, is_active,
+          name, participant_names, created_at, updated_at
+        ) VALUES (?, 'imessage', 'local', ?, 'dm', 1, ?, '', ?, ?)
       `,
       )
       .run("conversation-shared", "source-conversation-shared", "Thread", timestamp, timestamp);
@@ -800,10 +790,10 @@ describe("attachment service", () => {
           `
           INSERT INTO messages (
             id, platform, account_key, platform_message_id, conversation_id, sender_contact_id,
-            sender_source_key, sender_name, conversation_name, sent_at, service, status, is_from_me,
-            content, delivered_at, read_at, edited_at, deleted_at, reply_to_message_id, is_deleted,
-            is_edited, attachment_count, reaction_count, created_at, updated_at
-          ) VALUES (?, 'imessage', 'local', ?, ?, NULL, NULL, 'Ben', 'Thread', ?, 'iMessage', 'delivered', 0, 'hello', NULL, NULL, NULL, NULL, NULL, 0, 0, 1, 0, ?, ?)
+            sender_source_key, sender_name, conversation_name, sent_at, status, is_from_me,
+          content, delivered_at, read_at, is_deleted,
+          created_at, updated_at
+          ) VALUES (?, 'imessage', 'local', ?, ?, NULL, NULL, 'Ben', 'Thread', ?, 'delivered', 0, 'hello', NULL, NULL, 0, ?, ?)
         `,
         )
         .run(
@@ -820,8 +810,8 @@ describe("attachment service", () => {
           INSERT INTO message_attachments (
             id, message_id, platform, account_key, source_attachment_key, kind, mime_type, filename,
             title, local_path, remote_url, size_bytes, text_content, access_kind, access_ref_json,
-            preview_ref_json, availability_status, provider_metadata_json, metadata_json, created_at, updated_at
-          ) VALUES (?, ?, 'imessage', 'local', ?, 'file', 'text/plain', 'shared.txt', 'Shared', ?, NULL, ?, NULL, 'local_path', ?, NULL, 'available', '{}', '{}', ?, ?)
+          created_at, updated_at
+          ) VALUES (?, ?, 'imessage', 'local', ?, 'file', 'text/plain', 'shared.txt', 'Shared', ?, NULL, ?, NULL, 'local_path', ?, ?, ?)
         `,
         )
         .run(
@@ -881,10 +871,9 @@ describe("attachment service", () => {
       .prepare(
         `
         INSERT INTO conversations (
-          id, platform, account_key, source_conversation_key, native_conversation_key, type, is_active,
-          service, name, topic, participant_names, last_message_id, last_message_at, last_message_preview,
-          unread_count, created_at, updated_at
-        ) VALUES (?, 'imessage', 'local', ?, NULL, 'dm', 1, 'iMessage', ?, NULL, '', NULL, NULL, NULL, 0, ?, ?)
+          id, platform, account_key, source_conversation_key, type, is_active,
+          name, participant_names, created_at, updated_at
+        ) VALUES (?, 'imessage', 'local', ?, 'dm', 1, ?, '', ?, ?)
       `,
       )
       .run(
@@ -899,10 +888,10 @@ describe("attachment service", () => {
         `
         INSERT INTO messages (
           id, platform, account_key, platform_message_id, conversation_id, sender_contact_id,
-          sender_source_key, sender_name, conversation_name, sent_at, service, status, is_from_me,
-          content, delivered_at, read_at, edited_at, deleted_at, reply_to_message_id, is_deleted,
-          is_edited, attachment_count, reaction_count, created_at, updated_at
-        ) VALUES (?, 'imessage', 'local', ?, ?, NULL, NULL, 'Ben', 'Thread', ?, 'iMessage', 'delivered', 0, 'hello', NULL, NULL, NULL, NULL, NULL, 0, 0, 1, 0, ?, ?)
+          sender_source_key, sender_name, conversation_name, sent_at, status, is_from_me,
+          content, delivered_at, read_at, is_deleted,
+          created_at, updated_at
+        ) VALUES (?, 'imessage', 'local', ?, ?, NULL, NULL, 'Ben', 'Thread', ?, 'delivered', 0, 'hello', NULL, NULL, 0, ?, ?)
       `,
       )
       .run(
@@ -919,8 +908,8 @@ describe("attachment service", () => {
         INSERT INTO message_attachments (
           id, message_id, platform, account_key, source_attachment_key, kind, mime_type, filename,
           title, local_path, remote_url, size_bytes, text_content, access_kind, access_ref_json,
-          preview_ref_json, availability_status, provider_metadata_json, metadata_json, created_at, updated_at
-        ) VALUES (?, ?, 'imessage', 'local', ?, 'file', 'text/plain', 'large.txt', 'Large', ?, NULL, ?, NULL, 'local_path', ?, NULL, 'available', '{}', '{}', ?, ?)
+          created_at, updated_at
+        ) VALUES (?, ?, 'imessage', 'local', ?, 'file', 'text/plain', 'large.txt', 'Large', ?, NULL, ?, NULL, 'local_path', ?, ?, ?)
       `,
       )
       .run(

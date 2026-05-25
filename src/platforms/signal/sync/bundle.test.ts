@@ -58,7 +58,6 @@ describe("signal worker lib", () => {
         sourceConversationKey: "signal:dm:+14155550123",
         senderSourceKey: "signal:+14155550123",
         content: "Hello from Signal",
-        service: "signal",
         isFromMe: false,
       }),
     );

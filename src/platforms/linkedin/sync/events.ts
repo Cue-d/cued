@@ -129,12 +129,8 @@ export function buildParticipantContactEvent(
         company: participant.participantType.member?.headline ?? null,
         photo_url: bestParticipantPhoto(participant),
       },
-      sourceProfileUrl:
-        participant.participantType.member?.profileUrl ??
-        linkedinProfileUrlFromUrn(participant.entityURN),
       handles: participantHandles(participant),
     },
-    sourceVersion: "linkedin-v1",
   };
 }
 
@@ -170,16 +166,6 @@ function largestVectorImageUrl(value: unknown): string | null {
   return `${image.rootUrl}${artifact.fileIdentifyingUrlPathSegment}`;
 }
 
-export function replyToSourceMessageKey(message: Message): string | null {
-  for (const item of message.renderContent ?? []) {
-    const originalUrn = item.repliedMessageContent?.originalMessage?.entityUrn;
-    if (typeof originalUrn === "string" && originalUrn.length > 0) {
-      return `linkedin:${originalUrn}`;
-    }
-  }
-  return null;
-}
-
 export function normalizeLinkedInAttachments(message: Message): Array<Record<string, unknown>> {
   const attachments: Array<Record<string, unknown>> = [];
   for (const [index, item] of (message.renderContent ?? []).entries()) {
@@ -197,7 +183,6 @@ export function normalizeLinkedInAttachments(message: Message): Array<Record<str
         mime_type: file.mediaType ?? null,
         size_bytes: file.byteSize ?? null,
         remote_url: file.url ?? null,
-        metadata: file,
       });
       continue;
     }
@@ -207,11 +192,8 @@ export function normalizeLinkedInAttachments(message: Message): Array<Record<str
       attachments.push({
         sourceAttachmentKey: `${message.entityURN}:audio:${audio.assetUrn ?? index}`,
         kind: "audio",
-        id: audio.assetUrn ?? null,
         remote_url: audio.url ?? null,
         size_bytes: audio.byteSize ?? null,
-        duration_ms: audio.duration ?? null,
-        metadata: audio,
       });
       continue;
     }
@@ -232,8 +214,6 @@ export function normalizeLinkedInAttachments(message: Message): Array<Record<str
         remote_url: locations.find((location) => typeof location.url === "string")?.url ?? null,
         mime_type: firstStream?.mediaType ?? null,
         size_bytes: firstStream?.size ?? null,
-        preview_url: largestVectorImageUrl(video.thumbnail ?? null),
-        metadata: video,
       });
       continue;
     }
@@ -243,7 +223,6 @@ export function normalizeLinkedInAttachments(message: Message): Array<Record<str
         sourceAttachmentKey: `${message.entityURN}:image:${index}`,
         kind: "image",
         remote_url: largestVectorImageUrl(item.vectorImage),
-        metadata: item.vectorImage,
       });
       continue;
     }
@@ -256,11 +235,6 @@ export function normalizeLinkedInAttachments(message: Message): Array<Record<str
         kind: "link",
         title: media.title ?? null,
         remote_url: payload?.url ?? null,
-        preview_url:
-          typeof (media.previewMedia as Record<string, unknown> | undefined)?.url === "string"
-            ? (media.previewMedia as Record<string, unknown>).url
-            : null,
-        metadata: media,
       });
       continue;
     }
@@ -268,7 +242,6 @@ export function normalizeLinkedInAttachments(message: Message): Array<Record<str
     attachments.push({
       sourceAttachmentKey: `${message.entityURN}:attachment:${index}`,
       kind: "attachment",
-      metadata: item,
     });
   }
   return attachments;
@@ -276,10 +249,6 @@ export function normalizeLinkedInAttachments(message: Message): Array<Record<str
 
 export function isLinkedInMessageDeleted(message: Message): boolean {
   return message.messageBodyRenderFormat === "RECALLED";
-}
-
-export function isLinkedInMessageEdited(message: Message): boolean {
-  return message.messageBodyRenderFormat === "EDITED";
 }
 
 export function isLinkedInSystemMessage(message: Message): boolean {
@@ -321,15 +290,11 @@ export function buildLinkedInConversationEvent(
       sourceConversationKey: conversationSourceKey(normalizedConversation),
       conversationType: conversation.groupChat ? "group" : "dm",
       displayName: conversation.title || null,
-      nativeConversationKey: normalizedConversation,
-      service: "linkedin",
-      unreadCount: conversation.unreadCount,
       participants: conversation.conversationParticipants.map((participant) => ({
         sourceEntityKey: participantSourceKey(participant),
         isSelf: normalizeMemberUrn(participant.entityURN) === userEntityUrn,
       })),
     },
-    sourceVersion: "linkedin-v1",
   };
 }
 
@@ -362,10 +327,6 @@ export function buildLinkedInConversationRemovalEvents(input: {
         sourceConversationKey,
         conversationType: input.conversation?.groupChat ? "group" : "dm",
         displayName: input.conversation?.title || null,
-        nativeConversationKey: normalizedConversation,
-        service: "linkedin",
-        unreadCount: 0,
-        removalReason: input.reason,
         participants:
           input.conversation?.conversationParticipants.map((participant) => ({
             sourceEntityKey: participantSourceKey(participant),
@@ -374,7 +335,6 @@ export function buildLinkedInConversationRemovalEvents(input: {
               : undefined,
           })) ?? [],
       } satisfies ConversationObservationPayload,
-      sourceVersion: "linkedin-v1",
     },
   ];
 }
@@ -406,13 +366,8 @@ export function buildLinkedInSystemTimelineEvent(
       actorSourceKey: sender,
       eventAt: message.deliveredAt,
       text: message.body.text || null,
-      metadata: {
-        systemKind: "provider_notice",
-        renderFormat: message.messageBodyRenderFormat,
-        renderContent: message.renderContent ?? [],
-      },
+      systemKind: "provider_notice",
     },
-    sourceVersion: "linkedin-v1",
   };
 }
 
@@ -430,7 +385,6 @@ export function buildLinkedInMessageEvent(input: {
   const normalizedConversation = normalizeConversationUrn(conversationUrn);
   const senderUrn = normalizeMemberUrn(input.message.sender.entityURN);
   const isDeleted = isLinkedInMessageDeleted(input.message);
-  const isEdited = isLinkedInMessageEdited(input.message);
   const id = stableId(
     `linkedin:message:${input.accountKey}:${normalizedConversation}:${input.message.entityURN}:${input.message.body.text}:${input.message.messageBodyRenderFormat}:${input.readAt ?? ""}`,
   );
@@ -451,19 +405,13 @@ export function buildLinkedInMessageEvent(input: {
       senderSourceKey: senderUrn === input.userEntityUrn ? null : `linkedin:${senderUrn}`,
       sentAt: input.message.deliveredAt,
       content: isDeleted ? "" : input.message.body.text,
-      service: "linkedin",
       status: input.status ?? (input.readAt ? "read" : "delivered"),
       isFromMe: senderUrn === input.userEntityUrn,
       deliveredAt: input.message.deliveredAt,
       readAt: input.readAt ?? null,
-      editedAt: isEdited ? input.message.deliveredAt : null,
-      deletedAt: isDeleted ? input.message.deliveredAt : null,
-      replyToSourceMessageKey: replyToSourceMessageKey(input.message),
-      isEdited,
       isDeleted,
       attachments: normalizeLinkedInAttachments(input.message),
     },
-    sourceVersion: "linkedin-v1",
   };
 }
 
@@ -503,7 +451,6 @@ export function buildLinkedInReactionEvent(input: {
       timestamp: transitionTime,
       isActive: input.isActive,
     },
-    sourceVersion: "linkedin-v1",
   };
 }
 
@@ -538,13 +485,8 @@ export function buildLinkedInGroupReceiptTimelineEvent(input: {
       actorSourceKey,
       eventAt: input.receipt.seenAt,
       text: `${bestParticipantName(input.receipt.seenByParticipant)} read a message.`,
-      metadata: {
-        systemKind: "read_receipt_notice",
-        sourceMessageKey: messageSourceKey(input.receipt.message.entityURN),
-        seenAt: input.receipt.seenAt,
-      },
+      systemKind: "read_receipt_notice",
     },
-    sourceVersion: "linkedin-v1",
   };
 }
 

@@ -65,10 +65,6 @@ export interface SignalRealtimeSessionLike {
   stopAndWait(): Promise<void>;
   getStatus(): SignalRealtimeStatus;
   isConnected(): boolean;
-  sendMessage(
-    text: string,
-    target: { recipient?: string; groupId?: string },
-  ): Promise<{ timestamp: number }>;
 }
 
 export interface SignalRealtimeSupervisorSessionInput {
@@ -218,30 +214,6 @@ export class SignalRealtimeSession implements SignalRealtimeSessionLike {
 
   isConnected(): boolean {
     return this.status.state === "connected" && Boolean(this.child?.stdin?.writable);
-  }
-
-  async sendMessage(
-    text: string,
-    target: { recipient?: string; groupId?: string },
-  ): Promise<{ timestamp: number }> {
-    const message = text.trim();
-    if (message.length === 0) {
-      throw new Error("Signal message text is required");
-    }
-
-    const params: Record<string, unknown> = { message };
-    if (target.groupId) {
-      params.groupId = target.groupId;
-    } else if (target.recipient) {
-      params.recipient = [target.recipient];
-    } else {
-      throw new Error("Signal message requires a recipient or groupId");
-    }
-
-    const result = await this.request<{ timestamp?: number }>("send", params);
-    return {
-      timestamp: typeof result?.timestamp === "number" ? result.timestamp : now(),
-    };
   }
 
   async request<T>(method: string, params: Record<string, unknown>): Promise<T> {

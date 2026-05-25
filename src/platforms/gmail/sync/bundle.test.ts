@@ -157,7 +157,6 @@ describe("Gmail sync bundle", () => {
 
     const messageEvents = bundle.rawEvents.filter((event) => event.entityKind === "message");
     expect(messageEvents).toHaveLength(1);
-    expect(messageEvents[0]?.externalEventId).toBe("m-1");
     expect(bundle.proofs?.[0]?.stats).toEqual(
       expect.objectContaining({
         listedMessageCount: 2,
@@ -246,7 +245,6 @@ describe("Gmail sync bundle", () => {
             mime_type: "application/pdf",
             access_kind: "provider_fetch",
             access_ref: { messageId: "m-attachment", attachmentId: "att-1" },
-            availability_status: "available",
           }),
         ],
       }),

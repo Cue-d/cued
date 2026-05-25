@@ -497,44 +497,7 @@ func TestExtractTextUnwrapsFutureProofEditedMessage(t *testing.T) {
 	}
 }
 
-func TestHistoryMessageSnapshotFallbackRetainsReplyForwardAndRevokeMetadata(t *testing.T) {
-	forwardingScore := uint32(2)
-	historyMsg := &waHistorySync.HistorySyncMsg{
-		Message: &waWeb.WebMessageInfo{
-			Key: &waCommon.MessageKey{
-				ID:        proto.String("wamid-reply"),
-				RemoteJID: proto.String("15551234567@s.whatsapp.net"),
-				FromMe:    proto.Bool(false),
-			},
-			MessageTimestamp: proto.Uint64(1_710_000_000),
-			Message: &waProto.Message{
-				ExtendedTextMessage: &waProto.ExtendedTextMessage{
-					Text: proto.String("reply"),
-					ContextInfo: &waProto.ContextInfo{
-						StanzaID:        proto.String("wamid-parent"),
-						Participant:     proto.String("15557654321@s.whatsapp.net"),
-						IsForwarded:     proto.Bool(true),
-						ForwardingScore: proto.Uint32(forwardingScore),
-					},
-				},
-			},
-		},
-	}
-
-	snapshot, ok := historyMessageSnapshot(nil, types.NewJID("15551234567", types.DefaultUserServer), historyMsg)
-	if !ok {
-		t.Fatal("expected fallback history snapshot")
-	}
-	if snapshot.ReplyToID == nil || *snapshot.ReplyToID != "wamid-parent" {
-		t.Fatalf("expected reply id metadata, got %+v", snapshot)
-	}
-	if snapshot.ReplyToSender == nil || *snapshot.ReplyToSender != "15557654321@s.whatsapp.net" {
-		t.Fatalf("expected reply sender metadata, got %+v", snapshot)
-	}
-	if !snapshot.IsForwarded || snapshot.ForwardingScore == nil || *snapshot.ForwardingScore != forwardingScore {
-		t.Fatalf("expected forwarded metadata, got %+v", snapshot)
-	}
-
+func TestHistoryMessageSnapshotFallbackRetainsRevokeMetadata(t *testing.T) {
 	revokeType := waProto.ProtocolMessage_REVOKE
 	revokeSnapshot, ok := historyMessageSnapshot(nil, types.NewJID("15551234567", types.DefaultUserServer), &waHistorySync.HistorySyncMsg{
 		Message: &waWeb.WebMessageInfo{
@@ -727,13 +690,7 @@ func TestOpenSyncCacheMigratesLegacyMessageColumns(t *testing.T) {
 	}
 	defer cache.close()
 
-	for _, column := range []string{
-		"reply_to_message_id",
-		"reply_to_sender_jid",
-		"is_forwarded",
-		"forwarding_score",
-		"revoked",
-	} {
+	for _, column := range []string{"revoked"} {
 		if !sqliteColumnExists(t, cache.db, "messages", column) {
 			t.Fatalf("expected migrated messages.%s column", column)
 		}
@@ -746,11 +703,8 @@ func TestOpenSyncCacheMigratesLegacyMessageColumns(t *testing.T) {
 	if len(messages) != 1 {
 		t.Fatalf("expected legacy message to remain queryable, got %+v", messages)
 	}
-	if messages[0].IsForwarded || messages[0].Revoked {
-		t.Fatalf("expected legacy message defaults to be false, got %+v", messages[0])
-	}
-	if messages[0].ForwardingScore != nil || messages[0].ReplyToID != nil || messages[0].ReplyToSender != nil {
-		t.Fatalf("expected legacy nullable metadata defaults, got %+v", messages[0])
+	if messages[0].Revoked {
+		t.Fatalf("expected legacy message revoked default to be false, got %+v", messages[0])
 	}
 }
 
@@ -1179,10 +1133,6 @@ func TestApplySnapshotDoesNotRewriteUnchangedMediaFile(t *testing.T) {
 						"messageID":       "message-1",
 						"attachmentIndex": 0,
 					},
-					ProviderMeta: map[string]interface{}{
-						"kind":  "image",
-						"width": 640,
-					},
 				}},
 			},
 			{
@@ -1197,10 +1147,6 @@ func TestApplySnapshotDoesNotRewriteUnchangedMediaFile(t *testing.T) {
 						"chatJID":         "12015550123@s.whatsapp.net",
 						"messageID":       "message-2",
 						"attachmentIndex": 0,
-					},
-					ProviderMeta: map[string]interface{}{
-						"kind":      "document",
-						"pageCount": 3,
 					},
 				}},
 			},
@@ -1252,10 +1198,6 @@ func TestApplySnapshotDoesNotRewriteUnchangedMediaFileAfterReload(t *testing.T) 
 						"chatJID":         "12015550123@s.whatsapp.net",
 						"messageID":       "message-1",
 						"attachmentIndex": 0,
-					},
-					ProviderMeta: map[string]interface{}{
-						"kind":  "image",
-						"width": 640,
 					},
 				}},
 			},

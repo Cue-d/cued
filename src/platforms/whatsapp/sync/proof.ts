@@ -216,17 +216,10 @@ export function buildWhatsAppMessagesProof(input: {
     scope: {
       kind: "account",
       key: input.accountKey,
-      displayName: "WhatsApp",
-      metadata: {
-        source: "whatsmeow_history_cache",
-      },
     },
     proofKind: "messages",
     status: input.hasMore ? "running" : "complete",
-    syncMode: input.syncMode,
     observedAt: input.observedAt,
-    runStartedAt: input.runStartedAt,
-    completedAt: input.hasMore ? null : input.completedAt,
     resumeCursor: input.hasMore
       ? {
           cursor: input.nextCursor,

@@ -30,10 +30,8 @@ export const signalReplayFixtures: ProjectionReplayFixture[] = [
           sourceConversationKey: "signal:dm-casey",
           conversationType: "dm",
           displayName: "Casey Signal",
-          service: "signal",
           participants: [{ sourceEntityKey: "signal:+14155550123" }],
         },
-        sourceVersion: "signal-v1",
       }),
       fixtureEvent({
         id: "signal-message-before-contact",
@@ -49,10 +47,8 @@ export const signalReplayFixtures: ProjectionReplayFixture[] = [
           senderSourceKey: "signal:+14155550123",
           sentAt: 1_710_200_000_050,
           content: "hello from signal",
-          service: "signal",
           isFromMe: false,
         },
-        sourceVersion: "signal-v1",
       }),
       fixtureEvent({
         id: "signal-contact-after",
@@ -67,7 +63,6 @@ export const signalReplayFixtures: ProjectionReplayFixture[] = [
           fields: { display_name: "Casey Signal" },
           handles: [{ type: "phone", value: "+14155550123", deterministic: true }],
         },
-        sourceVersion: "signal-v1",
       }),
     ],
   },
@@ -79,20 +74,16 @@ export const signalReplayFixtures: ProjectionReplayFixture[] = [
       expect(snapshot.conversations[0]).toMatchObject({
         name: "Investor thread",
         participantNames: "Ava Zhang",
-        unreadCount: 2,
       });
       expect(snapshot.messages).toHaveLength(2);
       const reply = snapshot.messages.find((message) => message.content === "reply first");
       expect(reply).toMatchObject({
         senderName: "Ava Zhang",
         conversationName: "Investor thread",
-        attachmentCount: 1,
       });
-      expect(reply?.replyToMessageId).toBeTruthy();
       expect(snapshot.messageAttachments[0]).toMatchObject({
         filename: "agenda.pdf",
         title: "Agenda",
-        availabilityStatus: "metadata_only",
       });
     },
     events: [
@@ -109,7 +100,6 @@ export const signalReplayFixtures: ProjectionReplayFixture[] = [
           fields: { display_name: "Ava Chen" },
           handles: [{ type: "phone", value: "+14155550000", deterministic: true }],
         },
-        sourceVersion: "signal-v1",
       }),
       fixtureEvent({
         id: "signal-conversation-ava",
@@ -123,10 +113,8 @@ export const signalReplayFixtures: ProjectionReplayFixture[] = [
           sourceConversationKey: "signal:dm-ava",
           conversationType: "dm",
           displayName: "Ava Chen",
-          service: "signal",
           participants: [{ sourceEntityKey: "signal:+14155550000" }],
         },
-        sourceVersion: "signal-v1",
       }),
       fixtureEvent({
         id: "signal-parent-message",
@@ -142,10 +130,8 @@ export const signalReplayFixtures: ProjectionReplayFixture[] = [
           senderSourceKey: "signal:+14155550000",
           sentAt: 1_710_300_000_100,
           content: "parent later",
-          service: "signal",
           isFromMe: false,
         },
-        sourceVersion: "signal-v1",
       }),
       fixtureEvent({
         id: "signal-reply-message",
@@ -161,9 +147,7 @@ export const signalReplayFixtures: ProjectionReplayFixture[] = [
           senderSourceKey: "signal:+14155550000",
           sentAt: 1_710_300_000_150,
           content: "reply first",
-          service: "signal",
           isFromMe: false,
-          replyToSourceMessageKey: "signal:message:parent",
           attachments: [
             {
               id: "signal-attachment-1",
@@ -173,7 +157,6 @@ export const signalReplayFixtures: ProjectionReplayFixture[] = [
             },
           ],
         },
-        sourceVersion: "signal-v1",
       }),
       fixtureEvent({
         id: "signal-contact-ava-rename",
@@ -188,7 +171,6 @@ export const signalReplayFixtures: ProjectionReplayFixture[] = [
           fields: { display_name: "Ava Zhang" },
           handles: [{ type: "phone", value: "+14155550000", deterministic: true }],
         },
-        sourceVersion: "signal-v2",
       }),
       fixtureEvent({
         id: "signal-conversation-ava-rename",
@@ -202,10 +184,8 @@ export const signalReplayFixtures: ProjectionReplayFixture[] = [
           sourceConversationKey: "signal:dm-ava",
           conversationType: "dm",
           displayName: "Investor thread",
-          service: "signal",
           participants: [{ sourceEntityKey: "signal:+14155550000" }],
         },
-        sourceVersion: "signal-v2",
       }),
     ],
   },
@@ -243,7 +223,6 @@ export const signalReplayFixtures: ProjectionReplayFixture[] = [
             },
           ],
         },
-        sourceVersion: "signal-v1",
       }),
       fixtureEvent({
         id: "signal-conversation-uuid",
@@ -257,10 +236,8 @@ export const signalReplayFixtures: ProjectionReplayFixture[] = [
           sourceConversationKey: "signal:dm-uuid",
           conversationType: "dm",
           displayName: "Ava Chen",
-          service: "signal",
           participants: [{ sourceEntityKey: "signal:a1b2c3d4-e5f6-1234-9abc-def012345678" }],
         },
-        sourceVersion: "signal-v1",
       }),
       fixtureEvent({
         id: "signal-message-uuid",
@@ -276,10 +253,8 @@ export const signalReplayFixtures: ProjectionReplayFixture[] = [
           senderSourceKey: "signal:a1b2c3d4-e5f6-1234-9abc-def012345678",
           sentAt: 1_710_400_000_150,
           content: "hello from signal uuid",
-          service: "signal",
           isFromMe: false,
         },
-        sourceVersion: "signal-v1",
       }),
     ],
   },

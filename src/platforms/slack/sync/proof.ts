@@ -41,11 +41,6 @@ export function buildSlackBackfillSyncProofs(
   const scope = {
     kind: "conversation" as const,
     key: proof.conversationId,
-    displayName: proof.conversationName ?? null,
-    metadata: {
-      teamId: proof.teamId,
-      conversationFamily: proof.conversationFamily,
-    },
   };
   const messageStatus = getMessagesProofStatus(proof);
   const proofs: SyncProofInput[] = [
@@ -53,11 +48,7 @@ export function buildSlackBackfillSyncProofs(
       scope,
       proofKind: "messages",
       status: messageStatus,
-      syncMode: proof.syncMode,
       observedAt: proof.observedAt,
-      runStartedAt: proof.scanStartedAt,
-      completedAt:
-        messageStatus === "complete" || messageStatus === "partial" ? proof.observedAt : null,
       resumeCursor:
         messageStatus === "complete" || proof.historyError
           ? null
@@ -70,7 +61,6 @@ export function buildSlackBackfillSyncProofs(
         knownConversationCount: proof.knownConversationCount,
         ...(proof.threadRootCount > 0 ? { threadRootCount: proof.threadRootCount } : {}),
       },
-      error: proof.historyError ?? proof.membersError ?? undefined,
     },
   ];
 
@@ -88,11 +78,7 @@ export function buildSlackBackfillSyncProofs(
       scope,
       proofKind: "replies",
       status: repliesStatus,
-      syncMode: proof.syncMode,
       observedAt: proof.observedAt,
-      runStartedAt: proof.scanStartedAt,
-      completedAt:
-        repliesStatus === "complete" || repliesStatus === "partial" ? proof.observedAt : null,
       resumeCursor:
         repliesStatus === "complete" || proof.repliesError || proof.historyError
           ? null
@@ -112,7 +98,6 @@ export function buildSlackBackfillSyncProofs(
         completedThreadCount: proof.completedThreadCount,
         pendingThreadCount: proof.pendingThreadCount,
       },
-      error: proof.repliesError ?? proof.historyError ?? undefined,
     });
   }
 

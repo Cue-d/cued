@@ -74,27 +74,6 @@ export class DiscordApiClient {
     return await this.request<DiscordMessage[]>(`/channels/${channelId}/messages${suffix}`);
   }
 
-  async sendMessage(
-    channelId: string,
-    content: string,
-    options: { replyToMessageId?: string | null } = {},
-  ): Promise<DiscordMessage> {
-    return await this.request<DiscordMessage>(`/channels/${channelId}/messages`, {
-      method: "POST",
-      body: {
-        content,
-        allowed_mentions: { parse: [] as string[] },
-        ...(options.replyToMessageId
-          ? {
-              message_reference: {
-                message_id: options.replyToMessageId,
-              },
-            }
-          : {}),
-      },
-    });
-  }
-
   private async request<T>(
     path: string,
     options: {

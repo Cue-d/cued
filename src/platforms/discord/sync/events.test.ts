@@ -55,7 +55,6 @@ describe("discord sync events", () => {
       sourceConversationKey: "discord:channel:c-1",
       displayName: "planning",
       conversationType: "group",
-      topic: "Team chat",
     });
   });
 
@@ -101,8 +100,6 @@ describe("discord sync events", () => {
       sourceConversationKey: "discord:channel:c-1",
       senderSourceKey: "discord:u-peer",
       isFromMe: false,
-      isEdited: true,
-      replyToSourceMessageKey: "discord:message:c-1:m-0",
     });
     const attachments = (event.payload as { attachments?: Array<Record<string, unknown>> })
       .attachments;

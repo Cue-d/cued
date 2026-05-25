@@ -319,7 +319,6 @@ function buildLinkedInConnectionContactEvent(
         company: connection.headline ?? null,
         photo_url: connection.picture?.url ?? null,
       },
-      sourceProfileUrl: connection.profileUrl ?? null,
       handles: [
         {
           type: "linkedin_profile_id",
@@ -337,7 +336,6 @@ function buildLinkedInConnectionContactEvent(
           : []),
       ],
     },
-    sourceVersion: "linkedin-v1",
   };
 }
 
@@ -667,12 +665,6 @@ function conversationScope(conversation: Conversation): SyncProofInput["scope"] 
   return {
     kind: "conversation",
     key: normalizedConversation,
-    displayName: conversation.title || null,
-    metadata: {
-      sourceConversationKey: conversationSourceKey(normalizedConversation),
-      groupChat: conversation.groupChat,
-      categories: conversation.categories,
-    },
   };
 }
 
@@ -719,14 +711,10 @@ function buildLinkedInDiscoveryProof(input: {
     scope: {
       kind: "account",
       key: input.accountKey,
-      displayName: input.accountDisplayName,
     },
     proofKind: "discovery",
     status: input.complete ? "complete" : "running",
-    syncMode: input.syncMode,
     observedAt: input.observedAt,
-    runStartedAt: input.runStartedAt,
-    completedAt: input.complete ? input.observedAt : null,
     resumeCursor: input.complete ? null : input.resumeScan,
     stats: {
       conversationCount: input.conversationCount,
@@ -754,16 +742,12 @@ function buildLinkedInMessagesProof(input: {
     scope: conversationScope(input.conversation),
     proofKind: "messages",
     status: input.error ? "failed" : input.complete ? "complete" : "running",
-    syncMode: input.syncMode,
     observedAt: input.observedAt,
-    runStartedAt: input.runStartedAt,
-    completedAt: input.complete && !input.error ? input.observedAt : null,
     resumeCursor: input.complete || input.error ? null : input.resumeCursor,
     coverage: input.coverage,
     stats: {
       messageCount: input.messageCount,
     },
-    error: input.error,
   };
 }
 

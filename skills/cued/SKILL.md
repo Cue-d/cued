@@ -36,14 +36,14 @@ Do not use `sqlite3 ~/.cued/local.db` unless the user explicitly asks to debug r
 This is not a full schema reference. Use these tables when CLI commands are too coarse and you need exact counts, joins, ranking, or provenance. Prefer `cued` commands for mutations and attachment fetches.
 
 - `contacts`: canonical people/entities. Key fields: `id`, `name`, `company`, `archived`.
-- `contact_handles`: email/phone/platform handles. Key fields: `contact_id`, `type`, `value`, `normalized_value`, `platform`, `is_deterministic`.
-- `contact_sources`: where a contact came from. Key fields: `contact_id`, `platform`, `account_key`, `source_entity_key`, `profile_url`, `first_seen_at`, `last_seen_at`.
+- `contact_handles`: email/phone/platform handles. Key fields: `contact_id`, `type`, `value`, `normalized_value`, `is_deterministic`.
+- `contact_sources`: where a contact came from. Key fields: `contact_id`, `platform`, `account_key`, `source_entity_key`.
 - `contact_memories`: durable agent-written context. Query it for current memories with `stale_at IS NULL`; write through `cued contacts memory ...`, not SQL.
-- `conversations`: canonical threads. Key fields: `id`, `platform`, `account_key`, `type`, `name`, `participant_names`, `last_message_at`, `last_message_preview`, `unread_count`.
+- `conversations`: canonical threads. Key fields: `id`, `platform`, `account_key`, `source_conversation_key`, `type`, `is_active`, `name`, `participant_names`.
 - `conversation_participants`: contact membership in threads. Key fields: `conversation_id`, `contact_id`, `participant_name`, `is_self`, `is_active`.
-- `messages`: canonical message rows. Key fields: `id`, `platform`, `conversation_id`, `sender_contact_id`, `sender_name`, `sent_at`, `is_from_me`, `content`, `attachment_count`, `reaction_count`, `reply_to_message_id`.
-- `message_reactions`: reactions/tapbacks. Key fields: `message_id`, `reactor_contact_id`, `reactor_name`, `emoji`, `is_active`, `created_at`.
-- `message_attachments`: attachment metadata. Key fields: `id`, `message_id`, `platform`, `kind`, `mime_type`, `filename`, `title`, `size_bytes`, `text_content`, `access_kind`, `availability_status`.
+- `messages`: canonical message rows. Key fields: `id`, `platform`, `conversation_id`, `sender_contact_id`, `sender_source_key`, `sender_name`, `conversation_name`, `sent_at`, `status`, `is_from_me`, `content`, `delivered_at`, `read_at`, `is_deleted`.
+- `message_reactions`: reactions/tapbacks. Key fields: `message_id`, `reactor_source_key`, `emoji`, `is_active`, `created_at`.
+- `message_attachments`: attachment metadata. Key fields: `id`, `message_id`, `platform`, `kind`, `mime_type`, `filename`, `title`, `size_bytes`, `text_content`, `access_kind`, `access_ref_json`.
 - `attachment_content`: extracted text for fetched attachments. Key fields: `attachment_id`, `status`, `text_content`, `mime_type`, `extracted_at`, `last_error`. Prefer `cued attachments search`.
 - `messages_fts`: FTS5 over message search fields: `sender_name`, `conversation_name`, `participant_names`, `attachment_text`, `content`.
 - `attachment_content_fts`: FTS5 over extracted attachment text. Prefer `cued attachments search <query>`.
@@ -55,9 +55,9 @@ Useful SQL examples:
 ```bash
 cued sql "select count(*) as messages from messages"
 cued sql "select platform, count(*) as messages from messages group by platform order by messages desc"
-cued sql "select id, platform, name, participant_names, datetime(last_message_at/1000,'unixepoch','localtime') as last_message from conversations order by last_message_at desc limit 20"
-cued sql "select id, sender_name, conversation_name, datetime(sent_at/1000,'unixepoch','localtime') as sent, content, attachment_count from messages where conversation_id = 'conversation-id-here' order by sent_at desc limit 50"
-cued sql "select ma.id, ma.kind, ma.mime_type, ma.filename, ma.size_bytes, ma.access_kind, ma.availability_status from message_attachments ma where ma.message_id = 'message-id-here'"
+cued sql "select c.id, c.platform, c.name, c.participant_names, datetime(max(m.sent_at)/1000,'unixepoch','localtime') as last_message from conversations c left join messages m on m.conversation_id = c.id group by c.id order by max(m.sent_at) desc limit 20"
+cued sql "select m.id, m.sender_name, m.conversation_name, datetime(m.sent_at/1000,'unixepoch','localtime') as sent, m.content, (select count(*) from message_attachments ma where ma.message_id = m.id) as attachments from messages m where m.conversation_id = 'conversation-id-here' order by m.sent_at desc limit 50"
+cued sql "select ma.id, ma.kind, ma.mime_type, ma.filename, ma.size_bytes, ma.access_kind from message_attachments ma where ma.message_id = 'message-id-here'"
 ```
 
 ## Attachments
@@ -82,12 +82,12 @@ cued attachments search "search terms" --limit 20
 ```
 
 Safety rules:
-- Inspect `filename`, `mime_type`, `size_bytes`, `access_kind`, and `availability_status` before fetching.
+- Inspect `filename`, `mime_type`, `size_bytes`, and `access_kind` before fetching.
 - The default fetch path has a conservative byte ceiling to prevent accidental large downloads.
 - Use `--allow-large` only when the user explicitly asks for the file or the task clearly depends on the bytes.
 - Avoid fetching video, audio, archives, disk images, and opaque binary files unless the user asks for the file itself; agents usually cannot inspect them usefully.
 - Use `--max-bytes` when you intentionally want a stricter ceiling for a one-off fetch.
-- Treat `metadata_only`, `none`, or missing fetch coordinates as not currently fetchable.
+- Treat `none` or missing fetch coordinates as not currently fetchable.
 - Never paste private attachment text into fixtures or broad summaries; summarize only what is needed.
 
 ## Relationship Patterns
@@ -96,7 +96,7 @@ Safety rules:
 - **Follow-up needed**: DM where I sent the last message, got no reply or reaction, and it's 3+ days old. If they reacted but didn't reply, it's lower priority.
 - **Dormant relationship**: Contact with significant message history (10+ messages) but no messages in 30+ days.
 - **Network search**: Use `messages_fts` to find contacts who've discussed a topic, grouped by `sender_contact_id`.
-- **Unread triage**: Conversations with `unread_count > 0` where the last message is not from me. Prioritize DMs over groups.
+- **Unread triage**: Messages where `read_at IS NULL` and `is_from_me = 0`, grouped by conversation. Prioritize DMs over groups and use the newest unread `sent_at` as the recency signal.
 
 ## Contact Management
 
@@ -152,7 +152,7 @@ Deprioritize or skip service senders, newsletters, stores, bots, OTP/verificatio
 
 Use this source order:
 1. Local identity evidence: exact email, phone, LinkedIn URL/id, platform user id, profile URL, message history.
-2. Existing public profile URL from `contact_sources.profile_url` or `contact_handles`.
+2. Existing public profile URL or handle in `contact_handles`, or platform identity in `contact_sources.source_entity_key`.
 3. Web search for the exact profile handle or exact full name plus known affiliation.
 4. Cross-profile links from a verified source, such as a personal site linking GitHub/X/LinkedIn.
 

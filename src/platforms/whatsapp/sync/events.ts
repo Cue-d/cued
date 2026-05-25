@@ -101,42 +101,6 @@ function normalizeWhatsAppAttachments(
   });
 }
 
-function whatsappReplySourceKey(message: WhatsAppMessageSnapshot): string | null {
-  const replyID = message.replyToMessageID?.trim();
-  if (!replyID) {
-    return null;
-  }
-  return `${normalizeWhatsAppJid(message.chatJID)}:${replyID}`;
-}
-
-type WhatsAppMessageProviderMetadata = {
-  providerMetadata?: {
-    whatsapp?: {
-      isForwarded?: boolean;
-      forwardingScore?: number;
-      replyToSenderJID?: string;
-    };
-  };
-};
-
-function whatsappMessageProviderMetadata(
-  message: WhatsAppMessageSnapshot,
-): WhatsAppMessageProviderMetadata {
-  const whatsapp: NonNullable<
-    NonNullable<WhatsAppMessageProviderMetadata["providerMetadata"]>["whatsapp"]
-  > = {};
-  if (message.isForwarded) {
-    whatsapp.isForwarded = true;
-  }
-  if (typeof message.forwardingScore === "number") {
-    whatsapp.forwardingScore = message.forwardingScore;
-  }
-  if (message.replyToSenderJID?.trim()) {
-    whatsapp.replyToSenderJID = normalizeWhatsAppJid(message.replyToSenderJID);
-  }
-  return Object.keys(whatsapp).length > 0 ? { providerMetadata: { whatsapp } } : {};
-}
-
 function bestContactName(contact: WhatsAppContactSnapshot): string {
   return (
     contact.name?.trim() ||
@@ -184,7 +148,6 @@ export function buildWhatsAppContactEvent(
       },
       handles,
     } satisfies ContactObservationPayload,
-    sourceVersion: "whatsapp-v1",
   };
 }
 
@@ -207,14 +170,11 @@ export function buildWhatsAppChatEvent(
       sourceConversationKey: whatsappSourceConversationKey(chatJID),
       conversationType: chat.isGroup ? "group" : "dm",
       displayName: chat.name?.trim() || null,
-      nativeConversationKey: chatJID,
-      service: "whatsapp",
       participants: (chat.participants ?? [])
         .map((jid) => normalizeWhatsAppJid(jid))
         .filter((jid) => jid.length > 0)
         .map((jid) => ({ sourceEntityKey: whatsappSourceEntityKey(jid) })),
     } satisfies ConversationObservationPayload,
-    sourceVersion: "whatsapp-v1",
   };
 }
 
@@ -283,7 +243,6 @@ export function buildWhatsAppMessageEvent(
     : null;
   const normalizedChatJID = normalizeWhatsAppJid(message.chatJID);
   const sourceMessageKey = whatsappMessageSourceKey(message);
-  const replyToSourceMessageKey = whatsappReplySourceKey(message);
   return {
     id: stableId(`whatsapp:message:${accountKey}:${sourceMessageKey}`),
     platform: "whatsapp",
@@ -301,18 +260,13 @@ export function buildWhatsAppMessageEvent(
       senderSourceKey: senderJID ? whatsappSourceEntityKey(senderJID) : null,
       sentAt: message.timestamp,
       content: message.text,
-      service: "whatsapp",
       status: message.status ?? (message.fromMe ? "sent" : "delivered"),
       isFromMe: message.fromMe,
       deliveredAt: message.deliveredAt ?? null,
       readAt: message.readAt ?? null,
-      deletedAt: message.revoked ? message.timestamp : null,
-      replyToSourceMessageKey,
       isDeleted: message.revoked ?? false,
       attachments: normalizeWhatsAppAttachments(message.attachments),
-      ...whatsappMessageProviderMetadata(message),
-    } satisfies MessagePayload & WhatsAppMessageProviderMetadata,
-    sourceVersion: "whatsapp-v1",
+    } satisfies MessagePayload,
   };
 }
 
@@ -365,23 +319,14 @@ export function buildWhatsAppCallEvent(
       sourceCallKey,
       sourceConversationKey: whatsappSourceConversationKey(normalizedChatJID),
       provider: "whatsapp",
-      providerCallType: call.providerCallType ?? null,
       direction: normalizeCallDirection(call),
       medium: normalizeCallMedium(call.medium),
       status: normalizeCallStatus(call.status),
       startedAt: call.timestamp,
       durationSeconds: call.durationSeconds ?? null,
-      endedAt:
-        typeof call.durationSeconds === "number" && Number.isFinite(call.durationSeconds)
-          ? call.timestamp + call.durationSeconds * 1000
-          : null,
       initiatorSourceKey,
       primaryRemoteSourceKey: remoteSourceKey,
-      metadata: {
-        isFromMe: call.fromMe,
-      },
     } satisfies CallPayload,
-    sourceVersion: "whatsapp-v1",
   };
 }
 
@@ -411,7 +356,6 @@ export function buildWhatsAppCallDeleteEvent(
       provider: "whatsapp",
       direction,
     },
-    sourceVersion: "whatsapp-v1",
   };
 }
 

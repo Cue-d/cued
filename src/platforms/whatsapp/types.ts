@@ -24,10 +24,6 @@ export interface WhatsAppMessageSnapshot {
   status?: string | null;
   deliveredAt?: number | null;
   readAt?: number | null;
-  replyToMessageID?: string | null;
-  replyToSenderJID?: string | null;
-  isForwarded?: boolean;
-  forwardingScore?: number | null;
   revoked?: boolean;
   attachments?: Array<Record<string, unknown>>;
 }
@@ -51,7 +47,6 @@ export interface WhatsAppCallSnapshot {
   durationSeconds?: number | null;
   status: string;
   medium: string;
-  providerCallType?: string | null;
 }
 
 export interface WhatsAppCallDeleteSnapshot {
@@ -140,12 +135,6 @@ export interface WhatsAppHelperEventEnvelope<
 export type WhatsAppHelperCommand =
   | {
       id: number;
-      command: "sendText";
-      target: string;
-      text: string;
-    }
-  | {
-      id: number;
       command: "resync";
       cursor?: string;
       sinceMs?: number | null;
@@ -182,12 +171,6 @@ export interface WhatsAppHelperStatusResult {
   queuedHistorySyncCount?: number | null;
   lastHistorySyncError?: string | null;
   lastHistoryNotificationAt?: number | null;
-}
-
-export interface WhatsAppHelperSendResult {
-  messageID: string;
-  chatJID: string;
-  timestamp: number;
 }
 
 export interface WhatsAppHelperDownloadResult {

@@ -71,9 +71,6 @@ describe("discord realtime", () => {
             },
           ];
         },
-        async sendMessage() {
-          throw new Error("not used");
-        },
       } as unknown as DiscordApiClient,
     });
 
@@ -129,9 +126,6 @@ describe("discord realtime", () => {
         async listChannelMessages() {
           return [];
         },
-        async sendMessage() {
-          throw new Error("not used");
-        },
       } as unknown as DiscordApiClient,
     });
 
@@ -167,9 +161,6 @@ describe("discord realtime", () => {
         },
         async listChannelMessages() {
           return [];
-        },
-        async sendMessage() {
-          throw new Error("not used");
         },
       } as unknown as DiscordApiClient,
     });
@@ -215,9 +206,6 @@ describe("discord realtime", () => {
         },
         async listChannelMessages() {
           return [];
-        },
-        async sendMessage() {
-          throw new Error("not used");
         },
       } as unknown as DiscordApiClient,
     });
@@ -277,9 +265,6 @@ describe("discord realtime", () => {
         },
         async listChannelMessages() {
           return [];
-        },
-        async sendMessage() {
-          throw new Error("not used");
         },
       } as unknown as DiscordApiClient,
     });

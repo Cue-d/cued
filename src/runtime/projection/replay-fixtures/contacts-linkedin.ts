@@ -12,24 +12,19 @@ export const contactsLinkedInReplayFixtures: ProjectionReplayFixture[] = [
       expect(snapshot.conversations[0]).toMatchObject({
         name: "Ava Chen",
         participantNames: "Ava Chen",
-        unreadCount: 1,
       });
       expect(snapshot.messages).toHaveLength(1);
       expect(snapshot.messages[0]).toMatchObject({
         senderName: "Ava Chen",
         conversationName: "Ava Chen",
-        attachmentCount: 1,
-        reactionCount: 1,
       });
       expect(snapshot.messageAttachments[0]).toMatchObject({
         filename: "update.pdf",
         title: "Update",
         remoteUrl: "https://example.com/update.pdf",
-        availabilityStatus: "available",
       });
       expect(snapshot.messageReactions[0]).toMatchObject({
         emoji: "👍",
-        reactorName: "Ava Chen",
         isActive: 1,
       });
       expect(snapshot.ftsMessageIds).toEqual([snapshot.messages[0]!.id]);
@@ -55,7 +50,6 @@ export const contactsLinkedInReplayFixtures: ProjectionReplayFixture[] = [
             { type: "phone", value: "+1 (555) 123-4567", deterministic: true },
           ],
         },
-        sourceVersion: "contacts-v1",
       }),
       fixtureEvent({
         id: "conversation_thread_1",
@@ -68,10 +62,8 @@ export const contactsLinkedInReplayFixtures: ProjectionReplayFixture[] = [
         payload: {
           sourceConversationKey: "thread-1",
           conversationType: "dm",
-          service: "linkedin",
           participants: [{ sourceEntityKey: "contacts:ava" }],
         },
-        sourceVersion: "linkedin-v1",
       }),
       fixtureEvent({
         id: "message_msg_1",
@@ -87,7 +79,6 @@ export const contactsLinkedInReplayFixtures: ProjectionReplayFixture[] = [
           senderSourceKey: "contacts:ava",
           sentAt: 1_710_000_000_150,
           content: "Founder update tomorrow?",
-          service: "linkedin",
           status: "delivered",
           isFromMe: false,
           attachments: [
@@ -98,11 +89,9 @@ export const contactsLinkedInReplayFixtures: ProjectionReplayFixture[] = [
               filename: "update.pdf",
               title: "Update",
               remote_url: "https://example.com/update.pdf",
-              availability_status: "available",
             },
           ],
         },
-        sourceVersion: "linkedin-v1",
       }),
       fixtureEvent({
         id: "reaction_msg_1_thumbs_up",
@@ -120,7 +109,6 @@ export const contactsLinkedInReplayFixtures: ProjectionReplayFixture[] = [
           timestamp: 1_710_000_000_250,
           isActive: true,
         },
-        sourceVersion: "linkedin-v1",
       }),
     ],
   },
@@ -133,8 +121,6 @@ export const contactsLinkedInReplayFixtures: ProjectionReplayFixture[] = [
       expect(snapshot.conversations[0]).toMatchObject({
         name: "Northwind diligence",
         isActive: 0,
-        removalReason: "deleted",
-        unreadCount: 0,
       });
       expect(snapshot.messages).toHaveLength(1);
       expect(snapshot.messages[0]).toMatchObject({
@@ -165,7 +151,6 @@ export const contactsLinkedInReplayFixtures: ProjectionReplayFixture[] = [
           },
           handles: [{ type: "email", value: "milo@northwind.example", deterministic: true }],
         },
-        sourceVersion: "contacts-v1",
       }),
       fixtureEvent({
         id: "conversation_thread_removed",
@@ -179,11 +164,8 @@ export const contactsLinkedInReplayFixtures: ProjectionReplayFixture[] = [
           sourceConversationKey: "thread-removed",
           conversationType: "dm",
           displayName: "Northwind diligence",
-          nativeConversationKey: "urn:li:fsd_conversation:thread-removed",
-          service: "linkedin",
           participants: [{ sourceEntityKey: "contacts:milo" }],
         },
-        sourceVersion: "linkedin-v1",
       }),
       fixtureEvent({
         id: "message_thread_removed_1",
@@ -199,11 +181,9 @@ export const contactsLinkedInReplayFixtures: ProjectionReplayFixture[] = [
           senderSourceKey: "contacts:milo",
           sentAt: 1_710_000_100_150,
           content: "We should archive this thread.",
-          service: "linkedin",
           status: "delivered",
           isFromMe: false,
         },
-        sourceVersion: "linkedin-v1",
       }),
       fixtureEvent({
         id: "conversation_thread_removed_deleted",
@@ -217,13 +197,8 @@ export const contactsLinkedInReplayFixtures: ProjectionReplayFixture[] = [
           sourceConversationKey: "thread-removed",
           conversationType: "dm",
           displayName: "Northwind diligence",
-          nativeConversationKey: "urn:li:fsd_conversation:thread-removed",
-          service: "linkedin",
-          unreadCount: 0,
-          removalReason: "deleted",
           participants: [{ sourceEntityKey: "contacts:milo" }],
         },
-        sourceVersion: "linkedin-v1",
       }),
     ],
   },
@@ -235,19 +210,12 @@ export const contactsLinkedInReplayFixtures: ProjectionReplayFixture[] = [
       expect(snapshot.conversations).toHaveLength(1);
       expect(snapshot.conversations[0]).toMatchObject({
         name: "Ava Chen",
-        lastMessageId: null,
-        lastMessageAt: 1_710_000_200_275,
-        lastMessagePreview: "Ava renamed the conversation",
-        unreadCount: 0,
       });
       expect(snapshot.messages).toHaveLength(1);
       expect(snapshot.messages[0]).toMatchObject({
         content: "final copy",
         status: "read",
         readAt: 1_710_000_200_260,
-        editedAt: 1_710_000_200_210,
-        isEdited: 1,
-        reactionCount: 0,
       });
       expect(snapshot.messageReactions).toHaveLength(1);
       expect(snapshot.messageReactions[0]).toMatchObject({
@@ -277,7 +245,6 @@ export const contactsLinkedInReplayFixtures: ProjectionReplayFixture[] = [
           },
           handles: [{ type: "email", value: "ava@cued.com", deterministic: true }],
         },
-        sourceVersion: "contacts-v1",
       }),
       fixtureEvent({
         id: "conversation_thread_updated",
@@ -290,10 +257,8 @@ export const contactsLinkedInReplayFixtures: ProjectionReplayFixture[] = [
         payload: {
           sourceConversationKey: "thread-updated",
           conversationType: "dm",
-          service: "linkedin",
           participants: [{ sourceEntityKey: "contacts:ava" }],
         },
-        sourceVersion: "linkedin-v1",
       }),
       fixtureEvent({
         id: "message_thread_updated_created",
@@ -309,11 +274,9 @@ export const contactsLinkedInReplayFixtures: ProjectionReplayFixture[] = [
           senderSourceKey: "contacts:ava",
           sentAt: 1_710_000_200_090,
           content: "draft copy",
-          service: "linkedin",
           status: "delivered",
           isFromMe: false,
         },
-        sourceVersion: "linkedin-v1",
       }),
       fixtureEvent({
         id: "message_thread_updated_updated",
@@ -329,13 +292,9 @@ export const contactsLinkedInReplayFixtures: ProjectionReplayFixture[] = [
           senderSourceKey: "contacts:ava",
           sentAt: 1_710_000_200_090,
           content: "final copy",
-          service: "linkedin",
           status: "delivered",
           isFromMe: false,
-          editedAt: 1_710_000_200_210,
-          isEdited: true,
         },
-        sourceVersion: "linkedin-v1",
       }),
       fixtureEvent({
         id: "reaction_thread_updated_added",
@@ -353,7 +312,6 @@ export const contactsLinkedInReplayFixtures: ProjectionReplayFixture[] = [
           timestamp: 1_710_000_200_225,
           isActive: true,
         },
-        sourceVersion: "linkedin-v1",
       }),
       fixtureEvent({
         id: "reaction_thread_updated_removed",
@@ -371,7 +329,6 @@ export const contactsLinkedInReplayFixtures: ProjectionReplayFixture[] = [
           timestamp: 1_710_000_200_240,
           isActive: false,
         },
-        sourceVersion: "linkedin-v1",
       }),
       fixtureEvent({
         id: "message_thread_updated_read_receipt",
@@ -387,14 +344,10 @@ export const contactsLinkedInReplayFixtures: ProjectionReplayFixture[] = [
           senderSourceKey: "contacts:ava",
           sentAt: 1_710_000_200_090,
           content: "final copy",
-          service: "linkedin",
           status: "read",
           isFromMe: false,
           readAt: 1_710_000_200_260,
-          editedAt: 1_710_000_200_210,
-          isEdited: true,
         },
-        sourceVersion: "linkedin-v1",
       }),
       fixtureEvent({
         id: "timeline_thread_updated_system_message",
@@ -412,11 +365,8 @@ export const contactsLinkedInReplayFixtures: ProjectionReplayFixture[] = [
           subjectSourceKey: "contacts:ava",
           eventAt: 1_710_000_200_275,
           text: "Ava renamed the conversation",
-          metadata: {
-            systemKind: "provider_notice",
-          },
+          systemKind: "provider_notice",
         },
-        sourceVersion: "linkedin-v1",
       }),
     ],
   },

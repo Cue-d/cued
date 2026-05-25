@@ -71,9 +71,7 @@ function normalizeSignalAttachments(
       size_bytes: size,
       local_path: localPath,
       access_kind: localPath ? "local_path" : "none",
-      availability_status: localPath ? "available" : "unsupported_pending_signal_fetch",
       access_ref: localPath ? { path: localPath } : null,
-      provider_metadata: { ...attachment },
     };
   });
 }
@@ -123,7 +121,6 @@ export function buildSignalContactEvent(
       },
       handles: contactHandles(contact),
     } satisfies ContactObservationPayload,
-    sourceVersion: "signal-v1",
   };
 }
 
@@ -150,14 +147,11 @@ export function buildSignalGroupConversationEvent(
       sourceConversationKey: signalSourceConversationKey(`group:${groupId}`),
       conversationType: "group",
       displayName: group.name?.trim() || group.title?.trim() || "Signal Group",
-      nativeConversationKey: groupId,
-      service: "signal",
       participants: (group.members ?? [])
         .map((member) => member.number?.trim() || member.uuid?.trim()?.toLowerCase() || "")
         .filter((member): member is string => member.length > 0)
         .map((member) => ({ sourceEntityKey: signalSourceEntityKey(member) })),
     } satisfies ConversationObservationPayload,
-    sourceVersion: "signal-v1",
   };
 }
 
@@ -186,11 +180,8 @@ export function buildSignalMessageConversationEvent(
       sourceConversationKey: signalSourceConversationKey(message.threadId),
       conversationType: message.threadType,
       displayName: message.threadName ?? message.peerHandle ?? null,
-      nativeConversationKey: message.threadId,
-      service: "signal",
       participants,
     } satisfies ConversationObservationPayload,
-    sourceVersion: "signal-v1",
   };
 }
 
@@ -222,7 +213,6 @@ export function buildSyntheticSignalContactEvent(
         },
       ],
     } satisfies ContactObservationPayload,
-    sourceVersion: "signal-v1",
   };
 }
 
@@ -251,13 +241,11 @@ export function buildSignalMessageEvent(
       senderSourceKey: senderHandle ? signalSourceEntityKey(senderHandle) : null,
       sentAt: message.sentAt,
       content: message.text,
-      service: "signal",
       status: message.isFromMe ? "sent" : "delivered",
       isFromMe: message.isFromMe,
       deliveredAt: message.sentAt,
       attachments: normalizeSignalAttachments(message.attachments),
     } satisfies MessagePayload,
-    sourceVersion: "signal-v1",
   };
 }
 
