@@ -12,7 +12,7 @@ Local-only message and contact sync for agents.
 
 Cued is open source under the [Apache-2.0 license](LICENSE).
 
-The supported install path today is GitHub Releases. Homebrew and npm installation are planned, but the package remains private until those install paths are designed and tested.
+The supported install path today is GitHub Releases.
 
 Most integrations in the matrix below are ready for normal use. Gmail is available in shipped builds; Google may show an unverified-app warning while Cued's OAuth review is pending, but you can continue through the advanced option if you trust the local app.
 
