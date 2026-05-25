@@ -1,11 +1,12 @@
 import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { IMESSAGE_CONFIG } from "../core/config.js";
 import type { CuedDatabase } from "../db/database.js";
 import { listAdapterPlatforms } from "../platforms/core/registry.js";
 import { buildIntegrationStatus, listIntegrationStates } from "../platforms/core/state/status.js";
 import { resolveGoogleOAuthClientFile } from "../platforms/gmail/oauth/client.js";
-import { DEFAULT_CHAT_DB_PATH, IMessageReader } from "../platforms/imessage/reader.js";
+import { IMessageReader } from "../platforms/imessage/reader.js";
 import {
   getSignalConfigDir,
   isSignalCliVersionSupported,
@@ -158,18 +159,19 @@ export async function buildPermissionStatus(
 }
 
 function tryReadMessagesDatabase(): DoctorCheck {
-  if (!existsSync(DEFAULT_CHAT_DB_PATH)) {
+  const chatDbPath = IMESSAGE_CONFIG.chatDbPath;
+  if (!existsSync(chatDbPath)) {
     return {
       name: "messages_database",
       status: "error",
       summary: "Messages database was not found",
-      details: { path: DEFAULT_CHAT_DB_PATH },
+      details: { path: chatDbPath },
       remediation: "Open Messages once on this Mac, then rerun doctor.",
     };
   }
 
   try {
-    const reader = new IMessageReader(DEFAULT_CHAT_DB_PATH);
+    const reader = new IMessageReader(chatDbPath);
     try {
       const maxRowId = reader.getMaxMessageRowid();
       return {
@@ -177,7 +179,7 @@ function tryReadMessagesDatabase(): DoctorCheck {
         status: "ok",
         summary: "Messages database is readable",
         details: {
-          path: DEFAULT_CHAT_DB_PATH,
+          path: chatDbPath,
           maxRowId,
         },
       };
@@ -190,7 +192,7 @@ function tryReadMessagesDatabase(): DoctorCheck {
       status: "error",
       summary: "Messages database is not readable from the current process",
       details: {
-        path: DEFAULT_CHAT_DB_PATH,
+        path: chatDbPath,
         error: error instanceof Error ? error.message : String(error),
       },
       remediation:
@@ -200,6 +202,7 @@ function tryReadMessagesDatabase(): DoctorCheck {
 }
 
 function getMessagesNativeHelperCheck(): DoctorCheck {
+  const chatDbPath = IMESSAGE_CONFIG.chatDbPath;
   const nativeBinary = resolveMacOSNativeBinary();
   if (!nativeBinary) {
     return {
@@ -215,7 +218,7 @@ function getMessagesNativeHelperCheck(): DoctorCheck {
   try {
     execFileSync(
       nativeBinary,
-      ["imessage", "dump", "--db-path", DEFAULT_CHAT_DB_PATH, "--after-rowid", "0", "--limit", "1"],
+      ["imessage", "dump", "--db-path", chatDbPath, "--after-rowid", "0", "--limit", "1"],
       {
         encoding: "utf8",
         stdio: ["ignore", "pipe", "pipe"],

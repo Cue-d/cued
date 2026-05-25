@@ -1,6 +1,6 @@
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const { execFileSyncMock } = vi.hoisted(() => ({
@@ -15,7 +15,7 @@ vi.mock("node:child_process", async (importOriginal) => {
   };
 });
 
-import { NATIVE_RUNTIME_CONFIG } from "../core/config.js";
+import { IMESSAGE_CONFIG, NATIVE_RUNTIME_CONFIG } from "../core/config.js";
 import { CuedDatabase } from "../db/database.js";
 import { buildPermissionStatus } from "./doctor.js";
 
@@ -23,9 +23,11 @@ const itDarwin = process.platform === "darwin" ? it : it.skip;
 
 describe("permission status modes", () => {
   const tempDirs: string[] = [];
+  const originalIMessageDbPath = IMESSAGE_CONFIG.chatDbPath;
   const originalNativeRepoRoot = NATIVE_RUNTIME_CONFIG.repoRoot;
 
   afterEach(() => {
+    IMESSAGE_CONFIG.chatDbPath = originalIMessageDbPath;
     NATIVE_RUNTIME_CONFIG.repoRoot = originalNativeRepoRoot;
     vi.clearAllMocks();
     while (tempDirs.length > 0) {
@@ -87,6 +89,40 @@ describe("permission status modes", () => {
       "full_disk_access",
     ]);
     expect(execFileSyncMock.mock.calls.some(([command]) => command === "osascript")).toBe(false);
+
+    db.close();
+  });
+
+  itDarwin("uses the configured iMessage database path for native permission checks", async () => {
+    const db = createDb();
+    const nativeBinary = installNativeBinary();
+    const configuredChatDbPath = join(
+      mkdtempSync(join(tmpdir(), "cued-doctor-imessage-config-")),
+      "custom-chat.db",
+    );
+    tempDirs.push(dirname(configuredChatDbPath));
+    IMESSAGE_CONFIG.chatDbPath = configuredChatDbPath;
+
+    execFileSyncMock.mockImplementation((command: string, args?: string[]) => {
+      if (command === nativeBinary && args?.[0] === "contacts") {
+        return '{"status":"authorized"}';
+      }
+      if (command === nativeBinary && args?.[0] === "imessage") {
+        return "";
+      }
+      throw new Error(`unexpected command: ${command}`);
+    });
+
+    await buildPermissionStatus({
+      mode: "passive",
+      db,
+    });
+
+    expect(execFileSyncMock).toHaveBeenCalledWith(
+      nativeBinary,
+      ["imessage", "dump", "--db-path", configuredChatDbPath, "--after-rowid", "0", "--limit", "1"],
+      expect.objectContaining({ encoding: "utf8" }),
+    );
 
     db.close();
   });
