@@ -54,7 +54,7 @@ function readRuntimeConfig(args = process.argv.slice(2)): RuntimeConfigFile {
   }
   if (!existsSync(path)) {
     if (explicit) {
-      throw new Error(`Cued config file does not exist: ${path}`);
+      return { home: dirname(resolve(path)) };
     }
     return {};
   }

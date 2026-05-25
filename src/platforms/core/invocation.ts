@@ -7,7 +7,6 @@ export type AdapterInvocation = {
   syncProofs?: unknown;
   lastSyncAt?: number;
   syncToken?: string | null;
-  signalAccount?: string;
   imessageLastRowId?: number;
   whatsappSource?: "desktop_db";
   whatsappDesktopSourcePath?: string;

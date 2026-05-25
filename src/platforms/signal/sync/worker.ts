@@ -6,7 +6,6 @@ async function main(): Promise<void> {
     const invocation = await readAdapterInvocation();
     const bundle = await buildSignalSyncBundle({
       accountKey: invocation.accountKey,
-      account: invocation.signalAccount,
       lastSyncAt: invocation.lastSyncAt,
     });
     process.stdout.write(JSON.stringify({ ok: true, bundle }));
