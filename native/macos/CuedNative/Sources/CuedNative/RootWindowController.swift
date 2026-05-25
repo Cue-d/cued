@@ -159,12 +159,13 @@ final class RootWindowController: NSWindowController {
     let daemonSupervisor = self.daemonSupervisor
     let statusStore = self.statusStore
     let shouldEnsurePrerequisites = consumePrerequisiteSetupIntent()
-    let shouldRefreshPermissions = forceActivePermissionRefresh || shouldRefreshLivePermissions()
-    let fastPermissionKeys = shouldRefreshPermissions
+    let shouldRefreshFastPermissions = forceActivePermissionRefresh || shouldRefreshLivePermissions()
+    let shouldRefreshManagedIntegrations = shouldRefreshFastPermissions
+    let fastPermissionKeys = shouldRefreshFastPermissions
       ? (pendingLivePermissionKeys.isEmpty ? liveRefreshPermissionKeys : pendingLivePermissionKeys)
       : []
 
-    if shouldRefreshPermissions {
+    if shouldRefreshFastPermissions {
       applyFastPermissionStatuses(for: fastPermissionKeys)
     }
 
@@ -190,7 +191,7 @@ final class RootWindowController: NSWindowController {
       let snapshot = Self.decodeJSON(
         daemonSupervisor: daemonSupervisor,
         RootSnapshotResponse.self,
-        arguments: onboardingSnapshotArguments(refreshManagedIntegrations: shouldRefreshPermissions)
+        arguments: onboardingSnapshotArguments(refreshManagedIntegrations: shouldRefreshManagedIntegrations)
       )
 
       guard let snapshot else {
