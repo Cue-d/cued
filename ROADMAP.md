@@ -12,12 +12,6 @@ Release artifacts:
 - `cued-macos-arm64.tar.gz`
 - release metadata and checksums
 
-## Planned Distribution
-
-Homebrew is the preferred next install channel for macOS CLI/app installs. Before adding it, releases need stable tarball naming, checksums, and a formula that installs the app bundle and CLI symlink predictably.
-
-npm may make sense later as a CLI installer wrapper or developer package. Cued should stay `private` in `package.json` until the package contents and install behavior are intentionally designed for npm.
-
 ## Integration Status
 
 Ready for normal public use:
