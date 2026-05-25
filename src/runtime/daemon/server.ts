@@ -5297,9 +5297,7 @@ async function dispatchRequest(
         return {
           id: request.id,
           ok: true,
-          result: await db.withBusyTimeout(DAEMON_STATUS_BUSY_TIMEOUT_MS, () =>
-            buildPermissionStatus(),
-          ),
+          result: await buildPermissionStatus(),
         };
       case "onboarding-status":
         return {

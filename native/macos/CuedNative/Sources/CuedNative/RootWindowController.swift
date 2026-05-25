@@ -190,7 +190,7 @@ final class RootWindowController: NSWindowController {
       let snapshot = Self.decodeJSON(
         daemonSupervisor: daemonSupervisor,
         RootSnapshotResponse.self,
-        arguments: onboardingSnapshotArguments(refreshPermissions: shouldRefreshPermissions)
+        arguments: onboardingSnapshotArguments(refreshManagedIntegrations: shouldRefreshPermissions)
       )
 
       guard let snapshot else {
@@ -947,7 +947,7 @@ func shouldActivelyRefreshPermissions(for flags: [String]) -> Bool {
   return !keys.isDisjoint(with: liveRefreshPermissionKeys)
 }
 
-func onboardingSnapshotArguments(refreshPermissions: Bool) -> [String] {
+func onboardingSnapshotArguments(refreshManagedIntegrations: Bool) -> [String] {
   ["onboarding", "snapshot"] +
-    (refreshPermissions ? ["--refresh-managed"] : [])
+    (refreshManagedIntegrations ? ["--refresh-managed"] : [])
 }
