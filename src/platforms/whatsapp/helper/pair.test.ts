@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { WHATSAPP_HELPER_CONFIG } from "../../../core/config.js";
 
 const { spawnMock } = vi.hoisted(() => ({
   spawnMock: vi.fn(),
@@ -22,7 +23,6 @@ import {
   readWhatsAppHelperStatus,
   resolveWhatsAppHelperBinary,
   startWhatsAppPairSession,
-  WHATSAPP_HELPER_CONFIG,
 } from "./pair.js";
 
 class MockPairChild extends EventEmitter {

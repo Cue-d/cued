@@ -3,14 +3,11 @@ import { existsSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
+import { SLACK_HELPER_CONFIG } from "../../../core/config.js";
 
 const execFileAsync = promisify(execFile);
 const SLACK_HELPER_BINARY_NAME = "cued-slack-helper";
 const SUPPORTED_SLACK_HELPER_PROTOCOL_VERSION = 1;
-
-export const SLACK_HELPER_CONFIG = {
-  helperBinary: null as string | null,
-};
 
 function resolveRepoRoot(): string {
   return resolve(dirname(fileURLToPath(import.meta.url)), "../../../..");

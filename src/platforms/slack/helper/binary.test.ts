@@ -2,12 +2,12 @@ import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:f
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { SLACK_HELPER_CONFIG } from "../../../core/config.js";
 import {
   getSlackHelperBinaryCandidates,
   inspectSlackHelper,
   readSlackHelperStatus,
   resolveSlackHelperBinary,
-  SLACK_HELPER_CONFIG,
 } from "./binary.js";
 
 describe("slack helper binary", () => {

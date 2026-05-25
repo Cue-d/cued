@@ -3,16 +3,12 @@ import { existsSync, mkdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-import { ensureCuedDirs } from "../../../core/config.js";
+import { ensureCuedDirs, WHATSAPP_HELPER_CONFIG } from "../../../core/config.js";
 import { validateIntegrationAccountKey } from "../../core/account-keys.js";
 import { getWhatsAppStoreRoot } from "../../core/runtime-paths.js";
 import type { WhatsAppHelperEventEnvelope } from "../types.js";
 
 const execFileAsync = promisify(execFile);
-
-export const WHATSAPP_HELPER_CONFIG = {
-  helperBinary: null as string | null,
-};
 
 function resolveRepoRoot(): string {
   return resolve(dirname(fileURLToPath(import.meta.url)), "../../../..");

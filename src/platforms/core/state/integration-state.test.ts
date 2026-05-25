@@ -8,6 +8,8 @@ import {
   PLATFORM_RUNTIME_CONFIG,
   SIGNAL_CLI_CONFIG,
   SLACK_DESKTOP_IMPORT_CONFIG,
+  SLACK_HELPER_CONFIG,
+  WHATSAPP_HELPER_CONFIG,
 } from "../../../core/config.js";
 import { resolveHostOS } from "../../../core/platform-capabilities.js";
 import { CuedDatabase } from "../../../db/database.js";
@@ -18,8 +20,6 @@ import {
 } from "../../discord/sync/events.js";
 import { importLinkedInStoredAuth } from "../../linkedin/auth/keychain-import.js";
 import { storeSlackSession } from "../../slack/auth/session-store.js";
-import { SLACK_HELPER_CONFIG } from "../../slack/helper/binary.js";
-import { WHATSAPP_HELPER_CONFIG } from "../../whatsapp/helper/pair.js";
 import { startQrNativeAuthSession } from "../auth/qr-native.js";
 import { refreshLocalIntegrationStates } from "./local-refresh.js";
 import {

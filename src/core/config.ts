@@ -247,6 +247,12 @@ export const CONFIG = {
     remoteDebuggingPort: 9222,
     timeoutMs: 20_000,
   },
+  slackHelper: {
+    helperBinary: null as string | null,
+  },
+  whatsappHelper: {
+    helperBinary: null as string | null,
+  },
   signalCli: {
     repoRoot: REPO_ROOT,
   },
@@ -273,6 +279,8 @@ export const LINKEDIN_SYNC_CONFIG = CONFIG.linkedinSync;
 export const DISCORD_SYNC_CONFIG = CONFIG.discordSync;
 export const SLACK_SYNC_CONFIG = CONFIG.slackSync;
 export const SLACK_DESKTOP_IMPORT_CONFIG = CONFIG.slackDesktopImport;
+export const SLACK_HELPER_CONFIG = CONFIG.slackHelper;
+export const WHATSAPP_HELPER_CONFIG = CONFIG.whatsappHelper;
 export const SIGNAL_CLI_CONFIG = CONFIG.signalCli;
 export const AUTH_RUNTIME_CONFIG = CONFIG.authRuntime;
 

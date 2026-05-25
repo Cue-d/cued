@@ -7,9 +7,9 @@ import {
   NATIVE_RUNTIME_CONFIG,
   SIGNAL_CLI_CONFIG,
   SLACK_DESKTOP_IMPORT_CONFIG,
+  WHATSAPP_HELPER_CONFIG,
 } from "../core/config.js";
 import { CuedDatabase } from "../db/database.js";
-import { WHATSAPP_HELPER_CONFIG } from "../platforms/whatsapp/helper/pair.js";
 import { buildOnboardingSnapshot } from "./onboarding.js";
 
 describe("onboarding snapshot", () => {
