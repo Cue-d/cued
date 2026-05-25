@@ -902,12 +902,7 @@ async function main(): Promise<void> {
               printJson(daemonResponse.result ?? null);
               return;
             }
-            const db = openCuedDatabaseReadOnly();
-            try {
-              printJson(await buildPermissionStatus());
-            } finally {
-              db.close();
-            }
+            printJson(await buildPermissionStatus());
           }
           return;
         case "request": {
