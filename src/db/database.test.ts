@@ -98,6 +98,27 @@ describe("CuedDatabase", () => {
       .run(input.id, input.name, timestamp, timestamp);
   }
 
+  function executeContactMerge(
+    db: CuedDatabase,
+    input: { primaryContactId: string; secondaryContactId: string; reason?: string | null },
+  ) {
+    const action = db.createAction({
+      actionType: "contact.merge",
+      payload: {
+        primaryContactId: input.primaryContactId,
+        secondaryContactId: input.secondaryContactId,
+        reason: input.reason ?? null,
+      },
+      requiresApproval: false,
+    });
+    return db.executeApprovedAction(action.id, "test").result as {
+      decisionId: string;
+      primaryContactId: string;
+      secondaryContactId: string;
+      canonicalContactId: string;
+    };
+  }
+
   function insertHandle(
     db: CuedDatabase,
     input: {
@@ -243,6 +264,523 @@ describe("CuedDatabase", () => {
         .prepare("SELECT status, owner_id, lease_expires_at FROM jobs WHERE id = ?")
         .get(lowPriorityJobId),
     ).toEqual({ status: "completed", owner_id: null, lease_expires_at: null });
+
+    db.close();
+  });
+
+  it("records the full action lifecycle and execution effects", () => {
+    const db = createDb();
+
+    const action = db.createAction({
+      actionType: "contact.merge",
+      actionVersion: "1",
+      payload: {
+        primaryContactId: "contact-a",
+        secondaryContactId: "contact-b",
+        evidence: ["same normalized phone"],
+      },
+      priority: 10,
+      title: "Merge Ava duplicate",
+      summary: "Exact handle overlap.",
+      sourceSkill: "cued",
+      createdBy: "agent",
+      dedupeKey: "contact.merge:contact-a:contact-b",
+    });
+
+    expect(action).toMatchObject({
+      action_type: "contact.merge",
+      action_version: "1",
+      status: "proposed",
+      approval_status: "pending",
+      execution_status: "pending",
+      priority: 10,
+      source_skill: "cued",
+      created_by: "agent",
+      requires_approval: 1,
+      payload_hash: expect.stringMatching(/^[a-f0-9]{64}$/),
+      dedupe_key: "contact.merge:contact-a:contact-b",
+    });
+    expect(JSON.parse(action.payload_json)).toEqual({
+      primaryContactId: "contact-a",
+      secondaryContactId: "contact-b",
+      evidence: ["same normalized phone"],
+    });
+
+    const approved = db.approveAction(action.id, "soham");
+    expect(approved).toMatchObject({
+      status: "approved",
+      approval_status: "approved",
+      approved_by: "soham",
+      approved_at: expect.any(Number),
+    });
+
+    const locked = db.lockActionForExecution(action.id, "daemon");
+    expect(locked).toMatchObject({
+      status: "executing",
+      execution_status: "running",
+      executed_by: "daemon",
+      locked_at: expect.any(Number),
+      started_at: expect.any(Number),
+    });
+    expect(() =>
+      db.updateActionPayload(action.id, {
+        primaryContactId: "contact-c",
+        secondaryContactId: "contact-b",
+      }),
+    ).toThrow("Cannot update an action payload after execution has started.");
+
+    const effect = db.recordActionEffect({
+      actionId: action.id,
+      effectType: "contact.merge.recorded",
+      targetTable: "contacts",
+      targetId: "contact-a",
+      payload: { canonicalContactId: "contact-a" },
+      appliedAt: 1234,
+    });
+    expect(effect).toMatchObject({
+      action_id: action.id,
+      effect_type: "contact.merge.recorded",
+      target_table: "contacts",
+      target_id: "contact-a",
+      payload_json: JSON.stringify({ canonicalContactId: "contact-a" }),
+      applied_at: 1234,
+      reverted_at: null,
+    });
+
+    const completed = db.completeAction(action.id, { decisionId: "decision-1" });
+    expect(completed).toMatchObject({
+      status: "executed",
+      execution_status: "succeeded",
+      result_json: JSON.stringify({ decisionId: "decision-1" }),
+      executed_at: expect.any(Number),
+    });
+    expect(db.listActionEffects(action.id).map((row) => row.id)).toEqual([effect.id]);
+
+    db.close();
+  });
+
+  it("enforces action approval and failure transitions", () => {
+    const db = createDb();
+
+    const pending = db.createAction({
+      actionType: "contact.memory.add",
+      payload: { contactId: "contact-a", body: "Works on applied AI." },
+      createdBy: "agent",
+    });
+    expect(() => db.lockActionForExecution(pending.id)).toThrow(
+      "Action must be approved before execution.",
+    );
+
+    const updated = db.updateActionPayload(pending.id, {
+      contactId: "contact-a",
+      body: "Works on applied AI and founder tooling.",
+    });
+    expect(JSON.parse(updated.payload_json)).toEqual({
+      contactId: "contact-a",
+      body: "Works on applied AI and founder tooling.",
+    });
+    expect(updated.payload_hash).not.toBe(pending.payload_hash);
+
+    const denied = db.denyAction(pending.id, "soham");
+    expect(denied).toMatchObject({
+      status: "denied",
+      approval_status: "denied",
+      approved_by: null,
+      denied_by: "soham",
+      denied_at: expect.any(Number),
+    });
+    expect(() => db.approveAction(pending.id)).toThrow("Cannot approve a denied action.");
+
+    const autoApproved = db.createAction({
+      actionType: "contact.memory.stale",
+      payload: { memoryId: "memory-1" },
+      requiresApproval: false,
+      createdBy: "system",
+    });
+    expect(autoApproved).toMatchObject({
+      status: "approved",
+      approval_status: "auto_approved",
+      approved_by: "system",
+      approved_at: expect.any(Number),
+    });
+    db.lockActionForExecution(autoApproved.id, "daemon");
+    const failed = db.failAction(autoApproved.id, new Error("memory missing"));
+    expect(failed).toMatchObject({
+      status: "failed",
+      execution_status: "failed",
+      error_json: expect.stringContaining("memory missing"),
+      executed_at: expect.any(Number),
+    });
+
+    db.close();
+  });
+
+  it("executes approved contact merge actions and records effects", () => {
+    const db = createDb();
+    insertContact(db, { id: "contact-a", name: "Ava Chen" });
+    insertContact(db, { id: "contact-b", name: "Ava Duplicate" });
+
+    const action = db.createAction({
+      actionType: "contact.merge",
+      payload: {
+        primaryContactId: "contact-a",
+        secondaryContactId: "contact-b",
+        reason: "same normalized phone",
+      },
+      requiresApproval: false,
+    });
+
+    const executed = db.executeApprovedAction(action.id, "action-runner");
+    expect(executed.action).toMatchObject({
+      status: "executed",
+      execution_status: "succeeded",
+      executed_by: "action-runner",
+    });
+    expect(executed.effects).toHaveLength(1);
+    expect(executed.effects[0]).toMatchObject({
+      action_id: action.id,
+      effect_type: "contact.merge.recorded",
+      target_table: "contacts",
+      target_id: "contact-a",
+    });
+    expect(db.listActionEffects(action.id)).toEqual([
+      expect.objectContaining({ action_id: action.id, target_id: "contact-a" }),
+    ]);
+
+    db.close();
+  });
+
+  it("validates action payloads again at execution time", () => {
+    const db = createDb();
+    const action = db.createAction({
+      actionType: "contact.memory.add",
+      payload: { contactId: "contact-a" },
+      requiresApproval: false,
+    });
+
+    expect(() => db.executeApprovedAction(action.id, "action-runner")).toThrow(
+      "Action payload failed validation: Missing required payload field 'body'.",
+    );
+    expect(db.getAction(action.id)).toMatchObject({
+      status: "failed",
+      execution_status: "failed",
+      error_json: expect.stringContaining("Missing required payload field 'body'."),
+    });
+
+    db.close();
+  });
+
+  it("executes approved contact memory actions and records effects", () => {
+    const db = createDb();
+    insertContact(db, { id: "contact-a", name: "Ava Chen" });
+
+    const addAction = db.createAction({
+      actionType: "contact.memory.add",
+      payload: {
+        contactId: "contact-a",
+        body: "Works on applied AI.",
+        sourceKind: "local_messages",
+        evidence: { messageIds: ["message-1"] },
+        confidence: 90,
+      },
+      requiresApproval: false,
+    });
+    const added = db.executeApprovedAction(addAction.id, "action-runner");
+    expect(added.action).toMatchObject({ status: "executed", execution_status: "succeeded" });
+    expect(added.effects[0]).toMatchObject({
+      effect_type: "contact_memory.added",
+      target_table: "contact_memories",
+    });
+    const memoryId = added.effects[0]!.target_id!;
+    expect(db.getContactMemory(memoryId)).toMatchObject({
+      contact_id: "contact-a",
+      body: "Works on applied AI.",
+      source_kind: "local_messages",
+      confidence: 90,
+      created_by: "action-runner",
+    });
+
+    const staleAction = db.createAction({
+      actionType: "contact.memory.stale",
+      payload: { memoryId },
+      requiresApproval: false,
+    });
+    const staled = db.executeApprovedAction(staleAction.id, "action-runner");
+    expect(staled.effects[0]).toMatchObject({
+      effect_type: "contact_memory.marked_stale",
+      target_table: "contact_memories",
+      target_id: memoryId,
+    });
+    expect(db.getContactMemory(memoryId)).toMatchObject({
+      id: memoryId,
+      stale_at: expect.any(Number),
+    });
+
+    db.close();
+  });
+
+  it("executes approved follow-up recommendation actions without mutating contact state", () => {
+    const db = createDb();
+    insertContact(db, { id: "contact-a", name: "Ava Chen" });
+
+    const action = db.createAction({
+      actionType: "contact.followup.recommend",
+      payload: {
+        contactId: "contact-a",
+        reason: "They replied last week and no follow-up has been sent.",
+        suggestedMessage: "Following up on our last thread.",
+        dueAt: 1_735_689_600_000,
+        evidence: { messageIds: ["message-1"] },
+      },
+      requiresApproval: false,
+    });
+
+    const executed = db.executeApprovedAction(action.id, "action-runner");
+    expect(executed.action).toMatchObject({
+      status: "executed",
+      execution_status: "succeeded",
+    });
+    expect(executed.effects).toHaveLength(1);
+    expect(executed.effects[0]).toMatchObject({
+      effect_type: "contact.followup.recommended",
+      target_table: "contacts",
+      target_id: "contact-a",
+    });
+    expect(JSON.parse(executed.effects[0]!.payload_json!)).toEqual({
+      contactId: "contact-a",
+      reason: "They replied last week and no follow-up has been sent.",
+      suggestedMessage: "Following up on our last thread.",
+      dueAt: 1_735_689_600_000,
+      evidence: { messageIds: ["message-1"] },
+    });
+
+    db.close();
+  });
+
+  it("executes approved enrichment recommendation actions as effects only", () => {
+    const db = createDb();
+    insertContact(db, { id: "contact-a", name: "Ava Chen" });
+
+    const action = db.createAction({
+      actionType: "contact.enrichment.recommend",
+      payload: {
+        contactId: "contact-a",
+        field: "linkedin",
+        value: "https://www.linkedin.com/in/ava-chen",
+        sourceKind: "contact_sources",
+        evidence: { sourceEntityKey: "linkedin:ava-chen" },
+        confidence: 95,
+      },
+      requiresApproval: false,
+    });
+
+    const executed = db.executeApprovedAction(action.id, "action-runner");
+    expect(executed.action).toMatchObject({
+      status: "executed",
+      execution_status: "succeeded",
+    });
+    expect(executed.effects).toHaveLength(1);
+    expect(executed.effects[0]).toMatchObject({
+      effect_type: "contact.enrichment.recommended",
+      target_table: "contacts",
+      target_id: "contact-a",
+    });
+    expect(JSON.parse(executed.effects[0]!.payload_json!)).toEqual({
+      contactId: "contact-a",
+      field: "linkedin",
+      value: "https://www.linkedin.com/in/ava-chen",
+      sourceKind: "contact_sources",
+      evidence: { sourceEntityKey: "linkedin:ava-chen" },
+      confidence: 95,
+    });
+
+    db.close();
+  });
+
+  it("executes approved introduction recommendation actions as effects only", () => {
+    const db = createDb();
+    insertContact(db, { id: "contact-a", name: "Ava Chen" });
+    insertContact(db, { id: "contact-b", name: "Ben Ross" });
+
+    const action = db.createAction({
+      actionType: "contact.introduction.recommend",
+      payload: {
+        fromContactId: "contact-a",
+        toContactId: "contact-b",
+        reason: "Both have discussed local-first agent infrastructure.",
+        suggestedIntro: "You should meet because you are working on overlapping problems.",
+        evidence: { sharedTopics: ["agents", "local context"] },
+        confidence: 75,
+      },
+      requiresApproval: false,
+    });
+
+    const executed = db.executeApprovedAction(action.id, "action-runner");
+    expect(executed.action).toMatchObject({
+      status: "executed",
+      execution_status: "succeeded",
+    });
+    expect(executed.effects).toHaveLength(1);
+    expect(executed.effects[0]).toMatchObject({
+      effect_type: "contact.introduction.recommended",
+      target_table: "contacts",
+      target_id: "contact-a",
+    });
+    expect(JSON.parse(executed.effects[0]!.payload_json!)).toEqual({
+      fromContactId: "contact-a",
+      toContactId: "contact-b",
+      reason: "Both have discussed local-first agent infrastructure.",
+      suggestedIntro: "You should meet because you are working on overlapping problems.",
+      evidence: { sharedTopics: ["agents", "local context"] },
+      confidence: 75,
+    });
+
+    db.close();
+  });
+
+  it("executes approved message draft actions as effects only", () => {
+    const db = createDb();
+    insertContact(db, { id: "contact-a", name: "Ava Chen" });
+
+    const action = db.createAction({
+      actionType: "contact.message.draft",
+      payload: {
+        contactId: "contact-a",
+        body: "Following up on our last thread.",
+        reason: "Recent inbound message has no newer outbound reply.",
+        channelHint: "imessage",
+        evidence: { messageIds: ["message-1"] },
+        confidence: 70,
+      },
+      requiresApproval: false,
+    });
+
+    const executed = db.executeApprovedAction(action.id, "action-runner");
+    expect(executed.action).toMatchObject({
+      status: "executed",
+      execution_status: "succeeded",
+    });
+    expect(executed.effects).toHaveLength(1);
+    expect(executed.effects[0]).toMatchObject({
+      effect_type: "contact.message.drafted",
+      target_table: "contacts",
+      target_id: "contact-a",
+    });
+    expect(JSON.parse(executed.effects[0]!.payload_json!)).toEqual({
+      contactId: "contact-a",
+      body: "Following up on our last thread.",
+      reason: "Recent inbound message has no newer outbound reply.",
+      channelHint: "imessage",
+      evidence: { messageIds: ["message-1"] },
+      confidence: 70,
+    });
+
+    db.close();
+  });
+
+  it("executes approved conversation summary draft actions as effects only", () => {
+    const db = createDb();
+    insertConversation(db, "conversation-a", "Ava / Ben");
+
+    const action = db.createAction({
+      actionType: "conversation.summary.draft",
+      payload: {
+        conversationId: "conversation-a",
+        summary: "Discussed local-first agent context and action queues.",
+        reason: "Recent conversation summary requested by agent smoke.",
+        timeWindow: "last_30_days",
+        evidence: { messageCount: 12 },
+        confidence: 65,
+      },
+      requiresApproval: false,
+    });
+
+    const executed = db.executeApprovedAction(action.id, "action-runner");
+    expect(executed.action).toMatchObject({
+      status: "executed",
+      execution_status: "succeeded",
+    });
+    expect(executed.effects).toHaveLength(1);
+    expect(executed.effects[0]).toMatchObject({
+      effect_type: "conversation.summary.drafted",
+      target_table: "conversations",
+      target_id: "conversation-a",
+    });
+    expect(JSON.parse(executed.effects[0]!.payload_json!)).toEqual({
+      conversationId: "conversation-a",
+      summary: "Discussed local-first agent context and action queues.",
+      reason: "Recent conversation summary requested by agent smoke.",
+      timeWindow: "last_30_days",
+      evidence: { messageCount: 12 },
+      confidence: 65,
+    });
+
+    db.close();
+  });
+
+  it("executes approved conversation follow-up recommendation actions as effects only", () => {
+    const db = createDb();
+    insertConversation(db, "conversation-a", "Ava / Ben");
+
+    const action = db.createAction({
+      actionType: "conversation.followup.recommend",
+      payload: {
+        conversationId: "conversation-a",
+        reason: "The thread has recent activity and needs a next step.",
+        suggestedNextStep: "Review the thread and decide whether to reply.",
+        evidence: { messageCount: 12 },
+        confidence: 60,
+      },
+      requiresApproval: false,
+    });
+
+    const executed = db.executeApprovedAction(action.id, "action-runner");
+    expect(executed.action).toMatchObject({
+      status: "executed",
+      execution_status: "succeeded",
+    });
+    expect(executed.effects).toHaveLength(1);
+    expect(executed.effects[0]).toMatchObject({
+      effect_type: "conversation.followup.recommended",
+      target_table: "conversations",
+      target_id: "conversation-a",
+    });
+    expect(JSON.parse(executed.effects[0]!.payload_json!)).toEqual({
+      conversationId: "conversation-a",
+      reason: "The thread has recent activity and needs a next step.",
+      suggestedNextStep: "Review the thread and decide whether to reply.",
+      evidence: { messageCount: 12 },
+      confidence: 60,
+    });
+
+    db.close();
+  });
+
+  it("lists approved pending actions in execution order", () => {
+    const db = createDb();
+    const proposed = db.createAction({
+      actionType: "contact.memory.stale",
+      payload: { memoryId: "memory-proposed" },
+    });
+    const lowPriority = db.createAction({
+      actionType: "contact.memory.stale",
+      payload: { memoryId: "memory-low" },
+      priority: 10,
+      requiresApproval: false,
+    });
+    const highPriority = db.createAction({
+      actionType: "contact.memory.stale",
+      payload: { memoryId: "memory-high" },
+      priority: -1,
+      requiresApproval: false,
+    });
+    db.approveAction(proposed.id, "soham");
+    db.lockActionForExecution(lowPriority.id, "runner");
+
+    expect(db.listApprovedPendingActions().map((action) => action.id)).toEqual([
+      highPriority.id,
+      proposed.id,
+    ]);
 
     db.close();
   });
@@ -1205,7 +1743,7 @@ describe("CuedDatabase", () => {
     db.close();
   });
 
-  it("records manual merge decisions and resolves canonical contact chains", () => {
+  it("records contact merge actions and resolves canonical contact chains", () => {
     const db = createDb();
 
     insertContact(db, { id: "contact-a", name: "Ava Prime" });
@@ -1213,7 +1751,7 @@ describe("CuedDatabase", () => {
     insertContact(db, { id: "contact-c", name: "Ava Canonical" });
 
     expect(
-      db.recordContactMergeDecision({
+      executeContactMerge(db, {
         primaryContactId: "contact-a",
         secondaryContactId: "contact-b",
         reason: "same phone",
@@ -1224,9 +1762,8 @@ describe("CuedDatabase", () => {
       secondaryContactId: "contact-b",
       canonicalContactId: "contact-a",
     });
-
     expect(
-      db.recordContactMergeDecision({
+      executeContactMerge(db, {
         primaryContactId: "contact-c",
         secondaryContactId: "contact-a",
         reason: "prefer contacts source",
@@ -1238,10 +1775,11 @@ describe("CuedDatabase", () => {
       canonicalContactId: "contact-c",
     });
 
-    expect(db.resolveCanonicalContactId("contact-b")).toBe("contact-c");
-    expect(db.resolveCanonicalContactId("contact-a")).toBe("contact-c");
-    expect(db.resolveCanonicalContactId("contact-c")).toBe("contact-c");
-    expect(db.listContactMergeDecisions()).toHaveLength(2);
+    expect(db.listContactMergeAliases()).toEqual([
+      { contact_id: "contact-b", canonical_contact_id: "contact-a" },
+      { contact_id: "contact-a", canonical_contact_id: "contact-c" },
+    ]);
+    expect(db.listContactMergeAliases()).toHaveLength(2);
 
     db.close();
   });
@@ -1257,7 +1795,7 @@ describe("CuedDatabase", () => {
       createdBy: "test",
     });
 
-    db.recordContactMergeDecision({
+    executeContactMerge(db, {
       primaryContactId: "contact-a",
       secondaryContactId: "contact-b",
       reason: "same email",

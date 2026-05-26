@@ -1,6 +1,12 @@
 import { randomUUID } from "node:crypto";
 import { safeParseJson } from "../db/codecs.js";
-import type { ActionEffectRow, ActionRow, ContactMemoryRow } from "../db/database.js";
+import type {
+  ActionEffectRow,
+  ActionRow,
+  ContactMemoryRow,
+  ContactMergeAlias,
+} from "../db/database.js";
+import type { ActionDefinition } from "./registry.js";
 
 export interface ActionSkillDatabase {
   addContactMemory(input: {
@@ -28,15 +34,12 @@ export interface ActionSkillDatabase {
     payload?: unknown;
     appliedAt?: number;
   }): ActionEffectRow;
-  listActiveActionEffects(input?: {
-    actionType?: string;
-    effectType?: string;
-    limit?: number;
-  }): ActionEffectRow[];
+  listContactMergeAliases(): ContactMergeAlias[];
 }
 
 export interface ActionExecutionContext {
   action: ActionRow;
+  definition: ActionDefinition;
   db: ActionSkillDatabase;
   executedBy: string;
   helpers: ActionExecutionHelpers;

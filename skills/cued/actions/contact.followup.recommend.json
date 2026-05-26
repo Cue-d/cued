@@ -2,8 +2,15 @@
   "type": "contact.followup.recommend",
   "version": "1",
   "description": "Record a harmless follow-up recommendation for a contact.",
-  "module": "actions/contact-followup-recommend.cjs",
+  "module": "actions/record-effect.cjs",
   "requiresApprovalDefault": true,
+  "effect": {
+    "effectType": "contact.followup.recommended",
+    "targetTable": "contacts",
+    "targetExists": "contact",
+    "targetIdField": "contactId",
+    "resultKey": "recommendation"
+  },
   "payload": {
     "required": {
       "contactId": "string",

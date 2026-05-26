@@ -3,10 +3,7 @@ import { existsSync, type FSWatcher, rmSync, watch } from "node:fs";
 import { createConnection, createServer, type Socket } from "node:net";
 import { basename, dirname } from "node:path";
 import process from "node:process";
-import {
-  ActionDefinitionRegistry,
-  actionRequiresProjectionRebuild,
-} from "../../actions/registry.js";
+import { ActionDefinitionRegistry } from "../../actions/registry.js";
 import { getCurrentAppVersion, getCurrentReleaseChannel } from "../../core/app-metadata.js";
 import { CUED_DAEMON_LOCK_PATH, CUED_SOCKET_PATH } from "../../core/config.js";
 import { createLogger } from "../../core/logging.js";
@@ -5025,40 +5022,6 @@ function stopActiveAuthSessionsForIntegration(
   }
 }
 
-function runApprovedActions(
-  db: ReturnType<typeof openCuedDatabase>,
-  input: { limit?: number; executedBy?: string | null } = {},
-): {
-  attempted: number;
-  succeeded: number;
-  failed: number;
-  results: Array<{ actionId: string; ok: boolean; result?: unknown; error?: string }>;
-} {
-  const actions = db.listApprovedPendingActions(input.limit ?? 25);
-  const results: Array<{ actionId: string; ok: boolean; result?: unknown; error?: string }> = [];
-  for (const action of actions) {
-    try {
-      const executed = db.executeApprovedAction(action.id, input.executedBy ?? "daemon");
-      if (actionRequiresProjectionRebuild(executed.action)) {
-        rebuildProjectedState(db);
-      }
-      results.push({ actionId: action.id, ok: true, result: executed });
-    } catch (error) {
-      results.push({
-        actionId: action.id,
-        ok: false,
-        error: error instanceof Error ? error.message : String(error),
-      });
-    }
-  }
-  return {
-    attempted: results.length,
-    succeeded: results.filter((result) => result.ok).length,
-    failed: results.filter((result) => !result.ok).length,
-    results,
-  };
-}
-
 export async function dispatchRequest(
   db: ReturnType<typeof openCuedDatabase>,
   request: DaemonRequest,
@@ -5420,9 +5383,7 @@ export async function dispatchRequest(
           ok: true,
           result: {
             ...executed,
-            projection: actionRequiresProjectionRebuild(executed.action)
-              ? rebuildProjectedState(db)
-              : null,
+            projection: executed.requiresProjectionRebuild ? rebuildProjectedState(db) : null,
           },
         };
       }
@@ -5430,9 +5391,14 @@ export async function dispatchRequest(
         return {
           id: request.id,
           ok: true,
-          result: runApprovedActions(db, {
+          result: db.runApprovedActions({
             limit: request.limit,
             executedBy: request.executedBy,
+            afterAction: (executed) => {
+              if (executed.requiresProjectionRebuild) {
+                rebuildProjectedState(db);
+              }
+            },
           }),
         };
       case "integrations-list": {

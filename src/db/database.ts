@@ -98,6 +98,27 @@ function hashActionPayload(payloadJson: string): string {
   return createHash("sha256").update(payloadJson).digest("hex");
 }
 
+function parseContactMergeAlias(payloadJson: string | null): ContactMergeAlias | null {
+  const payload = safeParseJson<Record<string, unknown> | null>(
+    payloadJson,
+    "contact.merge.recorded:payload",
+    null,
+    (value): value is Record<string, unknown> =>
+      typeof value === "object" && value !== null && !Array.isArray(value),
+  );
+  if (
+    !payload ||
+    typeof payload.secondaryContactId !== "string" ||
+    typeof payload.canonicalContactId !== "string"
+  ) {
+    return null;
+  }
+  return {
+    contact_id: payload.secondaryContactId,
+    canonical_contact_id: payload.canonicalContactId,
+  };
+}
+
 export interface DaemonStatusRow {
   singleton_key: "daemon";
   pid: number | null;
@@ -202,10 +223,23 @@ export interface ActionEffectRow {
   reverted_at: number | null;
 }
 
+export interface ContactMergeAlias {
+  contact_id: string;
+  canonical_contact_id: string;
+}
+
 export interface ExecutedActionResult {
   action: ActionRow;
   effects: ActionEffectRow[];
   result: unknown;
+  requiresProjectionRebuild: boolean;
+}
+
+export interface RunApprovedActionsResult {
+  attempted: number;
+  succeeded: number;
+  failed: number;
+  results: Array<{ actionId: string; ok: boolean; result?: ExecutedActionResult; error?: string }>;
 }
 
 const ACTION_ROW_COLUMNS = `
@@ -1041,7 +1075,7 @@ export class CuedDatabase {
       .all(actionId) as ActionEffectRow[];
   }
 
-  listActiveActionEffects(
+  private listActiveActionEffects(
     input: { actionType?: string; effectType?: string; limit?: number } = {},
   ): ActionEffectRow[] {
     const filters = [
@@ -1086,6 +1120,15 @@ export class CuedDatabase {
       .all(...params) as ActionEffectRow[];
   }
 
+  listContactMergeAliases(): ContactMergeAlias[] {
+    return this.listActiveActionEffects({
+      actionType: "contact.merge",
+      effectType: "contact.merge.recorded",
+    })
+      .map((effect) => parseContactMergeAlias(effect.payload_json))
+      .filter((alias): alias is ContactMergeAlias => alias !== null);
+  }
+
   executeApprovedAction(id: string, executedBy = "daemon"): ExecutedActionResult {
     const locked = this.lockActionForExecution(id, executedBy);
     try {
@@ -1116,6 +1159,7 @@ export class CuedDatabase {
         }
         const { result, effects } = executor({
           action: locked,
+          definition,
           db: this.createActionSkillDatabase(),
           executedBy,
           helpers: actionExecutionHelpers,
@@ -1125,12 +1169,43 @@ export class CuedDatabase {
           action: this.completeAction(locked.id, result),
           effects,
           result,
+          requiresProjectionRebuild: definition.postExecution.rebuildProjection === true,
         };
       })();
     } catch (error) {
       this.failAction(locked.id, error);
       throw error;
     }
+  }
+
+  runApprovedActions(
+    input: {
+      limit?: number;
+      executedBy?: string | null;
+      afterAction?: (executed: ExecutedActionResult) => void;
+    } = {},
+  ): RunApprovedActionsResult {
+    const actions = this.listApprovedPendingActions(input.limit ?? 25);
+    const results: RunApprovedActionsResult["results"] = [];
+    for (const action of actions) {
+      try {
+        const executed = this.executeApprovedAction(action.id, input.executedBy ?? "daemon");
+        input.afterAction?.(executed);
+        results.push({ actionId: action.id, ok: true, result: executed });
+      } catch (error) {
+        results.push({
+          actionId: action.id,
+          ok: false,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+    return {
+      attempted: results.length,
+      succeeded: results.filter((result) => result.ok).length,
+      failed: results.filter((result) => !result.ok).length,
+      results,
+    };
   }
 
   private createActionSkillDatabase(): ActionSkillDatabase {
@@ -1141,7 +1216,7 @@ export class CuedDatabase {
       contactExists: (id) => this.contactExists(id),
       conversationExists: (id) => this.conversationExists(id),
       recordActionEffect: (input) => this.recordActionEffect(input),
-      listActiveActionEffects: (input) => this.listActiveActionEffects(input),
+      listContactMergeAliases: () => this.listContactMergeAliases(),
     };
   }
 

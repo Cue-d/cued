@@ -2,8 +2,17 @@
   "type": "contact.introduction.recommend",
   "version": "1",
   "description": "Record a harmless introduction recommendation between two contacts.",
-  "module": "actions/contact-introduction-recommend.cjs",
+  "module": "actions/record-effect.cjs",
   "requiresApprovalDefault": true,
+  "effect": {
+    "effectType": "contact.introduction.recommended",
+    "targetTable": "contacts",
+    "targetExists": "contact",
+    "targetIdField": "fromContactId",
+    "requireExistingFields": ["toContactId"],
+    "distinctFieldPairs": [["fromContactId", "toContactId"]],
+    "resultKey": "recommendation"
+  },
   "payload": {
     "required": {
       "fromContactId": "string",

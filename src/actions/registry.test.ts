@@ -47,15 +47,15 @@ describe("action definition registry", () => {
         .list()
         .map((definition) => `${definition.type}@${definition.version}:${definition.module}`),
     ).toEqual([
-      "contact.enrichment.recommend@1:actions/contact-enrichment-recommend.cjs",
-      "contact.followup.recommend@1:actions/contact-followup-recommend.cjs",
-      "contact.introduction.recommend@1:actions/contact-introduction-recommend.cjs",
+      "contact.enrichment.recommend@1:actions/record-effect.cjs",
+      "contact.followup.recommend@1:actions/record-effect.cjs",
+      "contact.introduction.recommend@1:actions/record-effect.cjs",
       "contact.memory.add@1:actions/contact-memory-add.cjs",
       "contact.memory.stale@1:actions/contact-memory-stale.cjs",
       "contact.merge@1:actions/contact-merge.cjs",
-      "contact.message.draft@1:actions/contact-message-draft.cjs",
-      "conversation.followup.recommend@1:actions/conversation-followup-recommend.cjs",
-      "conversation.summary.draft@1:actions/conversation-summary-draft.cjs",
+      "contact.message.draft@1:actions/record-effect.cjs",
+      "conversation.followup.recommend@1:actions/record-effect.cjs",
+      "conversation.summary.draft@1:actions/record-effect.cjs",
     ]);
     expect(registry.get("contact.merge", "1")?.skillName).toBe("cued");
     expect(

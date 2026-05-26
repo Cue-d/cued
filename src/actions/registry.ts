@@ -22,6 +22,16 @@ export interface ActionDefinition {
     required: Record<string, ActionPayloadFieldType>;
     optional: Record<string, ActionPayloadFieldType>;
   };
+  effect?: {
+    effectType: string;
+    targetTable: string;
+    targetExists: "contact" | "conversation";
+    targetIdField: string;
+    requireExistingFields: string[];
+    distinctFieldPairs: Array<[string, string]>;
+    resultKey: string;
+    defaults: Record<string, string | number | boolean | null>;
+  };
 }
 
 interface ActionDefinitionManifest {
@@ -139,6 +149,102 @@ function parsePayloadShape(value: unknown, actionType: string): ActionDefinition
   };
 }
 
+function parseStringArray(value: unknown, context: string): string[] {
+  if (value === undefined) {
+    return [];
+  }
+  if (!Array.isArray(value) || !value.every((entry) => typeof entry === "string")) {
+    throw new Error(`${context} must be an array of strings.`);
+  }
+  return value;
+}
+
+function parseDistinctFieldPairs(value: unknown, context: string): Array<[string, string]> {
+  if (value === undefined) {
+    return [];
+  }
+  if (
+    !Array.isArray(value) ||
+    !value.every(
+      (entry): entry is [string, string] =>
+        Array.isArray(entry) &&
+        entry.length === 2 &&
+        typeof entry[0] === "string" &&
+        typeof entry[1] === "string",
+    )
+  ) {
+    throw new Error(`${context} must be an array of two-string arrays.`);
+  }
+  return value;
+}
+
+function parseEffectDefaults(
+  value: unknown,
+  context: string,
+): Record<string, string | number | boolean | null> {
+  if (value === undefined) {
+    return {};
+  }
+  if (!isPlainObject(value)) {
+    throw new Error(`${context} must be an object.`);
+  }
+  const defaults: Record<string, string | number | boolean | null> = {};
+  for (const [key, entry] of Object.entries(value)) {
+    if (
+      typeof entry !== "string" &&
+      typeof entry !== "number" &&
+      typeof entry !== "boolean" &&
+      entry !== null
+    ) {
+      throw new Error(`${context}.${key} must be string, number, boolean, or null.`);
+    }
+    defaults[key] = entry;
+  }
+  return defaults;
+}
+
+function parseEffectDefinition(value: unknown, actionType: string): ActionDefinition["effect"] {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (!isPlainObject(value)) {
+    throw new Error(`Action '${actionType}' effect definition must be an object.`);
+  }
+  const effectType = typeof value.effectType === "string" ? value.effectType.trim() : "";
+  const targetTable = typeof value.targetTable === "string" ? value.targetTable.trim() : "";
+  const targetIdField = typeof value.targetIdField === "string" ? value.targetIdField.trim() : "";
+  const resultKey = typeof value.resultKey === "string" ? value.resultKey.trim() : "";
+  const targetExists = value.targetExists;
+  if (
+    !effectType ||
+    !targetTable ||
+    !targetIdField ||
+    !resultKey ||
+    (targetExists !== "contact" && targetExists !== "conversation")
+  ) {
+    throw new Error(
+      `Action '${actionType}' effect definition must include effectType, targetTable, targetExists, targetIdField, and resultKey.`,
+    );
+  }
+
+  return {
+    effectType,
+    targetTable,
+    targetExists,
+    targetIdField,
+    requireExistingFields: parseStringArray(
+      value.requireExistingFields,
+      `Action '${actionType}' effect requireExistingFields`,
+    ),
+    distinctFieldPairs: parseDistinctFieldPairs(
+      value.distinctFieldPairs,
+      `Action '${actionType}' effect distinctFieldPairs`,
+    ),
+    resultKey,
+    defaults: parseEffectDefaults(value.defaults, `Action '${actionType}' effect defaults`),
+  };
+}
+
 function parseActionDefinition(
   raw: unknown,
   index: number,
@@ -172,6 +278,7 @@ function parseActionDefinition(
     },
     requiresApprovalDefault: raw.requiresApprovalDefault !== false,
     payload: parsePayloadShape(raw.payload, type),
+    effect: parseEffectDefinition(raw.effect, type),
   };
 }
 
@@ -304,16 +411,6 @@ export class ActionDefinitionRegistry {
   private key(type: string, version: string): string {
     return `${type}@${version}`;
   }
-}
-
-export function actionRequiresProjectionRebuild(action: {
-  action_type: string;
-  action_version: string;
-}): boolean {
-  return (
-    ActionDefinitionRegistry.load().get(action.action_type, action.action_version)?.postExecution
-      .rebuildProjection === true
-  );
 }
 
 function matchesFieldType(value: unknown, expectedType: ActionPayloadFieldType): boolean {

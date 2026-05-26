@@ -2,8 +2,18 @@
   "type": "contact.enrichment.recommend",
   "version": "1",
   "description": "Record a local-data-backed contact enrichment recommendation.",
-  "module": "actions/contact-enrichment-recommend.cjs",
+  "module": "actions/record-effect.cjs",
   "requiresApprovalDefault": true,
+  "effect": {
+    "effectType": "contact.enrichment.recommended",
+    "targetTable": "contacts",
+    "targetExists": "contact",
+    "targetIdField": "contactId",
+    "resultKey": "recommendation",
+    "defaults": {
+      "sourceKind": "local"
+    }
+  },
   "payload": {
     "required": {
       "contactId": "string",

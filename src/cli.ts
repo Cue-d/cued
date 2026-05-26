@@ -5,7 +5,7 @@ import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
-import { ActionDefinitionRegistry, actionRequiresProjectionRebuild } from "./actions/registry.js";
+import { ActionDefinitionRegistry } from "./actions/registry.js";
 import { type DaemonRequestInput, DaemonRequestTimeoutError, sendDaemonRequest } from "./client.js";
 import { getCurrentAppVersion, getCurrentReleaseChannel } from "./core/app-metadata.js";
 import { CUED_DB_PATH, CUED_SOCKET_PATH, ensureCuedDirs } from "./core/config.js";
@@ -1186,9 +1186,7 @@ async function main(): Promise<void> {
             const executed = db.executeApprovedAction(actionId, executedBy);
             printJson({
               ...executed,
-              projection: actionRequiresProjectionRebuild(executed.action)
-                ? rebuildProjectedState(db)
-                : null,
+              projection: executed.requiresProjectionRebuild ? rebuildProjectedState(db) : null,
             });
           } finally {
             db.close();
@@ -1208,28 +1206,17 @@ async function main(): Promise<void> {
           }
           const db = openCuedDatabase();
           try {
-            const approved = db.listApprovedPendingActions(limit ?? 25);
-            const results = approved.map((action) => {
-              try {
-                const executed = db.executeApprovedAction(action.id, executedBy);
-                if (actionRequiresProjectionRebuild(executed.action)) {
-                  rebuildProjectedState(db);
-                }
-                return { actionId: action.id, ok: true, result: executed };
-              } catch (error) {
-                return {
-                  actionId: action.id,
-                  ok: false,
-                  error: error instanceof Error ? error.message : String(error),
-                };
-              }
-            });
-            printJson({
-              attempted: results.length,
-              succeeded: results.filter((result) => result.ok).length,
-              failed: results.filter((result) => !result.ok).length,
-              results,
-            });
+            printJson(
+              db.runApprovedActions({
+                limit: limit ?? undefined,
+                executedBy,
+                afterAction: (executed) => {
+                  if (executed.requiresProjectionRebuild) {
+                    rebuildProjectedState(db);
+                  }
+                },
+              }),
+            );
           } finally {
             db.close();
           }

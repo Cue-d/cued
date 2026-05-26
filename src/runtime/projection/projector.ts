@@ -1,6 +1,5 @@
 import { createHash } from "node:crypto";
 import { eq, type SQL, sql } from "drizzle-orm";
-import { listContactMergeAliases } from "../../actions/contact-merge-effects.js";
 import type {
   CallPayload,
   ContactObservationPayload,
@@ -614,7 +613,7 @@ function hydrateProjectionCache(db: CuedDatabase, cache: ProjectionCache): void 
   cache.contactNameMap.clear();
   cache.conversationNameMap.clear();
 
-  for (const row of listContactMergeAliases(db)) {
+  for (const row of db.listContactMergeAliases()) {
     cache.contactMergeAliasMap.set(row.contact_id, row.canonical_contact_id);
   }
 
@@ -669,7 +668,7 @@ function getProjectionCache(db: CuedDatabase): ProjectionCache {
 
 function resetProjectionCache(db: CuedDatabase): ProjectionCache {
   const cache = createProjectionCache();
-  for (const row of listContactMergeAliases(db)) {
+  for (const row of db.listContactMergeAliases()) {
     cache.contactMergeAliasMap.set(row.contact_id, row.canonical_contact_id);
   }
   cache.initialized = true;

@@ -2,8 +2,15 @@
   "type": "conversation.followup.recommend",
   "version": "1",
   "description": "Record a harmless follow-up recommendation for a conversation.",
-  "module": "actions/conversation-followup-recommend.cjs",
+  "module": "actions/record-effect.cjs",
   "requiresApprovalDefault": true,
+  "effect": {
+    "effectType": "conversation.followup.recommended",
+    "targetTable": "conversations",
+    "targetExists": "conversation",
+    "targetIdField": "conversationId",
+    "resultKey": "recommendation"
+  },
   "payload": {
     "required": {
       "conversationId": "string",

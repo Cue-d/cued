@@ -2,8 +2,15 @@
   "type": "contact.message.draft",
   "version": "1",
   "description": "Record a harmless drafted message for a contact without sending it.",
-  "module": "actions/contact-message-draft.cjs",
+  "module": "actions/record-effect.cjs",
   "requiresApprovalDefault": true,
+  "effect": {
+    "effectType": "contact.message.drafted",
+    "targetTable": "contacts",
+    "targetExists": "contact",
+    "targetIdField": "contactId",
+    "resultKey": "draft"
+  },
   "payload": {
     "required": {
       "contactId": "string",
