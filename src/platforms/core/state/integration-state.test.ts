@@ -40,7 +40,6 @@ describe("integration state management", () => {
     delete process.env.CUED_CONTACTS_NATIVE_BINARY;
     delete process.env.CUED_IMESSAGE_DB_PATH;
     delete process.env.CUED_SIGNAL_DIR;
-    delete process.env.CUED_SIGNAL_CLI_PATH;
     delete process.env.CUED_SLACK_APP_BINARY;
     delete process.env.CUED_SLACK_HELPER_BINARY;
     delete process.env.CUED_AUTH_NATIVE_BINARY;
@@ -1798,10 +1797,6 @@ process.exit(44);
 
   it("refreshes signal and whatsapp managed states for every persisted account", async () => {
     installSecurityTool({});
-    process.env.CUED_SIGNAL_CLI_PATH = join(
-      createTempDir("cued-missing-signal-cli-"),
-      "signal-cli",
-    );
     process.env.CUED_WHATSAPP_HELPER_BINARY = join(
       createTempDir("cued-missing-whatsapp-helper-"),
       "cued-whatsapp-helper",
