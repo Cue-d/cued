@@ -103,7 +103,6 @@ export interface Conversation {
   read: boolean;
   messages?: CollectionResponse<Message>;
   categories: string[];
-  unreadCount?: number;
 }
 
 export interface SeenReceipt {
