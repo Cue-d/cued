@@ -731,25 +731,15 @@ function summarizeMessageRange(messages: SlackMessage[]): {
 }
 
 function buildSlackBackfillConversationProof(input: {
-  teamId: string;
-  accountKey: string;
   conversation: SlackConversation;
-  family: SlackConversationFamily;
-  scan: SlackScanCursor;
   knownConversationCount: number;
   observedAt: number;
   messageBatch: SlackConversationBatchResult;
 }): SlackBackfillConversationProof {
   const range = summarizeMessageRange(input.messageBatch.messages);
   return {
-    teamId: input.teamId,
-    accountKey: input.accountKey,
-    syncMode: input.scan.mode,
-    scanStartedAt: input.scan.startedAt,
     knownConversationCount: input.knownConversationCount,
     conversationId: input.conversation.id,
-    conversationName: input.conversation.name,
-    conversationFamily: input.family,
     conversationPhase: input.messageBatch.resumeState.conversationPhase,
     historyComplete: input.messageBatch.resumeState.historyComplete,
     historyCursor: input.messageBatch.resumeState.historyCursor,
@@ -770,12 +760,7 @@ function buildSlackBackfillConversationProof(input: {
 }
 
 function buildCompleteSlackBackfillConversationProof(input: {
-  teamId: string;
-  accountKey: string;
   conversation: SlackConversation;
-  family: SlackConversationFamily;
-  scanMode: SlackScanMode;
-  scanStartedAt: number;
   knownConversationCount: number;
   observedAt: number;
   messages: SlackMessage[];
@@ -783,7 +768,6 @@ function buildCompleteSlackBackfillConversationProof(input: {
   repliesError?: SlackBackfillProofError | null;
   threadRootCount?: number;
   completedThreadCount?: number;
-  membersError?: SlackBackfillProofError | null;
 }): SlackBackfillConversationProof {
   const range = summarizeMessageRange(input.messages);
   const threadRootCount =
@@ -791,14 +775,8 @@ function buildCompleteSlackBackfillConversationProof(input: {
     input.messages.filter((message) => Number(message.reply_count ?? 0) > 0).length;
   const completedThreadCount = input.completedThreadCount ?? threadRootCount;
   return {
-    teamId: input.teamId,
-    accountKey: input.accountKey,
-    syncMode: input.scanMode,
-    scanStartedAt: input.scanStartedAt,
     knownConversationCount: input.knownConversationCount,
     conversationId: input.conversation.id,
-    conversationName: input.conversation.name,
-    conversationFamily: input.family,
     conversationPhase: "complete",
     historyComplete: true,
     historyCursor: null,
@@ -812,7 +790,6 @@ function buildCompleteSlackBackfillConversationProof(input: {
     observedAt: input.observedAt,
     historyError: input.historyError ?? null,
     repliesError: input.repliesError ?? null,
-    membersError: input.membersError ?? null,
   };
 }
 
@@ -939,10 +916,7 @@ export async function buildSlackSyncBundle(options?: {
         conversation,
         observedBase,
       );
-      const { memberIds, error: membersError } = await listConversationMembers(
-        client,
-        conversation,
-      );
+      const { memberIds } = await listConversationMembers(client, conversation);
       const messageBatch = await listConversationMessagesBatch(
         client,
         conversation.id,
@@ -965,20 +939,12 @@ export async function buildSlackSyncBundle(options?: {
       knownConversationIds.add(conversation.id);
       slackConversationProofs.push(
         buildSlackBackfillConversationProof({
-          teamId,
-          accountKey,
           conversation,
-          family,
-          scan,
           knownConversationCount: knownConversationIds.size,
           observedAt: observedBase,
           messageBatch,
         }),
       );
-      const proof = slackConversationProofs.at(-1);
-      if (proof) {
-        proof.membersError = membersError;
-      }
       rawEvents.push(
         buildSlackConversationEvent({
           teamId,
@@ -1142,10 +1108,7 @@ export async function buildSlackSyncBundle(options?: {
         conversation,
         observedBase,
       );
-      const { memberIds, error: membersError } = await listConversationMembers(
-        client,
-        conversation,
-      );
+      const { memberIds } = await listConversationMembers(client, conversation);
       const messageBatch = await listConversationMessages(
         client,
         conversation.id,
@@ -1179,12 +1142,7 @@ export async function buildSlackSyncBundle(options?: {
 
       slackConversationProofs.push(
         buildCompleteSlackBackfillConversationProof({
-          teamId,
-          accountKey,
           conversation,
-          family,
-          scanMode: scan.mode,
-          scanStartedAt: scan.startedAt,
           knownConversationCount: knownConversationIds.size,
           observedAt: observedBase,
           messages: messageBatch.messages,
@@ -1192,7 +1150,6 @@ export async function buildSlackSyncBundle(options?: {
           repliesError: messageBatch.repliesError,
           threadRootCount: messageBatch.threadRootCount,
           completedThreadCount: messageBatch.completedThreadCount,
-          membersError,
         }),
       );
     }

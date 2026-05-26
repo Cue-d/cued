@@ -3753,9 +3753,7 @@ export async function runDaemon(): Promise<void> {
           accountKey,
           proof: buildWhatsAppMessagesProof({
             accountKey,
-            syncMode: bundleSyncMode,
             observedAt: now(),
-            runStartedAt: resyncStartedAt,
             hasMore,
             nextCursor: cursor,
             sinceMs,

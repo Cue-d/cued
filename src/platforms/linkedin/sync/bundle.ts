@@ -700,8 +700,6 @@ function buildLinkedInDiscoveryProof(input: {
   accountKey: string;
   accountDisplayName: string;
   observedAt: number;
-  runStartedAt: number;
-  syncMode: "full" | "incremental";
   complete: boolean;
   resumeScan: LinkedInFullScanCursor | null;
   conversationCount: number;
@@ -732,8 +730,6 @@ function buildLinkedInMessagesProof(input: {
   };
   messageCount: number;
   observedAt: number;
-  runStartedAt: number;
-  syncMode: "full" | "incremental";
   complete: boolean;
   resumeCursor: LinkedInMessageResumeCursor | null;
   error?: unknown;
@@ -1012,8 +1008,6 @@ export async function buildLinkedInSyncBundle(options?: {
           coverage: messageResult.coverage,
           messageCount: messageResult.messageCount,
           observedAt: observedBase,
-          runStartedAt: scan?.startedAt ?? observedBase,
-          syncMode,
           complete: messageResult.complete,
           resumeCursor: messageResult.resumeCursor,
           error: messageResult.error,
@@ -1086,8 +1080,6 @@ export async function buildLinkedInSyncBundle(options?: {
         accountKey,
         accountDisplayName,
         observedAt: observedBase,
-        runStartedAt: scan?.startedAt ?? observedBase,
-        syncMode,
         complete: discoveryComplete,
         resumeScan: discoveryComplete ? null : (conversationResult.resumeScan ?? null),
         conversationCount: conversationResult.conversations.length,

@@ -10,14 +10,8 @@ export interface SlackBackfillProofError {
 }
 
 export interface SlackBackfillConversationProof {
-  teamId: string;
-  accountKey: string;
-  syncMode: "full" | "incremental";
-  scanStartedAt: number;
   knownConversationCount: number;
   conversationId: string;
-  conversationName?: string;
-  conversationFamily: "direct" | "channels";
   conversationPhase: SlackBackfillConversationPhase;
   historyComplete: boolean;
   historyCursor: string | null;
@@ -32,7 +26,6 @@ export interface SlackBackfillConversationProof {
   observedAt: number;
   historyError?: SlackBackfillProofError | null;
   repliesError?: SlackBackfillProofError | null;
-  membersError?: SlackBackfillProofError | null;
 }
 
 export function buildSlackBackfillSyncProofs(

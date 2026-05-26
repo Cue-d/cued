@@ -202,9 +202,7 @@ export function mergeWhatsAppResyncCoverage(
 
 export function buildWhatsAppMessagesProof(input: {
   accountKey: string;
-  syncMode: SyncMode;
   observedAt: number;
-  runStartedAt: number;
   hasMore: boolean;
   nextCursor: string | null;
   sinceMs: number | null;

@@ -143,9 +143,7 @@ describe("WhatsApp sync proof helpers", () => {
 
     const proof = buildWhatsAppMessagesProof({
       accountKey: "default",
-      syncMode: "full",
       observedAt: 500,
-      runStartedAt: 100,
       hasMore: false,
       nextCursor: null,
       sinceMs: null,
