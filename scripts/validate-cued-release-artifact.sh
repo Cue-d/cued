@@ -35,13 +35,9 @@ fi
 
 REQUIRED_SKILL_ACTION_FILES=(
   contact.enrichment.recommend.json
-  contact-enrichment-recommend.cjs
   contact.followup.recommend.json
-  contact-followup-recommend.cjs
   contact.introduction.recommend.json
-  contact-introduction-recommend.cjs
   contact.message.draft.json
-  contact-message-draft.cjs
   contact.merge.json
   contact-merge.cjs
   contact.memory.add.json
@@ -49,9 +45,8 @@ REQUIRED_SKILL_ACTION_FILES=(
   contact.memory.stale.json
   contact-memory-stale.cjs
   conversation.followup.recommend.json
-  conversation-followup-recommend.cjs
   conversation.summary.draft.json
-  conversation-summary-draft.cjs
+  record-effect.cjs
 )
 
 for file in "${REQUIRED_SKILL_ACTION_FILES[@]}"; do

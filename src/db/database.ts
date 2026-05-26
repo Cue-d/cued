@@ -1075,9 +1075,19 @@ export class CuedDatabase {
       .all(actionId) as ActionEffectRow[];
   }
 
+  private tableExists(tableName: string): boolean {
+    const row = this.sqlite
+      .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ? LIMIT 1")
+      .get(tableName) as { name: string } | undefined;
+    return row?.name === tableName;
+  }
+
   private listActiveActionEffects(
     input: { actionType?: string; effectType?: string; limit?: number } = {},
   ): ActionEffectRow[] {
+    if (!this.tableExists("actions") || !this.tableExists("action_effects")) {
+      return [];
+    }
     const filters = [
       "a.status = 'executed'",
       "a.execution_status = 'succeeded'",

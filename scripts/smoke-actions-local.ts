@@ -1,4 +1,3 @@
-import { listContactMergeAliases } from "../src/actions/contact-merge-effects.js";
 import { loadActionExecutor } from "../src/actions/executor-loader.js";
 import { ActionDefinitionRegistry } from "../src/actions/registry.js";
 import { openCuedDatabaseReadOnly } from "../src/db/database.js";
@@ -130,7 +129,7 @@ try {
     `contact.message.draft payload failed validation: ${messageDraftValidation?.errors.join("; ")}`,
   );
 
-  const aliases = listContactMergeAliases(db);
+  const aliases = db.listContactMergeAliases();
   const conversations = db.executeReadOnlySql(`
     SELECT c.id, COUNT(m.id) AS message_count
     FROM conversations c
@@ -178,12 +177,22 @@ try {
       "; ",
     )}`,
   );
-  const recentActions = db.executeReadOnlySql(`
-    SELECT action_type, status, approval_status, execution_status, queued_at
-    FROM actions
-    ORDER BY queued_at DESC
-    LIMIT 5
-  `);
+  const hasActionsTable =
+    db.executeReadOnlySql(`
+      SELECT name
+      FROM sqlite_master
+      WHERE type = 'table'
+        AND name = 'actions'
+      LIMIT 1
+    `).length > 0;
+  const recentActions = hasActionsTable
+    ? db.executeReadOnlySql(`
+        SELECT action_type, status, approval_status, execution_status, queued_at
+        FROM actions
+        ORDER BY queued_at DESC
+        LIMIT 5
+      `)
+    : [];
 
   process.stdout.write(
     `${JSON.stringify(
