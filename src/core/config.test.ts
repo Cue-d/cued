@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -44,6 +44,17 @@ describe("config path resolution", () => {
     const dir = mkdtempSync(join(tmpdir(), "cued-missing-config-"));
     tempDirs.push(dir);
     const configPath = join(dir, "config.json");
+    const config = await importConfig(["node", "cued", "--config", configPath]);
+
+    expect(config.resolveCuedHome()).toBe(dir);
+    expect(config.resolveCuedDbPath()).toBe(join(dir, "local.db"));
+  });
+
+  it("uses an explicit malformed config parent instead of the real home", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "cued-malformed-config-"));
+    tempDirs.push(dir);
+    const configPath = join(dir, "config.json");
+    writeFileSync(configPath, "{", "utf8");
     const config = await importConfig(["node", "cued", "--config", configPath]);
 
     expect(config.resolveCuedHome()).toBe(dir);

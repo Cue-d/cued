@@ -70,6 +70,25 @@ final class RuntimeSupportTests: XCTestCase {
     )
   }
 
+  func testExplicitMalformedConfigDoesNotFallBackToRealHome() throws {
+    let configPath = try writeConfig("{")
+
+    XCTAssertEqual(
+      configuredCuedHomePath(
+        arguments: ["Cued", "--config", configPath],
+        homeDirectory: "/Users/test"
+      ),
+      URL(fileURLWithPath: configPath).deletingLastPathComponent().path
+    )
+    XCTAssertEqual(
+      configuredCuedDBPath(
+        arguments: ["Cued", "--config", configPath],
+        homeDirectory: "/Users/test"
+      ),
+      "\(URL(fileURLWithPath: configPath).deletingLastPathComponent().path)/local.db"
+    )
+  }
+
   func testPermissionRelaunchSetupIntentPathUsesConfiguredCuedHome() throws {
     let homeConfigPath = try writeConfig(#"{"home":" /tmp/cued-home "}"#)
     XCTAssertEqual(
