@@ -651,6 +651,8 @@ func TestOpenSyncCacheMigratesLegacyMessageColumns(t *testing.T) {
 		message_id TEXT NOT NULL,
 		sender_jid TEXT,
 		participant_jid TEXT,
+		reply_to_message_id TEXT,
+		reply_to_sender_jid TEXT,
 		from_me INTEGER NOT NULL,
 		timestamp INTEGER NOT NULL,
 		text TEXT NOT NULL,
@@ -658,6 +660,8 @@ func TestOpenSyncCacheMigratesLegacyMessageColumns(t *testing.T) {
 		status TEXT,
 		delivered_at INTEGER,
 		read_at INTEGER,
+		is_forwarded INTEGER NOT NULL DEFAULT 0,
+		forwarding_score INTEGER,
 		updated_at INTEGER NOT NULL,
 		PRIMARY KEY (chat_jid, message_id)
 	)`)
@@ -680,6 +684,23 @@ func TestOpenSyncCacheMigratesLegacyMessageColumns(t *testing.T) {
 	if err != nil {
 		t.Fatalf("insert legacy message: %v", err)
 	}
+	_, err = db.Exec(`CREATE TABLE calls (
+		chat_jid TEXT NOT NULL,
+		call_id TEXT NOT NULL,
+		initiator_jid TEXT,
+		remote_jid TEXT,
+		from_me INTEGER NOT NULL,
+		timestamp INTEGER NOT NULL,
+		duration_seconds INTEGER,
+		status TEXT NOT NULL,
+		medium TEXT NOT NULL,
+		provider_call_type TEXT,
+		updated_at INTEGER NOT NULL,
+		PRIMARY KEY (chat_jid, call_id)
+	)`)
+	if err != nil {
+		t.Fatalf("create legacy calls table: %v", err)
+	}
 	if err := db.Close(); err != nil {
 		t.Fatalf("close legacy cache db: %v", err)
 	}
@@ -694,6 +715,19 @@ func TestOpenSyncCacheMigratesLegacyMessageColumns(t *testing.T) {
 		if !sqliteColumnExists(t, cache.db, "messages", column) {
 			t.Fatalf("expected migrated messages.%s column", column)
 		}
+	}
+	for _, column := range []string{
+		"reply_to_message_id",
+		"reply_to_sender_jid",
+		"is_forwarded",
+		"forwarding_score",
+	} {
+		if sqliteColumnExists(t, cache.db, "messages", column) {
+			t.Fatalf("expected migrated messages.%s column to be removed", column)
+		}
+	}
+	if sqliteColumnExists(t, cache.db, "calls", "provider_call_type") {
+		t.Fatalf("expected migrated calls.provider_call_type column to be removed")
 	}
 
 	messages, _, _, err := cache.queryMessages(nil, &resyncCursor{SnapshotUpdatedAt: 1_710_000_000_001}, 10)

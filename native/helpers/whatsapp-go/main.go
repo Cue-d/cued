@@ -446,13 +446,52 @@ func openSyncCache(storeDir string) (*syncCache, error) {
 			return nil, err
 		}
 	}
+	for _, column := range []struct {
+		table string
+		name  string
+	}{
+		{table: "messages", name: "reply_to_message_id"},
+		{table: "messages", name: "reply_to_sender_jid"},
+		{table: "messages", name: "is_forwarded"},
+		{table: "messages", name: "forwarding_score"},
+		{table: "calls", name: "provider_call_type"},
+	} {
+		if err := dropSQLiteColumnIfExists(db, column.table, column.name); err != nil {
+			_ = db.Close()
+			return nil, err
+		}
+	}
 	return &syncCache{db: db}, nil
 }
 
 func ensureSQLiteColumn(db *sql.DB, table string, column string, definition string) error {
-	rows, err := db.Query(fmt.Sprintf("PRAGMA table_info(%s)", table))
+	exists, err := sqliteColumnExistsInDB(db, table, column)
 	if err != nil {
 		return err
+	}
+	if exists {
+		return nil
+	}
+	_, err = db.Exec(fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s %s", table, column, definition))
+	return err
+}
+
+func dropSQLiteColumnIfExists(db *sql.DB, table string, column string) error {
+	exists, err := sqliteColumnExistsInDB(db, table, column)
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return nil
+	}
+	_, err = db.Exec(fmt.Sprintf("ALTER TABLE %s DROP COLUMN %s", table, column))
+	return err
+}
+
+func sqliteColumnExistsInDB(db *sql.DB, table string, column string) (bool, error) {
+	rows, err := db.Query(fmt.Sprintf("PRAGMA table_info(%s)", table))
+	if err != nil {
+		return false, err
 	}
 	defer rows.Close()
 	for rows.Next() {
@@ -463,17 +502,16 @@ func ensureSQLiteColumn(db *sql.DB, table string, column string, definition stri
 		var defaultValue sql.NullString
 		var primaryKey int
 		if err := rows.Scan(&cid, &name, &columnType, &notNull, &defaultValue, &primaryKey); err != nil {
-			return err
+			return false, err
 		}
 		if name == column {
-			return nil
+			return true, nil
 		}
 	}
 	if err := rows.Err(); err != nil {
-		return err
+		return false, err
 	}
-	_, err = db.Exec(fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s %s", table, column, definition))
-	return err
+	return false, nil
 }
 
 func (c *syncCache) close() error {
