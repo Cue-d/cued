@@ -7,8 +7,6 @@ import type { SyncBundle } from "../../core/sync.js";
 import { providerStableHash } from "../../core/utils.js";
 import type { GmailMessage, GmailMessagePayload } from "../api/client.js";
 
-export const gmailStableId = providerStableHash;
-
 function header(message: GmailMessage, name: string): string | null {
   const match = message.payload?.headers?.find(
     (candidate) => candidate.name.toLowerCase() === name.toLowerCase(),
@@ -156,7 +154,7 @@ export function buildGmailRawEvents(input: {
     const participants = collectParticipants({ from, recipients, selfEmail });
 
     for (const participant of participants.values()) {
-      const id = gmailStableId(`gmail:contact:${input.accountKey}:${participant.email}`);
+      const id = providerStableHash(`gmail:contact:${input.accountKey}:${participant.email}`);
       rawEvents.push({
         id,
         platform: "gmail",
@@ -178,7 +176,7 @@ export function buildGmailRawEvents(input: {
     }
 
     const conversationKey = `gmail:${input.emailAddress}:thread:${message.threadId}`;
-    const conversationId = gmailStableId(
+    const conversationId = providerStableHash(
       `gmail:conversation:${input.accountKey}:${message.threadId}`,
     );
     const subject = header(message, "subject");
@@ -201,7 +199,7 @@ export function buildGmailRawEvents(input: {
     const content = extractGmailMessageText(message);
     const attachments = collectAttachmentParts(message.payload, message.id);
     const sentAt = messageSentAt(message);
-    const rawMessageId = gmailStableId(`gmail:message:${input.accountKey}:${message.id}`);
+    const rawMessageId = providerStableHash(`gmail:message:${input.accountKey}:${message.id}`);
     rawEvents.push({
       id: rawMessageId,
       platform: "gmail",

@@ -5,7 +5,7 @@ import type {
   MessagePayload,
 } from "../../../core/types/provider.js";
 import type { SyncBundle } from "../../core/sync.js";
-import { stableId } from "../../core/utils.js";
+import { providerStableHash } from "../../core/utils.js";
 import {
   bestSignalContactName,
   contactHandleType,
@@ -104,14 +104,14 @@ export function buildSignalContactEvent(
   }
 
   return {
-    id: stableId(`signal:contact:${accountKey}:${handle}:${observedAt}`),
+    id: providerStableHash(`signal:contact:${accountKey}:${handle}:${observedAt}`),
     platform: "signal",
     accountKey,
     entityKind: "contact",
     eventKind: "observed",
     externalEntityId: handle,
     observedAt,
-    dedupeKey: stableId(`signal:contact:${accountKey}:${handle}`),
+    dedupeKey: providerStableHash(`signal:contact:${accountKey}:${handle}`),
     payload: {
       sourceEntityKey: signalSourceEntityKey(handle),
       fields: {
@@ -134,14 +134,14 @@ export function buildSignalGroupConversationEvent(
   }
 
   return {
-    id: stableId(`signal:conversation:${accountKey}:${groupId}:${observedAt}`),
+    id: providerStableHash(`signal:conversation:${accountKey}:${groupId}:${observedAt}`),
     platform: "signal",
     accountKey,
     entityKind: "conversation",
     eventKind: "observed",
     conversationExternalId: groupId,
     observedAt,
-    dedupeKey: stableId(`signal:conversation:${accountKey}:${groupId}`),
+    dedupeKey: providerStableHash(`signal:conversation:${accountKey}:${groupId}`),
     payload: {
       sourceConversationKey: signalSourceConversationKey(`group:${groupId}`),
       conversationType: "group",
@@ -170,14 +170,14 @@ export function buildSignalMessageConversationEvent(
         : [];
 
   return {
-    id: stableId(`signal:conversation:${accountKey}:${message.threadId}:${observedAt}`),
+    id: providerStableHash(`signal:conversation:${accountKey}:${message.threadId}:${observedAt}`),
     platform: "signal",
     accountKey,
     entityKind: "conversation",
     eventKind: "observed",
     conversationExternalId: message.threadId,
     observedAt,
-    dedupeKey: stableId(`signal:conversation:${accountKey}:${message.threadId}`),
+    dedupeKey: providerStableHash(`signal:conversation:${accountKey}:${message.threadId}`),
     payload: {
       sourceConversationKey: signalSourceConversationKey(message.threadId),
       conversationType: message.threadType,
@@ -197,14 +197,14 @@ export function buildSyntheticSignalContactEvent(
   observedAt: number,
 ): SyncBundle["rawEvents"][number] {
   return {
-    id: stableId(`signal:contact:${accountKey}:${handle}:${observedAt}`),
+    id: providerStableHash(`signal:contact:${accountKey}:${handle}:${observedAt}`),
     platform: "signal",
     accountKey,
     entityKind: "contact",
     eventKind: "observed",
     externalEntityId: handle,
     observedAt,
-    dedupeKey: stableId(`signal:contact:${accountKey}:${handle}`),
+    dedupeKey: providerStableHash(`signal:contact:${accountKey}:${handle}`),
     payload: {
       sourceEntityKey: signalSourceEntityKey(handle),
       fields: {
@@ -231,7 +231,7 @@ export function buildSignalMessageEvent(
     ? message.senderHandle || message.peerHandle || null
     : null;
   return {
-    id: stableId(`signal:message:${accountKey}:${message.messageId}`),
+    id: providerStableHash(`signal:message:${accountKey}:${message.messageId}`),
     platform: "signal",
     accountKey,
     entityKind: "message",
@@ -240,7 +240,7 @@ export function buildSignalMessageEvent(
     conversationExternalId: message.threadId,
     occurredAt: message.sentAt,
     observedAt,
-    dedupeKey: stableId(`signal:message:${accountKey}:${message.messageId}`),
+    dedupeKey: providerStableHash(`signal:message:${accountKey}:${message.messageId}`),
     payload: {
       sourceMessageKey: message.messageId,
       sourceConversationKey: signalSourceConversationKey(message.threadId),

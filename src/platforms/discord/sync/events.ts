@@ -14,8 +14,6 @@ import {
   discordSourceKey,
 } from "../types.js";
 
-export const discordDedupeKey = providerStableHash;
-
 export function discordTimestampMs(value: string | null | undefined): number | null {
   if (!value) {
     return null;
@@ -31,7 +29,7 @@ export function buildDiscordContactEvent(input: {
   displayName?: string | null;
 }): SyncBundle["rawEvents"][number] {
   const displayName = input.displayName?.trim() || discordDisplayName(input.user);
-  const id = discordDedupeKey(`discord:contact:${input.accountKey}:${input.user.id}`);
+  const id = providerStableHash(`discord:contact:${input.accountKey}:${input.user.id}`);
   return {
     id,
     platform: "discord",
@@ -65,7 +63,7 @@ export function buildDiscordConversationEvent(input: {
   channel: DiscordChannel;
   currentUser: DiscordUser;
 }): SyncBundle["rawEvents"][number] {
-  const id = discordDedupeKey(`discord:conversation:${input.accountKey}:${input.channel.id}`);
+  const id = providerStableHash(`discord:conversation:${input.accountKey}:${input.channel.id}`);
   const displayName = buildDiscordConversationDisplayName(input.channel, input.currentUser);
   const participants = [
     {
@@ -107,7 +105,7 @@ export function buildDiscordMessageEvent(input: {
   message: DiscordMessage;
   currentUserId: string;
 }): SyncBundle["rawEvents"][number] {
-  const id = discordDedupeKey(
+  const id = providerStableHash(
     `discord:message:${input.accountKey}:${input.message.channel_id}:${input.message.id}`,
   );
   const sentAt = discordTimestampMs(input.message.timestamp) ?? input.observedAt;

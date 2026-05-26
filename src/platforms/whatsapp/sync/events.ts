@@ -8,7 +8,7 @@ import type {
   MessagePayload,
 } from "../../../core/types/provider.js";
 import type { SyncBundle } from "../../core/sync.js";
-import { stableId } from "../../core/utils.js";
+import { providerStableHash } from "../../core/utils.js";
 import type {
   WhatsAppCallDeleteSnapshot,
   WhatsAppCallSnapshot,
@@ -165,14 +165,14 @@ export function buildWhatsAppContactEvent(
   }
 
   return {
-    id: stableId(`whatsapp:contact:${accountKey}:${jid}:${observedAt}`),
+    id: providerStableHash(`whatsapp:contact:${accountKey}:${jid}:${observedAt}`),
     platform: "whatsapp",
     accountKey,
     entityKind: "contact",
     eventKind: "observed",
     externalEntityId: jid,
     observedAt,
-    dedupeKey: stableId(`whatsapp:contact:${accountKey}:${jid}`),
+    dedupeKey: providerStableHash(`whatsapp:contact:${accountKey}:${jid}`),
     payload: {
       sourceEntityKey: whatsappSourceEntityKey(jid),
       fields: {
@@ -191,14 +191,14 @@ export function buildWhatsAppChatEvent(
 ): SyncBundle["rawEvents"][number] {
   const chatJID = normalizeWhatsAppJid(chat.jid);
   return {
-    id: stableId(`whatsapp:conversation:${accountKey}:${chatJID}:${observedAt}`),
+    id: providerStableHash(`whatsapp:conversation:${accountKey}:${chatJID}:${observedAt}`),
     platform: "whatsapp",
     accountKey,
     entityKind: "conversation",
     eventKind: "observed",
     conversationExternalId: chatJID,
     observedAt,
-    dedupeKey: stableId(`whatsapp:conversation:${accountKey}:${chatJID}`),
+    dedupeKey: providerStableHash(`whatsapp:conversation:${accountKey}:${chatJID}`),
     payload: {
       sourceConversationKey: whatsappSourceConversationKey(chatJID),
       conversationType: chat.isGroup ? "group" : "dm",
@@ -281,7 +281,7 @@ export function buildWhatsAppMessageEvent(
   const sourceMessageKey = whatsappMessageSourceKey(message);
   const replyToSourceMessageKey = whatsappReplySourceKey(message);
   return {
-    id: stableId(`whatsapp:message:${accountKey}:${sourceMessageKey}`),
+    id: providerStableHash(`whatsapp:message:${accountKey}:${sourceMessageKey}`),
     platform: "whatsapp",
     accountKey,
     entityKind: "message",
@@ -290,7 +290,7 @@ export function buildWhatsAppMessageEvent(
     conversationExternalId: normalizedChatJID,
     occurredAt: message.timestamp,
     observedAt,
-    dedupeKey: stableId(`whatsapp:message:${accountKey}:${sourceMessageKey}`),
+    dedupeKey: providerStableHash(`whatsapp:message:${accountKey}:${sourceMessageKey}`),
     payload: {
       sourceMessageKey,
       sourceConversationKey: whatsappSourceConversationKey(normalizedChatJID),
@@ -347,7 +347,7 @@ export function buildWhatsAppCallEvent(
   const initiatorSourceKey = call.initiatorJID ? whatsappSourceEntityKey(call.initiatorJID) : null;
   const remoteSourceKey = call.remoteJID ? whatsappSourceEntityKey(call.remoteJID) : null;
   return {
-    id: stableId(`whatsapp:call:${accountKey}:${sourceCallKey}`),
+    id: providerStableHash(`whatsapp:call:${accountKey}:${sourceCallKey}`),
     platform: "whatsapp",
     accountKey,
     entityKind: "call",
@@ -356,7 +356,7 @@ export function buildWhatsAppCallEvent(
     conversationExternalId: normalizedChatJID,
     occurredAt: call.timestamp,
     observedAt,
-    dedupeKey: stableId(`whatsapp:call:${accountKey}:${sourceCallKey}`),
+    dedupeKey: providerStableHash(`whatsapp:call:${accountKey}:${sourceCallKey}`),
     payload: {
       sourceCallKey,
       sourceConversationKey: whatsappSourceConversationKey(normalizedChatJID),
@@ -389,7 +389,7 @@ export function buildWhatsAppCallDeleteEvent(
   const normalizedChatJID = normalizeWhatsAppJid(callDelete.chatJID);
   const direction: CallDirection = callDelete.fromMe ? "outgoing" : "incoming";
   return {
-    id: stableId(
+    id: providerStableHash(
       `whatsapp:call-delete:${accountKey}:${normalizedChatJID}:${direction}:${observedAt}`,
     ),
     platform: "whatsapp",
@@ -399,7 +399,7 @@ export function buildWhatsAppCallDeleteEvent(
     conversationExternalId: normalizedChatJID,
     occurredAt: observedAt,
     observedAt,
-    dedupeKey: stableId(
+    dedupeKey: providerStableHash(
       `whatsapp:call-delete:${accountKey}:${normalizedChatJID}:${direction}:${observedAt}`,
     ),
     payload: {

@@ -8,8 +8,6 @@ import type { SyncBundle } from "../../core/sync.js";
 import { providerStableHash } from "../../core/utils.js";
 import type { SlackConversation, SlackMessage, SlackUser } from "../types.js";
 
-export const slackDedupeKey = providerStableHash;
-
 export function slackSourceKey(teamId: string, userId: string): string {
   return `slack:${teamId}:${userId}`;
 }
@@ -115,7 +113,7 @@ export function buildSlackContactEvents(
   users: SlackUser[],
 ): SyncBundle["rawEvents"] {
   return users.map((user) => {
-    const contactId = slackDedupeKey(`slack:contact:${teamId}:${user.id}`);
+    const contactId = providerStableHash(`slack:contact:${teamId}:${user.id}`);
     return {
       id: contactId,
       platform: "slack",
@@ -164,7 +162,7 @@ export function buildSlackConversationEvent(input: {
   usersById?: Map<string, SlackUser>;
   displayName?: string | null;
 }): SyncBundle["rawEvents"][number] {
-  const conversationId = slackDedupeKey(
+  const conversationId = providerStableHash(
     `slack:conversation:${input.teamId}:${input.conversation.id}`,
   );
   const usersById = input.usersById ?? new Map<string, SlackUser>();
@@ -213,7 +211,7 @@ export function buildSlackMessageEvents(input: {
     const messageTsMs = slackTimestampMs(message.ts) ?? input.observedAt;
     const attachments = toAttachmentMetadata(message);
     const senderUserId = message.user ?? message.bot_id;
-    const messageId = slackDedupeKey(
+    const messageId = providerStableHash(
       `slack:message:${input.teamId}:${input.conversationId}:${message.ts}:${message.text ?? ""}:${message.edited?.ts ?? ""}`,
     );
 
@@ -261,7 +259,7 @@ export function buildSlackMessageEvents(input: {
 
     for (const reaction of message.reactions ?? []) {
       for (const reactorUserId of reaction.users) {
-        const reactionId = slackDedupeKey(
+        const reactionId = providerStableHash(
           `slack:reaction:${input.teamId}:${input.conversationId}:${message.ts}:${reaction.name}:${reactorUserId}`,
         );
         rawEvents.push({

@@ -2,7 +2,7 @@ import type { SourceAccountInput, SyncProofInput } from "../../../core/types/pro
 import { mapWithConcurrency } from "../../../core/utils/async.js";
 import { openCuedDatabaseReadOnly } from "../../../db/database.js";
 import type { SyncBundle } from "../../core/sync.js";
-import { stableId } from "../../core/utils.js";
+import { providerStableHash } from "../../core/utils.js";
 import {
   type Connection,
   type Conversation,
@@ -290,7 +290,7 @@ function buildLinkedInConnectionContactEvent(
   observedAt: number,
 ): SyncBundle["rawEvents"][number] {
   const sourceEntityKey = `linkedin:urn:li:member:${connection.profileId}`;
-  const id = stableId(
+  const id = providerStableHash(
     `linkedin:contact:${accountKey}:${sourceEntityKey}:${connection.firstName}:${connection.lastName}:${connection.headline ?? ""}`,
   );
   return {
