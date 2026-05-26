@@ -457,12 +457,7 @@ final class RootWindowController: NSWindowController {
         daemonSupervisor.runCLI(arguments: ["skill", "install-global"])
       }.value
       let installResult: SkillInstallResponse? =
-        installCommandResult.flatMap { result in
-          guard result.status == 0, let data = result.stdout.data(using: .utf8) else {
-            return nil
-          }
-          return try? JSONDecoder().decode(SkillInstallResponse.self, from: data)
-        }
+        installCommandResult.flatMap { decodeCLIJSON(SkillInstallResponse.self, status: $0.status, stdout: $0.stdout) }
       let installFailed = ((installCommandResult?.status ?? 1) != 0 || installResult?.ok == false)
 
       refresh()
