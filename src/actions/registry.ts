@@ -34,11 +34,6 @@ export interface ActionDefinition {
   };
 }
 
-interface ActionDefinitionManifest {
-  version: number;
-  actions: ActionDefinition[];
-}
-
 export interface ActionPayloadValidationResult {
   ok: boolean;
   errors: string[];
@@ -293,52 +288,28 @@ function assertUniqueDefinitions(actions: ActionDefinition[]): void {
   }
 }
 
-function parseManifest(
-  raw: unknown,
-  sourcePath: string,
-  skillRoot: string,
-): ActionDefinitionManifest {
-  if (!isPlainObject(raw)) {
-    throw new Error(`Action definition manifest must be an object: ${sourcePath}`);
-  }
-  if (raw.version !== 1) {
-    throw new Error(`Unsupported action definition manifest version in ${sourcePath}.`);
-  }
-  if (!Array.isArray(raw.actions)) {
-    throw new Error(`Action definition manifest must include an actions array: ${sourcePath}`);
-  }
-
-  const actions = raw.actions.map((value, index) =>
-    parseActionDefinition(value, index, sourcePath, skillRoot),
-  );
-  assertUniqueDefinitions(actions);
-
-  return { version: 1, actions };
-}
-
 function loadActionDefinitions(path: string): ActionDefinition[] {
   if (!existsSync(path)) {
     return [];
   }
-  if (statSync(path).isDirectory()) {
-    const skillRoot = dirname(path);
-    const actions = readdirSync(path)
-      .filter((fileName) => fileName.endsWith(".json"))
-      .sort()
-      .map((fileName, index) => {
-        const filePath = join(path, fileName);
-        return parseActionDefinition(
-          JSON.parse(readFileSync(filePath, "utf8")) as unknown,
-          index,
-          filePath,
-          skillRoot,
-        );
-      });
-    assertUniqueDefinitions(actions);
-    return actions;
+  if (!statSync(path).isDirectory()) {
+    throw new Error(`Action definitions path must be a directory: ${path}`);
   }
-  return parseManifest(JSON.parse(readFileSync(path, "utf8")) as unknown, path, dirname(path))
-    .actions;
+  const skillRoot = dirname(path);
+  const actions = readdirSync(path)
+    .filter((fileName) => fileName.endsWith(".json"))
+    .sort()
+    .map((fileName, index) => {
+      const filePath = join(path, fileName);
+      return parseActionDefinition(
+        JSON.parse(readFileSync(filePath, "utf8")) as unknown,
+        index,
+        filePath,
+        skillRoot,
+      );
+    });
+  assertUniqueDefinitions(actions);
+  return actions;
 }
 
 function loadDefaultActionDefinitions(): ActionDefinition[] {

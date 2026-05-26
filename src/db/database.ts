@@ -196,7 +196,6 @@ export interface ActionRow {
   result_json: string | null;
   error_json: string | null;
   source_skill: string | null;
-  source_job_id: string | null;
   created_by: string;
   approved_by: string | null;
   denied_by: string | null;
@@ -257,7 +256,6 @@ const ACTION_ROW_COLUMNS = `
   result_json,
   error_json,
   source_skill,
-  source_job_id,
   created_by,
   approved_by,
   denied_by,
@@ -682,6 +680,7 @@ export class CuedDatabase {
 
   initializeSchema(): void {
     this.sqlite.exec(CURRENT_SCHEMA_SQL);
+    this.dropLegacyActionResidue();
   }
 
   close(): void {
@@ -715,7 +714,6 @@ export class CuedDatabase {
     title?: string | null;
     summary?: string | null;
     sourceSkill?: string | null;
-    sourceJobId?: string | null;
     createdBy?: string | null;
     requiresApproval?: boolean;
     dedupeKey?: string | null;
@@ -755,7 +753,6 @@ export class CuedDatabase {
         resultJson: null,
         errorJson: null,
         sourceSkill: input.sourceSkill ?? null,
-        sourceJobId: input.sourceJobId ?? null,
         createdBy,
         approvedBy: requiresApproval ? null : "system",
         deniedBy: null,
@@ -1080,6 +1077,25 @@ export class CuedDatabase {
       .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ? LIMIT 1")
       .get(tableName) as { name: string } | undefined;
     return row?.name === tableName;
+  }
+
+  private columnExists(tableName: string, columnName: string): boolean {
+    const rows = this.sqlite.prepare(`PRAGMA table_info(${tableName})`).all() as Array<{
+      name: string;
+    }>;
+    return rows.some((row) => row.name === columnName);
+  }
+
+  private dropColumnIfExists(tableName: string, columnName: string): void {
+    if (!this.tableExists(tableName) || !this.columnExists(tableName, columnName)) {
+      return;
+    }
+    this.sqlite.exec(`ALTER TABLE ${tableName} DROP COLUMN ${columnName}`);
+  }
+
+  private dropLegacyActionResidue(): void {
+    this.sqlite.exec("DROP TABLE IF EXISTS contact_merge_decisions");
+    this.dropColumnIfExists("actions", "source_job_id");
   }
 
   private listActiveActionEffects(

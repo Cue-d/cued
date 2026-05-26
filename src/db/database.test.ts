@@ -191,6 +191,79 @@ describe("CuedDatabase", () => {
       authSessions: 0,
       messageBreakdown: [],
     });
+    expect(
+      (sqlite(db).prepare("PRAGMA table_info(actions)").all() as Array<{ name: string }>).map(
+        (row) => row.name,
+      ),
+    ).toEqual([
+      "id",
+      "action_type",
+      "action_version",
+      "status",
+      "approval_status",
+      "execution_status",
+      "priority",
+      "title",
+      "summary",
+      "payload_json",
+      "payload_hash",
+      "result_json",
+      "error_json",
+      "source_skill",
+      "created_by",
+      "approved_by",
+      "denied_by",
+      "executed_by",
+      "requires_approval",
+      "queued_at",
+      "approved_at",
+      "denied_at",
+      "locked_at",
+      "started_at",
+      "executed_at",
+      "updated_at",
+      "dedupe_key",
+    ]);
+    expect(
+      (
+        sqlite(db).prepare("PRAGMA table_info(action_effects)").all() as Array<{ name: string }>
+      ).map((row) => row.name),
+    ).toEqual([
+      "id",
+      "action_id",
+      "effect_type",
+      "target_table",
+      "target_id",
+      "payload_json",
+      "applied_at",
+      "reverted_at",
+    ]);
+    db.close();
+  });
+
+  it("drops legacy action substrate residue during schema initialization", () => {
+    const db = createDb();
+    sqlite(db).exec(`
+      ALTER TABLE actions ADD COLUMN source_job_id TEXT;
+      CREATE TABLE contact_merge_decisions (
+        id TEXT PRIMARY KEY
+      );
+    `);
+
+    db.initializeSchema();
+
+    expect(
+      (sqlite(db).prepare("PRAGMA table_info(actions)").all() as Array<{ name: string }>).map(
+        (row) => row.name,
+      ),
+    ).not.toContain("source_job_id");
+    expect(
+      sqlite(db)
+        .prepare(
+          "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'contact_merge_decisions'",
+        )
+        .get(),
+    ).toBeUndefined();
     db.close();
   });
 

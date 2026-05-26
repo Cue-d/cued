@@ -5331,7 +5331,6 @@ export async function dispatchRequest(
             title: request.title ?? null,
             summary: request.summary ?? null,
             sourceSkill: request.sourceSkill ?? definition.skillName,
-            sourceJobId: request.sourceJobId ?? null,
             createdBy: request.createdBy ?? "daemon",
             requiresApproval: request.requiresApproval ?? definition.requiresApprovalDefault,
             dedupeKey: request.dedupeKey ?? null,

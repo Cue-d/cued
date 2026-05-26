@@ -114,7 +114,6 @@ export const CURRENT_SCHEMA_SQL = `
         result_json TEXT,
         error_json TEXT,
         source_skill TEXT,
-        source_job_id TEXT,
         created_by TEXT NOT NULL,
         approved_by TEXT,
         denied_by TEXT,

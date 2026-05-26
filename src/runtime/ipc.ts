@@ -22,7 +22,6 @@ export type DaemonRequest =
       title?: string | null;
       summary?: string | null;
       sourceSkill?: string | null;
-      sourceJobId?: string | null;
       createdBy?: string | null;
       requiresApproval?: boolean;
       dedupeKey?: string | null;

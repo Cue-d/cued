@@ -141,7 +141,6 @@ export const actions = sqliteTable("actions", {
   resultJson: text("result_json"),
   errorJson: text("error_json"),
   sourceSkill: text("source_skill"),
-  sourceJobId: text("source_job_id"),
   createdBy: text("created_by").notNull(),
   approvedBy: text("approved_by"),
   deniedBy: text("denied_by"),

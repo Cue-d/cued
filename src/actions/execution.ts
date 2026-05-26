@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import { safeParseJson } from "../db/codecs.js";
 import type {
   ActionEffectRow,
@@ -53,7 +52,6 @@ export interface ActionExecutionResult {
 export type ActionExecutor = (context: ActionExecutionContext) => ActionExecutionResult;
 
 export interface ActionExecutionHelpers {
-  randomUUID: typeof randomUUID;
   parseActionPayloadObject: typeof parseActionPayloadObject;
   requiredStringPayload: typeof requiredStringPayload;
   optionalStringPayload: typeof optionalStringPayload;
@@ -62,7 +60,6 @@ export interface ActionExecutionHelpers {
 }
 
 export const actionExecutionHelpers: ActionExecutionHelpers = {
-  randomUUID,
   parseActionPayloadObject,
   requiredStringPayload,
   optionalStringPayload,
