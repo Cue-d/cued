@@ -450,20 +450,20 @@ private func agentLaunchPrompt(
     - Do not treat SQLite busy warnings during active projection as a reason to reset
       data. Never run `cued reset --source <source>` without explicit user
       confirmation.
-    - Validate recency with both `max(messages.sent_at)` and
-      `max(conversations.last_message_at)`. If they disagree materially, report the
-      mismatch and avoid claiming full current coverage.
+    - Validate recency with `max(messages.sent_at)` and the projection backlog from
+      `cued status`; if projected messages lag raw ingest, report the mismatch and
+      avoid claiming full current coverage.
 
     SQL guardrails:
     - Cued timestamps are Unix epoch milliseconds; use
       `datetime(sent_at/1000,'unixepoch','localtime')`.
     - Start with metadata: ids, timestamps, direction, counts, type, platform,
-      unread count, attachment count, reaction count, and source tables.
-    - Do not select `messages.content`, `conversations.last_message_preview`,
-      participant names, sender names, contact names, phone numbers, emails, or
-      handles unless the task cannot be answered from metadata. If content is
-      necessary, inspect at most 25 messages from one conversation/topic and return
-      only synthesis, never raw bodies.
+      source tables, and bounded joins to `message_attachments` or
+      `message_reactions` when attachment or reaction evidence matters.
+    - Do not select `messages.content`, participant names, sender names, contact
+      names, phone numbers, emails, or handles unless the task cannot be answered
+      from metadata. If content is necessary, inspect at most 25 messages from one
+      conversation/topic and return only synthesis, never raw bodies.
     - Before FTS, check
       `select count(*) from messages_fts` and
       `select count(*) from message_fts_index_queue`. If FTS is empty or queued,
