@@ -28,7 +28,7 @@ handle_counts AS (
   SELECT
     contact_id,
     SUM(CASE WHEN is_deterministic = 1 THEN 1 ELSE 0 END) AS deterministic_handles,
-    GROUP_CONCAT(DISTINCT type || ':' || COALESCE(platform, '') || ':' || value) AS handles
+    GROUP_CONCAT(DISTINCT type || ':' || value) AS handles
   FROM contact_handles
   GROUP BY contact_id
 )

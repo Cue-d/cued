@@ -144,7 +144,7 @@ Enrichment is a local-first identity task, not a web search task. Prioritize con
 
 Queue candidates in this order:
 - high-recency or high-volume human DMs with missing company/profile context;
-- contacts with deterministic handles or profile URLs already in `contact_handles` / `contact_sources`;
+- contacts with deterministic handles or profile URLs already in `contact_handles`, or platform identity in `contact_sources`;
 - duplicate clusters where exact handles can enrich the canonical record;
 - high-value contacts from recent meetings, calls, or messages that still lack public profile context.
 
