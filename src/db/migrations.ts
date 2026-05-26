@@ -32,6 +32,13 @@ function addColumnIfMissing(db: MigrationDatabase, tableName: string, definition
   db.exec(`ALTER TABLE ${tableName} ADD COLUMN ${definition}`);
 }
 
+function dropColumnIfExists(db: MigrationDatabase, tableName: string, columnName: string): void {
+  if (!columnExists(db, tableName, columnName)) {
+    return;
+  }
+  db.exec(`ALTER TABLE ${tableName} DROP COLUMN ${columnName}`);
+}
+
 function buildSyncScopeId(
   platform: string,
   accountKey: string,
@@ -2227,6 +2234,70 @@ export const MIGRATIONS: Migration[] = [
         CREATE INDEX IF NOT EXISTS idx_raw_event_projection_failures_platform
         ON raw_event_projection_failures(platform, account_key, failed_at);
       `);
+    },
+  },
+  {
+    id: "0021_add_action_substrate",
+    apply: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS actions (
+          id TEXT PRIMARY KEY,
+          action_type TEXT NOT NULL,
+          action_version TEXT NOT NULL,
+          status TEXT NOT NULL,
+          approval_status TEXT NOT NULL,
+          execution_status TEXT NOT NULL,
+          priority INTEGER NOT NULL DEFAULT 0,
+          title TEXT,
+          summary TEXT,
+          payload_json TEXT NOT NULL,
+          payload_hash TEXT NOT NULL,
+          result_json TEXT,
+          error_json TEXT,
+          source_skill TEXT,
+          created_by TEXT NOT NULL,
+          approved_by TEXT,
+          denied_by TEXT,
+          executed_by TEXT,
+          requires_approval INTEGER NOT NULL DEFAULT 1,
+          queued_at INTEGER NOT NULL,
+          approved_at INTEGER,
+          denied_at INTEGER,
+          locked_at INTEGER,
+          started_at INTEGER,
+          executed_at INTEGER,
+          updated_at INTEGER NOT NULL,
+          dedupe_key TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS action_effects (
+          id TEXT PRIMARY KEY,
+          action_id TEXT NOT NULL REFERENCES actions(id) ON DELETE CASCADE,
+          effect_type TEXT NOT NULL,
+          target_table TEXT,
+          target_id TEXT,
+          payload_json TEXT,
+          applied_at INTEGER NOT NULL,
+          reverted_at INTEGER
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_actions_status_queue
+        ON actions(status, approval_status, execution_status, queued_at);
+
+        CREATE INDEX IF NOT EXISTS idx_actions_type_status
+        ON actions(action_type, status, queued_at);
+
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_actions_dedupe
+        ON actions(dedupe_key)
+        WHERE dedupe_key IS NOT NULL;
+
+        CREATE INDEX IF NOT EXISTS idx_action_effects_action
+        ON action_effects(action_id, applied_at);
+
+        CREATE INDEX IF NOT EXISTS idx_action_effects_target
+        ON action_effects(target_table, target_id, applied_at);
+      `);
+      dropColumnIfExists(db, "actions", "source_job_id");
     },
   },
 ];

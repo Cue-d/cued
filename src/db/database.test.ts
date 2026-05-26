@@ -241,12 +241,28 @@ describe("CuedDatabase", () => {
     db.close();
   });
 
-  it("drops legacy action substrate residue during schema initialization", () => {
+  it("drops stale action substrate columns without deleting legacy merge aliases", () => {
     const db = createDb();
     sqlite(db).exec(`
       ALTER TABLE actions ADD COLUMN source_job_id TEXT;
-      CREATE TABLE contact_merge_decisions (
-        id TEXT PRIMARY KEY
+      INSERT INTO contact_merge_decisions (
+        id,
+        decision_type,
+        primary_contact_id,
+        secondary_contact_id,
+        canonical_contact_id,
+        reason,
+        created_by,
+        created_at
+      ) VALUES (
+        'decision-1',
+        'merge',
+        'contact-a',
+        'contact-b',
+        'contact-a',
+        'same phone',
+        'cli',
+        1234
       );
     `);
 
@@ -257,13 +273,9 @@ describe("CuedDatabase", () => {
         (row) => row.name,
       ),
     ).not.toContain("source_job_id");
-    expect(
-      sqlite(db)
-        .prepare(
-          "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'contact_merge_decisions'",
-        )
-        .get(),
-    ).toBeUndefined();
+    expect(db.listContactMergeAliases()).toEqual([
+      { contact_id: "contact-b", canonical_contact_id: "contact-a" },
+    ]);
     db.close();
   });
 

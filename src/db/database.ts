@@ -45,8 +45,8 @@ import type {
   UpdateStatusSnapshot,
 } from "../runtime/updater/types.js";
 import { safeParseJson, safeStringifyJson } from "./codecs.js";
+import { MIGRATIONS } from "./migrations.js";
 import * as schema from "./schema.js";
-import { CURRENT_SCHEMA_SQL } from "./schema-bootstrap.js";
 import { openSqliteDatabase } from "./sqlite.js";
 
 const {
@@ -679,7 +679,42 @@ export class CuedDatabase {
   }
 
   initializeSchema(): void {
-    this.sqlite.exec(CURRENT_SCHEMA_SQL);
+    this.migrate();
+  }
+
+  migrate(): void {
+    for (const migration of MIGRATIONS) {
+      const alreadyApplied = this.sqlite
+        .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'schema_migrations'")
+        .get() as { 1: number } | undefined;
+
+      if (alreadyApplied) {
+        const migrationIds = [migration.id, ...(migration.legacyIds ?? [])];
+        const placeholders = migrationIds.map(() => "?").join(", ");
+        const applied = this.sqlite
+          .prepare(`SELECT id FROM schema_migrations WHERE id IN (${placeholders}) LIMIT 1`)
+          .get(...migrationIds) as { id: string } | undefined;
+        if (applied) {
+          continue;
+        }
+      }
+
+      this.sqlite.exec("BEGIN");
+      try {
+        if (migration.apply) {
+          migration.apply(this.sqlite);
+        } else if (migration.sql) {
+          this.sqlite.exec(migration.sql);
+        }
+        this.sqlite
+          .prepare("INSERT OR IGNORE INTO schema_migrations (id, applied_at) VALUES (?, ?)")
+          .run(migration.id, now());
+        this.sqlite.exec("COMMIT");
+      } catch (error) {
+        this.sqlite.exec("ROLLBACK");
+        throw error;
+      }
+    }
     this.dropLegacyActionResidue();
   }
 
@@ -1094,8 +1129,47 @@ export class CuedDatabase {
   }
 
   private dropLegacyActionResidue(): void {
-    this.sqlite.exec("DROP TABLE IF EXISTS contact_merge_decisions");
     this.dropColumnIfExists("actions", "source_job_id");
+  }
+
+  private legacyContactMergeColumn(primaryName: string, fallbackName?: string): string | null {
+    if (this.columnExists("contact_merge_decisions", primaryName)) {
+      return primaryName;
+    }
+    if (fallbackName && this.columnExists("contact_merge_decisions", fallbackName)) {
+      return fallbackName;
+    }
+    return null;
+  }
+
+  private listLegacyContactMergeAliases(): ContactMergeAlias[] {
+    if (!this.tableExists("contact_merge_decisions")) {
+      return [];
+    }
+    const secondaryColumn = this.legacyContactMergeColumn(
+      "secondary_contact_id",
+      "right_contact_id",
+    );
+    const canonicalColumn = this.legacyContactMergeColumn("canonical_contact_id");
+    if (!secondaryColumn || !canonicalColumn) {
+      return [];
+    }
+    const decisionTypeColumn = this.legacyContactMergeColumn("decision_type");
+    const createdAtColumn = this.legacyContactMergeColumn("created_at");
+    return this.sqlite
+      .prepare(
+        `
+        SELECT
+          ${secondaryColumn} AS contact_id,
+          ${canonicalColumn} AS canonical_contact_id
+        FROM contact_merge_decisions
+        WHERE ${secondaryColumn} IS NOT NULL
+          AND ${canonicalColumn} IS NOT NULL
+          ${decisionTypeColumn ? `AND ${decisionTypeColumn} = 'merge'` : ""}
+        ORDER BY ${createdAtColumn ?? "id"} ASC, id ASC
+      `,
+      )
+      .all() as ContactMergeAlias[];
   }
 
   private listActiveActionEffects(
@@ -1147,12 +1221,14 @@ export class CuedDatabase {
   }
 
   listContactMergeAliases(): ContactMergeAlias[] {
-    return this.listActiveActionEffects({
+    const legacyAliases = this.listLegacyContactMergeAliases();
+    const actionAliases = this.listActiveActionEffects({
       actionType: "contact.merge",
       effectType: "contact.merge.recorded",
     })
       .map((effect) => parseContactMergeAlias(effect.payload_json))
       .filter((alias): alias is ContactMergeAlias => alias !== null);
+    return [...legacyAliases, ...actionAliases];
   }
 
   executeApprovedAction(id: string, executedBy = "daemon"): ExecutedActionResult {
