@@ -12,7 +12,7 @@ function resolveCanonicalContactId(contactId, aliasMap) {
   throw new Error(`Contact merge alias cycle detected at ${current}`);
 }
 
-function planContactMerges(db, input, randomUUID) {
+function planContactMerges(db, input) {
   if (input.length === 0) {
     throw new Error("At least one contact merge is required.");
   }
@@ -48,7 +48,6 @@ function planContactMerges(db, input, randomUUID) {
     aliasMap.set(canonicalSecondary, canonicalPrimary);
     resolveCanonicalContactId(canonicalSecondary, aliasMap);
     planned.push({
-      decisionId: randomUUID(),
       primaryContactId: canonicalPrimary,
       secondaryContactId: canonicalSecondary,
       canonicalContactId: canonicalPrimary,
@@ -60,35 +59,31 @@ function planContactMerges(db, input, randomUUID) {
 
 function execute({ action, db, helpers }) {
   const payload = helpers.parseActionPayloadObject(action);
-  const [decision] = planContactMerges(
-    db,
-    [
-      {
-        primaryContactId: helpers.requiredStringPayload(payload, "primaryContactId", action),
-        secondaryContactId: helpers.requiredStringPayload(payload, "secondaryContactId", action),
-        reason: helpers.optionalStringPayload(payload, "reason", action),
-      },
-    ],
-    helpers.randomUUID,
-  );
-  if (!decision) {
-    throw new Error("Contact merge action did not produce a merge decision.");
+  const [merge] = planContactMerges(db, [
+    {
+      primaryContactId: helpers.requiredStringPayload(payload, "primaryContactId", action),
+      secondaryContactId: helpers.requiredStringPayload(payload, "secondaryContactId", action),
+      reason: helpers.optionalStringPayload(payload, "reason", action),
+    },
+  ]);
+  if (!merge) {
+    throw new Error("Contact merge action did not produce a merge record.");
   }
 
   db.moveContactMemoriesToContact({
-    fromContactId: decision.secondaryContactId,
-    toContactId: decision.canonicalContactId,
+    fromContactId: merge.secondaryContactId,
+    toContactId: merge.canonicalContactId,
   });
   const effect = db.recordActionEffect({
     actionId: action.id,
     effectType: "contact.merge.recorded",
     targetTable: "contacts",
-    targetId: decision.canonicalContactId,
-    payload: decision,
+    targetId: merge.canonicalContactId,
+    payload: merge,
   });
 
   return {
-    result: { decision },
+    result: { merge },
     effects: [effect],
   };
 }

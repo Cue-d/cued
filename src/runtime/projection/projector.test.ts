@@ -2736,17 +2736,22 @@ describe("projector", () => {
     const primaryContactId = contactsBefore[0]!.id;
     const secondaryContactId = contactsBefore[1]!.id;
 
-    expect(
-      db.recordContactMergeDecision({
+    const action = db.createAction({
+      actionType: "contact.merge",
+      payload: {
         primaryContactId,
         secondaryContactId,
         reason: "manual merge",
-      }),
-    ).toEqual({
-      decisionId: expect.any(String),
-      primaryContactId,
-      secondaryContactId,
-      canonicalContactId: primaryContactId,
+      },
+      requiresApproval: false,
+    });
+    expect(db.executeApprovedAction(action.id, "test").result).toMatchObject({
+      merge: {
+        primaryContactId,
+        secondaryContactId,
+        canonicalContactId: primaryContactId,
+        reason: "manual merge",
+      },
     });
 
     const projection = rebuildProjectedState(db);

@@ -334,7 +334,7 @@ describe("CuedDatabase", () => {
       effectType: "contact.merge.recorded",
       targetTable: "contacts",
       targetId: "contact-a",
-      payload: { canonicalContactId: "contact-a" },
+      payload: { secondaryContactId: "contact-b", canonicalContactId: "contact-a" },
       appliedAt: 1234,
     });
     expect(effect).toMatchObject({
@@ -342,16 +342,23 @@ describe("CuedDatabase", () => {
       effect_type: "contact.merge.recorded",
       target_table: "contacts",
       target_id: "contact-a",
-      payload_json: JSON.stringify({ canonicalContactId: "contact-a" }),
+      payload_json: JSON.stringify({
+        secondaryContactId: "contact-b",
+        canonicalContactId: "contact-a",
+      }),
       applied_at: 1234,
       reverted_at: null,
     });
 
-    const completed = db.completeAction(action.id, { decisionId: "decision-1" });
+    const completed = db.completeAction(action.id, {
+      merge: { secondaryContactId: "contact-b", canonicalContactId: "contact-a" },
+    });
     expect(completed).toMatchObject({
       status: "executed",
       execution_status: "succeeded",
-      result_json: JSON.stringify({ decisionId: "decision-1" }),
+      result_json: JSON.stringify({
+        merge: { secondaryContactId: "contact-b", canonicalContactId: "contact-a" },
+      }),
       executed_at: expect.any(Number),
     });
     expect(db.listActionEffects(action.id).map((row) => row.id)).toEqual([effect.id]);
