@@ -4,7 +4,7 @@ import { buildWhatsAppDesktopSyncBundle } from "../desktop.js";
 
 async function main(): Promise<void> {
   try {
-    const invocation = readAdapterInvocationEnv("whatsapp");
+    const invocation = readAdapterInvocationEnv();
     if (
       process.env.CUED_WHATSAPP_SYNC_SOURCE === "desktop_db" ||
       process.env.CUED_WHATSAPP_DESKTOP_SOURCE_PATH

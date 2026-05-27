@@ -138,22 +138,26 @@ describe("normalized raw event registry", () => {
     );
   });
 
-  it("rejects non-canonical stored schemas during projection normalization", () => {
-    expect(() =>
-      normalizeStoredRawEventForProjection(
-        {
-          entityKind: "message",
-          eventKind: "created",
-          normalizedSchema: "message.message_created@1",
-        },
-        {
-          sourceMessageKey: "message-1",
-          sourceConversationKey: "conversation-1",
-          senderSourceKey: "contact-1",
-          sentAt: 1,
-          content: "hello",
-        },
-      ),
-    ).toThrow("Unsupported normalized raw event schema 'message.message_created@1'");
+  it("upcasts legacy stored schemas during projection normalization", () => {
+    const normalized = normalizeStoredRawEventForProjection(
+      {
+        entityKind: "message",
+        eventKind: "created",
+        normalizedSchema: "message.message_created@1",
+      },
+      {
+        sourceMessageKey: "message-1",
+        sourceConversationKey: "conversation-1",
+        senderSourceKey: "contact-1",
+        sentAt: 1,
+        content: "hello",
+      },
+    );
+
+    expect(normalized).toMatchObject({
+      entityKind: "message",
+      eventKind: "created",
+      normalizedSchema: "message.created@1",
+    });
   });
 });

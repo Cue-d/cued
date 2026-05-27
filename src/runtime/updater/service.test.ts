@@ -268,6 +268,7 @@ describe("updater service", () => {
       targetVersion: "0.2.0",
       releaseUrl: null,
       stagingRoot: "/tmp/staging",
+      migrateLegacyLaunchAgent: false,
     });
 
     expect(script).toContain("HELPER_CLI_PATH=");

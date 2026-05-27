@@ -40,6 +40,12 @@ function createDispatchHarness() {
     finishedAt: Date.now(),
     error: null,
   };
+  const authRuntimeStatus = {
+    active: false,
+    expiresAt: null,
+    projectionBatchSize: 500,
+    ingestConcurrency: 2,
+  };
   const dispatch = (request: Parameters<typeof dispatchRequest>[1]) =>
     dispatchRequest(
       db,
@@ -57,7 +63,11 @@ function createDispatchHarness() {
       () => ({ shuttingDown: false, requestedAt: null }),
       () => false,
       () => {},
+      () => authRuntimeStatus,
+      () => authRuntimeStatus,
       () => {},
+      () => {},
+      () => true,
     );
   return {
     db,

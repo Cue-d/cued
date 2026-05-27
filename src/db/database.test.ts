@@ -112,10 +112,12 @@ describe("CuedDatabase", () => {
       requiresApproval: false,
     });
     return db.executeApprovedAction(action.id, "test").result as {
-      decisionId: string;
-      primaryContactId: string;
-      secondaryContactId: string;
-      canonicalContactId: string;
+      merge: {
+        primaryContactId: string;
+        secondaryContactId: string;
+        canonicalContactId: string;
+        reason: string | null;
+      };
     };
   }
 
@@ -162,6 +164,21 @@ describe("CuedDatabase", () => {
         timestamp,
         timestamp,
       );
+  }
+
+  function insertConversation(db: CuedDatabase, id: string, name: string): void {
+    const timestamp = Date.now();
+    sqlite(db)
+      .prepare(
+        `
+        INSERT INTO conversations (
+          id, platform, account_key, source_conversation_key, native_conversation_key, type,
+          is_active, removal_reason, service, name, topic, participant_names, last_message_id,
+          last_message_at, last_message_preview, unread_count, created_at, updated_at
+        ) VALUES (?, 'imessage', 'default', ?, NULL, 'dm', 1, NULL, NULL, ?, NULL, NULL, NULL, NULL, NULL, 0, ?, ?)
+      `,
+      )
+      .run(id, `imessage:${id}`, name, timestamp, timestamp);
   }
 
   function sqlite(db: CuedDatabase) {
@@ -1848,11 +1865,13 @@ describe("CuedDatabase", () => {
         secondaryContactId: "contact-b",
         reason: "same phone",
       }),
-    ).toEqual({
-      decisionId: expect.any(String),
-      primaryContactId: "contact-a",
-      secondaryContactId: "contact-b",
-      canonicalContactId: "contact-a",
+    ).toMatchObject({
+      merge: {
+        primaryContactId: "contact-a",
+        secondaryContactId: "contact-b",
+        canonicalContactId: "contact-a",
+        reason: "same phone",
+      },
     });
     expect(
       executeContactMerge(db, {
@@ -1860,11 +1879,13 @@ describe("CuedDatabase", () => {
         secondaryContactId: "contact-a",
         reason: "prefer contacts source",
       }),
-    ).toEqual({
-      decisionId: expect.any(String),
-      primaryContactId: "contact-c",
-      secondaryContactId: "contact-a",
-      canonicalContactId: "contact-c",
+    ).toMatchObject({
+      merge: {
+        primaryContactId: "contact-c",
+        secondaryContactId: "contact-a",
+        canonicalContactId: "contact-c",
+        reason: "prefer contacts source",
+      },
     });
 
     expect(db.listContactMergeAliases()).toEqual([
