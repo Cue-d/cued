@@ -9,17 +9,25 @@ import {
 } from "../../core/secrets/keychain.js";
 import { completeAuthSession } from "../../core/state/mutations.js";
 import { isUserRemovedIntegrationMetadata } from "../../core/state/status.js";
+import { LinkedInClient } from "../api/client.js";
+import { LinkedInAuthError } from "../api/request.js";
 import { type LinkedInSessionSecret, parseLinkedInSessionSecret } from "./session-store.js";
 
 const LINKEDIN_KEYCHAIN_SERVICE = authKeychainService("linkedin");
 const LEGACY_LINKEDIN_KEYCHAIN_SERVICE = legacyAuthKeychainService("linkedin");
 const LINKEDIN_DEFAULT_ACCOUNT_KEY = "default";
+const DEFAULT_LINKEDIN_AUTH_VALIDATION_TIMEOUT_MS = 5_000;
 
 export interface ImportedLinkedInSessionResult {
   platform: "linkedin";
   accountKey: string;
   imported: boolean;
 }
+
+export type LinkedInStoredAuthValidation =
+  | { status: "valid" }
+  | { status: "invalid" }
+  | { status: "indeterminate"; errorSummary: string };
 
 function readLinkedInKeychainSecret(accountKey: string): Record<string, unknown> | null {
   const current = loadKeychainSecret(LINKEDIN_KEYCHAIN_SERVICE, accountKey);
@@ -43,6 +51,46 @@ function getCookieNames(session: LinkedInSessionSecret): string[] {
 function hasRequiredCookies(cookieNames: readonly string[]): boolean {
   const cookieNamesSet = new Set(cookieNames);
   return cookieNamesSet.has("li_at") && cookieNamesSet.has("JSESSIONID");
+}
+
+function getLinkedInAuthValidationTimeoutMs(): number {
+  const configured = Number(process.env.CUED_LINKEDIN_AUTH_VALIDATION_TIMEOUT_MS);
+  return Number.isFinite(configured) && configured > 0
+    ? Math.trunc(configured)
+    : DEFAULT_LINKEDIN_AUTH_VALIDATION_TIMEOUT_MS;
+}
+
+export async function validateLinkedInStoredAuth(
+  accountKey: string,
+): Promise<LinkedInStoredAuthValidation> {
+  const secret = readLinkedInKeychainSecret(accountKey);
+  if (!secret) {
+    return { status: "invalid" };
+  }
+
+  const session = parseLinkedInSessionSecret(secret);
+  if (!hasRequiredCookies(getCookieNames(session))) {
+    return { status: "invalid" };
+  }
+
+  const client = new LinkedInClient({
+    cookies: session.cookies,
+    userAgent: session.userAgent ?? undefined,
+    pageInstance: session.pageInstance ?? undefined,
+    xLiTrack: session.xLiTrack ?? undefined,
+  });
+  try {
+    await client.verifySession(AbortSignal.timeout(getLinkedInAuthValidationTimeoutMs()));
+    return { status: "valid" };
+  } catch (error) {
+    if (error instanceof LinkedInAuthError) {
+      return { status: "invalid" };
+    }
+    return {
+      status: "indeterminate",
+      errorSummary: error instanceof Error ? error.message : String(error),
+    };
+  }
 }
 
 export function importLinkedInStoredAuth(

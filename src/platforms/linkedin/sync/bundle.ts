@@ -860,6 +860,7 @@ export async function buildLinkedInSyncBundle(options?: {
     options?.client ??
     new LinkedInClient({
       cookies: loadLinkedInCookies(accountKey),
+      userAgent: session?.userAgent ?? undefined,
       pageInstance: session?.pageInstance ?? undefined,
       xLiTrack: session?.xLiTrack ?? undefined,
     });

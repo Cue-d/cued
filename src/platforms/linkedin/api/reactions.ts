@@ -95,11 +95,7 @@ export async function getReactors(
       messageUrn: linkedInEncode(messageUrn),
       emoji: encodeURIComponent(emoji),
     },
-    {
-      pageInstance: client.pageInstance,
-      xLiTrack: client.xLiTrack,
-      allowRedirects: false,
-    },
+    client.requestOptions,
   ).doJSON<ReactorsGraphQLResponse>();
 
   return (

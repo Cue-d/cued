@@ -3,6 +3,7 @@ import type { Cookie } from "../api/types.js";
 
 export interface LinkedInSessionSecret {
   cookies: Cookie[];
+  userAgent: string | null;
   pageInstance: string | null;
   xLiTrack: string | null;
   serviceVersion: string | null;
@@ -19,6 +20,7 @@ export function parseLinkedInSessionSecret(secret: Record<string, unknown>): Lin
   const cookies = Array.isArray(secret.cookies) ? (secret.cookies as Cookie[]) : [];
   return {
     cookies,
+    userAgent: asString(secret.userAgent),
     pageInstance: asString(secret.pageInstance),
     xLiTrack: asString(secret.xLiTrack),
     serviceVersion: asString(secret.serviceVersion),

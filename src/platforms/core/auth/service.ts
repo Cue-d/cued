@@ -7,7 +7,10 @@ import {
   sendTelemetryEventSafe,
 } from "../../../telemetry/context.js";
 import { inspectGoogleOAuthClientConfig } from "../../gmail/oauth/client.js";
-import { importLinkedInStoredAuth } from "../../linkedin/auth/keychain-import.js";
+import {
+  importLinkedInStoredAuth,
+  validateLinkedInStoredAuth,
+} from "../../linkedin/auth/keychain-import.js";
 import { importSlackDesktopAuth } from "../../slack/auth/desktop-import.js";
 import { resolveIntegrationAccountKey } from "../account-keys.js";
 import {
@@ -445,6 +448,17 @@ export class IntegrationAuthService {
       typeof metadata.keychainAccount === "string" ? metadata.keychainAccount : null;
     if (!keychainService || !keychainAccount) {
       return null;
+    }
+    if (reusable.platform === "linkedin") {
+      const validation = await validateLinkedInStoredAuth(reusable.accountKey);
+      if (validation.status === "invalid") {
+        return null;
+      }
+      if (validation.status === "indeterminate") {
+        throw new Error(
+          `Could not verify the existing LinkedIn session: ${validation.errorSummary}`,
+        );
+      }
     }
     const previousAuthResult =
       typeof metadata.authResult === "object" && metadata.authResult

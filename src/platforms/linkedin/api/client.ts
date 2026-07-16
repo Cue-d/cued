@@ -2,7 +2,7 @@ import { COOKIE_NAMES, DEFAULT_X_LI_TRACK, USER_AGENT } from "./constants.js";
 import { getConnections } from "./contacts.js";
 import { getConversations, getConversationsBefore } from "./conversations.js";
 import { getReactors } from "./reactions.js";
-import { linkedInEncode, newGetRequest } from "./request.js";
+import { type LinkedInRequestOptions, linkedInEncode, newGetRequest } from "./request.js";
 import type {
   Connection,
   Conversation,
@@ -61,16 +61,13 @@ export class LinkedInClient {
     return this._userEntityURN;
   }
 
-  get userAgent(): string {
-    return this._userAgent;
-  }
-
-  get xLiTrack(): string {
-    return this._xLiTrack;
-  }
-
-  get pageInstance(): string {
-    return this._pageInstance;
+  get requestOptions(): LinkedInRequestOptions {
+    return {
+      userAgent: this._userAgent,
+      pageInstance: this._pageInstance,
+      xLiTrack: this._xLiTrack,
+      allowRedirects: false,
+    };
   }
 
   isAuthenticated(): boolean {
@@ -85,11 +82,11 @@ export class LinkedInClient {
       return this._userEntityURN;
     }
 
-    const response = await newGetRequest("https://www.linkedin.com/voyager/api/me", this._cookies, {
-      pageInstance: this._pageInstance,
-      xLiTrack: this._xLiTrack,
-      allowRedirects: false,
-    })
+    const response = await newGetRequest(
+      "https://www.linkedin.com/voyager/api/me",
+      this._cookies,
+      this.requestOptions,
+    )
       .withXLIHeaders()
       .doJSON<{
         data?: { plainId?: number };
@@ -114,6 +111,16 @@ export class LinkedInClient {
     }
 
     throw new Error("Could not determine user entity URN from /me response");
+  }
+
+  async verifySession(signal?: AbortSignal): Promise<void> {
+    await newGetRequest("https://www.linkedin.com/voyager/api/me", this._cookies, {
+      ...this.requestOptions,
+      signal,
+      maxRetries: 0,
+    })
+      .withXLIHeaders()
+      .doRaw();
   }
 
   async getMailboxUrn(): Promise<string> {

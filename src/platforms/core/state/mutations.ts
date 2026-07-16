@@ -46,6 +46,36 @@ export function setIntegrationEnabled(
   return getIntegrationSummary(db, normalized, resolvedAccountKey);
 }
 
+export function invalidateIntegrationAuth(
+  db: CuedDatabase,
+  platform: Platform,
+  accountKey: string,
+  input: { errorSummary: string; reason: string },
+): IntegrationStateSummary {
+  const integration = getIntegrationSummary(db, platform, accountKey);
+  db.upsertIntegrationState({
+    platform,
+    accountKey,
+    displayName: integration.displayName,
+    authState: "needs_auth",
+    enabled: integration.enabled,
+    connectionKind: integration.connectionKind,
+    syncCapable: false,
+    launchStrategy: integration.launchStrategy,
+    launchTarget: integration.launchTarget,
+    importedFrom: integration.importedFrom,
+    artifactPaths: integration.artifactPaths,
+    metadata: {
+      ...(integration.metadata ?? {}),
+      authenticatedAt: null,
+      lastAuthError: input.errorSummary,
+      authInvalidatedAt: now(),
+      authInvalidationReason: input.reason,
+    },
+  });
+  return getIntegrationSummary(db, platform, accountKey);
+}
+
 function ensureRequestableIntegrationState(
   db: CuedDatabase,
   platform: string,
@@ -366,6 +396,10 @@ export function completeAuthSession(
       authenticatedAt: input.state === "authenticated" ? now() : null,
       authResult: input.resultSummary ?? null,
       lastAuthError: input.errorSummary ?? null,
+      authInvalidatedAt:
+        input.state === "authenticated" ? null : (metadata.authInvalidatedAt ?? null),
+      authInvalidationReason:
+        input.state === "authenticated" ? null : (metadata.authInvalidationReason ?? null),
       blockedAt: input.state === "authenticated" ? null : (metadata.blockedAt ?? null),
       blockedReason: input.state === "authenticated" ? null : (metadata.blockedReason ?? null),
       ...(hideGeneratedPending

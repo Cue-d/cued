@@ -224,11 +224,12 @@ export async function getConversations(
   const mailboxUrn = await client.getMailboxUrn();
   const queryId = syncToken ? "messengerConversationsBySyncToken" : "messengerConversations";
   const variables: Record<string, string> = syncToken ? { mailboxUrn, syncToken } : { mailboxUrn };
-  const response = await newMessagingGraphQLRequest(client.cookies, queryId, variables, {
-    pageInstance: client.pageInstance,
-    xLiTrack: client.xLiTrack,
-    allowRedirects: false,
-  }).doJSON<GraphQLConversationsResponse>();
+  const response = await newMessagingGraphQLRequest(
+    client.cookies,
+    queryId,
+    variables,
+    client.requestOptions,
+  ).doJSON<GraphQLConversationsResponse>();
   return parseConversationsResponse(response);
 }
 
@@ -247,11 +248,7 @@ export async function getConversationsBefore(
     client.cookies,
     "messengerConversationsByCursor",
     variables,
-    {
-      pageInstance: client.pageInstance,
-      xLiTrack: client.xLiTrack,
-      allowRedirects: false,
-    },
+    client.requestOptions,
   ).doJSON<GraphQLConversationsResponse>();
   return parseConversationsResponse(response);
 }
@@ -271,11 +268,7 @@ export async function getConversationsWithCursor(
     client.cookies,
     "messengerConversationsByCursor",
     variables,
-    {
-      pageInstance: client.pageInstance,
-      xLiTrack: client.xLiTrack,
-      allowRedirects: false,
-    },
+    client.requestOptions,
   ).doJSON<GraphQLConversationsResponse>();
   return parseConversationsResponse(response);
 }

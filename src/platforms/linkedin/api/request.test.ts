@@ -60,6 +60,24 @@ describe("linkedin request auth invalidation", () => {
     ).rejects.toBeInstanceOf(LinkedInAuthError);
   });
 
+  it("uses the captured browser user agent for authenticated requests", async () => {
+    const fetchMock = vi.fn(async () => new Response("{}", { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await newGetRequest("https://www.linkedin.com/voyager/api/test", cookies, {
+      userAgent: "Cued LinkedIn Test/1.0",
+    }).doRaw();
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://www.linkedin.com/voyager/api/test",
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          "User-Agent": "Cued LinkedIn Test/1.0",
+        }),
+      }),
+    );
+  });
+
   it("encodes tuple-style linkedin urn parentheses", () => {
     expect(linkedInEncode("urn:li:msg_conversation:(urn:li:fsd_profile:SELF123,CONV123)")).toBe(
       "urn%3Ali%3Amsg_conversation%3A%28urn%3Ali%3Afsd_profile%3ASELF123%2CCONV123%29",

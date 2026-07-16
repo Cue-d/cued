@@ -29,9 +29,10 @@ import {
   selectAdapterInvocationProofs,
 } from "../../platforms/core/invocation.js";
 import { isAdapterPlatform, listAutoSyncPlatforms } from "../../platforms/core/registry.js";
-import { runAdapter } from "../../platforms/core/runner.js";
+import { isAdapterWorkerError, runAdapter } from "../../platforms/core/runner.js";
 import { loadIntegrationSecret } from "../../platforms/core/secrets/keychain.js";
 import { refreshLocalIntegrationStates } from "../../platforms/core/state/local-refresh.js";
+import { invalidateIntegrationAuth } from "../../platforms/core/state/mutations.js";
 import { refreshManagedIntegrationStates } from "../../platforms/core/state/refresh.js";
 import { getIntegrationSummary } from "../../platforms/core/state/status.js";
 import type { SyncContinuation } from "../../platforms/core/sync.js";
@@ -344,6 +345,7 @@ type WhatsAppDesiredSession = {
 type LinkedInDesiredSession = {
   accountKey: string;
   cookies: ReturnType<typeof loadLinkedInSessionSecret>["cookies"];
+  userAgent: string | null;
   pageInstance: string;
   xLiTrack: string;
   serviceVersion: string | null;
@@ -520,6 +522,13 @@ export function shouldSkipConnectedDiscordSchedulerSync(
   status: DiscordRealtimeStatus | null,
 ): boolean {
   return targetPlatform === "discord" && trigger === "scheduler" && status?.state === "connected";
+}
+
+export function isLinkedInAdapterAuthInvalidation(
+  platform: string | null,
+  error: unknown,
+): boolean {
+  return platform === "linkedin" && isAdapterWorkerError(error, "auth_invalid");
 }
 
 export function shouldDrainOutboundQueue(input: {
@@ -1813,6 +1822,7 @@ async function collectDesiredLinkedInSessions(db: ReturnType<typeof openCuedData
       desired.push({
         accountKey: integration.account_key,
         cookies: session.cookies,
+        userAgent: session.userAgent,
         pageInstance: session.pageInstance,
         xLiTrack: session.xLiTrack,
         serviceVersion: session.serviceVersion,
@@ -4466,6 +4476,19 @@ export async function runDaemon(): Promise<void> {
           errorMessage,
         );
         requestDiscordRealtimeReconcile();
+      }
+      if (isLinkedInAdapterAuthInvalidation(currentRun.platform, error)) {
+        invalidateIntegrationAuth(
+          db,
+          "linkedin",
+          currentRun.account_key ?? getDefaultAccountKeyForPlatform("linkedin"),
+          {
+            errorSummary: errorMessage,
+            reason: "linkedin_auth_invalidated",
+          },
+        );
+        requestLinkedInRealtimeReconcile();
+        requestMenuBarStatusWrite("linkedin_auth_invalidated");
       }
       db.failRun(currentRun.id, errorMessage, undefined, null, runClaim);
       if (currentRun.platform === "signal") {
