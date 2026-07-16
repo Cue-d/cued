@@ -8,6 +8,8 @@ import type { SlackHelperInspection } from "../../slack/helper/binary.js";
 import { IntegrationAuthService } from "./service.js";
 
 const importSlackDesktopAuthMock = vi.hoisted(() => vi.fn());
+const importLinkedInStoredAuthMock = vi.hoisted(() => vi.fn());
+const validateLinkedInStoredAuthMock = vi.hoisted(() => vi.fn());
 const inspectSlackHelperMock = vi.hoisted(() =>
   vi.fn<() => SlackHelperInspection>(() => ({
     helperPath: "/tmp/cued-slack-helper",
@@ -33,7 +35,8 @@ vi.mock("../../slack/helper/binary.js", () => ({
 }));
 
 vi.mock("../../linkedin/auth/keychain-import.js", () => ({
-  importLinkedInStoredAuth: vi.fn(),
+  importLinkedInStoredAuth: importLinkedInStoredAuthMock,
+  validateLinkedInStoredAuth: validateLinkedInStoredAuthMock,
 }));
 
 vi.mock("./runtime.js", () => ({
@@ -80,6 +83,27 @@ describe("IntegrationAuthService", () => {
         keychainAccount: accountKey,
         authResult: { teamId: accountKey, teamName: displayName },
         browserProfileDir: `/tmp/cued/slack/${accountKey}`,
+        runtimeKind: "chromium",
+      },
+    });
+  }
+
+  function upsertAuthenticatedLinkedIn(db: CuedDatabase) {
+    db.upsertIntegrationState({
+      platform: "linkedin",
+      accountKey: "default",
+      displayName: "LinkedIn",
+      authState: "authenticated",
+      enabled: true,
+      connectionKind: "browser-session",
+      syncCapable: true,
+      launchStrategy: "chromium-auth",
+      launchTarget: "https://www.linkedin.com/login",
+      importedFrom: "local-cli",
+      metadata: {
+        keychainService: "so.cued.desktop.auth.linkedin",
+        keychainAccount: "default",
+        browserProfileDir: "/tmp/cued/linkedin/default",
         runtimeKind: "chromium",
       },
     });
@@ -389,6 +413,60 @@ describe("IntegrationAuthService", () => {
     expect(shouldQueueAuthenticatedSync).toHaveBeenCalledWith("whatsapp", "default");
     expect(db.listRecentRuns(1)).toEqual([]);
     expect(wakeIngest).not.toHaveBeenCalled();
+
+    db.close();
+  });
+
+  it("reuses LinkedIn auth only after the stored session validates", async () => {
+    const db = createDb();
+    upsertAuthenticatedLinkedIn(db);
+    validateLinkedInStoredAuthMock.mockResolvedValue({ status: "valid" });
+
+    const service = new IntegrationAuthService(db);
+    const result = await service.connectManaged("linkedin", "default", new Map());
+
+    expect(validateLinkedInStoredAuthMock).toHaveBeenCalledWith("default");
+    expect(result.integration.authState).toBe("authenticated");
+    expect(startAuthSessionMock).not.toHaveBeenCalled();
+
+    db.close();
+  });
+
+  it("launches LinkedIn auth when the stored session is stale", async () => {
+    const db = createDb();
+    upsertAuthenticatedLinkedIn(db);
+    validateLinkedInStoredAuthMock.mockResolvedValue({ status: "invalid" });
+
+    const service = new IntegrationAuthService(db);
+    const activeAuthSessions = new Map<
+      string,
+      { child: ChildProcess; platform: "linkedin"; accountKey: string }
+    >();
+    const result = await service.connectManaged("linkedin", "default", activeAuthSessions);
+
+    expect(validateLinkedInStoredAuthMock).toHaveBeenCalledWith("default");
+    expect(result.integration.authState).toBe("in_progress");
+    expect(startAuthSessionMock).toHaveBeenCalledTimes(1);
+    expect(activeAuthSessions.size).toBe(1);
+
+    db.close();
+  });
+
+  it("does not launch LinkedIn auth when session validation is indeterminate", async () => {
+    const db = createDb();
+    upsertAuthenticatedLinkedIn(db);
+    validateLinkedInStoredAuthMock.mockResolvedValue({
+      status: "indeterminate",
+      errorSummary: "network unavailable",
+    });
+
+    const service = new IntegrationAuthService(db);
+
+    await expect(service.connectManaged("linkedin", "default", new Map())).rejects.toThrow(
+      "Could not verify the existing LinkedIn session: network unavailable",
+    );
+    expect(startAuthSessionMock).not.toHaveBeenCalled();
+    expect(db.getIntegrationState("linkedin", "default")?.auth_state).toBe("authenticated");
 
     db.close();
   });

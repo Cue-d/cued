@@ -22,7 +22,7 @@ vi.mock("./registry.js", () => ({
   getAdapterDefinition: getAdapterDefinitionMock,
 }));
 
-import { runAdapter } from "./runner.js";
+import { AdapterWorkerError, runAdapter } from "./runner.js";
 
 class MockChild extends EventEmitter {
   stdout = new EventEmitter();
@@ -68,6 +68,31 @@ describe("adapter runner", () => {
 
     await expect(promise).rejects.toThrow("Slack API error: rate_limited");
     expect(child.kill).not.toHaveBeenCalled();
+  });
+
+  it("preserves structured worker error codes across the process boundary", async () => {
+    const child = new MockChild();
+    spawnMock.mockReturnValue(child);
+
+    const promise = runAdapter("slack", "workspace-a");
+    child.stdout.emit(
+      "data",
+      Buffer.from(
+        JSON.stringify({
+          ok: false,
+          error: "Authentication failed: 302 Found",
+          errorCode: "auth_invalid",
+        }),
+      ),
+    );
+    child.emit("close", 1);
+
+    const error = await promise.catch((caught) => caught);
+    expect(error).toBeInstanceOf(AdapterWorkerError);
+    expect(error).toMatchObject({
+      message: "Authentication failed: 302 Found",
+      code: "auth_invalid",
+    });
   });
 
   it("times out hung workers and kills the child process", async () => {

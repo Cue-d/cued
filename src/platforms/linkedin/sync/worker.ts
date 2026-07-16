@@ -1,4 +1,5 @@
 import { readAdapterInvocationEnv } from "../../core/invocation.js";
+import { LinkedInAuthError } from "../api/request.js";
 import { buildLinkedInSyncBundle } from "./bundle.js";
 
 async function main(): Promise<void> {
@@ -20,6 +21,7 @@ async function main(): Promise<void> {
       JSON.stringify({
         ok: false,
         error: error instanceof Error ? error.message : String(error),
+        ...(error instanceof LinkedInAuthError ? { errorCode: "auth_invalid" as const } : {}),
       }),
     );
     process.exitCode = 1;

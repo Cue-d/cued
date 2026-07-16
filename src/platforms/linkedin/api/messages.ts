@@ -144,11 +144,7 @@ export async function getMessages(
     {
       conversationUrn: linkedInEncode(conversationURN),
     },
-    {
-      pageInstance: client.pageInstance,
-      xLiTrack: client.xLiTrack,
-      allowRedirects: false,
-    },
+    client.requestOptions,
   ).doJSON<MessagesGraphQLResponse>();
 
   const data = getMessagesPayload(response);
@@ -176,11 +172,7 @@ export async function getMessagesWithPrevCursor(
       count: String(PAGINATION_DEFAULTS.messagesCount),
       prevCursor: linkedInEncode(prevCursor),
     },
-    {
-      pageInstance: client.pageInstance,
-      xLiTrack: client.xLiTrack,
-      allowRedirects: false,
-    },
+    client.requestOptions,
   ).doJSON<MessagesGraphQLResponse>();
 
   const data = getMessagesPayload(response);
@@ -209,11 +201,7 @@ export async function getMessagesBefore(
       countBefore: String(PAGINATION_DEFAULTS.messagesCount),
       countAfter: "0",
     },
-    {
-      pageInstance: client.pageInstance,
-      xLiTrack: client.xLiTrack,
-      allowRedirects: false,
-    },
+    client.requestOptions,
   ).doJSON<MessagesGraphQLResponse>();
 
   const data = getMessagesPayload(response);

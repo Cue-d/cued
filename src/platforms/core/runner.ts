@@ -2,7 +2,24 @@ import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import type { AdapterPlatform } from "../../core/types/provider.js";
 import { getAdapterDefinition } from "./registry.js";
-import type { AdapterWorkerOutput, SyncBundle } from "./sync.js";
+import type { AdapterWorkerErrorCode, AdapterWorkerOutput, SyncBundle } from "./sync.js";
+
+export class AdapterWorkerError extends Error {
+  constructor(
+    message: string,
+    public readonly code: AdapterWorkerErrorCode | null = null,
+  ) {
+    super(message);
+    this.name = "AdapterWorkerError";
+  }
+}
+
+export function isAdapterWorkerError(
+  error: unknown,
+  code: AdapterWorkerErrorCode,
+): error is AdapterWorkerError {
+  return error instanceof AdapterWorkerError && error.code === code;
+}
 
 export async function runAdapter(
   platform: AdapterPlatform,
@@ -67,9 +84,14 @@ export async function runAdapter(
       clearTimeout(timeout);
 
       if (code !== 0) {
-        const parsedError = parseWorkerError(stdout);
-        const workerError = parsedError ?? stderr.trim();
-        reject(new Error(workerError || `Adapter worker exited with code ${code}`));
+        const parsedFailure = parseWorkerFailure(stdout);
+        const workerError = parsedFailure?.message ?? stderr.trim();
+        reject(
+          new AdapterWorkerError(
+            workerError || `Adapter worker exited with code ${code}`,
+            parsedFailure?.code ?? null,
+          ),
+        );
         return;
       }
 
@@ -86,7 +108,12 @@ export async function runAdapter(
       }
 
       if (!parsed.ok || !parsed.bundle) {
-        reject(new Error(parsed.error ?? "Adapter worker failed without output"));
+        reject(
+          new AdapterWorkerError(
+            parsed.error ?? "Adapter worker failed without output",
+            parsed.errorCode ?? null,
+          ),
+        );
         return;
       }
 
@@ -108,14 +135,18 @@ function killAdapterProcessTree(pid: number | undefined, fallback: () => void): 
   }
 }
 
-function parseWorkerError(stdout: string): string | null {
+function parseWorkerFailure(
+  stdout: string,
+): { message: string; code: AdapterWorkerErrorCode | null } | null {
   if (!stdout.trim()) {
     return null;
   }
 
   try {
     const parsed = JSON.parse(stdout) as AdapterWorkerOutput;
-    return typeof parsed.error === "string" && parsed.error.length > 0 ? parsed.error : null;
+    return typeof parsed.error === "string" && parsed.error.length > 0
+      ? { message: parsed.error, code: parsed.errorCode ?? null }
+      : null;
   } catch {
     return null;
   }

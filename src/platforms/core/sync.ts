@@ -35,8 +35,11 @@ export interface SyncBundle {
   diagnostics?: Record<string, unknown>;
 }
 
+export type AdapterWorkerErrorCode = "auth_invalid";
+
 export interface AdapterWorkerOutput {
   ok: boolean;
   bundle?: SyncBundle;
   error?: string;
+  errorCode?: AdapterWorkerErrorCode;
 }

@@ -11,6 +11,10 @@ declare const localStorage: {
   getItem(key: string): string | null;
 };
 
+declare const navigator: {
+  userAgent: string;
+};
+
 type Platform = "slack" | "linkedin" | "discord";
 type AuthState = "authenticated" | "failed" | "cancelled";
 
@@ -389,6 +393,7 @@ async function extractLinkedInAuth(
     return null;
   }
 
+  const userAgent = await page.evaluate(() => navigator.userAgent);
   const captured = await captureLinkedInSessionData(context, page);
   const realtimeReady = Boolean(
     captured.pageInstance &&
@@ -413,6 +418,7 @@ async function extractLinkedInAuth(
           secure: cookie.secure,
           sameSite: cookie.sameSite,
         })),
+      userAgent,
       pageInstance: captured.pageInstance,
       xLiTrack: captured.xLiTrack,
       serviceVersion: captured.serviceVersion,
@@ -424,6 +430,7 @@ async function extractLinkedInAuth(
       provider: "linkedin",
       runtime: runtimeKind(),
       cookieCount: cookies.length,
+      userAgentCaptured: userAgent.length > 0,
       realtimeReady,
       pageInstanceCaptured: Boolean(captured.pageInstance),
       xLiTrackCaptured: Boolean(captured.xLiTrack),

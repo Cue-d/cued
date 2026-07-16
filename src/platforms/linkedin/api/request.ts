@@ -74,10 +74,13 @@ function invalidatesAuth(response: Response): boolean {
 
 type HttpMethod = "GET" | "POST";
 
-type RequestOptions = {
+export type LinkedInRequestOptions = {
+  userAgent?: string;
   pageInstance?: string;
   xLiTrack?: string;
   allowRedirects?: boolean;
+  signal?: AbortSignal;
+  maxRetries?: number;
 };
 
 class AuthedRequest {
@@ -90,9 +93,12 @@ class AuthedRequest {
   constructor(
     private readonly url: string,
     cookies: Cookie[],
-    private readonly options: RequestOptions = {},
+    private readonly options: LinkedInRequestOptions = {},
   ) {
     Object.assign(this.headers, DEFAULT_HEADERS);
+    if (this.options.userAgent) {
+      this.headers["User-Agent"] = this.options.userAgent;
+    }
     this.headers.Cookie = formatCookieHeader(cookies);
     const csrfToken = getCSRFToken(cookies);
     if (csrfToken) {
@@ -164,12 +170,14 @@ class AuthedRequest {
 
   async doRaw(): Promise<Response> {
     const url = this.buildUrl();
-    for (let attempt = 0; attempt <= RETRY_CONFIG.maxRetries; attempt += 1) {
+    const maxRetries = this.options.maxRetries ?? RETRY_CONFIG.maxRetries;
+    for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
       const response = await fetch(url, {
         method: this.method,
         headers: this.headers,
         body: this.body ?? undefined,
         redirect: this.options.allowRedirects === false ? "manual" : "follow",
+        signal: this.options.signal,
       });
 
       if (
@@ -183,7 +191,7 @@ class AuthedRequest {
       }
 
       if ((RETRY_CONFIG.retryableStatusCodes as readonly number[]).includes(response.status)) {
-        if (attempt < RETRY_CONFIG.maxRetries) {
+        if (attempt < maxRetries) {
           await sleep(withJitter(RETRY_CONFIG.baseDelayMs * 2 ** attempt));
           continue;
         }
@@ -236,7 +244,7 @@ export function withJitter(ms: number): number {
 export function newGetRequest(
   url: string,
   cookies: Cookie[],
-  options?: RequestOptions,
+  options?: LinkedInRequestOptions,
 ): AuthedRequest {
   return new AuthedRequest(url, cookies, options).withMethod("GET");
 }
@@ -244,7 +252,7 @@ export function newGetRequest(
 export function newPostRequest(
   url: string,
   cookies: Cookie[],
-  options?: RequestOptions,
+  options?: LinkedInRequestOptions,
 ): AuthedRequest {
   return new AuthedRequest(url, cookies, options).withMethod("POST");
 }
@@ -253,7 +261,7 @@ export function newMessagingGraphQLRequest(
   cookies: Cookie[],
   queryId: keyof typeof GRAPHQL_QUERY_IDS,
   variables: Record<string, string>,
-  options?: RequestOptions,
+  options?: LinkedInRequestOptions,
 ): AuthedRequest {
   return newGetRequest(API_URLS.messagingGraphQL, cookies, options).withGraphQLQuery(
     queryId,

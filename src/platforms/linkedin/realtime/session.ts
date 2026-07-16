@@ -28,6 +28,7 @@ export interface LinkedInRealtimeStatus {
 interface LinkedInRealtimeSessionOptions {
   accountKey: string;
   cookies: Cookie[];
+  userAgent?: string | null;
   pageInstance: string;
   xLiTrack: string;
   serviceVersion?: string | null;
@@ -51,6 +52,7 @@ export interface LinkedInRealtimeSessionLike {
 export interface LinkedInRealtimeSupervisorSessionInput {
   accountKey: string;
   cookies: Cookie[];
+  userAgent?: string | null;
   pageInstance: string;
   xLiTrack: string;
   serviceVersion?: string | null;
@@ -128,11 +130,11 @@ function wait(ms: number, signal?: AbortSignal): Promise<void> {
   });
 }
 
-function baseHeaders(cookies: Cookie[]): Record<string, string> {
+function baseHeaders(cookies: Cookie[], userAgent: string): Record<string, string> {
   return {
     ...DEFAULT_HEADERS,
     Accept: CONTENT_TYPES.linkedInNormalized,
-    "User-Agent": USER_AGENT,
+    "User-Agent": userAgent,
     Cookie: cookieHeader(cookies),
   };
 }
@@ -179,6 +181,7 @@ function makeStatus(input: {
 export class LinkedInRealtimeSession implements LinkedInRealtimeSessionLike {
   private readonly accountKey: string;
   private readonly cookies: Cookie[];
+  private readonly userAgent: string;
   private readonly pageInstance: string;
   private readonly xLiTrack: string;
   private readonly serviceVersion: string;
@@ -205,6 +208,7 @@ export class LinkedInRealtimeSession implements LinkedInRealtimeSessionLike {
   constructor(options: LinkedInRealtimeSessionOptions) {
     this.accountKey = options.accountKey;
     this.cookies = options.cookies;
+    this.userAgent = options.userAgent ?? USER_AGENT;
     this.pageInstance = options.pageInstance;
     this.xLiTrack = options.xLiTrack;
     this.serviceVersion = parseServiceVersion(options.serviceVersion ?? null, options.xLiTrack);
@@ -301,6 +305,7 @@ export class LinkedInRealtimeSession implements LinkedInRealtimeSessionLike {
     }
     const client = new LinkedInClient({
       cookies: this.cookies,
+      userAgent: this.userAgent,
       pageInstance: this.pageInstance,
       xLiTrack: this.xLiTrack,
     });
@@ -311,7 +316,7 @@ export class LinkedInRealtimeSession implements LinkedInRealtimeSessionLike {
     const response = await fetch(`${API_URLS.realtimeConnect}?rc=1`, {
       method: "GET",
       headers: {
-        ...baseHeaders(this.cookies),
+        ...baseHeaders(this.cookies, this.userAgent),
         Accept: "text/event-stream",
         Referer: `${API_URLS.messagingBase}/`,
         "csrf-token": getCsrfToken(this.cookies) ?? "",
@@ -379,7 +384,7 @@ export class LinkedInRealtimeSession implements LinkedInRealtimeSessionLike {
         const response = await fetch(`${API_URLS.realtimeHeartbeat}?action=sendHeartbeat`, {
           method: "POST",
           headers: {
-            ...baseHeaders(this.cookies),
+            ...baseHeaders(this.cookies, this.userAgent),
             Accept: "*/*",
             Origin: "https://www.linkedin.com",
             Priority: "u=1, i",
@@ -554,6 +559,7 @@ function fingerprintSessionInput(input: LinkedInRealtimeSupervisorSessionInput):
       secure: cookie.secure ?? null,
       sameSite: cookie.sameSite ?? null,
     })),
+    userAgent: input.userAgent ?? null,
     pageInstance: input.pageInstance,
     xLiTrack: input.xLiTrack,
     serviceVersion: input.serviceVersion ?? null,

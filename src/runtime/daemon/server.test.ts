@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { AdapterWorkerError } from "../../platforms/core/runner.js";
 import {
   buildSyncResumeTargets,
   buildWhatsAppRealtimeSnapshotFromEvent,
@@ -7,12 +8,39 @@ import {
   getAutoSyncTargets,
   InteractiveAuthSessions,
   isDisconnectedSocketError,
+  isLinkedInAdapterAuthInvalidation,
   requestWhatsAppHistoryBackfillOnce,
   shouldDeferContinuationProjection,
   shouldDrainOutboundQueue,
   shouldProjectIngestRunInline,
   shouldSkipConnectedDiscordSchedulerSync,
 } from "./server.js";
+
+describe("LinkedIn auth invalidation", () => {
+  it("recognizes typed LinkedIn auth failures from adapter workers", () => {
+    expect(
+      isLinkedInAdapterAuthInvalidation(
+        "linkedin",
+        new AdapterWorkerError("Authentication failed: 302 Found", "auth_invalid"),
+      ),
+    ).toBe(true);
+  });
+
+  it("does not invalidate auth for transient or unrelated adapter failures", () => {
+    expect(
+      isLinkedInAdapterAuthInvalidation(
+        "linkedin",
+        new AdapterWorkerError("LinkedIn rate limited"),
+      ),
+    ).toBe(false);
+    expect(
+      isLinkedInAdapterAuthInvalidation(
+        "slack",
+        new AdapterWorkerError("Authentication failed", "auth_invalid"),
+      ),
+    ).toBe(false);
+  });
+});
 
 describe("discord scheduler pacing", () => {
   const connectedStatus = {

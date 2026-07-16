@@ -7,13 +7,14 @@ type TestableRealtimeSession = {
   connectOnce(signal: AbortSignal): Promise<void>;
 };
 
-function createSession() {
+function createSession(userAgent?: string) {
   const session = new LinkedInRealtimeSession({
     accountKey: "default",
     cookies: [
       { name: "li_at", value: "token", domain: ".linkedin.com", path: "/" },
       { name: "JSESSIONID", value: '"ajax:123"', domain: ".linkedin.com", path: "/" },
     ],
+    userAgent,
     pageInstance: "urn:li:page:d_flagship3_messaging_conversation_detail;test",
     xLiTrack: '{"clientVersion":"1.0.0"}',
     realtimeQueryMap: "{}",
@@ -87,6 +88,37 @@ describe("LinkedInRealtimeSession", () => {
     process.removeListener("unhandledRejection", unhandledRejection);
 
     expect(unhandledRejection).not.toHaveBeenCalled();
+  });
+
+  it("uses the captured browser user agent for realtime requests", async () => {
+    const { internals } = createSession("Cued LinkedIn Realtime Test/1.0");
+    internals.runHeartbeatLoop = vi.fn(
+      (signal: AbortSignal) =>
+        new Promise<void>((resolve) => {
+          signal.addEventListener("abort", () => resolve(), { once: true });
+        }),
+    );
+    const fetchMock = vi.fn(async () => {
+      const stream = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.close();
+        },
+      });
+      return new Response(stream, { status: 200 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(internals.connectOnce(new AbortController().signal)).rejects.toThrow(
+      "LinkedIn realtime stream closed",
+    );
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining("/realtime/connect"),
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          "User-Agent": "Cued LinkedIn Realtime Test/1.0",
+        }),
+      }),
+    );
   });
 });
 
