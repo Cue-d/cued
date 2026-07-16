@@ -131,6 +131,11 @@ const AUTH_SESSION_STALE_AFTER_MS = 15 * 60 * 1000;
 const AUTH_SESSION_ABANDONED_ERROR = "Auth session ended before Cued received a completion event";
 const AUTH_SESSION_EXPIRED_ERROR = "Auth session expired before completion";
 
+interface IntegrationStatusOptions {
+  includeLiveLocalIntegrations?: boolean;
+  includeDiagnostics?: boolean;
+}
+
 export function now(): number {
   return Date.now();
 }
@@ -687,7 +692,8 @@ function compareSetupIntegrations(
 
 function buildSetupIntegrations(
   db: CuedDatabase,
-  options: { includeLiveLocalIntegrations?: boolean; includeDiagnostics?: boolean } = {},
+  options: IntegrationStatusOptions = {},
+  existingIntegrations?: IntegrationStateSummary[],
 ): IntegrationStateSummary[] {
   const onboardingOrder: Platform[] = [
     "contacts",
@@ -700,7 +706,7 @@ function buildSetupIntegrations(
     "signal",
   ];
   const byPlatform = new Map<Platform, IntegrationStateSummary>();
-  for (const integration of listIntegrationStates(db, options)) {
+  for (const integration of existingIntegrations ?? listIntegrationStates(db, options)) {
     if (!isOnboardingVisiblePlatform(integration.platform)) {
       continue;
     }
@@ -895,15 +901,16 @@ export function getPlatformRuntimeDefaults(platform: Platform): {
 
 export function buildIntegrationStatus(
   db: CuedDatabase,
-  options: { includeLiveLocalIntegrations?: boolean; includeDiagnostics?: boolean } = {},
+  options: IntegrationStatusOptions = {},
 ): {
   hostOs: ReturnType<typeof resolveHostOS>;
   integrations: IntegrationStateSummary[];
   setupIntegrations: IntegrationStateSummary[];
 } {
+  const integrations = listIntegrationStates(db, options);
   return {
     hostOs: resolveHostOS(),
-    integrations: listIntegrationStates(db, options),
-    setupIntegrations: buildSetupIntegrations(db, options),
+    integrations,
+    setupIntegrations: buildSetupIntegrations(db, options, integrations),
   };
 }

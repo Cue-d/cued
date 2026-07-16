@@ -58,6 +58,7 @@ import {
 import { readMenuBarStatusCache } from "./runtime/menu-bar-status-cache.js";
 import { buildOnboardingSnapshot } from "./runtime/onboarding.js";
 import { runProjectionWorkerFromEnv } from "./runtime/projection/worker.js";
+import { hydrateIntegrationProjectionCounts } from "./runtime/status.js";
 import {
   checkForUpdates,
   clearUpdateHelperPendingState,
@@ -584,7 +585,10 @@ async function main(): Promise<void> {
           lastUpdatedAt: Date.now(),
           source: "menu_bar_cache",
         },
-        integrations: listMenuBarIntegrationStates(db),
+        integrations: hydrateIntegrationProjectionCounts(
+          listMenuBarIntegrationStates(db),
+          overview.integrationBreakdown,
+        ),
         update: getUpdateStatus(db),
         socketRunning: existsSync(CUED_SOCKET_PATH),
         dbPath: db.dbPath,

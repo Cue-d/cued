@@ -70,6 +70,114 @@ describe("CuedDatabase", () => {
     db.close();
   });
 
+  it("uses the normalized schema expression index for raw event diagnostics", () => {
+    const db = createDb();
+    const sqlite = (
+      db as unknown as {
+        sqlite: {
+          prepare: (sql: string) => {
+            all: (...params: unknown[]) => Array<{ detail: string }>;
+          };
+        };
+      }
+    ).sqlite;
+    const phonePlan = sqlite
+      .prepare(
+        `
+        EXPLAIN QUERY PLAN
+        SELECT COUNT(*)
+        FROM raw_events
+        WHERE platform = ?
+          AND account_key = ?
+          AND COALESCE(normalized_schema, entity_kind || '.' || event_kind || '@1') = ?
+      `,
+      )
+      .all("imessage", "local", "call.observed@1");
+    const schemaPlan = sqlite
+      .prepare(
+        `
+        EXPLAIN QUERY PLAN
+        SELECT
+          COALESCE(normalized_schema, entity_kind || '.' || event_kind || '@1') AS schema_key,
+          COUNT(*)
+        FROM raw_events
+        WHERE platform = ? AND account_key = ?
+        GROUP BY schema_key
+      `,
+      )
+      .all("imessage", "local");
+
+    expect(phonePlan.map((row) => row.detail).join("\n")).toContain(
+      "idx_raw_events_platform_account_normalized_schema",
+    );
+    expect(schemaPlan.map((row) => row.detail).join("\n")).toContain(
+      "idx_raw_events_platform_account_normalized_schema",
+    );
+    expect(schemaPlan.map((row) => row.detail).join("\n")).not.toContain(
+      "USE TEMP B-TREE FOR GROUP BY",
+    );
+
+    db.close();
+  });
+
+  it("groups menu bar projection counts by integration", () => {
+    const db = createDb();
+    const sqlite = (
+      db as unknown as {
+        sqlite: { exec: (sql: string) => void };
+      }
+    ).sqlite;
+    sqlite.exec(`
+      INSERT INTO contacts (id, kind, name, archived, created_at, updated_at)
+      VALUES ('contact-1', 'person', 'Ava', 0, 1, 1);
+      INSERT INTO contact_sources (
+        id, contact_id, platform, account_key, source_entity_key, first_seen_at, last_seen_at
+      ) VALUES ('source-1', 'contact-1', 'imessage', 'local', 'ava', 1, 1);
+      INSERT INTO conversations (
+        id, platform, account_key, source_conversation_key, type, is_active,
+        unread_count, created_at, updated_at
+      ) VALUES
+        ('conversation-1', 'imessage', 'local', 'chat-1', 'dm', 1, 0, 1, 1),
+        ('conversation-2', 'slack', 'workspace', 'channel-1', 'channel', 1, 0, 1, 1);
+      INSERT INTO messages (
+        id, platform, account_key, platform_message_id, conversation_id, sent_at,
+        is_from_me, is_deleted, is_edited, attachment_count, reaction_count, created_at, updated_at
+      ) VALUES
+        ('message-1', 'imessage', 'local', 'message-1', 'conversation-1', 1, 0, 0, 0, 0, 0, 1, 1),
+        ('message-2', 'slack', 'workspace', 'message-2', 'conversation-2', 1, 0, 0, 0, 0, 0, 1, 1);
+    `);
+
+    expect(db.listProjectionCountsByIntegration()).toEqual(
+      expect.arrayContaining([
+        { platform: "imessage", accountKey: "local", contacts: 1, messages: 1 },
+        { platform: "slack", accountKey: "workspace", contacts: 0, messages: 1 },
+      ]),
+    );
+    sqlite.exec(`
+      INSERT INTO messages (
+        id, platform, account_key, platform_message_id, conversation_id, sent_at,
+        is_from_me, is_deleted, is_edited, attachment_count, reaction_count, created_at, updated_at
+      ) VALUES (
+        'message-3', 'imessage', 'local', 'message-3', 'conversation-1', 2,
+        0, 0, 0, 0, 0, 2, 2
+      );
+    `);
+    expect(
+      db
+        .listProjectionCountsByIntegration()
+        .find((row) => row.platform === "imessage" && row.accountKey === "local")?.messages,
+    ).toBe(1);
+
+    db.upsertProjectionState({ projectionWatermark: 1 });
+    expect(
+      db
+        .listProjectionCountsByIntegration()
+        .find((row) => row.platform === "imessage" && row.accountKey === "local")?.messages,
+    ).toBe(2);
+
+    db.close();
+  });
+
   function insertContact(
     db: CuedDatabase,
     input: {

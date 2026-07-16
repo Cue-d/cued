@@ -2430,6 +2430,7 @@ function projectEventBatch(
       });
     }
   });
+  db.invalidateMenuBarProjectionCounts();
   for (const failure of projectionFailures) {
     db.quarantineRawEventProjectionFailure(
       {

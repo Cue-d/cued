@@ -1,7 +1,7 @@
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { CuedDatabase } from "../db/database.js";
 import { buildOnboardingSnapshot } from "./onboarding.js";
 
@@ -195,6 +195,70 @@ describe("onboarding snapshot", () => {
       lastUpdatedAt: null,
       source: "database",
     });
+
+    db.close();
+  });
+
+  it("does not load raw schema diagnostics for onboarding", async () => {
+    const db = createDb();
+    const projectionStats = vi.spyOn(db, "getIntegrationProjectionStats");
+
+    await buildOnboardingSnapshot(db);
+
+    expect(projectionStats).not.toHaveBeenCalled();
+
+    db.close();
+  });
+
+  it("builds platform breakdowns directly when the menu bar cache is unavailable", async () => {
+    const db = createDb();
+    db.upsertIntegrationState({
+      platform: "imessage",
+      accountKey: "local",
+      displayName: "Messages",
+      authState: "authorized",
+      enabled: true,
+      connectionKind: "native",
+      syncCapable: false,
+      launchStrategy: "system-settings",
+      launchTarget: null,
+      importedFrom: "test",
+    });
+    const sqlite = (
+      db as unknown as {
+        sqlite: { exec: (sql: string) => void };
+      }
+    ).sqlite;
+    sqlite.exec(`
+      INSERT INTO contacts (id, kind, name, archived, created_at, updated_at)
+      VALUES ('contact-1', 'person', 'Ava', 0, 1, 1);
+      INSERT INTO contact_sources (
+        id, contact_id, platform, account_key, source_entity_key, first_seen_at, last_seen_at
+      ) VALUES ('source-1', 'contact-1', 'imessage', 'local', 'ava', 1, 1);
+      INSERT INTO conversations (
+        id, platform, account_key, source_conversation_key, type, is_active,
+        unread_count, created_at, updated_at
+      ) VALUES ('conversation-1', 'imessage', 'local', 'chat-1', 'dm', 1, 0, 1, 1);
+      INSERT INTO messages (
+        id, platform, account_key, platform_message_id, conversation_id, sent_at,
+        is_from_me, is_deleted, is_edited, attachment_count, reaction_count, created_at, updated_at
+      ) VALUES (
+        'message-1', 'imessage', 'local', 'message-1', 'conversation-1', 1,
+        0, 0, 0, 0, 0, 1, 1
+      );
+    `);
+
+    const snapshot = await buildOnboardingSnapshot(db);
+    const imessage = snapshot.integrations.find(
+      (integration) => integration.platform === "imessage" && integration.accountKey === "local",
+    );
+
+    expect(imessage?.projectionStats).toEqual(
+      expect.objectContaining({
+        projectedContacts: 1,
+        projectedMessages: 1,
+      }),
+    );
 
     db.close();
   });
