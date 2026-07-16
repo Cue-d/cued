@@ -2229,4 +2229,20 @@ export const MIGRATIONS: Migration[] = [
       `);
     },
   },
+  {
+    id: "0021_raw_event_normalized_schema_index",
+    apply: (db) => {
+      if (!tableExists(db, "raw_events")) {
+        return;
+      }
+      db.exec(`
+        CREATE INDEX IF NOT EXISTS idx_raw_events_platform_account_normalized_schema
+        ON raw_events(
+          platform,
+          account_key,
+          COALESCE(normalized_schema, entity_kind || '.' || event_kind || '@1')
+        );
+      `);
+    },
+  },
 ];

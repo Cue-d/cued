@@ -446,6 +446,13 @@ type WhatsAppSendCandidate = {
   resolution: Extract<WhatsAppSendResolution["resolution"], "whatsapp_jid" | "phone">;
 };
 
+export interface IntegrationProjectionCount {
+  platform: Platform;
+  accountKey: string;
+  contacts: number;
+  messages: number;
+}
+
 const SIGNAL_UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -581,6 +588,11 @@ function buildRawEventValues(event: RawEventInput) {
 export class CuedDatabase {
   private readonly sqlite: Database.Database;
   private readonly db: LocalDrizzleDatabase;
+  private menuBarProjectionCountsCache: {
+    projectionWatermark: number;
+    lastRebuildAt: number | null;
+    rows: IntegrationProjectionCount[];
+  } | null = null;
 
   constructor(
     public readonly dbPath: string = CUED_DB_PATH,
@@ -1416,8 +1428,22 @@ export class CuedDatabase {
       platform: Platform;
       messages: number;
     }>;
+    integrationBreakdown: IntegrationProjectionCount[];
   } {
-    const messageBreakdown = this.listMessageCountsByPlatform();
+    const integrationBreakdown = this.listProjectionCountsByIntegration();
+    const messagesByPlatform = new Map<Platform, number>();
+    for (const row of integrationBreakdown) {
+      messagesByPlatform.set(
+        row.platform,
+        (messagesByPlatform.get(row.platform) ?? 0) + row.messages,
+      );
+    }
+    const messageBreakdown = [...messagesByPlatform]
+      .map(([platform, messages]) => ({ platform, messages }))
+      .sort(
+        (left, right) =>
+          right.messages - left.messages || left.platform.localeCompare(right.platform),
+      );
     return {
       contacts: this.countRows(contacts),
       conversations: this.countRows(conversations),
@@ -1427,7 +1453,66 @@ export class CuedDatabase {
       integrations: this.countRows(integrationStates),
       authSessions: this.countRows(authSessions),
       messageBreakdown,
+      integrationBreakdown,
     };
+  }
+
+  listProjectionCountsByIntegration(): IntegrationProjectionCount[] {
+    const projectionState = this.getProjectionState({ initialize: false });
+    if (
+      this.menuBarProjectionCountsCache?.projectionWatermark ===
+        projectionState.projection_watermark &&
+      this.menuBarProjectionCountsCache.lastRebuildAt === projectionState.last_rebuild_at
+    ) {
+      return this.menuBarProjectionCountsCache.rows;
+    }
+
+    const byIntegration = new Map<string, IntegrationProjectionCount>();
+    const getOrCreate = (platform: Platform, accountKey: string) => {
+      const key = `${platform}\u0000${accountKey}`;
+      const existing = byIntegration.get(key);
+      if (existing) {
+        return existing;
+      }
+      const created = { platform, accountKey, contacts: 0, messages: 0 };
+      byIntegration.set(key, created);
+      return created;
+    };
+    const contactCounts = this.sqlite
+      .prepare(
+        `
+        SELECT platform, account_key, COUNT(*) AS count
+        FROM contact_sources
+        GROUP BY platform, account_key
+      `,
+      )
+      .all() as Array<{ platform: Platform; account_key: string; count: number | null }>;
+    for (const row of contactCounts) {
+      getOrCreate(row.platform, row.account_key).contacts = Number(row.count ?? 0);
+    }
+    const messageCounts = this.sqlite
+      .prepare(
+        `
+        SELECT platform, account_key, COUNT(*) AS count
+        FROM messages
+        GROUP BY platform, account_key
+      `,
+      )
+      .all() as Array<{ platform: Platform; account_key: string; count: number | null }>;
+    for (const row of messageCounts) {
+      getOrCreate(row.platform, row.account_key).messages = Number(row.count ?? 0);
+    }
+    const rows = [...byIntegration.values()];
+    this.menuBarProjectionCountsCache = {
+      projectionWatermark: projectionState.projection_watermark,
+      lastRebuildAt: projectionState.last_rebuild_at,
+      rows,
+    };
+    return rows;
+  }
+
+  invalidateMenuBarProjectionCounts(): void {
+    this.menuBarProjectionCountsCache = null;
   }
 
   listMessageCountsByPlatform(): Array<{
@@ -1602,7 +1687,7 @@ export class CuedDatabase {
       .prepare(
         `
         SELECT
-          COALESCE(normalized_schema, entity_kind || '.' || event_kind) AS schema_key,
+          COALESCE(normalized_schema, entity_kind || '.' || event_kind || '@1') AS schema_key,
           COUNT(*) AS count
         FROM raw_events
         WHERE platform = ? AND account_key = ?
@@ -4908,6 +4993,7 @@ export class CuedDatabase {
       tx.delete(contactSources).run();
       tx.delete(contacts).run();
     });
+    this.invalidateMenuBarProjectionCounts();
   }
 
   private countRows(table: SQLiteTable): number {

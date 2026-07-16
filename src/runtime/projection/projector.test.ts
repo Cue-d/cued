@@ -1938,6 +1938,79 @@ describe("projector", () => {
     db.close();
   });
 
+  it("invalidates cached integration counts after out-of-order realtime projection", () => {
+    const db = createDb();
+    db.insertRawEvent({
+      id: "conversation-count-cache",
+      platform: "linkedin",
+      accountKey: "default",
+      entityKind: "conversation",
+      eventKind: "observed",
+      observedAt: 1,
+      dedupeKey: "conversation-count-cache",
+      payload: {
+        sourceConversationKey: "thread-count-cache",
+        conversationType: "dm",
+        participants: [],
+      },
+      sourceVersion: "test-v1",
+    });
+    projectPendingRawEvents(db);
+
+    const outOfOrder = db.insertRawEvents([
+      {
+        id: "contact-count-cache-filler",
+        platform: "contacts",
+        accountKey: "local",
+        entityKind: "contact",
+        eventKind: "observed",
+        observedAt: 2,
+        dedupeKey: "contact-count-cache-filler",
+        payload: {
+          sourceEntityKey: "contacts:filler",
+          fields: { display_name: "Filler" },
+          handles: [],
+        },
+        sourceVersion: "test-v1",
+      },
+      {
+        id: "message-count-cache",
+        platform: "linkedin",
+        accountKey: "default",
+        entityKind: "message",
+        eventKind: "created",
+        observedAt: 3,
+        dedupeKey: "message-count-cache",
+        payload: {
+          sourceMessageKey: "message-count-cache",
+          sourceConversationKey: "thread-count-cache",
+          sentAt: 3,
+          content: "invalidate the count cache",
+          isFromMe: false,
+        },
+        sourceVersion: "test-v1",
+      },
+    ]);
+    const messageRowId = outOfOrder.lastInsertedRowId!;
+    const before = db
+      .listProjectionCountsByIntegration()
+      .find((row) => row.platform === "linkedin" && row.accountKey === "default");
+    expect(before?.messages ?? 0).toBe(0);
+
+    projectRealtimeRange(db, {
+      startRowId: messageRowId,
+      endRowId: messageRowId,
+    });
+
+    const after = db
+      .listProjectionCountsByIntegration()
+      .find((row) => row.platform === "linkedin" && row.accountKey === "default");
+    expect(after?.messages).toBe(1);
+    expect(db.getProjectionState().projection_watermark).toBe(1);
+
+    db.close();
+  });
+
   it("normalizes attachment-only placeholders on realtime projection", () => {
     const db = createDb();
 

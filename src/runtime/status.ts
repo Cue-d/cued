@@ -1,8 +1,9 @@
-import type { CuedDatabase } from "../db/database.js";
+import type { CuedDatabase, IntegrationProjectionCount } from "../db/database.js";
 import {
   buildIntegrationStatus,
   listMenuBarIntegrationStates,
 } from "../platforms/core/state/status.js";
+import type { IntegrationStateSummary } from "../platforms/core/state/types.js";
 import type { DiscordRealtimeSupervisor } from "../platforms/discord/realtime/session.js";
 import type { LinkedInRealtimeSupervisor } from "../platforms/linkedin/realtime/session.js";
 import type { SignalRealtimeSupervisor } from "../platforms/signal/realtime/session.js";
@@ -132,6 +133,10 @@ export function buildMenuBarDaemonStatusSnapshot(
   const projection = db.getProjectionBacklog({ initializeProjectionState: false });
   const searchIndex = db.getMessageFtsIndexBacklog();
   const phoneCalls = db.countObservedPhoneCalls();
+  const integrations = hydrateIntegrationProjectionCounts(
+    listMenuBarIntegrationStates(db),
+    overview.integrationBreakdown,
+  );
   return {
     app: options.app,
     bootstrap: options.bootstrap,
@@ -155,7 +160,7 @@ export function buildMenuBarDaemonStatusSnapshot(
       lastUpdatedAt: Date.now(),
       source: "menu_bar_cache",
     },
-    integrations: listMenuBarIntegrationStates(db),
+    integrations,
     discordRealtimeSessions: options.discordRealtime.getStatuses(),
     slackRealtimeSessions: options.slackRealtime.getStatuses(),
     linkedinRealtimeSessions: options.linkedInRealtime.getStatuses(),
@@ -165,4 +170,26 @@ export function buildMenuBarDaemonStatusSnapshot(
     socketPath: options.socketPath,
     dbPath: db.dbPath,
   };
+}
+
+export function hydrateIntegrationProjectionCounts(
+  integrations: IntegrationStateSummary[],
+  counts: IntegrationProjectionCount[],
+): IntegrationStateSummary[] {
+  const countsByIntegration = new Map(
+    counts.map((row) => [`${row.platform}\u0000${row.accountKey}`, row]),
+  );
+  return integrations.map((integration) => {
+    const projectionCounts = countsByIntegration.get(
+      `${integration.platform}\u0000${integration.accountKey}`,
+    );
+    return {
+      ...integration,
+      projectionStats: {
+        ...integration.projectionStats,
+        projectedContacts: projectionCounts?.contacts ?? 0,
+        projectedMessages: projectionCounts?.messages ?? 0,
+      },
+    };
+  });
 }

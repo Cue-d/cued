@@ -38,7 +38,7 @@ describe("onboarding permission refresh", () => {
     dbPath: "/tmp/cued-test/local.db",
     getMenuBarOverview: () => ({ messages: 0, contacts: 0 }),
     getProjectionBacklog: () => ({ pending_raw_events: 0 }),
-    getIntegrationProjectionStats: () => ({ rawEventsBySchema: {} }),
+    countObservedPhoneCalls: () => 0,
     getAppSetting: vi.fn().mockReturnValue(null),
   };
 
@@ -200,5 +200,67 @@ describe("onboarding permission refresh", () => {
       lastUpdatedAt: 5678,
       source: "menu_bar_cache",
     });
+  });
+
+  it("rebuilds integration counts when a legacy cache has no breakdown", async () => {
+    mockSnapshotDependencies();
+    buildIntegrationStatusMock.mockReturnValue({
+      hostOs: "macos",
+      integrations: [
+        {
+          platform: "imessage",
+          accountKey: "local",
+          projectionStats: {
+            rawEvents: 0,
+            rawEventsBySchema: {},
+            projectedContacts: 0,
+            projectedConversations: 0,
+            projectedMessages: 0,
+          },
+        },
+      ],
+      setupIntegrations: [],
+    });
+    readMenuBarStatusCacheMock.mockReturnValue({
+      path: "/tmp/cued-test/menu-bar-status.json",
+      mtimeMs: 6789,
+      snapshot: {
+        dbPath: db.dbPath,
+        relationshipSummary: {
+          messages: 12,
+          contacts: 7,
+          phoneCalls: 3,
+          pendingProjectionEvents: 0,
+        },
+        overview: {
+          messages: 12,
+          contacts: 7,
+        },
+      },
+    });
+    const getMenuBarOverview = vi.fn().mockReturnValue({
+      messages: 12,
+      contacts: 7,
+      integrationBreakdown: [
+        {
+          platform: "imessage",
+          accountKey: "local",
+          contacts: 4,
+          messages: 10,
+        },
+      ],
+    });
+
+    const snapshot = await buildOnboardingSnapshot({ ...db, getMenuBarOverview } as never, {
+      installGlobalSkill: false,
+    });
+
+    expect(getMenuBarOverview).toHaveBeenCalledTimes(1);
+    expect(snapshot.integrations[0]?.projectionStats).toEqual(
+      expect.objectContaining({
+        projectedContacts: 4,
+        projectedMessages: 10,
+      }),
+    );
   });
 });

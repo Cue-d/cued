@@ -1,10 +1,12 @@
-import type { CuedDatabase } from "../db/database.js";
+import type { CuedDatabase, IntegrationProjectionCount } from "../db/database.js";
 import { refreshManagedIntegrationStates } from "../platforms/core/state/refresh.js";
 import { buildIntegrationStatus } from "../platforms/core/state/status.js";
+import { isPlatform } from "../platforms/core/types.js";
 import { getGlobalCuedSkillStatus, installGlobalCuedSkill } from "../skills/install.js";
 import { isTelemetryEnabled } from "../telemetry/client.js";
 import { buildPermissionStatus } from "./doctor.js";
 import { type MenuBarStatusCacheEntry, readMenuBarStatusCache } from "./menu-bar-status-cache.js";
+import { hydrateIntegrationProjectionCounts } from "./status.js";
 
 export interface OnboardingSnapshot {
   permissions: Awaited<ReturnType<typeof buildPermissionStatus>>["permissions"];
@@ -65,53 +67,81 @@ export async function buildOnboardingSnapshot(
           };
     }
   }
-  const integrations = buildIntegrationStatus(db, { includeDiagnostics: true });
+  const cachedStatus = readMenuBarStatusCache({ dbPath: db.dbPath });
+  const cachedRelationship = cachedStatus ? readCachedRelationshipSummary(cachedStatus) : null;
+  const cachedProjectionCounts = cachedStatus ? readCachedProjectionCounts(cachedStatus) : null;
+  const fallbackOverview =
+    cachedRelationship && cachedProjectionCounts ? null : db.getMenuBarOverview();
+  const projectionCounts = cachedProjectionCounts ?? fallbackOverview?.integrationBreakdown ?? [];
+  const integrationStatus = buildIntegrationStatus(db, { includeDiagnostics: false });
+  const integrations = hydrateIntegrationProjectionCounts(
+    integrationStatus.integrations,
+    projectionCounts,
+  );
+  const setupIntegrations = hydrateIntegrationProjectionCounts(
+    integrationStatus.setupIntegrations,
+    projectionCounts,
+  );
 
   return {
     permissions: permissions.permissions,
     globalSkill,
-    ...integrations,
-    relationshipSummary: buildRelationshipSummary(db),
+    ...integrationStatus,
+    integrations,
+    setupIntegrations,
+    relationshipSummary:
+      cachedRelationship ?? buildDatabaseRelationshipSummary(db, fallbackOverview),
   };
 }
 
-function buildRelationshipSummary(db: CuedDatabase): RelationshipSummary {
-  const cached = readCachedRelationshipSummary(db.dbPath);
-  if (cached) {
-    return {
-      ...cached,
-      phoneCalls:
-        cached.phoneCalls > 0
-          ? cached.phoneCalls
-          : (db.getIntegrationProjectionStats("imessage", "local").rawEventsBySchema[
-              "call.observed@1"
-            ] ?? 0),
-    };
-  }
-
-  const overview = db.getMenuBarOverview();
+function buildDatabaseRelationshipSummary(
+  db: CuedDatabase,
+  overview: ReturnType<CuedDatabase["getMenuBarOverview"]> | null,
+): RelationshipSummary {
+  const resolvedOverview = overview ?? db.getMenuBarOverview();
   const projection = db.getProjectionBacklog({ initializeProjectionState: false });
-  const imessageStats = db.getIntegrationProjectionStats("imessage", "local");
 
   return {
-    messages: overview.messages,
-    contacts: overview.contacts,
-    phoneCalls: imessageStats.rawEventsBySchema["call.observed@1"] ?? 0,
+    messages: resolvedOverview.messages,
+    contacts: resolvedOverview.contacts,
+    phoneCalls: db.countObservedPhoneCalls(),
     pendingProjectionEvents: projection.pending_raw_events,
     lastUpdatedAt: null,
     source: "database",
   };
 }
 
-function readCachedRelationshipSummary(dbPath: string): RelationshipSummary | null {
-  const cached = readMenuBarStatusCache({ dbPath });
-  if (!cached) {
-    return null;
-  }
-
+function readCachedRelationshipSummary(
+  cached: MenuBarStatusCacheEntry,
+): RelationshipSummary | null {
   return (
     readCurrentCachedRelationshipSummary(cached) ?? readLegacyCachedRelationshipSummary(cached)
   );
+}
+
+function readCachedProjectionCounts(
+  cached: MenuBarStatusCacheEntry,
+): IntegrationProjectionCount[] | null {
+  const overview = isRecord(cached.snapshot.overview) ? cached.snapshot.overview : null;
+  if (!Array.isArray(overview?.integrationBreakdown)) {
+    return null;
+  }
+  const counts: IntegrationProjectionCount[] = [];
+  for (const row of overview.integrationBreakdown) {
+    if (!isRecord(row) || typeof row.platform !== "string" || !isPlatform(row.platform)) {
+      return null;
+    }
+    if (typeof row.accountKey !== "string") {
+      return null;
+    }
+    counts.push({
+      platform: row.platform,
+      accountKey: row.accountKey,
+      contacts: numberValue(row.contacts),
+      messages: numberValue(row.messages),
+    });
+  }
+  return counts;
 }
 
 function readCurrentCachedRelationshipSummary(

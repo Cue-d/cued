@@ -203,11 +203,6 @@ final class RootWindowController: NSWindowController {
         return
       }
 
-      let globalSkill = Self.decodeJSON(
-        daemonSupervisor: daemonSupervisor,
-        SkillStatus.self,
-        arguments: ["skill", "status"]
-      ) ?? snapshot.globalSkill
       let setupIntegrations = snapshot.setupIntegrations.filter {
         $0.capability.setupVisible
       }
@@ -222,7 +217,7 @@ final class RootWindowController: NSWindowController {
         self.isRefreshing = false
         self.viewModel.apply(
           permissions: permissions,
-          globalSkill: globalSkill,
+          globalSkill: snapshot.globalSkill,
           relationshipSummary: snapshot.relationshipSummary ?? RelationshipSummary(),
           allIntegrations: self.cachedAllIntegrations,
           integrations: setupIntegrations
