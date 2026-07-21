@@ -7,11 +7,16 @@ import {
   loadKeychainSecret,
   storeKeychainSecret,
 } from "../../core/secrets/keychain.js";
-import { completeAuthSession } from "../../core/state/mutations.js";
+import { completeAuthSession, invalidateIntegrationAuth } from "../../core/state/mutations.js";
 import { isUserRemovedIntegrationMetadata } from "../../core/state/status.js";
 import { LinkedInClient } from "../api/client.js";
 import { LinkedInAuthError } from "../api/request.js";
-import { type LinkedInSessionSecret, parseLinkedInSessionSecret } from "./session-store.js";
+import {
+  buildLinkedInRealtimeAuthResult,
+  hasLinkedInRealtimeSessionHeaders,
+  type LinkedInSessionSecret,
+  parseLinkedInSessionSecret,
+} from "./session-store.js";
 
 const LINKEDIN_KEYCHAIN_SERVICE = authKeychainService("linkedin");
 const LEGACY_LINKEDIN_KEYCHAIN_SERVICE = legacyAuthKeychainService("linkedin");
@@ -69,7 +74,7 @@ export async function validateLinkedInStoredAuth(
   }
 
   const session = parseLinkedInSessionSecret(secret);
-  if (!hasRequiredCookies(getCookieNames(session))) {
+  if (!hasRequiredCookies(getCookieNames(session)) || !hasLinkedInRealtimeSessionHeaders(session)) {
     return { status: "invalid" };
   }
 
@@ -116,6 +121,16 @@ export function importLinkedInStoredAuth(
   if (userRemoved && !options.reviveUserRemoved) {
     return [];
   }
+  if (!hasLinkedInRealtimeSessionHeaders(parsed)) {
+    if (existing?.auth_state === "authenticated" && !userRemoved) {
+      invalidateIntegrationAuth(db, "linkedin", accountKey, {
+        errorSummary: "LinkedIn realtime headers were not captured during auth",
+        reason: "linkedin_realtime_headers_missing",
+      });
+    }
+    return [];
+  }
+  const realtimeAuthResult = buildLinkedInRealtimeAuthResult(parsed);
   const alreadyImported =
     existing?.auth_state === "authenticated" &&
     typeof existingMetadata.keychainService === "string" &&
@@ -123,6 +138,32 @@ export function importLinkedInStoredAuth(
     typeof existingMetadata.keychainAccount === "string" &&
     existingMetadata.keychainAccount === accountKey;
   if (alreadyImported) {
+    const existingAuthResult =
+      typeof existingMetadata.authResult === "object" && existingMetadata.authResult
+        ? (existingMetadata.authResult as Record<string, unknown>)
+        : {};
+    if (existingAuthResult.realtimeReady !== true) {
+      db.upsertIntegrationState({
+        platform: "linkedin",
+        accountKey,
+        displayName: existing.display_name,
+        authState: existing.auth_state,
+        enabled: existing.enabled === 1,
+        connectionKind: existing.connection_kind,
+        syncCapable: existing.sync_capable === 1,
+        launchStrategy: existing.launch_strategy,
+        launchTarget: existing.launch_target,
+        importedFrom: existing.imported_from,
+        artifactPaths: safeParseJsonStringArray(
+          existing.artifact_paths_json,
+          "integration_states.artifact_paths_json",
+        ),
+        metadata: {
+          ...existingMetadata,
+          authResult: { ...existingAuthResult, ...realtimeAuthResult },
+        },
+      });
+    }
     return [{ platform: "linkedin", accountKey, imported: false }];
   }
 
@@ -168,6 +209,7 @@ export function importLinkedInStoredAuth(
       provider: "linkedin",
       savedAt: parsed.savedAt,
       cookieNames,
+      ...realtimeAuthResult,
     },
   });
 
@@ -179,6 +221,7 @@ export function importLinkedInStoredAuth(
       provider: "linkedin",
       savedAt: parsed.savedAt,
       cookieNames,
+      ...realtimeAuthResult,
     },
   });
 

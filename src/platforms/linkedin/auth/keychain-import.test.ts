@@ -19,6 +19,8 @@ const storedSession = {
   userAgent: "Cued LinkedIn Test/1.0",
   pageInstance: "urn:li:page:messaging_thread;test",
   xLiTrack: '{"clientVersion":"1.0.0"}',
+  realtimeQueryMap: "{}",
+  realtimeRecipeMap: "{}",
 };
 
 describe("LinkedIn stored auth validation", () => {
@@ -54,6 +56,20 @@ describe("LinkedIn stored auth validation", () => {
     await expect(validateLinkedInStoredAuth("default")).resolves.toEqual({
       status: "invalid",
     });
+  });
+
+  it("rejects sessions that cannot start realtime before probing LinkedIn", async () => {
+    loadKeychainSecretMock.mockReturnValue({
+      ...storedSession,
+      realtimeQueryMap: null,
+    });
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(validateLinkedInStoredAuth("default")).resolves.toEqual({
+      status: "invalid",
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("returns indeterminate for transient network failures", async () => {

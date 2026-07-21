@@ -838,6 +838,10 @@ process.exit(44);
           { name: "li_at", value: "li_at-token" },
           { name: "JSESSIONID", value: '"ajax:123"' },
         ],
+        pageInstance: "urn:li:page:messaging;test",
+        xLiTrack: "{}",
+        realtimeQueryMap: "{}",
+        realtimeRecipeMap: "{}",
         savedAt: 1234,
       },
     });
@@ -857,6 +861,7 @@ process.exit(44);
             keychainService: "so.cued.desktop.auth.linkedin",
             keychainAccount: "default",
             importedSavedAt: 1234,
+            authResult: expect.objectContaining({ realtimeReady: true }),
           }),
         }),
       ]),
@@ -870,6 +875,102 @@ process.exit(44);
     db.close();
   });
 
+  it("marks incomplete stored LinkedIn auth as needing authentication", async () => {
+    installSecurityTool({
+      "so.cued.desktop.auth.linkedin:default": {
+        cookies: [
+          { name: "li_at", value: "li_at-token" },
+          { name: "JSESSIONID", value: '"ajax:123"' },
+        ],
+      },
+    });
+    process.env.CUED_SLACK_APP_BINARY = join(createTempDir("cued-no-slack-app-"), "Slack");
+
+    const db = createDb();
+    db.upsertIntegrationState({
+      platform: "linkedin",
+      accountKey: "default",
+      displayName: "LinkedIn",
+      authState: "authenticated",
+      enabled: true,
+      connectionKind: "browser-session",
+      syncCapable: true,
+      launchStrategy: "chromium-auth",
+      launchTarget: "https://www.linkedin.com/login",
+      importedFrom: "local-cli",
+      metadata: {
+        keychainService: "so.cued.desktop.auth.linkedin",
+        keychainAccount: "default",
+      },
+    });
+
+    await refreshManagedIntegrationStates(db);
+
+    expect(listIntegrationStates(db)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          platform: "linkedin",
+          authState: "needs_auth",
+          syncCapable: false,
+          metadata: expect.objectContaining({
+            authInvalidationReason: "linkedin_realtime_headers_missing",
+          }),
+        }),
+      ]),
+    );
+    db.close();
+  });
+
+  it("repairs realtime metadata from a complete stored LinkedIn session", async () => {
+    installSecurityTool({
+      "so.cued.desktop.auth.linkedin:default": {
+        cookies: [
+          { name: "li_at", value: "li_at-token" },
+          { name: "JSESSIONID", value: '"ajax:123"' },
+        ],
+        pageInstance: "urn:li:page:messaging;test",
+        xLiTrack: "{}",
+        realtimeQueryMap: "{}",
+        realtimeRecipeMap: "{}",
+      },
+    });
+    process.env.CUED_SLACK_APP_BINARY = join(createTempDir("cued-no-slack-app-"), "Slack");
+
+    const db = createDb();
+    db.upsertIntegrationState({
+      platform: "linkedin",
+      accountKey: "default",
+      displayName: "LinkedIn",
+      authState: "authenticated",
+      enabled: true,
+      connectionKind: "browser-session",
+      syncCapable: true,
+      launchStrategy: "chromium-auth",
+      launchTarget: "https://www.linkedin.com/login",
+      importedFrom: "local-cli",
+      metadata: {
+        keychainService: "so.cued.desktop.auth.linkedin",
+        keychainAccount: "default",
+        authResult: { realtimeReady: false },
+      },
+    });
+
+    await refreshManagedIntegrationStates(db);
+
+    expect(listIntegrationStates(db)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          platform: "linkedin",
+          authState: "authenticated",
+          metadata: expect.objectContaining({
+            authResult: expect.objectContaining({ realtimeReady: true }),
+          }),
+        }),
+      ]),
+    );
+    db.close();
+  });
+
   it("revives user-removed LinkedIn auth only during explicit connect import", () => {
     installSecurityTool({
       "so.cued.desktop.auth.linkedin:default": {
@@ -877,6 +978,10 @@ process.exit(44);
           { name: "li_at", value: "li_at-token" },
           { name: "JSESSIONID", value: '"ajax:123"' },
         ],
+        pageInstance: "urn:li:page:messaging;test",
+        xLiTrack: "{}",
+        realtimeQueryMap: "{}",
+        realtimeRecipeMap: "{}",
         savedAt: 1234,
       },
     });
