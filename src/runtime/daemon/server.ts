@@ -54,7 +54,10 @@ import { isDiscordDmChannel } from "../../platforms/discord/types.js";
 import { GmailClient } from "../../platforms/gmail/api/client.js";
 import { DEFAULT_CALL_HISTORY_DB_PATH } from "../../platforms/imessage/call-history.js";
 import { DEFAULT_CHAT_DB_PATH } from "../../platforms/imessage/reader.js";
-import { loadLinkedInSessionSecret } from "../../platforms/linkedin/auth/session-store.js";
+import {
+  hasLinkedInRealtimeSessionHeaders,
+  loadLinkedInSessionSecret,
+} from "../../platforms/linkedin/auth/session-store.js";
 import { buildLinkedInRawEventsFromRealtimeEnvelope } from "../../platforms/linkedin/realtime/events.js";
 import {
   type LinkedInRealtimeStatus,
@@ -1807,13 +1810,7 @@ async function collectDesiredLinkedInSessions(db: ReturnType<typeof openCuedData
 
     try {
       const session = loadLinkedInSessionSecret(integration.account_key);
-      if (
-        !session.cookies.length ||
-        !session.pageInstance ||
-        !session.xLiTrack ||
-        !session.realtimeQueryMap ||
-        !session.realtimeRecipeMap
-      ) {
+      if (!session.cookies.length || !hasLinkedInRealtimeSessionHeaders(session)) {
         degraded.push({
           accountKey: integration.account_key,
           state: "degraded",
