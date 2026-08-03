@@ -301,7 +301,8 @@ func readArchivePage(path, phase string, messageOffset int, afterRelationshipUse
 	} else {
 		for _, file := range reader.File {
 			if dmEntryPattern.MatchString(normalizePath(file.Name)) {
-				if err := parseDMEntry(file, &result, messageOffset, limit); err != nil {
+				isGroupSlice := strings.Contains(strings.ToLower(normalizePath(file.Name)), "direct-messages-group")
+				if err := parseDMEntry(file, &result, messageOffset, limit, isGroupSlice); err != nil {
 					return archiveData{}, err
 				}
 			}
@@ -317,10 +318,16 @@ func readArchivePage(path, phase string, messageOffset int, afterRelationshipUse
 		}
 	}
 	enrichProfilesFromMentions(reader.File, result.profiles)
+	for id, conversation := range result.conversations {
+		if conversation.Title == "" {
+			conversation.Title = conversationTitle(conversation.ParticipantIDs, result.profiles)
+			result.conversations[id] = conversation
+		}
+	}
 	return result, nil
 }
 
-func parseDMEntry(file *zip.File, result *archiveData, messageOffset, messageLimit int) error {
+func parseDMEntry(file *zip.File, result *archiveData, messageOffset, messageLimit int, isGroupSlice bool) error {
 	reader, decoder, err := archiveArrayDecoder(file)
 	if err != nil {
 		return err
@@ -342,7 +349,7 @@ func parseDMEntry(file *zip.File, result *archiveData, messageOffset, messageLim
 				}
 				continue
 			}
-			if err := parseDMConversation(decoder, result, messageOffset, messageLimit); err != nil {
+			if err := parseDMConversation(decoder, result, messageOffset, messageLimit, isGroupSlice); err != nil {
 				return err
 			}
 		}
@@ -353,7 +360,7 @@ func parseDMEntry(file *zip.File, result *archiveData, messageOffset, messageLim
 	return nil
 }
 
-func parseDMConversation(decoder *json.Decoder, result *archiveData, messageOffset, messageLimit int) error {
+func parseDMConversation(decoder *json.Decoder, result *archiveData, messageOffset, messageLimit int, isGroupSlice bool) error {
 	if token, err := decoder.Token(); err != nil || token != json.Delim('{') {
 		return fmt.Errorf("read dmConversation: %w", err)
 	}
@@ -441,7 +448,7 @@ func parseDMConversation(decoder *json.Decoder, result *archiveData, messageOffs
 		}
 	}
 	result.messages = append(result.messages, selected...)
-	result.conversations[conversationID] = conversationRow{ID: conversationID, ParticipantIDs: participants, Title: firstNonEmpty(name, conversationTitle(participants, result.profiles)), LastMessageAt: lastMessageAt, IsGroup: len(participants) > 1 || name != ""}
+	result.conversations[conversationID] = conversationRow{ID: conversationID, ParticipantIDs: participants, Title: name, LastMessageAt: lastMessageAt, IsGroup: isGroupSlice || len(participants) > 1 || name != ""}
 	return nil
 }
 

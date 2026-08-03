@@ -30,7 +30,11 @@ function writeArchive(
   );
   writeFileSync(
     join(source, "data/direct-messages.js"),
-    `window.YTD.direct_messages.part0 = [{"dmConversation":{"conversationId":"10-20","messages":[{"messageCreate":{"id":"message-1","senderId":"20","recipientId":"10","text":"Hello from the X archive","createdAt":"2026-08-03T12:00:00.000Z"}}]}},{"dmConversation":{"conversationId":"group-1","name":"${input.groupName}","messages":[${input.groupMember ? "" : '{"participantsLeave":{"initiatingUserId":"30","userIds":["30"],"createdAt":"2026-08-03T14:00:00.000Z"}},'}{"messageCreate":{"id":"group-message-1","senderId":"20","text":"Hello group","createdAt":"2026-08-03T13:00:00.000Z"}},{"joinConversation":{"participantsSnapshot":["10","20","30"],"createdAt":"2026-08-03T11:00:00.000Z"}}]}}]`,
+    `window.YTD.direct_messages.part0 = [{"dmConversation":{"conversationId":"10-20","messages":[{"messageCreate":{"id":"message-1","senderId":"20","recipientId":"10","text":"Hello from the X archive","createdAt":"2026-08-03T12:00:00.000Z"}}]}}]`,
+  );
+  writeFileSync(
+    join(source, "data/direct-messages-group.js"),
+    `window.YTD.direct_messages_group.part0 = [{"dmConversation":{"conversationId":"group-1","name":"${input.groupName}","messages":[${input.groupMember ? "" : '{"participantsLeave":{"initiatingUserId":"30","userIds":["30"],"createdAt":"2026-08-03T14:00:00.000Z"}},'}{"messageCreate":{"id":"group-message-1","senderId":"20","text":"Hello group","createdAt":"2026-08-03T13:00:00.000Z"}},{"joinConversation":{"participantsSnapshot":["10","20","30"],"createdAt":"2026-08-03T11:00:00.000Z"}}]}}]`,
   );
   writeFileSync(
     join(source, "data/follower.js"),
@@ -147,6 +151,13 @@ describe("X archive end to end", () => {
         )
         .get() as { id: string; name: string };
       expect(groupBefore.name).toBe("Builders");
+      expect(
+        sqlite
+          .prepare(
+            `SELECT name FROM conversations WHERE platform = 'x' AND source_conversation_key = 'x:conversation:10-20'`,
+          )
+          .get(),
+      ).toMatchObject({ name: "Ava Chen" });
 
       writeArchive(temp, {
         name: "Ava Patel",

@@ -15,11 +15,11 @@ func TestReadsArchiveDMsAndFollowGraph(t *testing.T) {
 	}
 	writer := zip.NewWriter(file)
 	entries := map[string]string{
-		"archive/data/account.js":         `window.YTD.account.part0 = [{"account":{"accountId":"10","username":"sam","accountDisplayName":"Sam"}}]`,
-		"archive/data/tweets.js":          `window.YTD.tweets.part0 = [{"tweet":{"entities":{"user_mentions":[{"id_str":"20","screen_name":"ava","name":"Ava Chen"}]}}}]`,
-		"archive/data/direct-messages.js": `window.YTD.direct_messages.part0 = [{"dmConversation":{"conversationId":"group-1","name":"Builders","messages":[{"participantsLeave":{"initiatingUserId":"30","userIds":["30"]}},{"messageCreate":{"id":"m1","senderId":"20","recipientId":"10","text":"hello","createdAt":"2026-08-03T12:00:00.000Z"}},{"participantsJoin":{"initiatingUserId":"20","userIds":["40"]}},{"joinConversation":{"participantsSnapshot":["10","20","30"]}}]}}]`,
-		"archive/data/follower.js":        `window.YTD.follower.part0 = [{"follower":{"accountId":"20"}}]`,
-		"archive/data/following.js":       `window.YTD.following.part0 = [{"following":{"accountId":"20"}}]`,
+		"archive/data/account.js":               `window.YTD.account.part0 = [{"account":{"accountId":"10","username":"sam","accountDisplayName":"Sam"}}]`,
+		"archive/data/tweets.js":                `window.YTD.tweets.part0 = [{"tweet":{"entities":{"user_mentions":[{"id_str":"20","screen_name":"ava","name":"Ava Chen"}]}}}]`,
+		"archive/data/direct-messages-group.js": `window.YTD.direct_messages_group.part0 = [{"dmConversation":{"conversationId":"group-1","messages":[{"participantsLeave":{"initiatingUserId":"30","userIds":["30","40"]}},{"messageCreate":{"id":"m1","senderId":"20","recipientId":"10","text":"hello","createdAt":"2026-08-03T12:00:00.000Z"}},{"participantsJoin":{"initiatingUserId":"20","userIds":["40"]}},{"joinConversation":{"participantsSnapshot":["10","20","30"]}}]}}]`,
+		"archive/data/follower.js":              `window.YTD.follower.part0 = [{"follower":{"accountId":"20"}}]`,
+		"archive/data/following.js":             `window.YTD.following.part0 = [{"following":{"accountId":"20"}}]`,
 	}
 	for name, content := range entries {
 		entry, err := writer.Create(name)
@@ -48,8 +48,11 @@ func TestReadsArchiveDMsAndFollowGraph(t *testing.T) {
 		t.Fatalf("messages = %#v", data.messages)
 	}
 	conversation := data.conversations["group-1"]
-	if len(conversation.ParticipantIDs) != 2 || conversation.ParticipantIDs[0] != "20" || conversation.ParticipantIDs[1] != "40" {
+	if len(conversation.ParticipantIDs) != 1 || conversation.ParticipantIDs[0] != "20" {
 		t.Fatalf("conversation participants = %#v", conversation.ParticipantIDs)
+	}
+	if !conversation.IsGroup || conversation.Title != "Ava Chen" {
+		t.Fatalf("conversation = %#v", conversation)
 	}
 	profile := data.profiles["profile_user_20"]
 	if profile.Handle != "ava" || profile.DisplayName != "Ava Chen" {
