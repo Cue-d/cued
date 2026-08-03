@@ -323,7 +323,9 @@ export async function buildXSyncBundle(
         },
         stats: {
           messageCount: snapshot.totalMessageCount ?? snapshot.messages?.length ?? 0,
-          rawEventCount: rawEvents.length,
+          relationshipEdgeCount:
+            snapshot.totalRelationshipCount ?? snapshot.followEdges?.length ?? 0,
+          pageRawEventCount: rawEvents.length,
         },
       },
     ],

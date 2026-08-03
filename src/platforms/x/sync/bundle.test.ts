@@ -100,6 +100,11 @@ describe("Birdclaw X sync bundle", () => {
       generation: "archive-v1",
       relationshipEdges: 2,
     });
+    expect(bundle.proofs?.[0]?.stats).toMatchObject({
+      messageCount: 1,
+      relationshipEdgeCount: 2,
+      pageRawEventCount: 4,
+    });
   });
 
   it("continues from the helper cursor when another DM page remains", async () => {
