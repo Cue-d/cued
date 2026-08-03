@@ -193,6 +193,7 @@ describe("contacts memory CLI", () => {
         DROP TRIGGER trg_contact_memories_deleted_contact_fts;
         DROP VIEW contact_fts_source;
         DROP TABLE contacts_fts;
+        DROP INDEX idx_contact_handles_contact_id;
         DELETE FROM schema_migrations WHERE id = '0022_contact_fts';
       `);
     } finally {
