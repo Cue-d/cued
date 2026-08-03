@@ -2,10 +2,11 @@ import { describe, expect, it } from "vitest";
 import { type BirdclawSnapshot, buildXSyncBundle } from "./bundle.js";
 
 const snapshot: BirdclawSnapshot = {
-  account: { id: "acct-1", name: "Sam", handle: "sam", external_user_id: "10" },
+  generation: "archive-v1",
+  account: { id: "10", name: "Sam", handle: "sam", external_user_id: "10" },
   profiles: [
     {
-      id: "profile-20",
+      id: "profile_user_20",
       handle: "ava",
       display_name: "Ava",
       bio: "Robotics",
@@ -20,16 +21,17 @@ const snapshot: BirdclawSnapshot = {
   conversations: [
     {
       id: "10-20",
-      participant_profile_id: "profile-20",
+      participant_ids: ["20"],
       title: "Ava",
       last_message_at: "2026-08-03T12:00:00.000Z",
+      is_group: false,
     },
   ],
   messages: [
     {
       id: "message-1",
       conversation_id: "10-20",
-      sender_profile_id: "profile-20",
+      sender_profile_id: "profile_user_20",
       text: "Hello from Birdclaw",
       created_at: "2026-08-03T12:00:00.000Z",
       direction: "inbound",
@@ -38,7 +40,7 @@ const snapshot: BirdclawSnapshot = {
   followEdges: [
     {
       direction: "followers",
-      profile_id: "profile-20",
+      profile_id: "profile_user_20",
       external_user_id: "20",
       source: "archive",
       first_seen_at: "2026-01-01T00:00:00.000Z",
@@ -46,7 +48,7 @@ const snapshot: BirdclawSnapshot = {
     },
     {
       direction: "following",
-      profile_id: "profile-20",
+      profile_id: "profile_user_20",
       external_user_id: "20",
       source: "archive",
       first_seen_at: "2026-01-01T00:00:00.000Z",
@@ -63,7 +65,7 @@ describe("Birdclaw X sync bundle", () => {
     const bundle = await buildXSyncBundle({ accountKey: "default" }, { snapshot });
 
     expect(bundle.sourceAccounts).toEqual([
-      { platform: "x", accountKey: "acct-1", displayName: "@sam" },
+      { platform: "x", accountKey: "10", displayName: "@sam" },
     ]);
     expect(bundle.rawEvents.map((event) => event.entityKind)).toEqual([
       "contact",
@@ -77,6 +79,7 @@ describe("Birdclaw X sync bundle", () => {
         { type: "x_handle", value: "ava", deterministic: true },
       ]),
       sourceMetadata: {
+        archiveGeneration: "archive-v1",
         followsYou: true,
         youFollow: true,
         mutual: true,
@@ -89,7 +92,8 @@ describe("Birdclaw X sync bundle", () => {
       isFromMe: false,
     });
     expect(bundle.proofs?.[0]?.coverage).toMatchObject({
-      source: "birdclaw.sqlite",
+      source: "x_archive",
+      generation: "archive-v1",
       relationshipEdges: 2,
     });
   });
@@ -97,13 +101,67 @@ describe("Birdclaw X sync bundle", () => {
   it("continues from the helper cursor when another DM page remains", async () => {
     const bundle = await buildXSyncBundle(
       {},
-      { snapshot: { ...snapshot, hasMore: true }, sourceCursor: { createdAt: null } },
+      {
+        snapshot: { ...snapshot, hasMore: true, nextPhase: "relationships", nextEdgeOffset: 10 },
+        sourceCursor: { createdAt: null },
+      },
     );
     expect(bundle.hasMore).toBe(true);
     expect(bundle.sourceCursor).toEqual({
+      generation: "archive-v1",
+      phase: "relationships",
       createdAt: "2026-08-03T12:00:00.000Z",
       messageId: "message-1",
+      edgeOffset: 10,
     });
     expect(bundle.proofs?.[0]?.status).toBe("running");
+  });
+
+  it("keeps outbound and group participants on real X user identities", async () => {
+    const bundle = await buildXSyncBundle(
+      {},
+      {
+        snapshot: {
+          ...snapshot,
+          profiles: [
+            ...snapshot.profiles,
+            { ...snapshot.profiles[0]!, id: "profile_user_30", handle: "lee", display_name: "Lee" },
+          ],
+          conversations: [
+            {
+              id: "group-1",
+              participant_ids: ["20", "30"],
+              title: "Builders",
+              last_message_at: "2026-08-03T13:00:00.000Z",
+              is_group: true,
+            },
+          ],
+          messages: [
+            {
+              id: "message-2",
+              conversation_id: "group-1",
+              sender_profile_id: "profile_user_10",
+              text: "Sent by me",
+              created_at: "2026-08-03T13:00:00.000Z",
+              direction: "outbound",
+            },
+          ],
+          followEdges: [],
+        },
+      },
+    );
+    const conversation = bundle.rawEvents.find((event) => event.entityKind === "conversation");
+    expect(conversation?.payload).toMatchObject({
+      conversationType: "group",
+      participants: [
+        { sourceEntityKey: "x:user:10", isSelf: true },
+        { sourceEntityKey: "x:user:20" },
+        { sourceEntityKey: "x:user:30" },
+      ],
+    });
+    expect(bundle.rawEvents.at(-1)?.payload).toMatchObject({
+      senderSourceKey: "x:user:10",
+      isFromMe: true,
+    });
   });
 });

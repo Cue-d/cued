@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, readdirSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -11,8 +11,17 @@ function repoRoot(): string {
   return resolve(dirname(fileURLToPath(import.meta.url)), "../../../..");
 }
 
-export function resolveBirdclawDatabasePath(env: NodeJS.ProcessEnv = process.env): string {
-  return env.CUED_BIRDCLAW_DB_PATH?.trim() || join(homedir(), ".birdclaw", "birdclaw.sqlite");
+export function resolveXArchivePath(env: NodeJS.ProcessEnv = process.env): string | null {
+  const configured = env.CUED_X_ARCHIVE_PATH?.trim();
+  if (configured) return configured;
+  const downloads = join(homedir(), "Downloads");
+  if (!existsSync(downloads)) return null;
+  return (
+    readdirSync(downloads)
+      .filter((name) => /(?:twitter|x).*(?:archive).*\.zip$/i.test(name))
+      .map((name) => join(downloads, name))
+      .sort((left, right) => statSync(right).mtimeMs - statSync(left).mtimeMs)[0] ?? null
+  );
 }
 
 export function birdclawHelperCandidates(root = repoRoot()): string[] {
@@ -27,7 +36,7 @@ export function birdclawHelperCandidates(root = repoRoot()): string[] {
 }
 
 export function resolveBirdclawHelperBinary(
-  envValue = process.env.CUED_BIRDCLAW_HELPER_BINARY,
+  envValue = process.env.CUED_X_ARCHIVE_HELPER_BINARY,
 ): string | null {
   return (
     envValue?.trim() ||
@@ -38,39 +47,42 @@ export function resolveBirdclawHelperBinary(
 
 export function inspectBirdclawHelper(): {
   helperPath: string | null;
-  databasePath: string;
+  archivePath: string | null;
   available: boolean;
   reason: string | null;
 } {
   const helperPath = resolveBirdclawHelperBinary();
-  const databasePath = resolveBirdclawDatabasePath();
+  const archivePath = resolveXArchivePath();
   if (!helperPath) {
     return {
       helperPath: null,
-      databasePath,
+      archivePath,
       available: false,
-      reason: "Birdclaw helper is missing",
+      reason: "X archive helper is missing",
     };
   }
-  if (!existsSync(databasePath)) {
-    return { helperPath, databasePath, available: false, reason: "Birdclaw database is missing" };
+  if (!archivePath || !existsSync(archivePath)) {
+    return { helperPath, archivePath, available: false, reason: "X archive is missing" };
   }
   try {
-    const output = execFileSync(helperPath, ["version"], { encoding: "utf8" });
-    const parsed = JSON.parse(output) as { protocolVersion?: unknown };
-    if (parsed.protocolVersion !== SUPPORTED_PROTOCOL_VERSION) {
+    const output = execFileSync(helperPath, ["status", "--archive", archivePath], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    const parsed = JSON.parse(output) as { protocolVersion?: unknown; available?: unknown };
+    if (parsed.protocolVersion !== SUPPORTED_PROTOCOL_VERSION || parsed.available !== true) {
       return {
         helperPath,
-        databasePath,
+        archivePath,
         available: false,
-        reason: `Unsupported Birdclaw helper protocol: ${String(parsed.protocolVersion)}`,
+        reason: `Unsupported X archive helper protocol: ${String(parsed.protocolVersion)}`,
       };
     }
-    return { helperPath, databasePath, available: true, reason: null };
+    return { helperPath, archivePath, available: true, reason: null };
   } catch (error) {
     return {
       helperPath,
-      databasePath,
+      archivePath,
       available: false,
       reason: error instanceof Error ? error.message : String(error),
     };

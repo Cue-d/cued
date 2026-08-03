@@ -37,9 +37,9 @@ Shared or managed app credentials must be injected at release time or supplied t
 
 ## X
 
-X reuses [Birdclaw](https://github.com/steipete/birdclaw) as the collector. Birdclaw imports an X archive and can refresh supported data through `xurl`; Cued's bundled Go helper reads `~/.birdclaw/birdclaw.sqlite` without owning X credentials or a second X API client.
+X archive support ports only the useful normalization behavior from [Birdclaw](https://github.com/steipete/birdclaw) and the small Go-adapter pattern from [Clawdex](https://github.com/openclaw/clawdex). The bundled helper reads an X archive zip directly; Cued does not install, invoke, or read the database of either project.
 
-Run `birdclaw import archive ~/Downloads/twitter-archive.zip --json` first. Cued then imports DM contacts, conversations, messages, profiles, and current follower/following edges into `~/.cued/local.db`; mutual status and profile metrics live in `contact_sources.metadata_json`. Set `CUED_BIRDCLAW_DB_PATH` only when Birdclaw uses a non-default data directory. X sync remains manual by default because Birdclaw's live transports can use metered provider APIs; run `cued sync run x` explicitly.
+Put the exported archive in `~/Downloads` with `twitter` or `x` and `archive` in the zip filename, or set `CUED_X_ARCHIVE_PATH`. Cued imports DM contacts, conversations, messages, and follower/following relationships into `~/.cued/local.db`; current mutual state and its archive generation live in `contact_sources.metadata_json`. Sync is manual because the archive is a point-in-time export: run `cued sync run x` after replacing it.
 
 ## Telegram
 

@@ -18,7 +18,7 @@ export const PLATFORM_PERMISSION_REQUIREMENT_VALUES = ["contacts", "full_disk_ac
 export type PlatformPermissionRequirement = (typeof PLATFORM_PERMISSION_REQUIREMENT_VALUES)[number];
 
 export const PLATFORM_HELPER_REQUIREMENT_VALUES = [
-  "birdclaw_helper",
+  "x_archive_helper",
   "signal_cli",
   "slack_helper",
   "whatsapp_helper",
@@ -73,7 +73,7 @@ export const PLATFORM_DEFINITIONS = {
     supportsMultipleAccounts: true,
     requestableIntegration: true,
     requestableOrder: 2,
-    supportedHostOs: ["macos", "windows", "linux"],
+    supportedHostOs: ["macos"],
     onboardingVisible: true,
     permissionRequirements: [],
     helperRequirements: [],
@@ -152,7 +152,7 @@ export const PLATFORM_DEFINITIONS = {
     supportedHostOs: ["macos", "windows", "linux"],
     onboardingVisible: true,
     permissionRequirements: [],
-    helperRequirements: ["birdclaw_helper"],
+    helperRequirements: ["x_archive_helper"],
   },
 } as const satisfies Record<Platform, PlatformDefinition>;
 

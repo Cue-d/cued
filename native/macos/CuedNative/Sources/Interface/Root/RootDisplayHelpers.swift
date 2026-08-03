@@ -242,7 +242,7 @@ func platformDescription(for configuration: PlatformConfig) -> String {
   case "signal":
     return "Syncs Signal messages after you link your device."
   case "x":
-    return "Imports X direct messages, profiles, and follow relationships from local Birdclaw data."
+    return "Imports direct messages and follow relationships from your local X archive."
   default:
     return "Syncs this source on this Mac."
   }

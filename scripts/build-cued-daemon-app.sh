@@ -423,7 +423,7 @@ if [[ -f "\$SCRIPT_DIR/oauth/google-oauth-client.json" ]]; then
 fi
 export CUED_SLACK_HELPER_BINARY="\${CUED_SLACK_HELPER_BINARY:-\$SCRIPT_DIR/helpers/cued-slack-helper}"
 export CUED_WHATSAPP_HELPER_BINARY="\${CUED_WHATSAPP_HELPER_BINARY:-\$SCRIPT_DIR/helpers/cued-whatsapp-helper}"
-export CUED_BIRDCLAW_HELPER_BINARY="\${CUED_BIRDCLAW_HELPER_BINARY:-\$SCRIPT_DIR/helpers/cued-birdclaw-helper}"
+export CUED_X_ARCHIVE_HELPER_BINARY="\${CUED_X_ARCHIVE_HELPER_BINARY:-\$SCRIPT_DIR/helpers/cued-birdclaw-helper}"
 export CUED_APP_VERSION="$APP_VERSION"
 export CUED_RELEASE_CHANNEL="$RELEASE_CHANNEL"
 exec "\$NODE_BIN" "\$RUNTIME_ROOT/dist/cli.js" "\$@"

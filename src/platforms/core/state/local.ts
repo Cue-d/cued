@@ -115,7 +115,7 @@ export function buildLocalIntegrationStates(): ManagedIntegrationState[] {
     {
       platform: "x",
       accountKey: "default",
-      displayName: "X via Birdclaw",
+      displayName: "X Archive",
       authState: birdclaw.available
         ? "authorized"
         : birdclaw.helperPath
@@ -125,11 +125,12 @@ export function buildLocalIntegrationStates(): ManagedIntegrationState[] {
       connectionKind: "local-cli",
       runtimeKind: "native",
       syncCapable: birdclaw.available,
-      importedFrom: "birdclaw",
-      artifactPaths: existsSync(birdclaw.databasePath) ? [birdclaw.databasePath] : [],
+      importedFrom: "x-archive",
+      artifactPaths:
+        birdclaw.archivePath && existsSync(birdclaw.archivePath) ? [birdclaw.archivePath] : [],
       metadata: {
         helperPath: birdclaw.helperPath,
-        databasePath: birdclaw.databasePath,
+        archivePath: birdclaw.archivePath,
         reason: birdclaw.reason,
       },
     },

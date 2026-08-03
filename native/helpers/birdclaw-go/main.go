@@ -1,22 +1,32 @@
 package main
 
 import (
-	"context"
+	"archive/zip"
+	"bufio"
 	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
+	"regexp"
+	"sort"
 	"strconv"
 	"strings"
+	"time"
 )
 
 const (
-	helperVersion   = "0.1.0"
+	helperVersion   = "0.2.0"
 	protocolVersion = 1
 	defaultLimit    = 5000
+)
+
+var (
+	dmEntryPattern        = regexp.MustCompile(`(?i)(?:^|/)data/direct-messages(?:-group)?(?:-part\d+)?\.js$`)
+	tweetEntryPattern     = regexp.MustCompile(`(?i)(?:^|/)data/tweets(?:-part\d+)?\.js$`)
+	followerEntryPattern  = regexp.MustCompile(`(?i)(?:^|/)data/follower(?:-part\d+)?\.js$`)
+	followingEntryPattern = regexp.MustCompile(`(?i)(?:^|/)data/following(?:-part\d+)?\.js$`)
 )
 
 type accountRow struct {
@@ -40,10 +50,11 @@ type profileRow struct {
 }
 
 type conversationRow struct {
-	ID                   string `json:"id"`
-	ParticipantProfileID string `json:"participant_profile_id"`
-	Title                string `json:"title"`
-	LastMessageAt        string `json:"last_message_at"`
+	ID             string   `json:"id"`
+	ParticipantIDs []string `json:"participant_ids"`
+	Title          string   `json:"title"`
+	LastMessageAt  string   `json:"last_message_at"`
+	IsGroup        bool     `json:"is_group"`
 }
 
 type messageRow struct {
@@ -67,7 +78,10 @@ type followEdgeRow struct {
 type syncResult struct {
 	HelperVersion   string            `json:"helperVersion"`
 	ProtocolVersion int               `json:"protocolVersion"`
-	DatabasePath    string            `json:"databasePath"`
+	ArchivePath     string            `json:"archivePath"`
+	Generation      string            `json:"generation"`
+	NextPhase       string            `json:"nextPhase,omitempty"`
+	NextEdgeOffset  int               `json:"nextEdgeOffset,omitempty"`
 	Account         accountRow        `json:"account"`
 	Profiles        []profileRow      `json:"profiles"`
 	Conversations   []conversationRow `json:"conversations"`
@@ -76,6 +90,14 @@ type syncResult struct {
 	HasMore         bool              `json:"hasMore"`
 	NextCreatedAt   string            `json:"nextCreatedAt,omitempty"`
 	NextMessageID   string            `json:"nextMessageId,omitempty"`
+}
+
+type archiveData struct {
+	account       accountRow
+	profiles      map[string]profileRow
+	conversations map[string]conversationRow
+	messages      []messageRow
+	followEdges   []followEdgeRow
 }
 
 func main() {
@@ -96,33 +118,36 @@ func main() {
 
 func runStatus(args []string) {
 	flags := flag.NewFlagSet("status", flag.ContinueOnError)
-	dbPath := flags.String("db", "", "Birdclaw SQLite database path")
+	archivePath := flags.String("archive", "", "X archive zip path")
 	if err := flags.Parse(args); err != nil {
 		fail(err)
 	}
-	resolved, err := resolveDBPath(*dbPath)
+	resolved, err := resolveArchivePath(*archivePath)
 	if err != nil {
 		fail(err)
 	}
-	if _, err := os.Stat(resolved); err != nil {
-		fail(fmt.Errorf("birdclaw database: %w", err))
+	reader, err := zip.OpenReader(resolved)
+	if err != nil {
+		fail(fmt.Errorf("open X archive: %w", err))
 	}
-	var rows []map[string]any
-	if err := sqliteJSON(context.Background(), resolved, "SELECT COUNT(*) AS accounts FROM accounts", &rows); err != nil {
-		fail(err)
+	defer reader.Close()
+	if findEntry(reader.File, `data/account.js`) == nil {
+		fail(errors.New("X archive is missing data/account.js"))
 	}
 	writeJSON(map[string]any{
 		"helperVersion": helperVersion, "protocolVersion": protocolVersion,
-		"databasePath": resolved, "available": true,
+		"archivePath": resolved, "available": true,
 	})
 }
 
 func runSync(args []string) {
 	flags := flag.NewFlagSet("sync", flag.ContinueOnError)
-	dbPath := flags.String("db", "", "Birdclaw SQLite database path")
-	account := flags.String("account", "default", "Birdclaw account id or handle")
+	archivePath := flags.String("archive", "", "X archive zip path")
 	afterCreatedAt := flags.String("after-created-at", "", "exclusive message timestamp cursor")
 	afterMessageID := flags.String("after-message-id", "", "exclusive message id cursor")
+	expectedGeneration := flags.String("generation", "", "archive generation for the cursor")
+	phase := flags.String("phase", "messages", "messages or relationships")
+	edgeOffset := flags.Int("edge-offset", 0, "relationship cursor offset")
 	limit := flags.Int("limit", defaultLimit, "maximum messages per page")
 	if err := flags.Parse(args); err != nil {
 		fail(err)
@@ -130,118 +155,339 @@ func runSync(args []string) {
 	if *limit < 1 || *limit > 25000 {
 		fail(errors.New("limit must be between 1 and 25000"))
 	}
-	resolved, err := resolveDBPath(*dbPath)
+	resolved, err := resolveArchivePath(*archivePath)
 	if err != nil {
 		fail(err)
 	}
-	ctx := context.Background()
-	selected, err := selectAccount(ctx, resolved, *account)
+	generation, err := archiveGeneration(resolved)
 	if err != nil {
 		fail(err)
 	}
-	accountID := quoteSQL(selected.ID)
-	var result syncResult
-	result.HelperVersion = helperVersion
-	result.ProtocolVersion = protocolVersion
-	result.DatabasePath = resolved
-	result.Account = selected
-
-	conversationFilter := "SELECT id FROM dm_conversations WHERE account_id = " + accountID
-	profileQuery := `SELECT p.id, COALESCE(p.handle, '') AS handle, COALESCE(p.display_name, '') AS display_name,
-		COALESCE(p.bio, '') AS bio, COALESCE(p.followers_count, 0) AS followers_count,
-		COALESCE(p.following_count, 0) AS following_count, COALESCE(p.avatar_url, '') AS avatar_url,
-		COALESCE(p.location, '') AS location, COALESCE(p.url, '') AS url,
-		COALESCE(p.verified_type, '') AS verified_type
-		FROM profiles p WHERE p.id IN (
-			SELECT participant_profile_id FROM dm_conversations WHERE account_id = ` + accountID + `
-			UNION SELECT sender_profile_id FROM dm_messages WHERE conversation_id IN (` + conversationFilter + `)
-			UNION SELECT profile_id FROM follow_edges WHERE account_id = ` + accountID + ` AND current = 1
-		) ORDER BY lower(p.handle), p.id`
-	if err := sqliteJSON(ctx, resolved, profileQuery, &result.Profiles); err != nil {
+	if *expectedGeneration != "" && *expectedGeneration != generation {
+		*afterCreatedAt, *afterMessageID, *phase, *edgeOffset = "", "", "messages", 0
+	}
+	data, err := readArchive(resolved)
+	if err != nil {
 		fail(err)
 	}
-	if err := sqliteJSON(ctx, resolved, `SELECT id, participant_profile_id, COALESCE(title, '') AS title,
-		COALESCE(last_message_at, '') AS last_message_at FROM dm_conversations
-		WHERE account_id = `+accountID+` ORDER BY last_message_at, id`, &result.Conversations); err != nil {
-		fail(err)
+	result := syncResult{
+		HelperVersion: helperVersion, ProtocolVersion: protocolVersion, ArchivePath: resolved,
+		Generation: generation, Account: data.account, Profiles: []profileRow{},
+		Conversations: []conversationRow{}, Messages: []messageRow{}, FollowEdges: []followEdgeRow{},
 	}
-	cursorFilter := ""
-	if *afterCreatedAt != "" {
-		cursorFilter = " AND (m.created_at > " + quoteSQL(*afterCreatedAt) +
-			" OR (m.created_at = " + quoteSQL(*afterCreatedAt) + " AND m.id > " + quoteSQL(*afterMessageID) + "))"
-	}
-	messageQuery := `SELECT m.id, m.conversation_id, COALESCE(m.sender_profile_id, '') AS sender_profile_id,
-		COALESCE(m.text, '') AS text, m.created_at, COALESCE(m.direction, '') AS direction
-		FROM dm_messages m WHERE m.conversation_id IN (` + conversationFilter + `)` + cursorFilter +
-		" ORDER BY m.created_at, m.id LIMIT " + strconv.Itoa(*limit+1)
-	if err := sqliteJSON(ctx, resolved, messageQuery, &result.Messages); err != nil {
-		fail(err)
-	}
-	if len(result.Messages) > *limit {
-		result.Messages = result.Messages[:*limit]
-		result.HasMore = true
-	}
-	if len(result.Messages) > 0 {
-		last := result.Messages[len(result.Messages)-1]
-		result.NextCreatedAt = last.CreatedAt
-		result.NextMessageID = last.ID
-	}
-	if err := sqliteJSON(ctx, resolved, `SELECT direction, profile_id,
-		COALESCE(external_user_id, '') AS external_user_id, COALESCE(source, '') AS source,
-		COALESCE(first_seen_at, '') AS first_seen_at, COALESCE(last_seen_at, '') AS last_seen_at
-		FROM follow_edges WHERE account_id = `+accountID+` AND current = 1 ORDER BY profile_id, direction`, &result.FollowEdges); err != nil {
-		fail(err)
+	if *phase == "relationships" {
+		start := max(0, *edgeOffset)
+		if start > len(data.followEdges) {
+			start = len(data.followEdges)
+		}
+		end := min(start+*limit, len(data.followEdges))
+		for end < len(data.followEdges) && end > start &&
+			data.followEdges[end].ProfileID == data.followEdges[end-1].ProfileID {
+			end++
+		}
+		result.FollowEdges = data.followEdges[start:end]
+		result.Profiles = profilesForEdges(result.FollowEdges, data.profiles)
+		result.HasMore = end < len(data.followEdges)
+		if result.HasMore {
+			result.NextPhase = "relationships"
+			result.NextEdgeOffset = end
+		}
+	} else {
+		filtered := make([]messageRow, 0, len(data.messages))
+		for _, message := range data.messages {
+			if *afterCreatedAt == "" || message.CreatedAt > *afterCreatedAt ||
+				(message.CreatedAt == *afterCreatedAt && message.ID > *afterMessageID) {
+				filtered = append(filtered, message)
+			}
+		}
+		moreMessages := len(filtered) > *limit
+		if moreMessages {
+			filtered = filtered[:*limit]
+		}
+		result.Messages = filtered
+		result.Conversations, result.Profiles = entitiesForMessages(filtered, data)
+		if len(filtered) > 0 {
+			last := filtered[len(filtered)-1]
+			result.NextCreatedAt = last.CreatedAt
+			result.NextMessageID = last.ID
+		}
+		result.HasMore = moreMessages || len(data.followEdges) > 0
+		if moreMessages {
+			result.NextPhase = "messages"
+		} else if len(data.followEdges) > 0 {
+			result.NextPhase = "relationships"
+		}
 	}
 	writeJSON(result)
 }
 
-func selectAccount(ctx context.Context, dbPath, requested string) (accountRow, error) {
-	where := ""
-	if strings.TrimSpace(requested) != "" && requested != "default" {
-		value := strings.TrimPrefix(strings.TrimSpace(requested), "@")
-		where = " WHERE id = " + quoteSQL(value) + " OR handle = " + quoteSQL(value)
+func entitiesForMessages(messages []messageRow, data archiveData) ([]conversationRow, []profileRow) {
+	conversationIDs := make(map[string]bool)
+	profileIDs := make(map[string]bool)
+	for _, message := range messages {
+		conversationIDs[message.ConversationID] = true
+		if message.Direction != "outbound" {
+			profileIDs[message.SenderProfileID] = true
+		}
 	}
-	var rows []accountRow
-	err := sqliteJSON(ctx, dbPath, `SELECT id, COALESCE(name, '') AS name, COALESCE(handle, '') AS handle,
-		COALESCE(external_user_id, '') AS external_user_id FROM accounts`+where+` ORDER BY is_default DESC, created_at LIMIT 1`, &rows)
-	if err != nil {
-		return accountRow{}, err
+	conversations := make([]conversationRow, 0, len(conversationIDs))
+	for id := range conversationIDs {
+		conversation := data.conversations[id]
+		conversations = append(conversations, conversation)
+		for _, participantID := range conversation.ParticipantIDs {
+			profileIDs[profileID(participantID)] = true
+		}
 	}
-	if len(rows) == 0 {
-		return accountRow{}, fmt.Errorf("birdclaw account %q not found", requested)
+	profiles := make([]profileRow, 0, len(profileIDs))
+	for id := range profileIDs {
+		if profile, exists := data.profiles[id]; exists {
+			profiles = append(profiles, profile)
+		}
 	}
-	return rows[0], nil
+	sort.Slice(conversations, func(i, j int) bool { return conversations[i].ID < conversations[j].ID })
+	sort.Slice(profiles, func(i, j int) bool { return profiles[i].ID < profiles[j].ID })
+	return conversations, profiles
 }
 
-func sqliteJSON(ctx context.Context, dbPath, query string, target any) error {
-	binary := strings.TrimSpace(os.Getenv("CUED_BIRDCLAW_SQLITE_BINARY"))
-	if binary == "" {
-		binary = "sqlite3"
-	}
-	cmd := exec.CommandContext(ctx, binary, "-json", dbPath, query) // #nosec G204 -- no shell is used.
-	raw, err := cmd.Output()
-	if err != nil {
-		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) {
-			return fmt.Errorf("birdclaw sqlite query: %s", strings.TrimSpace(string(exitErr.Stderr)))
+func profilesForEdges(edges []followEdgeRow, profiles map[string]profileRow) []profileRow {
+	seen := make(map[string]bool)
+	result := make([]profileRow, 0, len(edges))
+	for _, edge := range edges {
+		if seen[edge.ProfileID] {
+			continue
 		}
+		seen[edge.ProfileID] = true
+		result = append(result, profiles[edge.ProfileID])
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i].ID < result[j].ID })
+	return result
+}
+
+func archiveGeneration(path string) (string, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("%d:%d", info.Size(), info.ModTime().UnixNano()), nil
+}
+
+func readArchive(path string) (archiveData, error) {
+	reader, err := zip.OpenReader(path)
+	if err != nil {
+		return archiveData{}, fmt.Errorf("open X archive: %w", err)
+	}
+	defer reader.Close()
+	result := archiveData{
+		profiles: make(map[string]profileRow), conversations: make(map[string]conversationRow),
+	}
+	accountEntry := findEntry(reader.File, `data/account.js`)
+	if accountEntry == nil {
+		return archiveData{}, errors.New("X archive is missing data/account.js")
+	}
+	if err := forEachRecord(accountEntry, func(record map[string]any) error {
+		account := asMap(record["account"])
+		result.account = accountRow{
+			ID: stringValue(account["accountId"]), ExternalUserID: stringValue(account["accountId"]),
+			Handle: stringValue(account["username"]),
+			Name:   firstNonEmpty(stringValue(account["accountDisplayName"]), stringValue(account["name"]), stringValue(account["username"])),
+		}
+		return nil
+	}); err != nil {
+		return archiveData{}, err
+	}
+	if result.account.ID == "" {
+		return archiveData{}, errors.New("X archive account id is missing")
+	}
+	mentionDirectory := readMentionDirectory(reader.File)
+	for _, file := range reader.File {
+		if dmEntryPattern.MatchString(normalizePath(file.Name)) {
+			if err := parseDMEntry(file, &result, mentionDirectory); err != nil {
+				return archiveData{}, err
+			}
+		}
+	}
+	for _, input := range []struct {
+		pattern   *regexp.Regexp
+		direction string
+		key       string
+	}{{followerEntryPattern, "followers", "follower"}, {followingEntryPattern, "following", "following"}} {
+		for _, file := range reader.File {
+			if input.pattern.MatchString(normalizePath(file.Name)) {
+				if err := parseFollowEntry(file, &result, mentionDirectory, input.direction, input.key); err != nil {
+					return archiveData{}, err
+				}
+			}
+		}
+	}
+	sort.Slice(result.messages, func(i, j int) bool {
+		if result.messages[i].CreatedAt == result.messages[j].CreatedAt {
+			return result.messages[i].ID < result.messages[j].ID
+		}
+		return result.messages[i].CreatedAt < result.messages[j].CreatedAt
+	})
+	sort.Slice(result.followEdges, func(i, j int) bool {
+		if result.followEdges[i].ProfileID == result.followEdges[j].ProfileID {
+			return result.followEdges[i].Direction < result.followEdges[j].Direction
+		}
+		return result.followEdges[i].ProfileID < result.followEdges[j].ProfileID
+	})
+	return result, nil
+}
+
+func parseDMEntry(file *zip.File, result *archiveData, directory map[string]profileRow) error {
+	return forEachRecord(file, func(record map[string]any) error {
+		conversation := asMap(record["dmConversation"])
+		conversationID := stringValue(conversation["conversationId"])
+		if conversationID == "" {
+			return nil
+		}
+		participantSet := make(map[string]bool)
+		messages := asSlice(conversation["messages"])
+		lastMessageAt := ""
+		for _, rawEvent := range messages {
+			messageCreate := asMap(asMap(rawEvent)["messageCreate"])
+			if len(messageCreate) == 0 {
+				continue
+			}
+			senderID := stringValue(messageCreate["senderId"])
+			recipientID := stringValue(messageCreate["recipientId"])
+			if senderID != "" {
+				participantSet[senderID] = true
+			}
+			if recipientID != "" {
+				participantSet[recipientID] = true
+			}
+			messageID := firstNonEmpty(stringValue(messageCreate["id"]), conversationID+"-"+senderID+"-"+strconv.Itoa(len(result.messages)))
+			createdAt := parseTwitterDate(stringValue(messageCreate["createdAt"]))
+			direction := "inbound"
+			if senderID == result.account.ExternalUserID {
+				direction = "outbound"
+			} else if senderID != "" {
+				ensureProfile(result, directory, senderID)
+			}
+			result.messages = append(result.messages, messageRow{
+				ID: messageID, ConversationID: conversationID, SenderProfileID: profileID(senderID),
+				Text: stringValue(messageCreate["text"]), CreatedAt: createdAt, Direction: direction,
+			})
+			if createdAt > lastMessageAt {
+				lastMessageAt = createdAt
+			}
+		}
+		participants := make([]string, 0, len(participantSet))
+		for userID := range participantSet {
+			if userID != "" && userID != result.account.ExternalUserID {
+				participants = append(participants, userID)
+				ensureProfile(result, directory, userID)
+			}
+		}
+		sort.Strings(participants)
+		if lastMessageAt != "" {
+			result.conversations[conversationID] = conversationRow{
+				ID: conversationID, ParticipantIDs: participants,
+				Title:         firstNonEmpty(stringValue(conversation["name"]), conversationTitle(participants, result.profiles)),
+				LastMessageAt: lastMessageAt, IsGroup: len(participants) > 1 || stringValue(conversation["name"]) != "",
+			}
+		}
+		return nil
+	})
+}
+
+func parseFollowEntry(file *zip.File, result *archiveData, directory map[string]profileRow, direction, key string) error {
+	return forEachRecord(file, func(record map[string]any) error {
+		item := asMap(record[key])
+		userID := stringValue(item["accountId"])
+		if userID == "" {
+			return nil
+		}
+		ensureProfile(result, directory, userID)
+		result.followEdges = append(result.followEdges, followEdgeRow{
+			Direction: direction, ProfileID: profileID(userID), ExternalUserID: userID, Source: "archive",
+		})
+		return nil
+	})
+}
+
+func readMentionDirectory(files []*zip.File) map[string]profileRow {
+	directory := make(map[string]profileRow)
+	for _, file := range files {
+		if !tweetEntryPattern.MatchString(normalizePath(file.Name)) {
+			continue
+		}
+		_ = forEachRecord(file, func(record map[string]any) error {
+			tweet := asMap(record["tweet"])
+			entities := asMap(tweet["entities"])
+			for _, rawMention := range asSlice(entities["user_mentions"]) {
+				mention := asMap(rawMention)
+				userID := firstNonEmpty(stringValue(mention["id_str"]), stringValue(mention["id"]))
+				if userID != "" {
+					handle := stringValue(mention["screen_name"])
+					directory[userID] = profileRow{
+						ID: profileID(userID), Handle: handle,
+						DisplayName: firstNonEmpty(stringValue(mention["name"]), handle, "X user "+userID),
+					}
+				}
+			}
+			return nil
+		})
+	}
+	return directory
+}
+
+func ensureProfile(result *archiveData, directory map[string]profileRow, userID string) {
+	id := profileID(userID)
+	if _, exists := result.profiles[id]; exists {
+		return
+	}
+	profile, exists := directory[userID]
+	if !exists {
+		profile = profileRow{ID: id, Handle: "id" + userID, DisplayName: "X user " + userID}
+	}
+	result.profiles[id] = profile
+}
+
+func forEachRecord(file *zip.File, visit func(map[string]any) error) error {
+	reader, err := file.Open()
+	if err != nil {
 		return err
 	}
-	if strings.TrimSpace(string(raw)) == "" {
-		raw = []byte("[]")
+	defer reader.Close()
+	buffered := bufio.NewReader(reader)
+	if _, err := buffered.ReadString('='); err != nil {
+		return fmt.Errorf("read %s assignment: %w", file.Name, err)
 	}
-	return json.Unmarshal(raw, target)
+	decoder := json.NewDecoder(buffered)
+	token, err := decoder.Token()
+	if err != nil || token != json.Delim('[') {
+		return fmt.Errorf("read %s array: %w", file.Name, err)
+	}
+	for decoder.More() {
+		var record map[string]any
+		if err := decoder.Decode(&record); err != nil {
+			return fmt.Errorf("decode %s: %w", file.Name, err)
+		}
+		if err := visit(record); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
-func resolveDBPath(value string) (string, error) {
+func findEntry(files []*zip.File, suffix string) *zip.File {
+	suffix = strings.ToLower(suffix)
+	for _, file := range files {
+		if strings.HasSuffix(strings.ToLower(normalizePath(file.Name)), suffix) {
+			return file
+		}
+	}
+	return nil
+}
+
+func resolveArchivePath(value string) (string, error) {
 	path := strings.TrimSpace(value)
 	if path == "" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return "", err
-		}
-		path = filepath.Join(home, ".birdclaw", "birdclaw.sqlite")
-	} else if strings.HasPrefix(path, "~/") {
+		return "", errors.New("X archive path is required")
+	}
+	if strings.HasPrefix(path, "~/") {
 		home, err := os.UserHomeDir()
 		if err != nil {
 			return "", err
@@ -251,8 +497,60 @@ func resolveDBPath(value string) (string, error) {
 	return filepath.Abs(path)
 }
 
-func quoteSQL(value string) string {
-	return "'" + strings.ReplaceAll(value, "'", "''") + "'"
+func parseTwitterDate(value string) string {
+	for _, layout := range []string{time.RFC3339Nano, "Mon Jan 02 15:04:05 -0700 2006"} {
+		if parsed, err := time.Parse(layout, value); err == nil {
+			return parsed.UTC().Format(time.RFC3339Nano)
+		}
+	}
+	return value
+}
+
+func profileID(userID string) string    { return "profile_user_" + userID }
+func normalizePath(value string) string { return strings.ReplaceAll(value, `\`, "/") }
+
+func conversationTitle(participants []string, profiles map[string]profileRow) string {
+	names := make([]string, 0, len(participants))
+	for _, userID := range participants {
+		names = append(names, profiles[profileID(userID)].DisplayName)
+	}
+	return strings.Join(names, ", ")
+}
+
+func asMap(value any) map[string]any {
+	if result, ok := value.(map[string]any); ok {
+		return result
+	}
+	return map[string]any{}
+}
+
+func asSlice(value any) []any {
+	if result, ok := value.([]any); ok {
+		return result
+	}
+	return nil
+}
+
+func stringValue(value any) string {
+	switch typed := value.(type) {
+	case string:
+		return typed
+	case json.Number:
+		return typed.String()
+	case float64:
+		return strconv.FormatInt(int64(typed), 10)
+	default:
+		return ""
+	}
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
 }
 
 func writeJSON(value any) {
