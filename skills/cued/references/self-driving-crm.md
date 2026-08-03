@@ -22,7 +22,7 @@ WITH latest AS (
   SELECT m.*, ROW_NUMBER() OVER (PARTITION BY m.conversation_id ORDER BY m.sent_at DESC, m.id DESC) AS rn
   FROM messages m
   JOIN conversations c ON c.id = m.conversation_id
-  WHERE c.type = 'dm' AND m.is_deleted = 0
+  WHERE c.type = 'dm' AND c.is_active = 1 AND m.is_deleted = 0
 )
 SELECT
   cp.contact_id,
@@ -35,6 +35,7 @@ JOIN conversation_participants cp
   ON cp.conversation_id = l.conversation_id AND cp.is_self = 0 AND cp.is_active = 1
 JOIN contacts c ON c.id = cp.contact_id
 WHERE l.rn = 1
+  AND c.archived = 0
   AND l.is_from_me = 0
   AND l.sent_at < unixepoch('now', '-2 days') * 1000
   AND NOT EXISTS (
