@@ -1172,7 +1172,9 @@ async function main(): Promise<void> {
         if (!query) {
           throw new Error("Usage: cued contacts search <query> [--limit N] [--include-archived]");
         }
-        const db = openCuedDatabaseReadOnly();
+        // Contact search owns a schema migration, so its first invocation after an
+        // upgrade must open the canonical writable database before reading it.
+        const db = openCuedDatabase();
         try {
           printJson(
             db.searchContacts({

@@ -170,6 +170,41 @@ describe("contacts memory CLI", () => {
     expect(JSON.parse(runCli(home, ["contacts", "search", "robotics"]))).toEqual([]);
   });
 
+  it("applies the contact search migration on the first search after an upgrade", () => {
+    const home = createHome();
+    const db = new CuedDatabase(join(home, "local.db"));
+    try {
+      const sqlite = (
+        db as unknown as {
+          sqlite: {
+            exec: (sql: string) => void;
+          };
+        }
+      ).sqlite;
+      sqlite.exec(`
+        DROP TRIGGER trg_contacts_inserted_contact_fts;
+        DROP TRIGGER trg_contacts_updated_contact_fts;
+        DROP TRIGGER trg_contacts_deleted_contact_fts;
+        DROP TRIGGER trg_contact_handles_inserted_contact_fts;
+        DROP TRIGGER trg_contact_handles_updated_contact_fts;
+        DROP TRIGGER trg_contact_handles_deleted_contact_fts;
+        DROP TRIGGER trg_contact_memories_inserted_contact_fts;
+        DROP TRIGGER trg_contact_memories_updated_contact_fts;
+        DROP TRIGGER trg_contact_memories_deleted_contact_fts;
+        DROP VIEW contact_fts_source;
+        DROP TABLE contacts_fts;
+        DELETE FROM schema_migrations WHERE id = '0022_contact_fts';
+      `);
+    } finally {
+      db.close();
+    }
+
+    const results = JSON.parse(runCli(home, ["contacts", "search", "Ava"])) as Array<{
+      id: string;
+    }>;
+    expect(results.map((row) => row.id)).toEqual(["contact-1"]);
+  });
+
   it("dry-runs contact merge batches from a JSON file", () => {
     const home = createHome();
     insertContact(home, "contact-2", "Ava Duplicate");

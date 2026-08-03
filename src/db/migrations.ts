@@ -2256,6 +2256,9 @@ export const MIGRATIONS: Migration[] = [
         return;
       }
       db.exec(`
+        CREATE INDEX IF NOT EXISTS idx_contact_handles_contact_id
+        ON contact_handles(contact_id);
+
         CREATE VIRTUAL TABLE IF NOT EXISTS contacts_fts USING fts5(
           contact_id UNINDEXED,
           name,
