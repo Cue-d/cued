@@ -446,6 +446,7 @@ func parseDMConversation(decoder *json.Decoder, result *archiveData, messageOffs
 }
 
 func applyMembershipEvent(event map[string]any, membership, known map[string]bool) {
+	// X stores DM events newest-first, so the first membership fact for a user is current.
 	setIfUnknown := func(userID string, active bool) {
 		if userID == "" || known[userID] {
 			return
