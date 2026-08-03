@@ -129,10 +129,11 @@ describe("X archive end to end", () => {
       const readGraphOnly = () =>
         sqlite
           .prepare(
-            `SELECT metadata_json FROM contact_sources WHERE platform = 'x' AND source_entity_key = 'x:user:40'`,
+            `SELECT metadata_json, last_seen_at FROM contact_sources WHERE platform = 'x' AND source_entity_key = 'x:user:40'`,
           )
-          .get() as { metadata_json: string };
+          .get() as { metadata_json: string; last_seen_at: number };
       expect(JSON.parse(readGraphOnly().metadata_json)).toMatchObject({ mutual: true });
+      const graphOnlyLastSeenAt = readGraphOnly().last_seen_at;
       expect(
         sqlite
           .prepare(
@@ -167,6 +168,7 @@ describe("X archive end to end", () => {
         followsYou: false,
         youFollow: false,
       });
+      expect(readGraphOnly().last_seen_at).toBe(graphOnlyLastSeenAt);
       expect(
         sqlite.prepare(`SELECT name FROM conversations WHERE id = ?`).get(groupBefore.id),
       ).toMatchObject({ name: "Core team" });
