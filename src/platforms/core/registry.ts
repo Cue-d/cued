@@ -66,6 +66,12 @@ const ADAPTER_DEFINITIONS: Record<AdapterPlatform, AdapterDefinition> = {
     autoSync: true,
     workerTimeoutMs: 60_000,
   },
+  x: {
+    platform: "x",
+    workerEntrypoint: join(MODULE_DIRNAME, "../x/sync/worker.js"),
+    autoSync: false,
+    workerTimeoutMs: 120_000,
+  },
 };
 
 export function listAdapterPlatforms(): AdapterPlatform[] {

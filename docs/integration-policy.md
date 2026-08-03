@@ -35,6 +35,12 @@ QR or device-linking flows are acceptable when they are the platform's normal lo
 
 Shared or managed app credentials must be injected at release time or supplied through local environment/config overrides for source builds. They must not be committed.
 
+## X
+
+X reuses [Birdclaw](https://github.com/steipete/birdclaw) as the collector. Birdclaw imports an X archive and can refresh supported data through `xurl`; Cued's bundled Go helper reads `~/.birdclaw/birdclaw.sqlite` without owning X credentials or a second X API client.
+
+Run `birdclaw import archive ~/Downloads/twitter-archive.zip --json` first. Cued then imports DM contacts, conversations, messages, profiles, and current follower/following edges into `~/.cued/local.db`; mutual status and profile metrics live in `contact_sources.metadata_json`. Set `CUED_BIRDCLAW_DB_PATH` only when Birdclaw uses a non-default data directory. X sync remains manual by default because Birdclaw's live transports can use metered provider APIs; run `cued sync run x` explicitly.
+
 ## Telegram
 
 Telegram is deferred for the public OSS launch.

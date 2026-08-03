@@ -109,6 +109,14 @@ const PROOF_KIND_CONTRACTS: SyncProofKindContract[] = [
     invalidatedBy: "A later helper resync reports additional pages or a newer message range.",
     resumeCursorMeans: "The WhatsApp helper resync cursor and selected since timestamp.",
   },
+  {
+    platform: "x",
+    proofKind: "messages",
+    scopeKind: "account",
+    completeMeans: "All X DM messages currently present in the local Birdclaw database were read.",
+    invalidatedBy: "A later Birdclaw import or live refresh adds messages to its local database.",
+    resumeCursorMeans: "The Birdclaw DM created-at and message-id boundary for the account.",
+  },
 ];
 
 export function listSyncProofKindContracts(platform?: AdapterPlatform): SyncProofKindContract[] {

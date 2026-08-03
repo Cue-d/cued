@@ -1209,7 +1209,7 @@ function projectContactObservation(
       accountKey: event.account_key,
       sourceEntityKey: payload.sourceEntityKey,
       profileUrl: normalizeText(payload.sourceProfileUrl ?? null),
-      metadataJson: null,
+      metadataJson: payload.sourceMetadata ? JSON.stringify(payload.sourceMetadata) : null,
       firstSeenAt: event.observed_at,
       lastSeenAt: event.observed_at,
     })
@@ -1218,7 +1218,7 @@ function projectContactObservation(
       set: {
         contactId,
         profileUrl: normalizeText(payload.sourceProfileUrl ?? null),
-        metadataJson: null,
+        metadataJson: payload.sourceMetadata ? JSON.stringify(payload.sourceMetadata) : null,
         lastSeenAt: event.observed_at,
       },
     })

@@ -7,6 +7,7 @@ export const PLATFORM_VALUES = [
   "signal",
   "slack",
   "whatsapp",
+  "x",
 ] as const;
 export type Platform = (typeof PLATFORM_VALUES)[number];
 
@@ -17,6 +18,7 @@ export const PLATFORM_PERMISSION_REQUIREMENT_VALUES = ["contacts", "full_disk_ac
 export type PlatformPermissionRequirement = (typeof PLATFORM_PERMISSION_REQUIREMENT_VALUES)[number];
 
 export const PLATFORM_HELPER_REQUIREMENT_VALUES = [
+  "birdclaw_helper",
   "signal_cli",
   "slack_helper",
   "whatsapp_helper",
@@ -141,6 +143,17 @@ export const PLATFORM_DEFINITIONS = {
     permissionRequirements: [],
     helperRequirements: ["whatsapp_helper"],
   },
+  x: {
+    adapter: true,
+    defaultAccountKey: "default",
+    supportsMultipleAccounts: false,
+    requestableIntegration: false,
+    requestableOrder: 7,
+    supportedHostOs: ["macos", "windows", "linux"],
+    onboardingVisible: true,
+    permissionRequirements: [],
+    helperRequirements: ["birdclaw_helper"],
+  },
 } as const satisfies Record<Platform, PlatformDefinition>;
 
 export const PLATFORM_FEATURE_MATRIX = {
@@ -239,6 +252,18 @@ export const PLATFORM_FEATURE_MATRIX = {
     read_receipts: "partial",
     attachments: "yes",
     contact_sync: "partial",
+  },
+  x: {
+    receive: "yes",
+    realtime_ingest: "no",
+    full_history_sync: "yes",
+    message_edits: "no",
+    deletes: "no",
+    reactions: "no",
+    threads_replies: "no",
+    read_receipts: "no",
+    attachments: "no",
+    contact_sync: "yes",
   },
 } as const satisfies Record<Platform, Record<PlatformFeature, PlatformFeatureSupport>>;
 

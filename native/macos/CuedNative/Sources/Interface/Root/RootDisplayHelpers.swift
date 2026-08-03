@@ -120,6 +120,8 @@ func platformAccentColor(for platform: String) -> Color {
     return Color(red: 0.24, green: 0.56, blue: 0.98)
   case "whatsapp":
     return Color(red: 0.13, green: 0.74, blue: 0.38)
+  case "x":
+    return Color(red: 0.08, green: 0.08, blue: 0.09)
   default:
     return .accentColor
   }
@@ -239,6 +241,8 @@ func platformDescription(for configuration: PlatformConfig) -> String {
     return "Syncs WhatsApp messages after you link your phone."
   case "signal":
     return "Syncs Signal messages after you link your device."
+  case "x":
+    return "Imports X direct messages, profiles, and follow relationships from local Birdclaw data."
   default:
     return "Syncs this source on this Mac."
   }
@@ -331,6 +335,8 @@ func platformTitle(_ platform: String, fallback: String?) -> String {
     return "Discord"
   case "whatsapp":
     return "WhatsApp"
+  case "x":
+    return "X"
   default:
     if let fallback = fallback?.trimmingCharacters(in: .whitespacesAndNewlines), !fallback.isEmpty {
       return fallback

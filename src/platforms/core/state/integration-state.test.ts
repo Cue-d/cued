@@ -204,7 +204,7 @@ process.exit(44);
 
     const db = createDb();
     const refreshed = await refreshManagedIntegrationStates(db);
-    expect(refreshed.refreshed).toBe(4);
+    expect(refreshed.refreshed).toBe(5);
     expect(listIntegrationStates(db)).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -310,6 +310,7 @@ process.exit(44);
       "linkedin",
       "whatsapp",
       "signal",
+      "x",
     ]);
     db.close();
   });
@@ -330,6 +331,7 @@ process.exit(44);
       "linkedin",
       "whatsapp",
       "signal",
+      "x",
     ]);
 
     db.close();
@@ -736,7 +738,7 @@ process.exit(44);
 
     const refreshed = refreshLocalIntegrationStates(db);
 
-    expect(refreshed.refreshed).toBe(2);
+    expect(refreshed.refreshed).toBe(3);
     expect(listIntegrationStates(db)).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -1668,7 +1670,7 @@ process.exit(44);
 
     const refreshed = await refreshManagedIntegrationStates(db);
 
-    expect(refreshed.refreshed).toBe(10);
+    expect(refreshed.refreshed).toBe(11);
     expect(listIntegrationStates(db)).toEqual(
       expect.arrayContaining([
         expect.objectContaining({

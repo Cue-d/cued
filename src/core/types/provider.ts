@@ -23,6 +23,7 @@ export interface ContactObservationPayload {
   fields: ContactFields;
   handles: ContactHandleInput[];
   sourceProfileUrl?: string | null;
+  sourceMetadata?: Record<string, unknown> | null;
 }
 
 export interface ConversationParticipantInput {

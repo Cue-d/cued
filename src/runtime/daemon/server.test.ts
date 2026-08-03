@@ -348,6 +348,33 @@ describe("interactive auth sessions", () => {
 });
 
 describe("sync resume targets", () => {
+  it("does not poll metered X reads unless autosync is explicitly configured", () => {
+    const previous = process.env.CUED_AUTOSYNC_PLATFORMS;
+    delete process.env.CUED_AUTOSYNC_PLATFORMS;
+    try {
+      expect(
+        getAutoSyncTargets({
+          listEnabledSyncTargets: () => [
+            { platform: "x", account_key: "default" },
+            { platform: "slack", account_key: "workspace" },
+          ],
+          listIntegrationStates: () => [],
+        }),
+      ).toEqual([{ platform: "slack", accountKey: "workspace" }]);
+
+      process.env.CUED_AUTOSYNC_PLATFORMS = "x";
+      expect(
+        getAutoSyncTargets({
+          listEnabledSyncTargets: () => [],
+          listIntegrationStates: () => [],
+        }),
+      ).toEqual([{ platform: "x", accountKey: "default" }]);
+    } finally {
+      if (previous == null) delete process.env.CUED_AUTOSYNC_PLATFORMS;
+      else process.env.CUED_AUTOSYNC_PLATFORMS = previous;
+    }
+  });
+
   it("allows autosync to be explicitly disabled", () => {
     const previous = process.env.CUED_AUTOSYNC_PLATFORMS;
     process.env.CUED_AUTOSYNC_PLATFORMS = "none";
