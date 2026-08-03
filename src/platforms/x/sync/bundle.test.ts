@@ -56,8 +56,9 @@ const snapshot: BirdclawSnapshot = {
     },
   ],
   hasMore: false,
-  nextCreatedAt: "2026-08-03T12:00:00.000Z",
-  nextMessageId: "message-1",
+  nextMessageOffset: 1,
+  totalMessageCount: 1,
+  totalRelationshipCount: 2,
 };
 
 describe("Birdclaw X sync bundle", () => {
@@ -67,10 +68,11 @@ describe("Birdclaw X sync bundle", () => {
     expect(bundle.sourceAccounts).toEqual([
       { platform: "x", accountKey: "10", displayName: "@sam" },
     ]);
-    expect(bundle.rawEvents.map((event) => event.entityKind)).toEqual([
-      "contact",
-      "conversation",
-      "message",
+    expect(bundle.rawEvents.map((event) => `${event.entityKind}.${event.eventKind}`)).toEqual([
+      "contact.observed",
+      "conversation.observed",
+      "message.created",
+      "contact.snapshot_completed",
     ]);
     expect(bundle.rawEvents[0]?.payload).toMatchObject({
       sourceEntityKey: "x:user:20",
@@ -86,11 +88,13 @@ describe("Birdclaw X sync bundle", () => {
         followersCount: 100,
       },
     });
-    expect(bundle.rawEvents.at(-1)?.payload).toMatchObject({
-      content: "Hello from Birdclaw",
-      senderSourceKey: "x:user:20",
-      isFromMe: false,
-    });
+    expect(bundle.rawEvents.find((event) => event.entityKind === "message")?.payload).toMatchObject(
+      {
+        content: "Hello from Birdclaw",
+        senderSourceKey: "x:user:20",
+        isFromMe: false,
+      },
+    );
     expect(bundle.proofs?.[0]?.coverage).toMatchObject({
       source: "x_archive",
       generation: "archive-v1",
@@ -103,15 +107,14 @@ describe("Birdclaw X sync bundle", () => {
       {},
       {
         snapshot: { ...snapshot, hasMore: true, nextPhase: "relationships", nextEdgeOffset: 10 },
-        sourceCursor: { createdAt: null },
+        sourceCursor: { messageOffset: 0 },
       },
     );
     expect(bundle.hasMore).toBe(true);
     expect(bundle.sourceCursor).toEqual({
       generation: "archive-v1",
       phase: "relationships",
-      createdAt: "2026-08-03T12:00:00.000Z",
-      messageId: "message-1",
+      messageOffset: 1,
       edgeOffset: 10,
     });
     expect(bundle.proofs?.[0]?.status).toBe("running");
@@ -153,15 +156,18 @@ describe("Birdclaw X sync bundle", () => {
     const conversation = bundle.rawEvents.find((event) => event.entityKind === "conversation");
     expect(conversation?.payload).toMatchObject({
       conversationType: "group",
+      participantsAreSnapshot: true,
       participants: [
         { sourceEntityKey: "x:user:10", isSelf: true },
         { sourceEntityKey: "x:user:20" },
         { sourceEntityKey: "x:user:30" },
       ],
     });
-    expect(bundle.rawEvents.at(-1)?.payload).toMatchObject({
-      senderSourceKey: "x:user:10",
-      isFromMe: true,
-    });
+    expect(bundle.rawEvents.find((event) => event.entityKind === "message")?.payload).toMatchObject(
+      {
+        senderSourceKey: "x:user:10",
+        isFromMe: true,
+      },
+    );
   });
 });

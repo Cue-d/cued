@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { promisify } from "node:util";
 import type {
   ContactObservationPayload,
+  ContactSnapshotCompletedPayload,
   ConversationObservationPayload,
   MessagePayload,
   ProviderRawEventInput,
@@ -53,15 +54,15 @@ export interface BirdclawSnapshot {
   hasMore: boolean;
   nextPhase?: string;
   nextEdgeOffset?: number;
-  nextCreatedAt?: string;
-  nextMessageId?: string;
+  nextMessageOffset?: number;
+  totalMessageCount?: number;
+  totalRelationshipCount?: number;
 }
 
 type BirdclawCursor = {
   generation: string | null;
   phase: "messages" | "relationships";
-  createdAt: string | null;
-  messageId: string | null;
+  messageOffset: number;
   edgeOffset: number;
 };
 
@@ -74,8 +75,7 @@ function parseCursor(value: unknown): BirdclawCursor {
   return {
     generation: typeof cursor.generation === "string" ? cursor.generation : null,
     phase: cursor.phase === "relationships" ? "relationships" : "messages",
-    createdAt: typeof cursor.createdAt === "string" ? cursor.createdAt : null,
-    messageId: typeof cursor.messageId === "string" ? cursor.messageId : null,
+    messageOffset: typeof cursor.messageOffset === "number" ? cursor.messageOffset : 0,
     edgeOffset: typeof cursor.edgeOffset === "number" ? cursor.edgeOffset : 0,
   };
 }
@@ -91,13 +91,12 @@ async function readBirdclawSnapshot(cursor: BirdclawCursor): Promise<BirdclawSna
     archivePath,
     "--phase",
     cursor.phase,
+    "--message-offset",
+    String(cursor.messageOffset),
     "--edge-offset",
     String(cursor.edgeOffset),
   ];
   if (cursor.generation) args.push("--generation", cursor.generation);
-  if (cursor.createdAt) {
-    args.push("--after-created-at", cursor.createdAt, "--after-message-id", cursor.messageId ?? "");
-  }
   const { stdout } = await execFileAsync(helper, args, {
     timeout: 120_000,
     maxBuffer: 256 * 1024 * 1024,
@@ -193,8 +192,18 @@ export function buildBirdclawRawEvents(input: {
 
   const selfKey = sourceKey(snapshot.account.external_user_id || snapshot.account.id);
   for (const conversation of snapshot.conversations ?? []) {
-    const conversationId = stableId(`x:conversation:${input.accountKey}:${conversation.id}`);
     const remoteKeys = conversation.participant_ids.map(sourceKey);
+    const conversationVersion = stableId(
+      JSON.stringify({
+        generation: snapshot.generation,
+        isGroup: conversation.is_group,
+        participantIds: conversation.participant_ids,
+        title: conversation.title,
+      }),
+    );
+    const conversationId = stableId(
+      `x:conversation:${input.accountKey}:${conversation.id}:${conversationVersion}`,
+    );
     rawEvents.push({
       id: conversationId,
       platform: "x",
@@ -208,6 +217,7 @@ export function buildBirdclawRawEvents(input: {
         sourceConversationKey: `x:conversation:${conversation.id}`,
         conversationType: conversation.is_group ? "group" : "dm",
         displayName: conversation.title || "X conversation",
+        participantsAreSnapshot: true,
         participants: [
           { sourceEntityKey: selfKey, isSelf: true },
           ...remoteKeys.map((participantKey) => ({ sourceEntityKey: participantKey })),
@@ -244,6 +254,19 @@ export function buildBirdclawRawEvents(input: {
       } satisfies MessagePayload,
     });
   }
+  if (!snapshot.hasMore) {
+    const id = stableId(`x:contact-snapshot:${input.accountKey}:${snapshot.generation}`);
+    rawEvents.push({
+      id,
+      platform: "x",
+      accountKey: input.accountKey,
+      entityKind: "contact",
+      eventKind: "snapshot_completed",
+      observedAt: input.observedAt,
+      dedupeKey: id,
+      payload: { generation: snapshot.generation } satisfies ContactSnapshotCompletedPayload,
+    } satisfies ProviderRawEventInput<ContactSnapshotCompletedPayload>);
+  }
   return rawEvents;
 }
 
@@ -260,15 +283,13 @@ export async function buildXSyncBundle(
     ? {
         generation: snapshot.generation,
         phase: snapshot.nextPhase === "relationships" ? "relationships" : "messages",
-        createdAt: snapshot.nextCreatedAt ?? cursor.createdAt,
-        messageId: snapshot.nextMessageId ?? cursor.messageId,
+        messageOffset: snapshot.nextMessageOffset ?? cursor.messageOffset,
         edgeOffset: snapshot.nextEdgeOffset ?? 0,
       }
     : {
         generation: snapshot.generation,
         phase: "messages",
-        createdAt: null,
-        messageId: null,
+        messageOffset: 0,
         edgeOffset: 0,
       };
   return {
@@ -298,9 +319,12 @@ export async function buildXSyncBundle(
         coverage: {
           source: "x_archive",
           generation: snapshot.generation,
-          relationshipEdges: snapshot.followEdges?.length ?? 0,
+          relationshipEdges: snapshot.totalRelationshipCount ?? snapshot.followEdges?.length ?? 0,
         },
-        stats: { messageCount: snapshot.messages?.length ?? 0, rawEventCount: rawEvents.length },
+        stats: {
+          messageCount: snapshot.totalMessageCount ?? snapshot.messages?.length ?? 0,
+          rawEventCount: rawEvents.length,
+        },
       },
     ],
   };

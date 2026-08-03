@@ -26,6 +26,10 @@ export interface ContactObservationPayload {
   sourceMetadata?: Record<string, unknown> | null;
 }
 
+export interface ContactSnapshotCompletedPayload {
+  generation: string;
+}
+
 export interface ConversationParticipantInput {
   sourceEntityKey: string;
   isSelf?: boolean;
@@ -40,6 +44,7 @@ export interface ConversationObservationPayload {
   topic?: string | null;
   unreadCount?: number | null;
   removalReason?: string | null;
+  participantsAreSnapshot?: boolean;
   participants: ConversationParticipantInput[];
 }
 
@@ -143,6 +148,7 @@ export interface CallPayload {
 
 export type RawEventPayload =
   | ContactObservationPayload
+  | ContactSnapshotCompletedPayload
   | ConversationObservationPayload
   | CallPayload
   | MessagePayload

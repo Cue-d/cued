@@ -76,20 +76,21 @@ type followEdgeRow struct {
 }
 
 type syncResult struct {
-	HelperVersion   string            `json:"helperVersion"`
-	ProtocolVersion int               `json:"protocolVersion"`
-	ArchivePath     string            `json:"archivePath"`
-	Generation      string            `json:"generation"`
-	NextPhase       string            `json:"nextPhase,omitempty"`
-	NextEdgeOffset  int               `json:"nextEdgeOffset,omitempty"`
-	Account         accountRow        `json:"account"`
-	Profiles        []profileRow      `json:"profiles"`
-	Conversations   []conversationRow `json:"conversations"`
-	Messages        []messageRow      `json:"messages"`
-	FollowEdges     []followEdgeRow   `json:"followEdges"`
-	HasMore         bool              `json:"hasMore"`
-	NextCreatedAt   string            `json:"nextCreatedAt,omitempty"`
-	NextMessageID   string            `json:"nextMessageId,omitempty"`
+	HelperVersion          string            `json:"helperVersion"`
+	ProtocolVersion        int               `json:"protocolVersion"`
+	ArchivePath            string            `json:"archivePath"`
+	Generation             string            `json:"generation"`
+	NextPhase              string            `json:"nextPhase,omitempty"`
+	NextEdgeOffset         int               `json:"nextEdgeOffset,omitempty"`
+	NextMessageOffset      int               `json:"nextMessageOffset,omitempty"`
+	TotalMessageCount      int               `json:"totalMessageCount"`
+	TotalRelationshipCount int               `json:"totalRelationshipCount"`
+	Account                accountRow        `json:"account"`
+	Profiles               []profileRow      `json:"profiles"`
+	Conversations          []conversationRow `json:"conversations"`
+	Messages               []messageRow      `json:"messages"`
+	FollowEdges            []followEdgeRow   `json:"followEdges"`
+	HasMore                bool              `json:"hasMore"`
 }
 
 type archiveData struct {
@@ -98,6 +99,7 @@ type archiveData struct {
 	conversations map[string]conversationRow
 	messages      []messageRow
 	followEdges   []followEdgeRow
+	totalMessages int
 }
 
 func main() {
@@ -143,8 +145,7 @@ func runStatus(args []string) {
 func runSync(args []string) {
 	flags := flag.NewFlagSet("sync", flag.ContinueOnError)
 	archivePath := flags.String("archive", "", "X archive zip path")
-	afterCreatedAt := flags.String("after-created-at", "", "exclusive message timestamp cursor")
-	afterMessageID := flags.String("after-message-id", "", "exclusive message id cursor")
+	messageOffset := flags.Int("message-offset", 0, "message cursor offset")
 	expectedGeneration := flags.String("generation", "", "archive generation for the cursor")
 	phase := flags.String("phase", "messages", "messages or relationships")
 	edgeOffset := flags.Int("edge-offset", 0, "relationship cursor offset")
@@ -164,9 +165,9 @@ func runSync(args []string) {
 		fail(err)
 	}
 	if *expectedGeneration != "" && *expectedGeneration != generation {
-		*afterCreatedAt, *afterMessageID, *phase, *edgeOffset = "", "", "messages", 0
+		*messageOffset, *phase, *edgeOffset = 0, "messages", 0
 	}
-	data, err := readArchive(resolved)
+	data, err := readArchivePage(resolved, *messageOffset, *limit)
 	if err != nil {
 		fail(err)
 	}
@@ -174,6 +175,7 @@ func runSync(args []string) {
 		HelperVersion: helperVersion, ProtocolVersion: protocolVersion, ArchivePath: resolved,
 		Generation: generation, Account: data.account, Profiles: []profileRow{},
 		Conversations: []conversationRow{}, Messages: []messageRow{}, FollowEdges: []followEdgeRow{},
+		TotalMessageCount: data.totalMessages, TotalRelationshipCount: len(data.followEdges),
 	}
 	if *phase == "relationships" {
 		start := max(0, *edgeOffset)
@@ -193,24 +195,11 @@ func runSync(args []string) {
 			result.NextEdgeOffset = end
 		}
 	} else {
-		filtered := make([]messageRow, 0, len(data.messages))
-		for _, message := range data.messages {
-			if *afterCreatedAt == "" || message.CreatedAt > *afterCreatedAt ||
-				(message.CreatedAt == *afterCreatedAt && message.ID > *afterMessageID) {
-				filtered = append(filtered, message)
-			}
-		}
-		moreMessages := len(filtered) > *limit
-		if moreMessages {
-			filtered = filtered[:*limit]
-		}
+		filtered := data.messages
+		moreMessages := *messageOffset+len(filtered) < data.totalMessages
 		result.Messages = filtered
 		result.Conversations, result.Profiles = entitiesForMessages(filtered, data)
-		if len(filtered) > 0 {
-			last := filtered[len(filtered)-1]
-			result.NextCreatedAt = last.CreatedAt
-			result.NextMessageID = last.ID
-		}
+		result.NextMessageOffset = *messageOffset + len(filtered)
 		result.HasMore = moreMessages || len(data.followEdges) > 0
 		if moreMessages {
 			result.NextPhase = "messages"
@@ -272,6 +261,10 @@ func archiveGeneration(path string) (string, error) {
 }
 
 func readArchive(path string) (archiveData, error) {
+	return readArchivePage(path, 0, int(^uint(0)>>1))
+}
+
+func readArchivePage(path string, messageOffset, messageLimit int) (archiveData, error) {
 	reader, err := zip.OpenReader(path)
 	if err != nil {
 		return archiveData{}, fmt.Errorf("open X archive: %w", err)
@@ -301,7 +294,7 @@ func readArchive(path string) (archiveData, error) {
 	mentionDirectory := readMentionDirectory(reader.File)
 	for _, file := range reader.File {
 		if dmEntryPattern.MatchString(normalizePath(file.Name)) {
-			if err := parseDMEntry(file, &result, mentionDirectory); err != nil {
+			if err := parseDMEntry(file, &result, mentionDirectory, messageOffset, messageLimit); err != nil {
 				return archiveData{}, err
 			}
 		}
@@ -319,12 +312,6 @@ func readArchive(path string) (archiveData, error) {
 			}
 		}
 	}
-	sort.Slice(result.messages, func(i, j int) bool {
-		if result.messages[i].CreatedAt == result.messages[j].CreatedAt {
-			return result.messages[i].ID < result.messages[j].ID
-		}
-		return result.messages[i].CreatedAt < result.messages[j].CreatedAt
-	})
 	sort.Slice(result.followEdges, func(i, j int) bool {
 		if result.followEdges[i].ProfileID == result.followEdges[j].ProfileID {
 			return result.followEdges[i].Direction < result.followEdges[j].Direction
@@ -334,7 +321,7 @@ func readArchive(path string) (archiveData, error) {
 	return result, nil
 }
 
-func parseDMEntry(file *zip.File, result *archiveData, directory map[string]profileRow) error {
+func parseDMEntry(file *zip.File, result *archiveData, directory map[string]profileRow, messageOffset, messageLimit int) error {
 	return forEachRecord(file, func(record map[string]any) error {
 		conversation := asMap(record["dmConversation"])
 		conversationID := stringValue(conversation["conversationId"])
@@ -344,9 +331,14 @@ func parseDMEntry(file *zip.File, result *archiveData, directory map[string]prof
 		participantSet := make(map[string]bool)
 		messages := asSlice(conversation["messages"])
 		lastMessageAt := ""
+		selectedConversation := false
 		for _, rawEvent := range messages {
-			messageCreate := asMap(asMap(rawEvent)["messageCreate"])
+			event := asMap(rawEvent)
+			messageCreate := asMap(event["messageCreate"])
 			if len(messageCreate) == 0 {
+				for _, userID := range participantIDs(event) {
+					participantSet[userID] = true
+				}
 				continue
 			}
 			senderID := stringValue(messageCreate["senderId"])
@@ -357,7 +349,13 @@ func parseDMEntry(file *zip.File, result *archiveData, directory map[string]prof
 			if recipientID != "" {
 				participantSet[recipientID] = true
 			}
-			messageID := firstNonEmpty(stringValue(messageCreate["id"]), conversationID+"-"+senderID+"-"+strconv.Itoa(len(result.messages)))
+			messageIndex := result.totalMessages
+			result.totalMessages++
+			if messageIndex < messageOffset || len(result.messages) >= messageLimit {
+				continue
+			}
+			selectedConversation = true
+			messageID := firstNonEmpty(stringValue(messageCreate["id"]), conversationID+"-"+senderID+"-"+strconv.Itoa(messageIndex))
 			createdAt := parseTwitterDate(stringValue(messageCreate["createdAt"]))
 			direction := "inbound"
 			if senderID == result.account.ExternalUserID {
@@ -381,7 +379,7 @@ func parseDMEntry(file *zip.File, result *archiveData, directory map[string]prof
 			}
 		}
 		sort.Strings(participants)
-		if lastMessageAt != "" {
+		if selectedConversation {
 			result.conversations[conversationID] = conversationRow{
 				ID: conversationID, ParticipantIDs: participants,
 				Title:         firstNonEmpty(stringValue(conversation["name"]), conversationTitle(participants, result.profiles)),
@@ -390,6 +388,25 @@ func parseDMEntry(file *zip.File, result *archiveData, directory map[string]prof
 		}
 		return nil
 	})
+}
+
+func participantIDs(event map[string]any) []string {
+	result := []string{}
+	for _, input := range []struct {
+		key  string
+		list string
+	}{{"joinConversation", "participantsSnapshot"}, {"participantsJoin", "userIds"}, {"participantsLeave", "userIds"}} {
+		payload := asMap(event[input.key])
+		for _, value := range asSlice(payload[input.list]) {
+			if userID := stringValue(value); userID != "" {
+				result = append(result, userID)
+			}
+		}
+		if userID := stringValue(payload["initiatingUserId"]); userID != "" {
+			result = append(result, userID)
+		}
+	}
+	return result
 }
 
 func parseFollowEntry(file *zip.File, result *archiveData, directory map[string]profileRow, direction, key string) error {
@@ -440,7 +457,7 @@ func ensureProfile(result *archiveData, directory map[string]profileRow, userID 
 	}
 	profile, exists := directory[userID]
 	if !exists {
-		profile = profileRow{ID: id, Handle: "id" + userID, DisplayName: "X user " + userID}
+		profile = profileRow{ID: id, DisplayName: "X user " + userID}
 	}
 	result.profiles[id] = profile
 }

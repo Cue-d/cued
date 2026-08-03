@@ -7,7 +7,16 @@ import { CuedDatabase } from "../../db/database.js";
 import { projectPendingRawEvents } from "../../runtime/projection/projector.js";
 import { buildXSyncBundle } from "./sync/bundle.js";
 
-function writeArchive(root: string, input: { name: string; follower: boolean }): string {
+function writeArchive(
+  root: string,
+  input: {
+    name: string;
+    follower: boolean;
+    groupName: string;
+    groupMember: boolean;
+    graphOnly: boolean;
+  },
+): string {
   const source = join(root, "archive-source");
   rmSync(source, { recursive: true, force: true });
   mkdirSync(join(source, "data"), { recursive: true });
@@ -21,17 +30,17 @@ function writeArchive(root: string, input: { name: string; follower: boolean }):
   );
   writeFileSync(
     join(source, "data/direct-messages.js"),
-    `window.YTD.direct_messages.part0 = [{"dmConversation":{"conversationId":"10-20","messages":[{"messageCreate":{"id":"message-1","senderId":"20","recipientId":"10","text":"Hello from the X archive","createdAt":"2026-08-03T12:00:00.000Z"}}]}}]`,
+    `window.YTD.direct_messages.part0 = [{"dmConversation":{"conversationId":"10-20","messages":[{"messageCreate":{"id":"message-1","senderId":"20","recipientId":"10","text":"Hello from the X archive","createdAt":"2026-08-03T12:00:00.000Z"}}]}},{"dmConversation":{"conversationId":"group-1","name":"${input.groupName}","messages":[{"joinConversation":{"participantsSnapshot":["10","20"${input.groupMember ? ',"30"' : ""}]}},{"messageCreate":{"id":"group-message-1","senderId":"20","text":"Hello group","createdAt":"2026-08-03T13:00:00.000Z"}}]}}]`,
   );
   writeFileSync(
     join(source, "data/follower.js"),
     input.follower
-      ? `window.YTD.follower.part0 = [{"follower":{"accountId":"20"}}]`
+      ? `window.YTD.follower.part0 = [{"follower":{"accountId":"20"}}${input.graphOnly ? ',{"follower":{"accountId":"40"}}' : ""}]`
       : `window.YTD.follower.part0 = []`,
   );
   writeFileSync(
     join(source, "data/following.js"),
-    `window.YTD.following.part0 = [{"following":{"accountId":"20"}}]`,
+    `window.YTD.following.part0 = [{"following":{"accountId":"20"}}${input.graphOnly ? ',{"following":{"accountId":"40"}}' : ""}]`,
   );
   const archivePath = join(root, "twitter-archive.zip");
   rmSync(archivePath, { force: true });
@@ -66,7 +75,13 @@ describe("X archive end to end", () => {
   it("imports an X archive through the compiled Go helper and refreshes contact state", async () => {
     const temp = mkdtempSync(join(tmpdir(), "cued-x-archive-e2e-"));
     tempDirs.push(temp);
-    const archivePath = writeArchive(temp, { name: "Ava Chen", follower: true });
+    const archivePath = writeArchive(temp, {
+      name: "Ava Chen",
+      follower: true,
+      groupName: "Builders",
+      groupMember: true,
+      graphOnly: true,
+    });
     const cuedPath = join(temp, "cued.sqlite");
     const helperPath = join(temp, "cued-birdclaw-helper");
     execFileSync("go", ["build", "-o", helperPath, "."], {
@@ -105,10 +120,40 @@ describe("X archive end to end", () => {
         youFollow: true,
       });
       expect(
-        sqlite.prepare("SELECT content FROM messages WHERE platform = 'x'").get(),
+        sqlite
+          .prepare(
+            "SELECT content FROM messages WHERE platform = 'x' AND content = 'Hello from the X archive'",
+          )
+          .get(),
       ).toMatchObject({ content: "Hello from the X archive" });
+      const readGraphOnly = () =>
+        sqlite
+          .prepare(
+            `SELECT metadata_json FROM contact_sources WHERE platform = 'x' AND source_entity_key = 'x:user:40'`,
+          )
+          .get() as { metadata_json: string };
+      expect(JSON.parse(readGraphOnly().metadata_json)).toMatchObject({ mutual: true });
+      expect(
+        sqlite
+          .prepare(
+            `SELECT COUNT(*) AS count FROM contact_handles WHERE type = 'x_handle' AND value = 'id40'`,
+          )
+          .get(),
+      ).toMatchObject({ count: 0 });
+      const groupBefore = sqlite
+        .prepare(
+          `SELECT id, name FROM conversations WHERE platform = 'x' AND source_conversation_key = 'x:conversation:group-1'`,
+        )
+        .get() as { id: string; name: string };
+      expect(groupBefore.name).toBe("Builders");
 
-      writeArchive(temp, { name: "Ava Patel", follower: false });
+      writeArchive(temp, {
+        name: "Ava Patel",
+        follower: false,
+        groupName: "Core team",
+        groupMember: false,
+        graphOnly: false,
+      });
       const second = await projectArchiveCycle(cued);
       expect(second.totalApplied).toBeGreaterThan(0);
       expect(readContact().name).toBe("Ava Patel");
@@ -117,6 +162,21 @@ describe("X archive end to end", () => {
         followsYou: false,
         youFollow: true,
       });
+      expect(JSON.parse(readGraphOnly().metadata_json)).toMatchObject({
+        mutual: false,
+        followsYou: false,
+        youFollow: false,
+      });
+      expect(
+        sqlite.prepare(`SELECT name FROM conversations WHERE id = ?`).get(groupBefore.id),
+      ).toMatchObject({ name: "Core team" });
+      expect(
+        sqlite
+          .prepare(
+            `SELECT is_active FROM conversation_participants WHERE conversation_id = ? AND source_participant_key = 'x:user:30'`,
+          )
+          .get(groupBefore.id),
+      ).toMatchObject({ is_active: 0 });
     } finally {
       if (previousHelper === undefined) delete process.env.CUED_X_ARCHIVE_HELPER_BINARY;
       else process.env.CUED_X_ARCHIVE_HELPER_BINARY = previousHelper;

@@ -1,8 +1,9 @@
 import { createHash } from "node:crypto";
-import { eq, type SQL, sql } from "drizzle-orm";
+import { and, eq, type SQL, sql } from "drizzle-orm";
 import type {
   CallPayload,
   ContactObservationPayload,
+  ContactSnapshotCompletedPayload,
   ConversationObservationPayload,
   MessagePayload,
   ParticipantPayload,
@@ -1325,6 +1326,39 @@ function projectConversationObservation(
       .run();
   }
 
+  if (event.event_kind !== "removed" && payload.participantsAreSnapshot) {
+    const participantKeys = new Set(
+      payload.participants.map((participant) => participant.sourceEntityKey),
+    );
+    const existingParticipants = conn
+      .select({
+        contactId: conversationParticipants.contactId,
+        sourceParticipantKey: conversationParticipants.sourceParticipantKey,
+      })
+      .from(conversationParticipants)
+      .where(eq(conversationParticipants.conversationId, conversationId))
+      .all();
+    for (const participant of existingParticipants) {
+      if (
+        !participant.sourceParticipantKey ||
+        participantKeys.has(participant.sourceParticipantKey)
+      ) {
+        continue;
+      }
+      conn
+        .update(conversationParticipants)
+        .set({ isActive: 0, leftAt: event.observed_at, updatedAt: event.observed_at })
+        .where(
+          and(
+            eq(conversationParticipants.conversationId, conversationId),
+            eq(conversationParticipants.contactId, participant.contactId),
+            eq(conversationParticipants.sourceParticipantKey, participant.sourceParticipantKey),
+          ),
+        )
+        .run();
+    }
+  }
+
   for (const participant of payload.participants) {
     const contactId = resolveOrEnsureContact(
       conn,
@@ -1370,6 +1404,49 @@ function projectConversationObservation(
   }
 
   changes.dirtyConversationIds.add(conversationId);
+}
+
+function projectContactSnapshotCompleted(
+  conn: LocalDbExecutor,
+  changes: ProjectionChangeSet,
+  event: ProjectableRawEvent,
+): void {
+  const payload = JSON.parse(event.payload_json) as ContactSnapshotCompletedPayload;
+  const sources = conn
+    .select({
+      id: contactSources.id,
+      contactId: contactSources.contactId,
+      metadataJson: contactSources.metadataJson,
+    })
+    .from(contactSources)
+    .where(
+      and(
+        eq(contactSources.platform, event.platform),
+        eq(contactSources.accountKey, event.account_key),
+      ),
+    )
+    .all();
+  for (const source of sources) {
+    const metadata = source.metadataJson
+      ? (JSON.parse(source.metadataJson) as Record<string, unknown>)
+      : {};
+    if (metadata.archiveGeneration === payload.generation) continue;
+    conn
+      .update(contactSources)
+      .set({
+        metadataJson: JSON.stringify({
+          ...metadata,
+          archiveGeneration: payload.generation,
+          followsYou: false,
+          youFollow: false,
+          mutual: false,
+        }),
+        lastSeenAt: event.observed_at,
+      })
+      .where(eq(contactSources.id, source.id))
+      .run();
+    changes.dirtyContactIds.add(source.contactId);
+  }
 }
 
 function projectMessageEvent(
@@ -2391,7 +2468,11 @@ function projectEventBatch(
       tx.run(sql.raw(`SAVEPOINT projection_event_${shapedEvent.rawEvent.rowid}`));
       try {
         if (shapedEvent.entity_kind === "contact") {
-          projectContactObservation(tx, eventCache, eventChanges, shapedEvent);
+          if (shapedEvent.event_kind === "snapshot_completed") {
+            projectContactSnapshotCompleted(tx, eventChanges, shapedEvent);
+          } else {
+            projectContactObservation(tx, eventCache, eventChanges, shapedEvent);
+          }
         } else if (shapedEvent.entity_kind === "conversation") {
           projectConversationObservation(tx, eventCache, eventChanges, shapedEvent);
         } else if (shapedEvent.entity_kind === "call") {
