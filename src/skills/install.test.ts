@@ -1,4 +1,12 @@
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -190,5 +198,31 @@ describe("cued skill installer", () => {
     expect(resolveNvmNpxPath()).toBe(
       join(homeDir, ".nvm", "versions", "node", "v20.11.0", "bin", "npx"),
     );
+  });
+
+  it("keeps the self-driving CRM reference and eval contracts in the Cued skill source", () => {
+    delete process.env.CUED_APP_PATH;
+    const skillRoot = resolveCuedSkillSourcePath();
+    expect(skillRoot).not.toBeNull();
+    if (!skillRoot) {
+      throw new Error("Cued skill source was not found");
+    }
+    const skill = readFileSync(join(skillRoot, "SKILL.md"), "utf8");
+    const referencePath = join(skillRoot, "references", "self-driving-crm.md");
+
+    expect(skill).toContain("references/self-driving-crm.md");
+    expect(existsSync(referencePath)).toBe(true);
+
+    const reference = readFileSync(referencePath, "utf8");
+    expect(reference).toContain("cued contacts memory show <contact-id> --all");
+    expect(reference).toContain("current_x_generation");
+    expect(reference).toContain("no_change");
+
+    const evals = JSON.parse(readFileSync(join(skillRoot, "evals", "evals.json"), "utf8")) as {
+      evals: Array<{ id: number; prompt: string }>;
+    };
+    expect(new Set(evals.evals.map((entry) => entry.id)).size).toBe(evals.evals.length);
+    expect(evals.evals.find((entry) => entry.id === 36)?.prompt).toContain("relationship radar");
+    expect(evals.evals.find((entry) => entry.id === 37)?.prompt).toContain("X mutuals");
   });
 });
