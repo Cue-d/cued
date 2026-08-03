@@ -455,6 +455,33 @@
         "Explained how local and external evidence should aggregate into one canonical contact record",
         "Did not skip the local-first pass before proposing external enrichment"
       ]
+    },
+    {
+      "id": 36,
+      "prompt": "Run the self-driving CRM relationship radar and tell me who needs attention. Update memories if useful while you work.",
+      "expected_output": "A bounded, evidence-backed list of relationships needing attention, with durable memory writes only where genuinely new contact context was discovered.",
+      "files": [],
+      "expectations": [
+        "Selected a bounded candidate set using latest DM direction, reply age, and reactions",
+        "Loaded each selected contact's full memory history before any memory mutation",
+        "Did not persist transient follow-up status such as needs a reply as a contact memory",
+        "Classified each candidate as no_change, add, supersede, or invalidate",
+        "Included contact ids and evidence for any mutation actually performed"
+      ]
+    },
+    {
+      "id": 37,
+      "prompt": "Find my most important X mutuals from my latest imported archive, use our DMs to explain who matters, and save whatever should be remembered.",
+      "expected_output": "A ranked list of X mutuals grounded in contact-source relationship metadata and local DM history, with only durable, non-duplicative memories written.",
+      "files": [],
+      "expectations": [
+        "Read mutual status from X contact_sources metadata rather than guessing from messages",
+        "Matched contact-source archiveGeneration to the latest completed X sync proof",
+        "Joined X conversations and messages through the canonical contact",
+        "Did not duplicate deterministic mutual or follower state into a prose memory",
+        "Loaded all memories before reconciling any durable context found in DMs",
+        "Used no_change when the evidence added nothing durable"
+      ]
     }
   ]
 }

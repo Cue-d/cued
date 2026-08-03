@@ -145,6 +145,8 @@ Whenever new evidence could change an existing memory, reconcile before writing:
 
 Never create a second memory that restates a current one. Never invalidate a memory merely because the latest search did not mention it, and never revive an invalidated memory without new supporting evidence.
 
+For complete agent loops built on this contract, use `references/self-driving-crm.md`. Its relationship radar, pre-meeting brief, enrichment reconciliation, and X-mutual workflows keep derived recommendations out of durable memories and require an auditable decision for every candidate.
+
 Before writing a memory, verify at least one of:
 - deterministic handle evidence: LinkedIn profile URL/id, email, phone, or platform id;
 - strong DM history with the contact;
