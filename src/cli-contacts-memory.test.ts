@@ -126,6 +126,50 @@ describe("contacts memory CLI", () => {
     ).toThrow();
   });
 
+  it("searches canonical contacts across names, companies, handles, and current memories", () => {
+    const home = createHome();
+    const db = new CuedDatabase(join(home, "local.db"));
+    let memoryId: string;
+    try {
+      const sqlite = (
+        db as unknown as {
+          sqlite: {
+            prepare: (sql: string) => {
+              run: (...params: unknown[]) => void;
+            };
+          };
+        }
+      ).sqlite;
+      sqlite.prepare("UPDATE contacts SET company = ? WHERE id = ?").run("Acme Labs", "contact-1");
+      sqlite
+        .prepare(
+          "INSERT INTO contact_handles (id, contact_id, type, value, normalized_value, platform, account_key, is_deterministic, created_at, updated_at) VALUES (?, ?, 'email', ?, ?, 'gmail', 'default', 1, 1, 1)",
+        )
+        .run("handle-1", "contact-1", "ava@example.com", "ava@example.com");
+      memoryId = db.addContactMemory({
+        contactId: "contact-1",
+        body: "Interested in applied robotics",
+      }).id;
+    } finally {
+      db.close();
+    }
+
+    for (const query of ["Ava Ch", "Acme", "ava@example", "applied robot"]) {
+      const results = JSON.parse(runCli(home, ["contacts", "search", query])) as Array<{
+        id: string;
+      }>;
+      expect(results.map((row) => row.id)).toContain("contact-1");
+    }
+
+    const writableDb = new CuedDatabase(join(home, "local.db"));
+    try {
+      writableDb.markContactMemoryStale(memoryId);
+    } finally {
+      writableDb.close();
+    }
+    expect(JSON.parse(runCli(home, ["contacts", "search", "robotics"]))).toEqual([]);
+  });
+
   it("dry-runs contact merge batches from a JSON file", () => {
     const home = createHome();
     insertContact(home, "contact-2", "Ava Duplicate");

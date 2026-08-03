@@ -100,7 +100,7 @@ Safety rules:
 
 ## Contact Management
 
-- **Find a person**: Search `contacts` by name (`LIKE '%name%' COLLATE NOCASE`), then check `contact_handles` for email/phone/handle matches.
+- **Find a person**: Start with `cued contacts search "name, company, handle, or remembered fact"`. It searches names, companies, handles, and current memories and returns canonical contact ids. Use SQL only when you need a precise join or ranking the command does not expose.
 - **Cross-platform view**: Join `conversation_participants` → `conversations` for a contact to see all their threads across platforms.
 - **Duplicate detection**: Match `contact_handles.normalized_value` across different `contact_id`s, or match `contacts.name` case-insensitively. Many contacts have phone numbers as names (e.g. `+1347...`) because they were discovered via iMessage before being linked.
 - **Merge duplicates**: `cued contacts merge <primary-id> <secondary-id> [--reason TEXT]` for one merge, or `cued contacts merge-batch merges.json --apply` for many exact-evidence merges with one rebuild. `merge-batch` dry-runs by default when `--apply` is omitted.
