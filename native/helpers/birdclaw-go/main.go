@@ -454,10 +454,13 @@ func applyMembershipEvent(event map[string]any, membership, known map[string]boo
 		known[userID], membership[userID] = true, active
 	}
 	if payload := asMap(event["participantsLeave"]); len(payload) > 0 {
-		for _, value := range asSlice(payload["userIds"]) {
+		userIDs := asSlice(payload["userIds"])
+		for _, value := range userIDs {
 			setIfUnknown(stringValue(value), false)
 		}
-		setIfUnknown(stringValue(payload["initiatingUserId"]), false)
+		if len(userIDs) == 0 {
+			setIfUnknown(stringValue(payload["initiatingUserId"]), false)
+		}
 	}
 	if payload := asMap(event["participantsJoin"]); len(payload) > 0 {
 		for _, value := range asSlice(payload["userIds"]) {
