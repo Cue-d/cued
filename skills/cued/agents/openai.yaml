@@ -1,7 +1,7 @@
 interface:
   display_name: "Cued"
   short_description: "Inspect Cued through the local CLI and manage contact memories."
-  default_prompt: "Use $cued to query Cued through `cued sql` for reads; do not open ~/.cued/local.db directly with sqlite3 because the DB may be encrypted. Use cued contacts memory add/list/stale for successful useful contact memories."
+  default_prompt: "Use $cued to query Cued through `cued sql` for reads; do not open ~/.cued/local.db directly with sqlite3 because the DB may be encrypted. Load memories with cued contacts memory show before adding evidence-backed memories, and invalidate only memories disproved by new evidence."
 
 policy:
   allow_implicit_invocation: true

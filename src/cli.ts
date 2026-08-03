@@ -1202,10 +1202,12 @@ async function main(): Promise<void> {
                 );
               }
               const includeAll = args.includes("--all") || args.includes("--include-stale");
+              const explicitLimit = parseIntegerFlag(args, "--limit");
               printJson(
                 db.listContactMemories({
                   contactId,
-                  limit: parseIntegerFlag(args, "--limit") ?? (includeAll ? 500 : undefined),
+                  limit: explicitLimit,
+                  all: memoryCommand === "show" && explicitLimit === undefined,
                   includeStale: includeAll,
                 }),
               );

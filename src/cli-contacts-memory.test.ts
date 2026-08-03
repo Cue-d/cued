@@ -148,6 +148,23 @@ describe("contacts memory CLI", () => {
     expect(all.map((row) => row.id)).toEqual([memory.id]);
   });
 
+  it("does not truncate exhaustive memory reads", () => {
+    const home = createHome();
+    const db = new CuedDatabase(join(home, "local.db"));
+    try {
+      for (let index = 0; index < 501; index += 1) {
+        db.addContactMemory({ contactId: "contact-1", body: `Memory ${index}` });
+      }
+    } finally {
+      db.close();
+    }
+
+    const all = JSON.parse(
+      runCli(home, ["contacts", "memory", "show", "contact-1", "--all"]),
+    ) as Array<{ id: string }>;
+    expect(all).toHaveLength(501);
+  });
+
   it("dry-runs contact merge batches from a JSON file", () => {
     const home = createHome();
     insertContact(home, "contact-2", "Ava Duplicate");
