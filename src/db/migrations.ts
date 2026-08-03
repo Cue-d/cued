@@ -2245,4 +2245,124 @@ export const MIGRATIONS: Migration[] = [
       `);
     },
   },
+  {
+    id: "0022_contact_fts",
+    apply: (db) => {
+      if (
+        !tableExists(db, "contacts") ||
+        !tableExists(db, "contact_handles") ||
+        !tableExists(db, "contact_memories")
+      ) {
+        return;
+      }
+      db.exec(`
+        CREATE INDEX IF NOT EXISTS idx_contact_handles_contact_id
+        ON contact_handles(contact_id);
+
+        CREATE VIRTUAL TABLE IF NOT EXISTS contacts_fts USING fts5(
+          contact_id UNINDEXED,
+          name,
+          company,
+          handles,
+          memories
+        );
+
+        CREATE VIEW IF NOT EXISTS contact_fts_source AS
+        SELECT
+          c.rowid AS contact_rowid,
+          c.id AS contact_id,
+          COALESCE(c.name, '') AS name,
+          COALESCE(c.company, '') AS company,
+          COALESCE((
+            SELECT GROUP_CONCAT(TRIM(ch.type || ' ' || ch.value), ' ')
+            FROM contact_handles ch
+            WHERE ch.contact_id = c.id
+          ), '') AS handles,
+          COALESCE((
+            SELECT GROUP_CONCAT(cm.body, ' ')
+            FROM contact_memories cm
+            WHERE cm.contact_id = c.id AND cm.stale_at IS NULL
+          ), '') AS memories
+        FROM contacts c;
+
+        INSERT INTO contacts_fts (rowid, contact_id, name, company, handles, memories)
+        SELECT contact_rowid, contact_id, name, company, handles, memories
+        FROM contact_fts_source;
+
+        CREATE TRIGGER IF NOT EXISTS trg_contacts_inserted_contact_fts
+        AFTER INSERT ON contacts BEGIN
+          INSERT INTO contacts_fts (rowid, contact_id, name, company, handles, memories)
+          SELECT contact_rowid, contact_id, name, company, handles, memories
+          FROM contact_fts_source WHERE contact_id = NEW.id;
+        END;
+
+        CREATE TRIGGER IF NOT EXISTS trg_contacts_updated_contact_fts
+        AFTER UPDATE OF name, company ON contacts BEGIN
+          DELETE FROM contacts_fts WHERE rowid = OLD.rowid;
+          INSERT INTO contacts_fts (rowid, contact_id, name, company, handles, memories)
+          SELECT contact_rowid, contact_id, name, company, handles, memories
+          FROM contact_fts_source WHERE contact_id = NEW.id;
+        END;
+
+        CREATE TRIGGER IF NOT EXISTS trg_contacts_deleted_contact_fts
+        AFTER DELETE ON contacts BEGIN
+          DELETE FROM contacts_fts WHERE rowid = OLD.rowid;
+        END;
+
+        CREATE TRIGGER IF NOT EXISTS trg_contact_handles_inserted_contact_fts
+        AFTER INSERT ON contact_handles BEGIN
+          DELETE FROM contacts_fts
+          WHERE rowid = (SELECT rowid FROM contacts WHERE id = NEW.contact_id);
+          INSERT INTO contacts_fts (rowid, contact_id, name, company, handles, memories)
+          SELECT contact_rowid, contact_id, name, company, handles, memories
+          FROM contact_fts_source WHERE contact_id = NEW.contact_id;
+        END;
+
+        CREATE TRIGGER IF NOT EXISTS trg_contact_handles_updated_contact_fts
+        AFTER UPDATE OF contact_id, type, value ON contact_handles BEGIN
+          DELETE FROM contacts_fts
+          WHERE rowid IN (SELECT rowid FROM contacts WHERE id IN (OLD.contact_id, NEW.contact_id));
+          INSERT INTO contacts_fts (rowid, contact_id, name, company, handles, memories)
+          SELECT contact_rowid, contact_id, name, company, handles, memories
+          FROM contact_fts_source WHERE contact_id IN (OLD.contact_id, NEW.contact_id);
+        END;
+
+        CREATE TRIGGER IF NOT EXISTS trg_contact_handles_deleted_contact_fts
+        AFTER DELETE ON contact_handles BEGIN
+          DELETE FROM contacts_fts
+          WHERE rowid = (SELECT rowid FROM contacts WHERE id = OLD.contact_id);
+          INSERT INTO contacts_fts (rowid, contact_id, name, company, handles, memories)
+          SELECT contact_rowid, contact_id, name, company, handles, memories
+          FROM contact_fts_source WHERE contact_id = OLD.contact_id;
+        END;
+
+        CREATE TRIGGER IF NOT EXISTS trg_contact_memories_inserted_contact_fts
+        AFTER INSERT ON contact_memories BEGIN
+          DELETE FROM contacts_fts
+          WHERE rowid = (SELECT rowid FROM contacts WHERE id = NEW.contact_id);
+          INSERT INTO contacts_fts (rowid, contact_id, name, company, handles, memories)
+          SELECT contact_rowid, contact_id, name, company, handles, memories
+          FROM contact_fts_source WHERE contact_id = NEW.contact_id;
+        END;
+
+        CREATE TRIGGER IF NOT EXISTS trg_contact_memories_updated_contact_fts
+        AFTER UPDATE OF contact_id, body, stale_at ON contact_memories BEGIN
+          DELETE FROM contacts_fts
+          WHERE rowid IN (SELECT rowid FROM contacts WHERE id IN (OLD.contact_id, NEW.contact_id));
+          INSERT INTO contacts_fts (rowid, contact_id, name, company, handles, memories)
+          SELECT contact_rowid, contact_id, name, company, handles, memories
+          FROM contact_fts_source WHERE contact_id IN (OLD.contact_id, NEW.contact_id);
+        END;
+
+        CREATE TRIGGER IF NOT EXISTS trg_contact_memories_deleted_contact_fts
+        AFTER DELETE ON contact_memories BEGIN
+          DELETE FROM contacts_fts
+          WHERE rowid = (SELECT rowid FROM contacts WHERE id = OLD.contact_id);
+          INSERT INTO contacts_fts (rowid, contact_id, name, company, handles, memories)
+          SELECT contact_rowid, contact_id, name, company, handles, memories
+          FROM contact_fts_source WHERE contact_id = OLD.contact_id;
+        END;
+      `);
+    },
+  },
 ];

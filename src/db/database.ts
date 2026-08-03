@@ -165,6 +165,16 @@ export interface ContactMemoryRow {
   updated_at: number;
 }
 
+export interface ContactSearchRow {
+  id: string;
+  name: string | null;
+  company: string | null;
+  archived: number;
+  handles: string | null;
+  rank: number;
+  snippet: string;
+}
+
 export interface ContactMergeBatchInput {
   primaryContactId: string;
   secondaryContactId: string;
@@ -2323,6 +2333,50 @@ export class CuedDatabase {
       `,
       )
       .all(...params) as ContactMemoryRow[];
+  }
+
+  searchContacts(input: {
+    query: string;
+    limit?: number;
+    includeArchived?: boolean;
+  }): ContactSearchRow[] {
+    const terms = input.query
+      .trim()
+      .split(/\s+/)
+      .filter(Boolean)
+      .map((term) => `"${term.replaceAll('"', '""')}"*`);
+    if (terms.length === 0) {
+      throw new Error("Contact search query is required.");
+    }
+    const limit =
+      typeof input.limit === "number" && Number.isFinite(input.limit)
+        ? Math.max(1, Math.min(100, Math.trunc(input.limit)))
+        : 20;
+
+    return this.sqlite
+      .prepare(
+        `
+        SELECT
+          c.id,
+          c.name,
+          c.company,
+          c.archived,
+          (
+            SELECT GROUP_CONCAT(ch.type || ':' || ch.value, ' | ')
+            FROM contact_handles ch
+            WHERE ch.contact_id = c.id
+          ) AS handles,
+          bm25(contacts_fts, 0.0, 8.0, 4.0, 2.0, 1.0) AS rank,
+          snippet(contacts_fts, -1, '[', ']', '…', 16) AS snippet
+        FROM contacts_fts
+        JOIN contacts c ON c.id = contacts_fts.contact_id
+        WHERE contacts_fts MATCH ?
+          AND (? = 1 OR c.archived = 0)
+        ORDER BY rank ASC, c.name COLLATE NOCASE ASC
+        LIMIT ?
+      `,
+      )
+      .all(terms.join(" AND "), input.includeArchived ? 1 : 0, limit) as ContactSearchRow[];
   }
 
   markContactMemoryStale(id: string, staleAt: number | null = null): ContactMemoryRow | null {

@@ -155,6 +155,7 @@ Usage:
   cued integrations disable <platform> [account]
   cued contacts merge <primary-contact-id> <secondary-contact-id> [--reason TEXT]
   cued contacts merge-batch <merges.json> [--apply]
+  cued contacts search <query> [--limit N] [--include-archived]
   cued contacts memory add <contact-id> <memory> [--source SOURCE] [--confidence 0-100] [--evidence JSON] [--supersedes MEMORY_ID]
   cued contacts memory list <contact-id> [--limit N] [--include-stale]
   cued contacts memory stale <memory-id>
@@ -1166,6 +1167,27 @@ async function main(): Promise<void> {
       }
       throw new Error("Usage: cued sync run [source] | cued sync resume");
     case "contacts":
+      if (subcommand === "search") {
+        const query = parseFreeTextArgument(rest, 0);
+        if (!query) {
+          throw new Error("Usage: cued contacts search <query> [--limit N] [--include-archived]");
+        }
+        // Contact search owns a schema migration, so its first invocation after an
+        // upgrade must open the canonical writable database before reading it.
+        const db = openCuedDatabase();
+        try {
+          printJson(
+            db.searchContacts({
+              query,
+              limit: parseIntegerFlag(rest, "--limit"),
+              includeArchived: rest.includes("--include-archived"),
+            }),
+          );
+        } finally {
+          db.close();
+        }
+        return;
+      }
       if (subcommand === "memory" || subcommand === "memories") {
         const memoryCommand = rest[0];
         const args = rest.slice(1);

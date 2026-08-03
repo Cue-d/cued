@@ -165,4 +165,84 @@ describe("contacts memory CLI", () => {
       ],
     });
   });
+
+  it("searches canonical contacts across names, companies, handles, and current memories", () => {
+    const home = createHome();
+    const db = new CuedDatabase(join(home, "local.db"));
+    let memoryId: string;
+    try {
+      const sqlite = (
+        db as unknown as {
+          sqlite: {
+            prepare: (sql: string) => {
+              run: (...params: unknown[]) => void;
+            };
+          };
+        }
+      ).sqlite;
+      sqlite.prepare("UPDATE contacts SET company = ? WHERE id = ?").run("Acme Labs", "contact-1");
+      sqlite
+        .prepare(
+          "INSERT INTO contact_handles (id, contact_id, type, value, normalized_value, platform, account_key, is_deterministic, created_at, updated_at) VALUES (?, ?, 'email', ?, ?, 'gmail', 'default', 1, 1, 1)",
+        )
+        .run("handle-1", "contact-1", "ava@example.com", "ava@example.com");
+      memoryId = db.addContactMemory({
+        contactId: "contact-1",
+        body: "Interested in applied robotics",
+      }).id;
+    } finally {
+      db.close();
+    }
+
+    for (const query of ["Ava Ch", "Acme", "ava@example", "applied robot"]) {
+      const results = JSON.parse(runCli(home, ["contacts", "search", query])) as Array<{
+        id: string;
+      }>;
+      expect(results.map((row) => row.id)).toContain("contact-1");
+    }
+
+    const writableDb = new CuedDatabase(join(home, "local.db"));
+    try {
+      writableDb.markContactMemoryStale(memoryId);
+    } finally {
+      writableDb.close();
+    }
+    expect(JSON.parse(runCli(home, ["contacts", "search", "robotics"]))).toEqual([]);
+  });
+
+  it("applies the contact search migration on the first search after an upgrade", () => {
+    const home = createHome();
+    const db = new CuedDatabase(join(home, "local.db"));
+    try {
+      const sqlite = (
+        db as unknown as {
+          sqlite: {
+            exec: (sql: string) => void;
+          };
+        }
+      ).sqlite;
+      sqlite.exec(`
+        DROP TRIGGER trg_contacts_inserted_contact_fts;
+        DROP TRIGGER trg_contacts_updated_contact_fts;
+        DROP TRIGGER trg_contacts_deleted_contact_fts;
+        DROP TRIGGER trg_contact_handles_inserted_contact_fts;
+        DROP TRIGGER trg_contact_handles_updated_contact_fts;
+        DROP TRIGGER trg_contact_handles_deleted_contact_fts;
+        DROP TRIGGER trg_contact_memories_inserted_contact_fts;
+        DROP TRIGGER trg_contact_memories_updated_contact_fts;
+        DROP TRIGGER trg_contact_memories_deleted_contact_fts;
+        DROP VIEW contact_fts_source;
+        DROP TABLE contacts_fts;
+        DROP INDEX idx_contact_handles_contact_id;
+        DELETE FROM schema_migrations WHERE id = '0022_contact_fts';
+      `);
+    } finally {
+      db.close();
+    }
+
+    const results = JSON.parse(runCli(home, ["contacts", "search", "Ava"])) as Array<{
+      id: string;
+    }>;
+    expect(results.map((row) => row.id)).toEqual(["contact-1"]);
+  });
 });
