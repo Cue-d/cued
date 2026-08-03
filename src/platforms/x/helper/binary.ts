@@ -18,7 +18,7 @@ export function resolveXArchivePath(env: NodeJS.ProcessEnv = process.env): strin
   if (!existsSync(downloads)) return null;
   return (
     readdirSync(downloads)
-      .filter((name) => /(?:twitter|x).*(?:archive).*\.zip$/i.test(name))
+      .filter((name) => /^(?:twitter.*|x.*archive).*\.zip$/i.test(name))
       .map((name) => join(downloads, name))
       .sort((left, right) => statSync(right).mtimeMs - statSync(left).mtimeMs)[0] ?? null
   );
