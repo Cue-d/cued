@@ -53,7 +53,7 @@ export interface BirdclawSnapshot {
   }>;
   hasMore: boolean;
   nextPhase?: string;
-  nextEdgeOffset?: number;
+  nextRelationshipUserId?: string;
   nextMessageOffset?: number;
   totalMessageCount?: number;
   totalRelationshipCount?: number;
@@ -63,7 +63,9 @@ type BirdclawCursor = {
   generation: string | null;
   phase: "messages" | "relationships";
   messageOffset: number;
-  edgeOffset: number;
+  relationshipUserId: string | null;
+  totalMessageCount: number | null;
+  totalRelationshipCount: number | null;
 };
 
 function stableId(seed: string): string {
@@ -76,7 +78,12 @@ function parseCursor(value: unknown): BirdclawCursor {
     generation: typeof cursor.generation === "string" ? cursor.generation : null,
     phase: cursor.phase === "relationships" ? "relationships" : "messages",
     messageOffset: typeof cursor.messageOffset === "number" ? cursor.messageOffset : 0,
-    edgeOffset: typeof cursor.edgeOffset === "number" ? cursor.edgeOffset : 0,
+    relationshipUserId:
+      typeof cursor.relationshipUserId === "string" ? cursor.relationshipUserId : null,
+    totalMessageCount:
+      typeof cursor.totalMessageCount === "number" ? cursor.totalMessageCount : null,
+    totalRelationshipCount:
+      typeof cursor.totalRelationshipCount === "number" ? cursor.totalRelationshipCount : null,
   };
 }
 
@@ -93,10 +100,17 @@ async function readBirdclawSnapshot(cursor: BirdclawCursor): Promise<BirdclawSna
     cursor.phase,
     "--message-offset",
     String(cursor.messageOffset),
-    "--edge-offset",
-    String(cursor.edgeOffset),
   ];
+  if (cursor.relationshipUserId) {
+    args.push("--after-relationship-user-id", cursor.relationshipUserId);
+  }
   if (cursor.generation) args.push("--generation", cursor.generation);
+  if (cursor.totalMessageCount !== null) {
+    args.push("--known-message-count", String(cursor.totalMessageCount));
+  }
+  if (cursor.totalRelationshipCount !== null) {
+    args.push("--known-relationship-count", String(cursor.totalRelationshipCount));
+  }
   const { stdout } = await execFileAsync(helper, args, {
     timeout: 120_000,
     maxBuffer: 256 * 1024 * 1024,
@@ -284,13 +298,17 @@ export async function buildXSyncBundle(
         generation: snapshot.generation,
         phase: snapshot.nextPhase === "relationships" ? "relationships" : "messages",
         messageOffset: snapshot.nextMessageOffset ?? cursor.messageOffset,
-        edgeOffset: snapshot.nextEdgeOffset ?? 0,
+        relationshipUserId: snapshot.nextRelationshipUserId ?? cursor.relationshipUserId,
+        totalMessageCount: snapshot.totalMessageCount ?? cursor.totalMessageCount,
+        totalRelationshipCount: snapshot.totalRelationshipCount ?? cursor.totalRelationshipCount,
       }
     : {
         generation: snapshot.generation,
         phase: "messages",
         messageOffset: 0,
-        edgeOffset: 0,
+        relationshipUserId: null,
+        totalMessageCount: snapshot.totalMessageCount ?? null,
+        totalRelationshipCount: snapshot.totalRelationshipCount ?? null,
       };
   return {
     sourceAccounts: [

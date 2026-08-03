@@ -111,7 +111,12 @@ describe("Birdclaw X sync bundle", () => {
     const bundle = await buildXSyncBundle(
       {},
       {
-        snapshot: { ...snapshot, hasMore: true, nextPhase: "relationships", nextEdgeOffset: 10 },
+        snapshot: {
+          ...snapshot,
+          hasMore: true,
+          nextPhase: "relationships",
+          nextRelationshipUserId: "20",
+        },
         sourceCursor: { messageOffset: 0 },
       },
     );
@@ -120,7 +125,9 @@ describe("Birdclaw X sync bundle", () => {
       generation: "archive-v1",
       phase: "relationships",
       messageOffset: 1,
-      edgeOffset: 10,
+      relationshipUserId: "20",
+      totalMessageCount: 1,
+      totalRelationshipCount: 2,
     });
     expect(bundle.proofs?.[0]?.status).toBe("running");
   });

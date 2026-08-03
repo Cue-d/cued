@@ -1441,7 +1441,6 @@ function projectContactSnapshotCompleted(
           youFollow: false,
           mutual: false,
         }),
-        lastSeenAt: event.observed_at,
       })
       .where(eq(contactSources.id, source.id))
       .run();

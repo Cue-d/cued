@@ -3,10 +3,12 @@ package main
 import (
 	"archive/zip"
 	"bufio"
+	"container/heap"
 	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -81,7 +83,7 @@ type syncResult struct {
 	ArchivePath            string            `json:"archivePath"`
 	Generation             string            `json:"generation"`
 	NextPhase              string            `json:"nextPhase,omitempty"`
-	NextEdgeOffset         int               `json:"nextEdgeOffset,omitempty"`
+	NextRelationshipUserID string            `json:"nextRelationshipUserId,omitempty"`
 	NextMessageOffset      int               `json:"nextMessageOffset,omitempty"`
 	TotalMessageCount      int               `json:"totalMessageCount"`
 	TotalRelationshipCount int               `json:"totalRelationshipCount"`
@@ -94,12 +96,14 @@ type syncResult struct {
 }
 
 type archiveData struct {
-	account       accountRow
-	profiles      map[string]profileRow
-	conversations map[string]conversationRow
-	messages      []messageRow
-	followEdges   []followEdgeRow
-	totalMessages int
+	account             accountRow
+	profiles            map[string]profileRow
+	conversations       map[string]conversationRow
+	messages            []messageRow
+	followEdges         []followEdgeRow
+	totalMessages       int
+	totalRelationships  int
+	relationshipHasMore bool
 }
 
 func main() {
@@ -148,7 +152,9 @@ func runSync(args []string) {
 	messageOffset := flags.Int("message-offset", 0, "message cursor offset")
 	expectedGeneration := flags.String("generation", "", "archive generation for the cursor")
 	phase := flags.String("phase", "messages", "messages or relationships")
-	edgeOffset := flags.Int("edge-offset", 0, "relationship cursor offset")
+	afterRelationshipUserID := flags.String("after-relationship-user-id", "", "exclusive relationship user id cursor")
+	knownMessageCount := flags.Int("known-message-count", -1, "known generation message total")
+	knownRelationshipCount := flags.Int("known-relationship-count", -1, "known generation relationship total")
 	limit := flags.Int("limit", defaultLimit, "maximum messages per page")
 	if err := flags.Parse(args); err != nil {
 		fail(err)
@@ -165,9 +171,10 @@ func runSync(args []string) {
 		fail(err)
 	}
 	if *expectedGeneration != "" && *expectedGeneration != generation {
-		*messageOffset, *phase, *edgeOffset = 0, "messages", 0
+		*messageOffset, *phase, *afterRelationshipUserID = 0, "messages", ""
+		*knownMessageCount, *knownRelationshipCount = -1, -1
 	}
-	data, err := readArchivePage(resolved, *messageOffset, *limit)
+	data, err := readArchivePage(resolved, *phase, *messageOffset, *afterRelationshipUserID, *knownMessageCount, *knownRelationshipCount, *limit)
 	if err != nil {
 		fail(err)
 	}
@@ -175,24 +182,17 @@ func runSync(args []string) {
 		HelperVersion: helperVersion, ProtocolVersion: protocolVersion, ArchivePath: resolved,
 		Generation: generation, Account: data.account, Profiles: []profileRow{},
 		Conversations: []conversationRow{}, Messages: []messageRow{}, FollowEdges: []followEdgeRow{},
-		TotalMessageCount: data.totalMessages, TotalRelationshipCount: len(data.followEdges),
+		TotalMessageCount: data.totalMessages, TotalRelationshipCount: data.totalRelationships,
 	}
 	if *phase == "relationships" {
-		start := max(0, *edgeOffset)
-		if start > len(data.followEdges) {
-			start = len(data.followEdges)
-		}
-		end := min(start+*limit, len(data.followEdges))
-		for end < len(data.followEdges) && end > start &&
-			data.followEdges[end].ProfileID == data.followEdges[end-1].ProfileID {
-			end++
-		}
-		result.FollowEdges = data.followEdges[start:end]
+		result.FollowEdges = data.followEdges
 		result.Profiles = profilesForEdges(result.FollowEdges, data.profiles)
-		result.HasMore = end < len(data.followEdges)
+		result.HasMore = data.relationshipHasMore
 		if result.HasMore {
 			result.NextPhase = "relationships"
-			result.NextEdgeOffset = end
+			if len(data.followEdges) > 0 {
+				result.NextRelationshipUserID = data.followEdges[len(data.followEdges)-1].ExternalUserID
+			}
 		}
 	} else {
 		filtered := data.messages
@@ -200,10 +200,10 @@ func runSync(args []string) {
 		result.Messages = filtered
 		result.Conversations, result.Profiles = entitiesForMessages(filtered, data)
 		result.NextMessageOffset = *messageOffset + len(filtered)
-		result.HasMore = moreMessages || len(data.followEdges) > 0
+		result.HasMore = moreMessages || data.totalRelationships > 0
 		if moreMessages {
 			result.NextPhase = "messages"
-		} else if len(data.followEdges) > 0 {
+		} else if data.totalRelationships > 0 {
 			result.NextPhase = "relationships"
 		}
 	}
@@ -261,10 +261,10 @@ func archiveGeneration(path string) (string, error) {
 }
 
 func readArchive(path string) (archiveData, error) {
-	return readArchivePage(path, 0, int(^uint(0)>>1))
+	return readArchivePage(path, "messages", 0, "", -1, -1, int(^uint(0)>>1))
 }
 
-func readArchivePage(path string, messageOffset, messageLimit int) (archiveData, error) {
+func readArchivePage(path, phase string, messageOffset int, afterRelationshipUserID string, knownMessageCount, knownRelationshipCount, limit int) (archiveData, error) {
 	reader, err := zip.OpenReader(path)
 	if err != nil {
 		return archiveData{}, fmt.Errorf("open X archive: %w", err)
@@ -291,141 +291,301 @@ func readArchivePage(path string, messageOffset, messageLimit int) (archiveData,
 	if result.account.ID == "" {
 		return archiveData{}, errors.New("X archive account id is missing")
 	}
-	mentionDirectory := readMentionDirectory(reader.File)
-	for _, file := range reader.File {
-		if dmEntryPattern.MatchString(normalizePath(file.Name)) {
-			if err := parseDMEntry(file, &result, mentionDirectory, messageOffset, messageLimit); err != nil {
-				return archiveData{}, err
-			}
+	if phase == "relationships" {
+		if knownMessageCount >= 0 {
+			result.totalMessages = knownMessageCount
 		}
-	}
-	for _, input := range []struct {
-		pattern   *regexp.Regexp
-		direction string
-		key       string
-	}{{followerEntryPattern, "followers", "follower"}, {followingEntryPattern, "following", "following"}} {
+		if err := readRelationshipPage(reader.File, &result, afterRelationshipUserID, limit); err != nil {
+			return archiveData{}, err
+		}
+	} else {
 		for _, file := range reader.File {
-			if input.pattern.MatchString(normalizePath(file.Name)) {
-				if err := parseFollowEntry(file, &result, mentionDirectory, input.direction, input.key); err != nil {
+			if dmEntryPattern.MatchString(normalizePath(file.Name)) {
+				if err := parseDMEntry(file, &result, messageOffset, limit); err != nil {
 					return archiveData{}, err
 				}
 			}
 		}
-	}
-	sort.Slice(result.followEdges, func(i, j int) bool {
-		if result.followEdges[i].ProfileID == result.followEdges[j].ProfileID {
-			return result.followEdges[i].Direction < result.followEdges[j].Direction
+		if knownRelationshipCount >= 0 {
+			result.totalRelationships = knownRelationshipCount
+		} else {
+			count, err := countRelationshipEdges(reader.File)
+			if err != nil {
+				return archiveData{}, err
+			}
+			result.totalRelationships = count
 		}
-		return result.followEdges[i].ProfileID < result.followEdges[j].ProfileID
-	})
+	}
+	enrichProfilesFromMentions(reader.File, result.profiles)
 	return result, nil
 }
 
-func parseDMEntry(file *zip.File, result *archiveData, directory map[string]profileRow, messageOffset, messageLimit int) error {
-	return forEachRecord(file, func(record map[string]any) error {
-		conversation := asMap(record["dmConversation"])
-		conversationID := stringValue(conversation["conversationId"])
-		if conversationID == "" {
-			return nil
+func parseDMEntry(file *zip.File, result *archiveData, messageOffset, messageLimit int) error {
+	reader, decoder, err := archiveArrayDecoder(file)
+	if err != nil {
+		return err
+	}
+	defer reader.Close()
+	for decoder.More() {
+		if token, err := decoder.Token(); err != nil || token != json.Delim('{') {
+			return fmt.Errorf("read %s record: %w", file.Name, err)
 		}
-		participantSet := make(map[string]bool)
-		messages := asSlice(conversation["messages"])
-		lastMessageAt := ""
-		selectedConversation := false
-		for _, rawEvent := range messages {
-			event := asMap(rawEvent)
-			messageCreate := asMap(event["messageCreate"])
-			if len(messageCreate) == 0 {
-				for _, userID := range participantIDs(event) {
-					participantSet[userID] = true
+		for decoder.More() {
+			keyToken, err := decoder.Token()
+			if err != nil {
+				return err
+			}
+			if keyToken != "dmConversation" {
+				var ignored any
+				if err := decoder.Decode(&ignored); err != nil {
+					return err
 				}
 				continue
 			}
-			senderID := stringValue(messageCreate["senderId"])
-			recipientID := stringValue(messageCreate["recipientId"])
-			if senderID != "" {
-				participantSet[senderID] = true
-			}
-			if recipientID != "" {
-				participantSet[recipientID] = true
-			}
-			messageIndex := result.totalMessages
-			result.totalMessages++
-			if messageIndex < messageOffset || len(result.messages) >= messageLimit {
-				continue
-			}
-			selectedConversation = true
-			messageID := firstNonEmpty(stringValue(messageCreate["id"]), conversationID+"-"+senderID+"-"+strconv.Itoa(messageIndex))
-			createdAt := parseTwitterDate(stringValue(messageCreate["createdAt"]))
-			direction := "inbound"
-			if senderID == result.account.ExternalUserID {
-				direction = "outbound"
-			} else if senderID != "" {
-				ensureProfile(result, directory, senderID)
-			}
-			result.messages = append(result.messages, messageRow{
-				ID: messageID, ConversationID: conversationID, SenderProfileID: profileID(senderID),
-				Text: stringValue(messageCreate["text"]), CreatedAt: createdAt, Direction: direction,
-			})
-			if createdAt > lastMessageAt {
-				lastMessageAt = createdAt
+			if err := parseDMConversation(decoder, result, messageOffset, messageLimit); err != nil {
+				return err
 			}
 		}
-		participants := make([]string, 0, len(participantSet))
-		for userID := range participantSet {
-			if userID != "" && userID != result.account.ExternalUserID {
-				participants = append(participants, userID)
-				ensureProfile(result, directory, userID)
-			}
-		}
-		sort.Strings(participants)
-		if selectedConversation {
-			result.conversations[conversationID] = conversationRow{
-				ID: conversationID, ParticipantIDs: participants,
-				Title:         firstNonEmpty(stringValue(conversation["name"]), conversationTitle(participants, result.profiles)),
-				LastMessageAt: lastMessageAt, IsGroup: len(participants) > 1 || stringValue(conversation["name"]) != "",
-			}
-		}
-		return nil
-	})
-}
-
-func participantIDs(event map[string]any) []string {
-	result := []string{}
-	for _, input := range []struct {
-		key  string
-		list string
-	}{{"joinConversation", "participantsSnapshot"}, {"participantsJoin", "userIds"}, {"participantsLeave", "userIds"}} {
-		payload := asMap(event[input.key])
-		for _, value := range asSlice(payload[input.list]) {
-			if userID := stringValue(value); userID != "" {
-				result = append(result, userID)
-			}
-		}
-		if userID := stringValue(payload["initiatingUserId"]); userID != "" {
-			result = append(result, userID)
+		if _, err := decoder.Token(); err != nil {
+			return err
 		}
 	}
-	return result
+	return nil
 }
 
-func parseFollowEntry(file *zip.File, result *archiveData, directory map[string]profileRow, direction, key string) error {
-	return forEachRecord(file, func(record map[string]any) error {
-		item := asMap(record[key])
-		userID := stringValue(item["accountId"])
-		if userID == "" {
-			return nil
+func parseDMConversation(decoder *json.Decoder, result *archiveData, messageOffset, messageLimit int) error {
+	if token, err := decoder.Token(); err != nil || token != json.Delim('{') {
+		return fmt.Errorf("read dmConversation: %w", err)
+	}
+	conversationID, name := "", ""
+	membership := map[string]bool{}
+	knownMembership := map[string]bool{}
+	selected := []messageRow{}
+	lastMessageAt := ""
+	for decoder.More() {
+		keyToken, err := decoder.Token()
+		if err != nil {
+			return err
 		}
-		ensureProfile(result, directory, userID)
-		result.followEdges = append(result.followEdges, followEdgeRow{
-			Direction: direction, ProfileID: profileID(userID), ExternalUserID: userID, Source: "archive",
-		})
+		key := keyToken.(string)
+		switch key {
+		case "conversationId":
+			if err := decoder.Decode(&conversationID); err != nil {
+				return err
+			}
+		case "name":
+			if err := decoder.Decode(&name); err != nil {
+				return err
+			}
+		case "messages":
+			if token, err := decoder.Token(); err != nil || token != json.Delim('[') {
+				return err
+			}
+			for decoder.More() {
+				var event map[string]any
+				if err := decoder.Decode(&event); err != nil {
+					return err
+				}
+				applyMembershipEvent(event, membership, knownMembership)
+				messageCreate := asMap(event["messageCreate"])
+				if len(messageCreate) == 0 {
+					continue
+				}
+				messageIndex := result.totalMessages
+				result.totalMessages++
+				if messageIndex < messageOffset || len(result.messages)+len(selected) >= messageLimit {
+					continue
+				}
+				senderID := stringValue(messageCreate["senderId"])
+				createdAt := parseTwitterDate(stringValue(messageCreate["createdAt"]))
+				direction := "inbound"
+				if senderID == result.account.ExternalUserID {
+					direction = "outbound"
+				}
+				selected = append(selected, messageRow{ID: firstNonEmpty(stringValue(messageCreate["id"]), "message-"+strconv.Itoa(messageIndex)), SenderProfileID: profileID(senderID), Text: stringValue(messageCreate["text"]), CreatedAt: createdAt, Direction: direction})
+				if createdAt > lastMessageAt {
+					lastMessageAt = createdAt
+				}
+			}
+			if _, err := decoder.Token(); err != nil {
+				return err
+			}
+		default:
+			var ignored any
+			if err := decoder.Decode(&ignored); err != nil {
+				return err
+			}
+		}
+	}
+	if _, err := decoder.Token(); err != nil {
+		return err
+	}
+	if conversationID == "" || len(selected) == 0 {
 		return nil
-	})
+	}
+	participants := []string{}
+	for userID, active := range membership {
+		if active && userID != "" && userID != result.account.ExternalUserID {
+			participants = append(participants, userID)
+			ensureProfile(result, userID)
+		}
+	}
+	sort.Strings(participants)
+	for index := range selected {
+		selected[index].ConversationID = conversationID
+		if strings.HasPrefix(selected[index].ID, "message-") {
+			selected[index].ID = conversationID + "-" + selected[index].ID
+		}
+		if selected[index].Direction != "outbound" {
+			ensureProfile(result, strings.TrimPrefix(selected[index].SenderProfileID, "profile_user_"))
+		}
+	}
+	result.messages = append(result.messages, selected...)
+	result.conversations[conversationID] = conversationRow{ID: conversationID, ParticipantIDs: participants, Title: firstNonEmpty(name, conversationTitle(participants, result.profiles)), LastMessageAt: lastMessageAt, IsGroup: len(participants) > 1 || name != ""}
+	return nil
 }
 
-func readMentionDirectory(files []*zip.File) map[string]profileRow {
-	directory := make(map[string]profileRow)
+func applyMembershipEvent(event map[string]any, membership, known map[string]bool) {
+	setIfUnknown := func(userID string, active bool) {
+		if userID == "" || known[userID] {
+			return
+		}
+		known[userID], membership[userID] = true, active
+	}
+	if payload := asMap(event["participantsLeave"]); len(payload) > 0 {
+		for _, value := range asSlice(payload["userIds"]) {
+			setIfUnknown(stringValue(value), false)
+		}
+		setIfUnknown(stringValue(payload["initiatingUserId"]), false)
+	}
+	if payload := asMap(event["participantsJoin"]); len(payload) > 0 {
+		for _, value := range asSlice(payload["userIds"]) {
+			setIfUnknown(stringValue(value), true)
+		}
+		setIfUnknown(stringValue(payload["initiatingUserId"]), true)
+	}
+	if payload := asMap(event["joinConversation"]); len(payload) > 0 {
+		for _, value := range asSlice(payload["participantsSnapshot"]) {
+			setIfUnknown(stringValue(value), true)
+		}
+	}
+	if payload := asMap(event["messageCreate"]); len(payload) > 0 {
+		setIfUnknown(stringValue(payload["senderId"]), true)
+		setIfUnknown(stringValue(payload["recipientId"]), true)
+	}
+}
+
+type userIDMaxHeap []string
+
+func (items userIDMaxHeap) Len() int           { return len(items) }
+func (items userIDMaxHeap) Less(i, j int) bool { return items[i] > items[j] }
+func (items userIDMaxHeap) Swap(i, j int)      { items[i], items[j] = items[j], items[i] }
+func (items *userIDMaxHeap) Push(value any)    { *items = append(*items, value.(string)) }
+func (items *userIDMaxHeap) Pop() any {
+	old := *items
+	last := old[len(old)-1]
+	*items = old[:len(old)-1]
+	return last
+}
+
+var followInputs = []struct {
+	pattern        *regexp.Regexp
+	direction, key string
+}{
+	{followerEntryPattern, "followers", "follower"},
+	{followingEntryPattern, "following", "following"},
+}
+
+func scanFollowRecords(files []*zip.File, visit func(direction, userID string)) error {
+	for _, input := range followInputs {
+		for _, file := range files {
+			if !input.pattern.MatchString(normalizePath(file.Name)) {
+				continue
+			}
+			if err := forEachRecord(file, func(record map[string]any) error {
+				userID := stringValue(asMap(record[input.key])["accountId"])
+				if userID != "" {
+					visit(input.direction, userID)
+				}
+				return nil
+			}); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func countRelationshipEdges(files []*zip.File) (int, error) {
+	count := 0
+	err := scanFollowRecords(files, func(_, _ string) { count++ })
+	return count, err
+}
+
+func readRelationshipPage(files []*zip.File, result *archiveData, afterUserID string, limit int) error {
+	candidates := &userIDMaxHeap{}
+	heap.Init(candidates)
+	selected := map[string]bool{}
+	total := 0
+	if err := scanFollowRecords(files, func(_ string, userID string) {
+		total++
+		if userID <= afterUserID || selected[userID] {
+			return
+		}
+		if candidates.Len() < limit {
+			heap.Push(candidates, userID)
+			selected[userID] = true
+			return
+		}
+		if userID >= (*candidates)[0] {
+			return
+		}
+		delete(selected, heap.Pop(candidates).(string))
+		heap.Push(candidates, userID)
+		selected[userID] = true
+	}); err != nil {
+		return err
+	}
+	userIDs := make([]string, 0, len(selected))
+	for userID := range selected {
+		userIDs = append(userIDs, userID)
+	}
+	sort.Strings(userIDs)
+	directions := map[string]map[string]bool{}
+	if err := scanFollowRecords(files, func(direction, userID string) {
+		if !selected[userID] {
+			return
+		}
+		if directions[userID] == nil {
+			directions[userID] = map[string]bool{}
+		}
+		directions[userID][direction] = true
+	}); err != nil {
+		return err
+	}
+	for _, userID := range userIDs {
+		ensureProfile(result, userID)
+		for _, direction := range []string{"followers", "following"} {
+			if directions[userID][direction] {
+				result.followEdges = append(result.followEdges, followEdgeRow{Direction: direction, ProfileID: profileID(userID), ExternalUserID: userID, Source: "archive"})
+			}
+		}
+	}
+	result.totalRelationships = total
+	if len(userIDs) > 0 {
+		last := userIDs[len(userIDs)-1]
+		if err := scanFollowRecords(files, func(_ string, userID string) {
+			if userID > last {
+				result.relationshipHasMore = true
+			}
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func enrichProfilesFromMentions(files []*zip.File, profiles map[string]profileRow) {
 	for _, file := range files {
 		if !tweetEntryPattern.MatchString(normalizePath(file.Name)) {
 			continue
@@ -436,10 +596,11 @@ func readMentionDirectory(files []*zip.File) map[string]profileRow {
 			for _, rawMention := range asSlice(entities["user_mentions"]) {
 				mention := asMap(rawMention)
 				userID := firstNonEmpty(stringValue(mention["id_str"]), stringValue(mention["id"]))
-				if userID != "" {
+				id := profileID(userID)
+				if _, wanted := profiles[id]; wanted {
 					handle := stringValue(mention["screen_name"])
-					directory[userID] = profileRow{
-						ID: profileID(userID), Handle: handle,
+					profiles[id] = profileRow{
+						ID: id, Handle: handle,
 						DisplayName: firstNonEmpty(stringValue(mention["name"]), handle, "X user "+userID),
 					}
 				}
@@ -447,19 +608,32 @@ func readMentionDirectory(files []*zip.File) map[string]profileRow {
 			return nil
 		})
 	}
-	return directory
 }
 
-func ensureProfile(result *archiveData, directory map[string]profileRow, userID string) {
+func ensureProfile(result *archiveData, userID string) {
 	id := profileID(userID)
 	if _, exists := result.profiles[id]; exists {
 		return
 	}
-	profile, exists := directory[userID]
-	if !exists {
-		profile = profileRow{ID: id, DisplayName: "X user " + userID}
+	result.profiles[id] = profileRow{ID: id, DisplayName: "X user " + userID}
+}
+
+func archiveArrayDecoder(file *zip.File) (io.ReadCloser, *json.Decoder, error) {
+	reader, err := file.Open()
+	if err != nil {
+		return nil, nil, err
 	}
-	result.profiles[id] = profile
+	buffered := bufio.NewReader(reader)
+	if _, err := buffered.ReadString('='); err != nil {
+		reader.Close()
+		return nil, nil, fmt.Errorf("read %s assignment: %w", file.Name, err)
+	}
+	decoder := json.NewDecoder(buffered)
+	if token, err := decoder.Token(); err != nil || token != json.Delim('[') {
+		reader.Close()
+		return nil, nil, fmt.Errorf("read %s array: %w", file.Name, err)
+	}
+	return reader, decoder, nil
 }
 
 func forEachRecord(file *zip.File, visit func(map[string]any) error) error {
