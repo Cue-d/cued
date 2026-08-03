@@ -8,7 +8,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const { execFileSyncMock } = vi.hoisted(() => ({
@@ -200,8 +200,13 @@ describe("cued skill installer", () => {
     );
   });
 
-  it("ships the self-driving CRM reference and its eval contracts with the Cued skill", () => {
-    const skillRoot = resolve("skills", "cued");
+  it("keeps the self-driving CRM reference and eval contracts in the Cued skill source", () => {
+    delete process.env.CUED_APP_PATH;
+    const skillRoot = resolveCuedSkillSourcePath();
+    expect(skillRoot).not.toBeNull();
+    if (!skillRoot) {
+      throw new Error("Cued skill source was not found");
+    }
     const skill = readFileSync(join(skillRoot, "SKILL.md"), "utf8");
     const referencePath = join(skillRoot, "references", "self-driving-crm.md");
 
