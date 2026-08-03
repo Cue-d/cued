@@ -126,6 +126,46 @@ describe("contacts memory CLI", () => {
     ).toThrow();
   });
 
+  it("dry-runs contact merge batches from a JSON file", () => {
+    const home = createHome();
+    insertContact(home, "contact-2", "Ava Duplicate");
+    const batchPath = join(home, "merge-batch.json");
+    writeFileSync(
+      batchPath,
+      JSON.stringify([
+        {
+          primaryContactId: "contact-1",
+          secondaryContactId: "contact-2",
+          reason: "exact email match",
+        },
+      ]),
+    );
+
+    const result = JSON.parse(runCli(home, ["contacts", "merge-batch", batchPath])) as {
+      applied: boolean;
+      mergeCount: number;
+      decisions: Array<{
+        primaryContactId: string;
+        secondaryContactId: string;
+        canonicalContactId: string;
+        reason: string;
+      }>;
+    };
+
+    expect(result).toMatchObject({
+      applied: false,
+      mergeCount: 1,
+      decisions: [
+        {
+          primaryContactId: "contact-1",
+          secondaryContactId: "contact-2",
+          canonicalContactId: "contact-1",
+          reason: "exact email match",
+        },
+      ],
+    });
+  });
+
   it("searches canonical contacts across names, companies, handles, and current memories", () => {
     const home = createHome();
     const db = new CuedDatabase(join(home, "local.db"));
@@ -204,45 +244,5 @@ describe("contacts memory CLI", () => {
       id: string;
     }>;
     expect(results.map((row) => row.id)).toEqual(["contact-1"]);
-  });
-
-  it("dry-runs contact merge batches from a JSON file", () => {
-    const home = createHome();
-    insertContact(home, "contact-2", "Ava Duplicate");
-    const batchPath = join(home, "merge-batch.json");
-    writeFileSync(
-      batchPath,
-      JSON.stringify([
-        {
-          primaryContactId: "contact-1",
-          secondaryContactId: "contact-2",
-          reason: "exact email match",
-        },
-      ]),
-    );
-
-    const result = JSON.parse(runCli(home, ["contacts", "merge-batch", batchPath])) as {
-      applied: boolean;
-      mergeCount: number;
-      decisions: Array<{
-        primaryContactId: string;
-        secondaryContactId: string;
-        canonicalContactId: string;
-        reason: string;
-      }>;
-    };
-
-    expect(result).toMatchObject({
-      applied: false,
-      mergeCount: 1,
-      decisions: [
-        {
-          primaryContactId: "contact-1",
-          secondaryContactId: "contact-2",
-          canonicalContactId: "contact-1",
-          reason: "exact email match",
-        },
-      ],
-    });
   });
 });
