@@ -28,7 +28,11 @@ import {
   buildAdapterInvocationEnv,
   selectAdapterInvocationProofs,
 } from "../../platforms/core/invocation.js";
-import { isAdapterPlatform, listAutoSyncPlatforms } from "../../platforms/core/registry.js";
+import {
+  getAdapterDefinition,
+  isAdapterPlatform,
+  listAutoSyncPlatforms,
+} from "../../platforms/core/registry.js";
 import { isAdapterWorkerError, runAdapter } from "../../platforms/core/runner.js";
 import { loadIntegrationSecret } from "../../platforms/core/secrets/keychain.js";
 import { refreshLocalIntegrationStates } from "../../platforms/core/state/local-refresh.js";
@@ -407,8 +411,10 @@ export function getAutoSyncTargets(
 
   const enabled = db
     .listEnabledSyncTargets()
-    .filter((target): target is { platform: AdapterPlatform; account_key: string } =>
-      isAdapterPlatform(target.platform),
+    .filter(
+      (target): target is { platform: AdapterPlatform; account_key: string } =>
+        isAdapterPlatform(target.platform) &&
+        getAdapterDefinition(target.platform)?.autoSync === true,
     )
     .map((target) => ({
       platform: target.platform,
@@ -5372,7 +5378,8 @@ async function dispatchRequest(
               wakeIngest: schedulers.wakeIngest,
               onRuntimeStateChanged: onAuthRuntimeStateChanged,
               shouldQueueAuthenticatedSync: (platform) =>
-                platform !== "whatsapp" || shouldRunRealtimePlatform("whatsapp"),
+                getAdapterDefinition(platform)?.autoSync === true &&
+                (platform !== "whatsapp" || shouldRunRealtimePlatform("whatsapp")),
               emitAuthenticatedHook: async (platform, accountKey) => {
                 await emitAuthenticatedHook(db, platform, accountKey);
               },

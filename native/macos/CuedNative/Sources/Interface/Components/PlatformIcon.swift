@@ -103,6 +103,10 @@ public struct PlatformIcon: View {
         .font(.system(size: 14, weight: .black, design: .rounded))
         .foregroundStyle(.white)
         .offset(y: 0.5)
+    case "x":
+      Text("X")
+        .font(.system(size: 14, weight: .bold, design: .rounded))
+        .foregroundStyle(.white)
     case "signal":
       ZStack {
         ZStack {

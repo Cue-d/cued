@@ -35,6 +35,12 @@ QR or device-linking flows are acceptable when they are the platform's normal lo
 
 Shared or managed app credentials must be injected at release time or supplied through local environment/config overrides for source builds. They must not be committed.
 
+## X
+
+X archive support ports only the useful normalization behavior from [Birdclaw](https://github.com/steipete/birdclaw) and the small Go-adapter pattern from [Clawdex](https://github.com/openclaw/clawdex). The bundled helper reads an X archive zip directly; Cued does not install, invoke, or read the database of either project.
+
+Put the exported `twitter*.zip` or `x*archive*.zip` in `~/Downloads`, or set `CUED_X_ARCHIVE_PATH`. Cued imports DM contacts, conversations, messages, and follower/following relationships into `~/.cued/local.db`; current mutual state and its archive generation live in `contact_sources.metadata_json`. Sync is manual because the archive is a point-in-time export: run `cued sync run x` after replacing it.
+
 ## Telegram
 
 Telegram is deferred for the public OSS launch.

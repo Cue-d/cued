@@ -109,6 +109,14 @@ const PROOF_KIND_CONTRACTS: SyncProofKindContract[] = [
     invalidatedBy: "A later helper resync reports additional pages or a newer message range.",
     resumeCursorMeans: "The WhatsApp helper resync cursor and selected since timestamp.",
   },
+  {
+    platform: "x",
+    proofKind: "messages",
+    scopeKind: "account",
+    completeMeans: "All DMs and relationship edges in the selected X archive generation were read.",
+    invalidatedBy: "The selected X archive zip is replaced with a different generation.",
+    resumeCursorMeans: "The archive generation plus DM or relationship page boundary.",
+  },
 ];
 
 export function listSyncProofKindContracts(platform?: AdapterPlatform): SyncProofKindContract[] {

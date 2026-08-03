@@ -704,6 +704,7 @@ function buildSetupIntegrations(
     "linkedin",
     "whatsapp",
     "signal",
+    "x",
   ];
   const byPlatform = new Map<Platform, IntegrationStateSummary>();
   for (const integration of existingIntegrations ?? listIntegrationStates(db, options)) {

@@ -29,6 +29,7 @@ APP_PERMISSIONS_ENTITLEMENTS="$ROOT_DIR/scripts/packaging/app-permissions.entitl
 SIGNAL_HELPER_SOURCE_DIR="$ROOT_DIR/native/helpers/signal-cli/.build/cued-signal-cli"
 SLACK_HELPER_SOURCE="$ROOT_DIR/native/helpers/slack-go/.build/cued-slack-helper"
 WHATSAPP_HELPER_SOURCE="$ROOT_DIR/native/helpers/whatsapp-go/.build/cued-whatsapp-helper"
+BIRDCLAW_HELPER_SOURCE="$ROOT_DIR/native/helpers/birdclaw-go/.build/cued-birdclaw-helper"
 PERMISSIONS_SCRIPT_SOURCE="$ROOT_DIR/scripts/request-macos-access.sh"
 APP_ICON_SOURCE="$ROOT_DIR/native/macos/CuedNative/Resources/AppIcon.icns"
 TRAY_ICON_SOURCE="$ROOT_DIR/native/macos/CuedNative/Resources/trayIconTemplate.png"
@@ -240,6 +241,8 @@ mkdir -p "$(dirname "$SLACK_HELPER_SOURCE")"
 (cd "$ROOT_DIR/native/helpers/slack-go" && GOWORK=off go build -o "$SLACK_HELPER_SOURCE" .) >/dev/null
 mkdir -p "$(dirname "$WHATSAPP_HELPER_SOURCE")"
 (cd "$ROOT_DIR/native/helpers/whatsapp-go" && GOWORK=off go build -o "$WHATSAPP_HELPER_SOURCE" .) >/dev/null
+mkdir -p "$(dirname "$BIRDCLAW_HELPER_SOURCE")"
+(cd "$ROOT_DIR/native/helpers/birdclaw-go" && GOWORK=off go build -o "$BIRDCLAW_HELPER_SOURCE" .) >/dev/null
 npm_config_ignore_scripts=true pnpm --dir "$ROOT_DIR" --filter . deploy --legacy --prod "$DEPLOY_STAGING_DIR" >/dev/null
 copy_better_sqlite3_binary
 
@@ -270,6 +273,8 @@ cp "$SLACK_HELPER_SOURCE" "$HELPERS_DIR/cued-slack-helper"
 chmod +x "$HELPERS_DIR/cued-slack-helper"
 cp "$WHATSAPP_HELPER_SOURCE" "$HELPERS_DIR/cued-whatsapp-helper"
 chmod +x "$HELPERS_DIR/cued-whatsapp-helper"
+cp "$BIRDCLAW_HELPER_SOURCE" "$HELPERS_DIR/cued-birdclaw-helper"
+chmod +x "$HELPERS_DIR/cued-birdclaw-helper"
 
 if [[ -z "$BETTER_SQLITE3_BINDING_SOURCE" ]]; then
   echo "better-sqlite3-multiple-ciphers native binding not found in node_modules" >&2
@@ -418,6 +423,7 @@ if [[ -f "\$SCRIPT_DIR/oauth/google-oauth-client.json" ]]; then
 fi
 export CUED_SLACK_HELPER_BINARY="\${CUED_SLACK_HELPER_BINARY:-\$SCRIPT_DIR/helpers/cued-slack-helper}"
 export CUED_WHATSAPP_HELPER_BINARY="\${CUED_WHATSAPP_HELPER_BINARY:-\$SCRIPT_DIR/helpers/cued-whatsapp-helper}"
+export CUED_X_ARCHIVE_HELPER_BINARY="\${CUED_X_ARCHIVE_HELPER_BINARY:-\$SCRIPT_DIR/helpers/cued-birdclaw-helper}"
 export CUED_APP_VERSION="$APP_VERSION"
 export CUED_RELEASE_CHANNEL="$RELEASE_CHANNEL"
 exec "\$NODE_BIN" "\$RUNTIME_ROOT/dist/cli.js" "\$@"

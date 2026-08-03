@@ -19,7 +19,7 @@ export type NormalizedProjectedRawEvent = {
 };
 
 const CANONICAL_SCHEMA_REGISTRY = {
-  contact: new Set(["observed"]),
+  contact: new Set(["observed", "snapshot_completed"]),
   conversation: new Set(["observed", "removed"]),
   call: new Set(["observed", "deleted"]),
   message: new Set(["created", "updated", "deleted", "read_receipt"]),
@@ -52,6 +52,9 @@ export function assertCanonicalRawEventPayloadForWrite(
   switch (normalizedSchema) {
     case "contact.observed@1":
       assertStringField(normalizedSchema, event.payload, "sourceEntityKey");
+      return;
+    case "contact.snapshot_completed@1":
+      assertStringField(normalizedSchema, event.payload, "generation");
       return;
     case "conversation.observed@1":
     case "conversation.removed@1":

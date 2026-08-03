@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { resolveMacOSNativeBinary } from "../../../runtime/native-binary.js";
 import { DEFAULT_CHAT_DB_PATH, IMessageReader } from "../../imessage/reader.js";
+import { inspectBirdclawHelper } from "../../x/helper/binary.js";
 import { type IntegrationAuthState, parseIntegrationAuthState } from "../types.js";
 import type { ManagedIntegrationState } from "./types.js";
 
@@ -82,6 +83,7 @@ export function buildLocalIntegrationStates(): ManagedIntegrationState[] {
   const chatDbPath = process.env.CUED_IMESSAGE_DB_PATH ?? DEFAULT_CHAT_DB_PATH;
   const contactsAuthState = getContactsAuthState();
   const imessageAuthState = getIMessageAuthState();
+  const birdclaw = inspectBirdclawHelper();
   return [
     {
       platform: "contacts",
@@ -109,6 +111,28 @@ export function buildLocalIntegrationStates(): ManagedIntegrationState[] {
       launchTarget: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles",
       importedFrom: "local-system",
       artifactPaths: existsSync(chatDbPath) ? [chatDbPath] : [],
+    },
+    {
+      platform: "x",
+      accountKey: "default",
+      displayName: "X Archive",
+      authState: birdclaw.available
+        ? "authorized"
+        : birdclaw.helperPath
+          ? "missing"
+          : "native_helper_missing",
+      enabled: true,
+      connectionKind: "local-cli",
+      runtimeKind: "native",
+      syncCapable: birdclaw.available,
+      importedFrom: "x-archive",
+      artifactPaths:
+        birdclaw.archivePath && existsSync(birdclaw.archivePath) ? [birdclaw.archivePath] : [],
+      metadata: {
+        helperPath: birdclaw.helperPath,
+        archivePath: birdclaw.archivePath,
+        reason: birdclaw.reason,
+      },
     },
   ];
 }

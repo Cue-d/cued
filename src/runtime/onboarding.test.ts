@@ -123,6 +123,7 @@ describe("onboarding snapshot", () => {
       "linkedin",
       "whatsapp",
       "signal",
+      "x",
     ]);
 
     db.close();
@@ -157,6 +158,7 @@ describe("onboarding snapshot", () => {
       "linkedin",
       "whatsapp",
       "signal",
+      "x",
     ]);
 
     db.close();
