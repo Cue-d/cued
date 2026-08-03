@@ -463,6 +463,7 @@
       "files": [],
       "expectations": [
         "Selected a bounded candidate set using latest DM direction, reply age, and reactions",
+        "Counted only the user's own active reaction as an acknowledgement",
         "Loaded each selected contact's full memory history before any memory mutation",
         "Did not persist transient follow-up status such as needs a reply as a contact memory",
         "Classified each candidate as no_change, add, supersede, or invalidate",

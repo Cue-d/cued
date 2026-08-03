@@ -4,7 +4,7 @@ A self-driving CRM should be an agent loop over durable local state, not a secon
 
 Every loop follows the same contract:
 
-1. Select a small candidate set with SQL or `cued contacts search`.
+1. Select a small candidate set with `cued sql`; use `cued contacts search` when the contact-FTS command is installed.
 2. Resolve one canonical contact and load `cued contacts memory show <contact-id> --all`.
 3. Gather only the evidence needed for this candidate.
 4. Make one of four decisions: `no_change`, `add`, `supersede`, or `invalidate`.
@@ -38,7 +38,9 @@ WHERE l.rn = 1
   AND l.is_from_me = 0
   AND l.sent_at < unixepoch('now', '-2 days') * 1000
   AND NOT EXISTS (
-    SELECT 1 FROM message_reactions r WHERE r.message_id = l.id AND r.is_active = 1
+    SELECT 1
+    FROM message_reactions r
+    WHERE r.message_id = l.id AND r.is_active = 1 AND r.reactor_source_key IS NULL
   )
 ORDER BY l.sent_at DESC
 LIMIT 25;
@@ -48,10 +50,21 @@ For each result, load current memories and recent messages, then rank it. Do not
 
 ## Implementation 2: pre-meeting brief
 
-Resolve the person with `cued contacts search`, load all current memories, then retrieve their recent cross-platform messages:
+Resolve the person locally, load all current memories, then retrieve their recent cross-platform messages. Contact FTS is the preferred resolver when available; the base skill can resolve an exact or partial name with:
+
+```sql
+SELECT c.id, c.name, c.company, GROUP_CONCAT(h.type || ':' || h.value) AS handles
+FROM contacts c
+LEFT JOIN contact_handles h ON h.contact_id = c.id
+WHERE c.name LIKE '%person name%' COLLATE NOCASE
+GROUP BY c.id
+LIMIT 20;
+```
 
 ```sql
 SELECT
+  m.id AS message_id,
+  m.conversation_id,
   m.platform,
   m.sent_at,
   m.is_from_me,
@@ -59,7 +72,7 @@ SELECT
   m.content
 FROM conversation_participants cp
 JOIN messages m ON m.conversation_id = cp.conversation_id
-WHERE cp.contact_id = 'contact-id-here'
+WHERE cp.contact_id = 'contact-id-here' AND m.is_deleted = 0
 ORDER BY m.sent_at DESC
 LIMIT 100;
 ```
@@ -104,9 +117,15 @@ JOIN current_x_generation xg
   ON xg.account_key = cs.account_key
   AND xg.generation = json_extract(cs.metadata_json, '$.archiveGeneration')
 JOIN contacts c ON c.id = cs.contact_id
-JOIN conversation_participants cp ON cp.contact_id = c.id AND cp.is_self = 0
-JOIN conversations conv ON conv.id = cp.conversation_id AND conv.platform = 'x' AND conv.type = 'dm'
-JOIN messages m ON m.conversation_id = conv.id
+JOIN conversation_participants cp
+  ON cp.contact_id = c.id AND cp.is_self = 0 AND cp.is_active = 1
+JOIN conversations conv
+  ON conv.id = cp.conversation_id
+  AND conv.platform = 'x'
+  AND conv.account_key = cs.account_key
+  AND conv.type = 'dm'
+  AND conv.is_active = 1
+JOIN messages m ON m.conversation_id = conv.id AND m.is_deleted = 0
 WHERE cs.platform = 'x'
   AND json_extract(cs.metadata_json, '$.mutual') = 1
 GROUP BY c.id, c.name
