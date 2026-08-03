@@ -126,6 +126,28 @@ describe("contacts memory CLI", () => {
     ).toThrow();
   });
 
+  it("shows the full memory history and invalidates a selected memory", () => {
+    const home = createHome();
+    const memory = JSON.parse(
+      runCli(home, ["contacts", "memory", "add", "contact-1", "No longer current"]),
+    ) as { id: string };
+
+    const invalidated = JSON.parse(
+      runCli(home, ["contacts", "memory", "invalidate", memory.id]),
+    ) as { id: string; stale_at: number | null };
+    expect(invalidated).toMatchObject({ id: memory.id, stale_at: expect.any(Number) });
+
+    const current = JSON.parse(runCli(home, ["contacts", "memory", "show", "contact-1"])) as Array<{
+      id: string;
+    }>;
+    const all = JSON.parse(
+      runCli(home, ["contacts", "memory", "show", "contact-1", "--all"]),
+    ) as Array<{ id: string }>;
+
+    expect(current).toEqual([]);
+    expect(all.map((row) => row.id)).toEqual([memory.id]);
+  });
+
   it("dry-runs contact merge batches from a JSON file", () => {
     const home = createHome();
     insertContact(home, "contact-2", "Ava Duplicate");

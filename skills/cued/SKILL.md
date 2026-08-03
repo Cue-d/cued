@@ -116,9 +116,14 @@ Add a memory:
 cued contacts memory add contact-id-here "Works on applied AI; likely useful for Cued enrichment feedback." --source local_messages --confidence 90 --evidence '{"message_ids":["message-id-here"]}'
 ```
 
-List current memories:
+Load current memories before answering about a person or writing new memory:
 ```bash
-cued contacts memory list contact-id-here --limit 20
+cued contacts memory show contact-id-here --limit 50
+```
+
+Load the full history before reconciling new evidence, including invalidated memories:
+```bash
+cued contacts memory show contact-id-here --all
 ```
 
 Replace stale or incorrect information:
@@ -126,10 +131,19 @@ Replace stale or incorrect information:
 cued contacts memory add contact-id-here "Now works at ExampleCo, based on LinkedIn profile and recent messages." --source linkedin --confidence 95 --evidence '{"urls":["https://www.linkedin.com/in/example"],"message_ids":["message-id-here"]}' --supersedes memory-id-here
 ```
 
-Mark a memory stale without replacement:
+Invalidate a memory without replacement:
 ```bash
-cued contacts memory stale memory-id-here
+cued contacts memory invalidate memory-id-here
 ```
+
+Whenever new evidence could change an existing memory, reconcile before writing:
+1. Load the full memory history with `cued contacts memory show <contact-id> --all`.
+2. Leave supported current memories unchanged; a newer source alone does not make a memory stale.
+3. Add genuinely new, non-conflicting facts once with evidence.
+4. Replace a contradicted current memory atomically with `memory add ... --supersedes <memory-id>`.
+5. Use `memory invalidate <memory-id>` only when evidence disproves or makes the memory unusable and there is no supported replacement.
+
+Never create a second memory that restates a current one. Never invalidate a memory merely because the latest search did not mention it, and never revive an invalidated memory without new supporting evidence.
 
 Before writing a memory, verify at least one of:
 - deterministic handle evidence: LinkedIn profile URL/id, email, phone, or platform id;
