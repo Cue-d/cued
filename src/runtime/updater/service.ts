@@ -48,6 +48,7 @@ import {
   errorTelemetryProperties,
   sendTelemetryEventSafe,
 } from "../../telemetry/context.js";
+import { validateBundleSignature } from "./signature.js";
 import type {
   PendingRollbackState,
   UpdateErrorState,
@@ -459,11 +460,6 @@ async function downloadReleaseAsset(url: string, destinationPath: string): Promi
     rmSync(temporaryPath, { force: true });
     throw error;
   }
-}
-
-function validateBundleSignature(appPath: string): void {
-  execFileSync("codesign", ["--verify", "--deep", "--strict", appPath], { stdio: "ignore" });
-  execFileSync("spctl", ["--assess", "--type", "execute", appPath], { stdio: "ignore" });
 }
 
 function waitForDaemonExit(db: CuedDatabase, timeoutMs: number): void {
