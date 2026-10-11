@@ -83,17 +83,19 @@ describe("Slack auth-session request pacing", () => {
     await verifySlackSession("xoxc-fresh", "TTARGET", cookies.slice(0, 1), request, state);
     expect(request).toHaveBeenCalledTimes(3);
   });
-  it("honors retry-after without poisoning credentials", async () => {
+  it.each([10, 120])("honors %ss retry-after without poisoning credentials", async (seconds) => {
     let time = 1000;
     const state = new SlackVerificationState(() => time);
     const request = vi
       .fn()
-      .mockResolvedValueOnce(new Response("", { status: 429, headers: { "retry-after": "10" } }))
+      .mockResolvedValueOnce(
+        new Response("", { status: 429, headers: { "retry-after": String(seconds) } }),
+      )
       .mockResolvedValueOnce(Response.json(success));
     await expect(
       verifySlackSession("xoxc-secret", "TTARGET", cookies, request, state),
     ).rejects.toThrow("HTTP 429");
-    time += 9999;
+    time += seconds * 1000 - 1;
     expect(await verifySlackSession("xoxc-secret", "TTARGET", cookies, request, state)).toBeNull();
     expect(request).toHaveBeenCalledTimes(1);
     time++;
