@@ -2531,6 +2531,7 @@ export function projectRealtimeRange(
     null,
     true,
     null,
+    { includeOverview: options.includeOverview },
   );
   while (currentStartRowId <= options.endRowId) {
     const result = projectRangeInternal(db, {
