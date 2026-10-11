@@ -336,7 +336,17 @@ export async function buildDiscordSyncBundle(
     hydrationBreakChannelId,
     hydrationRetryAfterMs,
   });
-  const hasMore = hasRunningDiscordMessageProof(proofs);
+  const hydratedIds = new Set(hydratedChannels.map((channel) => channel.channelId));
+  const pendingInitialHydration =
+    syncMessageChannelLimit > 0 &&
+    hydrationErrorMessage == null &&
+    privateDmChannels.some(
+      (channel) =>
+        typeof channel.last_message_id === "string" &&
+        !hydratedIds.has(channel.id) &&
+        needsInitialDiscordHydration(channel, sourceCursor, syncProofState),
+    );
+  const hasMore = pendingInitialHydration || hasRunningDiscordMessageProof(proofs);
   const firstRunningMessageProof = proofs.find(
     (proof) => proof.proofKind === "messages" && proof.status === "running",
   );
@@ -358,7 +368,9 @@ export async function buildDiscordSyncBundle(
             hydrationRetryAfterMs != null || backfillRetryAfterMs != null
               ? "rate_limit_backoff"
               : "scoped_proof_continuation",
-          detail: "Discord direct-message history proof is still running",
+          detail: pendingInitialHydration
+            ? "Discord direct-message initial hydration is incomplete"
+            : "Discord direct-message history proof is still running",
           delayMs: hydrationRetryAfterMs ?? backfillRetryAfterMs ?? undefined,
           scope: firstRunningMessageProof
             ? {
@@ -496,10 +508,8 @@ function buildDiscordSyncProofs(input: {
       continue;
     }
 
-    if (hydrated || (previousLatestMessageId && previousLatestMessageId === latestMessageId)) {
-      const proofPreviousLatestMessageId = hydrated
-        ? hydrated.previousLatestMessageId
-        : previousLatestMessageId;
+    if (hydrated) {
+      const proofPreviousLatestMessageId = hydrated.previousLatestMessageId;
       proofs.push({
         scope,
         proofKind: "latest_messages",
@@ -742,7 +752,11 @@ function selectChannelsForMessageHydration(
   const selected = new Map<string, DiscordHydrationTarget>();
   const changedChannels = sorted.flatMap((channel): DiscordHydrationTarget[] => {
     const latestMessageId = sourceCursor.channels[channel.id]?.latestMessageId ?? null;
-    if (!latestMessageId || !isSnowflakeGreater(channel.last_message_id!, latestMessageId)) {
+    if (
+      !proofState.messages.has(channel.id) ||
+      !latestMessageId ||
+      !isSnowflakeGreater(channel.last_message_id!, latestMessageId)
+    ) {
       return [];
     }
     return [
@@ -782,7 +796,9 @@ function needsInitialDiscordHydration(
   const latestMessageId =
     typeof channel.last_message_id === "string" ? channel.last_message_id : null;
   const cursorLatestMessageId = sourceCursor.channels[channel.id]?.latestMessageId ?? null;
-  if (!cursorLatestMessageId) {
+  // Discovery cursors and old latest-message proofs can describe channels never fetched.
+  // Every successful initial hydration, even an empty page, also writes a history proof.
+  if (!cursorLatestMessageId || !proofState.messages.has(channel.id)) {
     return true;
   }
 
