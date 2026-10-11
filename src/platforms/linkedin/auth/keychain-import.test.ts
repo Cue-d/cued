@@ -58,18 +58,18 @@ describe("LinkedIn stored auth validation", () => {
     });
   });
 
-  it("rejects sessions that cannot start realtime before probing LinkedIn", async () => {
+  it("validates cookie-only sessions through the HTTP API", async () => {
     loadKeychainSecretMock.mockReturnValue({
       ...storedSession,
       realtimeQueryMap: null,
     });
-    const fetchMock = vi.fn();
+    const fetchMock = vi.fn(async () => new Response("{}", { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(validateLinkedInStoredAuth("default")).resolves.toEqual({
-      status: "invalid",
+      status: "valid",
     });
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledOnce();
   });
 
   it("returns indeterminate for transient network failures", async () => {
