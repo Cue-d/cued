@@ -82,6 +82,26 @@ describe("daemon telemetry queue", () => {
     expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 
+  it("schedules events arriving during the completed drain handoff", async () => {
+    const fetchImpl = vi
+      .fn<typeof fetch>()
+      .mockImplementationOnce(async () => {
+        queueMicrotask(() =>
+          queueMicrotask(() =>
+            queueMicrotask(() => {
+              queue.enqueue("sync_completed");
+            }),
+          ),
+        );
+        return new Response(null, { status: 200 });
+      })
+      .mockResolvedValue(new Response(null, { status: 200 }));
+    queue = new DaemonTelemetryQueue(db, { fetchImpl });
+    queue.enqueue("sync_started");
+    await vi.advanceTimersByTimeAsync(500);
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+
   it("honors opt-out before queued delivery", async () => {
     const fetchImpl = vi.fn<typeof fetch>();
     queue = new DaemonTelemetryQueue(db, { fetchImpl });
