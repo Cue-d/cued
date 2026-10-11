@@ -1226,7 +1226,11 @@ function projectContactObservation(
       .run();
   }
 
-  changes.dirtyContactIds.add(contactId);
+  // Only denormalized display names require message/conversation fanout.
+  // Preserve fanout for new or remapped identities even when the name matches.
+  if (existingSourceContactId !== contactId || existingName !== resolvedName) {
+    changes.dirtyContactIds.add(contactId);
+  }
 }
 
 function projectConversationObservation(
