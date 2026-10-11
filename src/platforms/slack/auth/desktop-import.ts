@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { chromium } from "playwright";
 import type { CuedDatabase } from "../../../db/database.js";
 import { storeSlackSession } from "./session-store.js";
-import { verifySlackSession } from "./verify-session.js";
+import { SlackSessionVerificationError, verifySlackSession } from "./verify-session.js";
 
 declare const localStorage: {
   getItem(key: string): string | null;
@@ -254,7 +254,7 @@ export async function importSlackDesktopAuth(
   try {
     return await attemptImport(firstLaunch);
   } catch (error) {
-    if (!debuggerAlreadyRunning) {
+    if (!debuggerAlreadyRunning || error instanceof SlackSessionVerificationError) {
       throw error;
     }
 

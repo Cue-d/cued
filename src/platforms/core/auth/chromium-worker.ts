@@ -6,7 +6,7 @@ import {
   isSlackApiTokenRequest,
   SlackRequestTokenCapture,
 } from "../../slack/auth/request-capture.js";
-import { verifySlackSession } from "../../slack/auth/verify-session.js";
+import { SlackVerificationState, verifySlackSession } from "../../slack/auth/verify-session.js";
 import {
   SLACK_PENDING_ACCOUNT_KEY_PREFIX,
   selectSlackWorkspaceCredentials,
@@ -321,6 +321,7 @@ async function extractSlackAuth(
   page: Page,
   accountKey: string,
   requestTokens: SlackRequestTokenCapture,
+  verificationState: SlackVerificationState,
 ): Promise<ExtractedAuth | null> {
   if (!isSlackWorkspaceUrl(page.url())) {
     return null;
@@ -340,7 +341,13 @@ async function extractSlackAuth(
     5,
   );
   for (const token of tokens) {
-    const verified = await verifySlackSession(token, expectedTeamId, cookies);
+    const verified = await verifySlackSession(
+      token,
+      expectedTeamId,
+      cookies,
+      fetch,
+      verificationState,
+    );
     if (!verified) continue;
     const { teamId, teamName, userId } = verified;
 
@@ -487,10 +494,11 @@ async function maybeExtractAuth(
   context: BrowserContext,
   page: Page,
   requestTokens: SlackRequestTokenCapture,
+  verificationState: SlackVerificationState,
 ): Promise<ExtractedAuth | null> {
   switch (args.platform) {
     case "slack":
-      return extractSlackAuth(context, page, args.accountKey, requestTokens);
+      return extractSlackAuth(context, page, args.accountKey, requestTokens, verificationState);
     case "discord":
       return extractDiscordAuth(context, page, args.accountKey);
     case "linkedin":
@@ -540,6 +548,7 @@ async function run(): Promise<void> {
   mkdirSync(args.profileDir, { recursive: true });
   let context: BrowserContext | null = null;
   const requestTokens = new SlackRequestTokenCapture();
+  const verificationState = new SlackVerificationState();
   let detachSlackCapture: (() => void) | null = null;
   try {
     context = await chromium.launchPersistentContext(args.profileDir, {
@@ -603,7 +612,13 @@ async function run(): Promise<void> {
           if (args.platform === "slack") {
             await continueSlackInBrowser(candidatePage);
           }
-          const extracted = await maybeExtractAuth(args, context, candidatePage, requestTokens);
+          const extracted = await maybeExtractAuth(
+            args,
+            context,
+            candidatePage,
+            requestTokens,
+            verificationState,
+          );
           if (!extracted) {
             continue;
           }
