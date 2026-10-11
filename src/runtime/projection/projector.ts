@@ -27,6 +27,11 @@ import {
   timelineEvents,
 } from "../../db/schema.js";
 import { normalizeStoredRawEventForProjection } from "./events.js";
+import {
+  createProjectionCacheOverlay,
+  type ProjectionCache,
+  type StoredProjectionCache,
+} from "./projection-cache.js";
 
 type LocalDbExecutor = Pick<
   LocalDrizzleDatabase,
@@ -48,16 +53,6 @@ type RawEventRow = {
 };
 
 type ProjectionMode = "realtime" | "deferred" | "rebuild";
-
-type ProjectionCache = {
-  initialized: boolean;
-  contactMergeAliasMap: Map<string, string>;
-  sourceContactMap: Map<string, string>;
-  deterministicHandleMap: Map<string, string>;
-  conversationMap: Map<string, string>;
-  contactNameMap: Map<string, string | null>;
-  conversationNameMap: Map<string, string | null>;
-};
 
 type ProjectionChangeSet = {
   dirtyContactIds: Set<string>;
@@ -108,7 +103,7 @@ export type ProjectionRangeResult = ProjectionOverview & {
   rangeEndRowId: number | null;
 };
 
-const projectionCaches = new WeakMap<CuedDatabase, ProjectionCache>();
+const projectionCaches = new WeakMap<CuedDatabase, StoredProjectionCache>();
 const SQL_CHUNK_SIZE = 200;
 const SIGNAL_UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -593,7 +588,7 @@ function sqlValueList(values: readonly (string | number)[]) {
   );
 }
 
-function createProjectionCache(): ProjectionCache {
+function createProjectionCache(): StoredProjectionCache {
   return {
     initialized: false,
     contactMergeAliasMap: new Map<string, string>(),
@@ -605,7 +600,7 @@ function createProjectionCache(): ProjectionCache {
   };
 }
 
-function hydrateProjectionCache(db: CuedDatabase, cache: ProjectionCache): void {
+function hydrateProjectionCache(db: CuedDatabase, cache: StoredProjectionCache): void {
   cache.contactMergeAliasMap.clear();
   cache.sourceContactMap.clear();
   cache.deterministicHandleMap.clear();
@@ -651,7 +646,7 @@ function hydrateProjectionCache(db: CuedDatabase, cache: ProjectionCache): void 
   cache.initialized = true;
 }
 
-function getProjectionCache(db: CuedDatabase): ProjectionCache {
+function getProjectionCache(db: CuedDatabase): StoredProjectionCache {
   const existing = projectionCaches.get(db);
   if (existing) {
     if (!existing.initialized) {
@@ -666,7 +661,7 @@ function getProjectionCache(db: CuedDatabase): ProjectionCache {
   return created;
 }
 
-function resetProjectionCache(db: CuedDatabase): ProjectionCache {
+function resetProjectionCache(db: CuedDatabase): StoredProjectionCache {
   const cache = createProjectionCache();
   for (const row of db.listContactMergeAliases()) {
     cache.contactMergeAliasMap.set(row.contact_id, row.canonical_contact_id);
@@ -719,28 +714,6 @@ function createProjectionChangeSet(): ProjectionChangeSet {
     touchedAttachments: false,
     touchedReactions: false,
   };
-}
-
-function cloneProjectionCache(cache: ProjectionCache): ProjectionCache {
-  return {
-    initialized: cache.initialized,
-    contactMergeAliasMap: new Map(cache.contactMergeAliasMap),
-    sourceContactMap: new Map(cache.sourceContactMap),
-    deterministicHandleMap: new Map(cache.deterministicHandleMap),
-    conversationMap: new Map(cache.conversationMap),
-    contactNameMap: new Map(cache.contactNameMap),
-    conversationNameMap: new Map(cache.conversationNameMap),
-  };
-}
-
-function replaceProjectionCache(target: ProjectionCache, source: ProjectionCache): void {
-  target.initialized = source.initialized;
-  target.contactMergeAliasMap = source.contactMergeAliasMap;
-  target.sourceContactMap = source.sourceContactMap;
-  target.deterministicHandleMap = source.deterministicHandleMap;
-  target.conversationMap = source.conversationMap;
-  target.contactNameMap = source.contactNameMap;
-  target.conversationNameMap = source.conversationNameMap;
 }
 
 function mergeProjectionChangeSet(target: ProjectionChangeSet, source: ProjectionChangeSet): void {
@@ -2331,7 +2304,9 @@ function projectEventBatch(
     clearState?: boolean;
   },
 ): number {
-  const cache = input.resetCache ? resetProjectionCache(db) : getProjectionCache(db);
+  const storedCache = input.resetCache ? resetProjectionCache(db) : getProjectionCache(db);
+  const batchCache = createProjectionCacheOverlay(storedCache);
+  const cache = batchCache.cache;
   const changes = createProjectionChangeSet();
   const shapedEvents: Array<{
     rawEvent: RawEventRow;
@@ -2379,57 +2354,64 @@ function projectEventBatch(
   }
   const projectionFailures: Array<{ event: RawEventRow; error: unknown }> = [];
 
-  db.orm().transaction((tx) => {
-    const projectedAt = Date.now();
-    if (input.clearState) {
-      clearProjectedState(tx);
-    }
-
-    for (const shapedEvent of shapedEvents) {
-      const eventCache = cloneProjectionCache(cache);
-      const eventChanges = createProjectionChangeSet();
-      tx.run(sql.raw(`SAVEPOINT projection_event_${shapedEvent.rawEvent.rowid}`));
-      try {
-        if (shapedEvent.entity_kind === "contact") {
-          projectContactObservation(tx, eventCache, eventChanges, shapedEvent);
-        } else if (shapedEvent.entity_kind === "conversation") {
-          projectConversationObservation(tx, eventCache, eventChanges, shapedEvent);
-        } else if (shapedEvent.entity_kind === "call") {
-          if (shapedEvent.event_kind === "deleted") {
-            projectCallDeleteEvent(tx, eventCache, eventChanges, shapedEvent);
-          } else {
-            projectCallEvent(tx, eventCache, eventChanges, shapedEvent);
-          }
-        } else if (shapedEvent.entity_kind === "message") {
-          projectMessageEvent(tx, eventCache, eventChanges, shapedEvent);
-        } else if (shapedEvent.entity_kind === "reaction") {
-          projectReactionEvent(tx, eventCache, eventChanges, shapedEvent);
-        } else if (shapedEvent.entity_kind === "participant") {
-          projectParticipantEvent(tx, eventCache, eventChanges, shapedEvent);
-        } else if (shapedEvent.entity_kind === "timeline_event") {
-          projectTimelineEvent(tx, eventCache, eventChanges, shapedEvent);
-        }
-        tx.run(sql.raw(`RELEASE projection_event_${shapedEvent.rawEvent.rowid}`));
-        replaceProjectionCache(cache, eventCache);
-        mergeProjectionChangeSet(changes, eventChanges);
-      } catch (error) {
-        tx.run(sql.raw(`ROLLBACK TO projection_event_${shapedEvent.rawEvent.rowid}`));
-        tx.run(sql.raw(`RELEASE projection_event_${shapedEvent.rawEvent.rowid}`));
-        projectionFailures.push({ event: shapedEvent.rawEvent, error });
+  try {
+    db.orm().transaction((tx) => {
+      const projectedAt = Date.now();
+      if (input.clearState) {
+        clearProjectedState(tx);
       }
-    }
 
-    finalizeDeferredProjection(tx, cache, changes, {
-      initialProjection: input.initialProjection,
-    });
-    if (input.projectionWatermark != null) {
-      upsertProjectionState(tx, {
-        projectionWatermark: input.projectionWatermark,
-        lastProjectedAt: projectedAt,
-        lastRebuildAt: input.lastRebuildAt,
+      for (const shapedEvent of shapedEvents) {
+        const eventOverlay = createProjectionCacheOverlay(cache);
+        const eventCache = eventOverlay.cache;
+        const eventChanges = createProjectionChangeSet();
+        tx.run(sql.raw(`SAVEPOINT projection_event_${shapedEvent.rawEvent.rowid}`));
+        try {
+          if (shapedEvent.entity_kind === "contact") {
+            projectContactObservation(tx, eventCache, eventChanges, shapedEvent);
+          } else if (shapedEvent.entity_kind === "conversation") {
+            projectConversationObservation(tx, eventCache, eventChanges, shapedEvent);
+          } else if (shapedEvent.entity_kind === "call") {
+            if (shapedEvent.event_kind === "deleted") {
+              projectCallDeleteEvent(tx, eventCache, eventChanges, shapedEvent);
+            } else {
+              projectCallEvent(tx, eventCache, eventChanges, shapedEvent);
+            }
+          } else if (shapedEvent.entity_kind === "message") {
+            projectMessageEvent(tx, eventCache, eventChanges, shapedEvent);
+          } else if (shapedEvent.entity_kind === "reaction") {
+            projectReactionEvent(tx, eventCache, eventChanges, shapedEvent);
+          } else if (shapedEvent.entity_kind === "participant") {
+            projectParticipantEvent(tx, eventCache, eventChanges, shapedEvent);
+          } else if (shapedEvent.entity_kind === "timeline_event") {
+            projectTimelineEvent(tx, eventCache, eventChanges, shapedEvent);
+          }
+          tx.run(sql.raw(`RELEASE projection_event_${shapedEvent.rawEvent.rowid}`));
+          eventOverlay.commit();
+          mergeProjectionChangeSet(changes, eventChanges);
+        } catch (error) {
+          tx.run(sql.raw(`ROLLBACK TO projection_event_${shapedEvent.rawEvent.rowid}`));
+          tx.run(sql.raw(`RELEASE projection_event_${shapedEvent.rawEvent.rowid}`));
+          projectionFailures.push({ event: shapedEvent.rawEvent, error });
+        }
+      }
+
+      finalizeDeferredProjection(tx, cache, changes, {
+        initialProjection: input.initialProjection,
       });
-    }
-  });
+      if (input.projectionWatermark != null) {
+        upsertProjectionState(tx, {
+          projectionWatermark: input.projectionWatermark,
+          lastProjectedAt: projectedAt,
+          lastRebuildAt: input.lastRebuildAt,
+        });
+      }
+    });
+  } catch (error) {
+    projectionCaches.delete(db);
+    throw error;
+  }
+  batchCache.commit();
   db.invalidateMenuBarProjectionCounts();
   for (const failure of projectionFailures) {
     db.quarantineRawEventProjectionFailure(
