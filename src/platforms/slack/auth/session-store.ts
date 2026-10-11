@@ -32,6 +32,7 @@ export interface StoredSlackSessionResult {
 
 export interface StoreSlackSessionOptions {
   reviveUserRemoved?: boolean;
+  reconnectInvalidated?: boolean;
 }
 
 function storeSecretInKeychain(
@@ -57,7 +58,13 @@ export function storeSlackSession(
     ? (JSON.parse(existing.metadata_json) as Record<string, unknown>)
     : {};
   const userRemoved = isUserRemovedIntegrationMetadata(existingMetadata);
-  if (userRemoved && !options.reviveUserRemoved) {
+  const authInvalidated = typeof existingMetadata.authInvalidatedAt === "number";
+  // Desktop extraction only checks credential presence, not server acceptance.
+  // Automatic imports must never undo a provider-confirmed invalidation.
+  if (
+    (userRemoved && !options.reviveUserRemoved) ||
+    (authInvalidated && !options.reconnectInvalidated)
+  ) {
     return {
       platform: "slack",
       accountKey,

@@ -426,6 +426,7 @@ export class IntegrationAuthService {
       await importSlackDesktopAuth(this.db, {
         skipWhenAnyAuthenticated: false,
         reviveUserRemoved: true,
+        reconnectInvalidated: true,
       }).catch(() => []);
     } else {
       importLinkedInStoredAuth(this.db, { reviveUserRemoved: true });
