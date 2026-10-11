@@ -1,4 +1,5 @@
 /** Run with: pnpm exec tsx src/runtime/perf/projection-cache.ts [conversation-count] [event-count] */
+import { randomBytes } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -13,6 +14,8 @@ if (![conversationCount, eventCount].every((n) => Number.isSafeInteger(n) && n >
   throw new Error("Counts must be positive integers");
 }
 const dir = mkdtempSync(join(tmpdir(), "cued-projection-cache-bench-"));
+// This standalone process must never consult or create canonical Keychain credentials.
+process.env.CUED_DB_KEY = randomBytes(32).toString("hex");
 const db = new CuedDatabase(join(dir, "local.db"));
 try {
   db.migrate();
