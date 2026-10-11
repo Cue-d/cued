@@ -1,4 +1,5 @@
 import { readAdapterInvocationEnv } from "../../core/invocation.js";
+import { isGmailAuthInvalidationError } from "../api/client.js";
 import { buildGmailSyncBundle } from "./bundle.js";
 
 async function main(): Promise<void> {
@@ -25,6 +26,7 @@ async function main(): Promise<void> {
     process.stdout.write(
       JSON.stringify({
         ok: false,
+        ...(isGmailAuthInvalidationError(error) ? { errorCode: "auth_invalid" as const } : {}),
         error: error instanceof Error ? error.message : String(error),
       }),
     );

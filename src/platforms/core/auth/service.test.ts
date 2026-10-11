@@ -173,6 +173,9 @@ describe("IntegrationAuthService", () => {
 
   it("returns an active managed auth session instead of launching the same account twice", async () => {
     const db = createDb();
+    const historicalStats = vi.spyOn(db, "getIntegrationProjectionStats").mockImplementation(() => {
+      throw new Error("Historical scans must not delay auth session reuse");
+    });
     db.upsertIntegrationState({
       platform: "discord",
       accountKey: "default",
@@ -220,6 +223,8 @@ describe("IntegrationAuthService", () => {
 
     expect(result.integration.accountKey).toBe("default");
     expect(result.integration.authState).toBe("in_progress");
+    expect(result.integration.latestAuthSessionId).toBe(sessionId);
+    expect(historicalStats).not.toHaveBeenCalled();
     expect(result.authSession?.id).toBe(sessionId);
     expect(activeAuthSessions.size).toBe(1);
     expect(startAuthSessionMock).not.toHaveBeenCalled();

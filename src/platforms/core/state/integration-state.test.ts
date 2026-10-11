@@ -1,7 +1,7 @@
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { resolveHostOS } from "../../../core/platform-capabilities.js";
 import { CuedDatabase } from "../../../db/database.js";
 import { openSqliteDatabase } from "../../../db/sqlite.js";
@@ -25,6 +25,7 @@ import { refreshManagedIntegrationStates } from "./refresh.js";
 import {
   buildIntegrationStatus,
   getAuthSessionSummary,
+  getIntegrationSummary,
   listIntegrationStates,
   listRequestableIntegrationPlatforms,
   reconcileAbandonedAuthSessions,
@@ -203,8 +204,23 @@ process.exit(44);
     );
 
     const db = createDb();
+    const historicalStats = vi.spyOn(db, "getIntegrationProjectionStats").mockImplementation(() => {
+      throw new Error("Historical scans must not block connection refresh");
+    });
+    const latestRun = vi.spyOn(db, "getLatestFinishedSyncRun").mockImplementation(() => {
+      throw new Error("Historical run scans must not block connection refresh");
+    });
     const refreshed = await refreshManagedIntegrationStates(db);
     expect(refreshed.refreshed).toBe(4);
+    expect(getIntegrationSummary(db, "contacts", "local").authState).toBe("authorized");
+    expect(historicalStats).not.toHaveBeenCalled();
+    expect(latestRun).not.toHaveBeenCalled();
+    historicalStats.mockRestore();
+    latestRun.mockRestore();
+    const explicitDiagnostics = vi.spyOn(db, "getIntegrationProjectionStats");
+    listIntegrationStates(db);
+    expect(explicitDiagnostics).toHaveBeenCalled();
+    explicitDiagnostics.mockRestore();
     expect(listIntegrationStates(db)).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -498,7 +514,77 @@ process.exit(44);
     db.close();
   });
 
-  it("marks invalidated LinkedIn auth as needing auth and stops scheduled sync", () => {
+  it.each([
+    "linkedin",
+    "slack",
+    "gmail",
+  ] as const)("invalidated %s stops scheduled sync until reconnect", (platform) => {
+    const db = createDb();
+    db.upsertIntegrationState({
+      platform,
+      accountKey: "default",
+      displayName: platform,
+      authState: "authenticated",
+      enabled: true,
+      connectionKind: "browser-session",
+      syncCapable: true,
+      launchStrategy: "chromium-auth",
+      launchTarget: "https://www.linkedin.com/login",
+      importedFrom: "local-cli",
+      metadata: {
+        authenticatedAt: 123,
+        keychainService: `so.cued.desktop.auth.${platform}`,
+        keychainAccount: "default",
+      },
+    });
+
+    const invalidated = invalidateIntegrationAuth(db, platform, "default", {
+      errorSummary: "Authentication failed: 302 Found",
+      reason: `${platform}_auth_invalidated`,
+    });
+
+    expect(invalidated).toMatchObject({
+      authState: "needs_auth",
+      enabled: true,
+      syncCapable: false,
+      metadata: expect.objectContaining({
+        authenticatedAt: null,
+        lastAuthError: "Authentication failed: 302 Found",
+        authInvalidationReason: `${platform}_auth_invalidated`,
+      }),
+    });
+    expect(db.listEnabledSyncTargets()).not.toContainEqual({
+      platform,
+      account_key: "default",
+    });
+
+    const requested = requestIntegrationAccess(db, platform, "default");
+    const completed = completeAuthSession(db, requested.authSession.id, {
+      state: "authenticated",
+      keychainService: `so.cued.desktop.auth.${platform}`,
+      keychainAccount: "default",
+      resultSummary: { provider: platform },
+    });
+    expect(completed.integration?.metadata).toEqual(
+      expect.objectContaining({
+        authInvalidatedAt: null,
+        authInvalidationReason: null,
+        lastAuthError: null,
+      }),
+    );
+
+    db.close();
+  });
+
+  it("keeps invalidated LinkedIn auth paused across refresh until authentication completes", async () => {
+    installSecurityTool({
+      "so.cued.desktop.auth.linkedin:default": {
+        cookies: [
+          { name: "li_at", value: "rejected-token" },
+          { name: "JSESSIONID", value: '"ajax:123"' },
+        ],
+      },
+    });
     const db = createDb();
     db.upsertIntegrationState({
       platform: "linkedin",
@@ -532,6 +618,18 @@ process.exit(44);
         lastAuthError: "Authentication failed: 302 Found",
         authInvalidationReason: "linkedin_auth_invalidated",
       }),
+    });
+    expect(db.listEnabledSyncTargets()).not.toContainEqual({
+      platform: "linkedin",
+      account_key: "default",
+    });
+
+    expect(importLinkedInStoredAuth(db)).toEqual([]);
+    expect(importLinkedInStoredAuth(db, { reviveUserRemoved: true })).toEqual([]);
+    await refreshManagedIntegrationStates(db);
+    expect(db.getIntegrationState("linkedin", "default")).toMatchObject({
+      auth_state: "needs_auth",
+      sync_capable: 0,
     });
     expect(db.listEnabledSyncTargets()).not.toContainEqual({
       platform: "linkedin",
@@ -838,6 +936,10 @@ process.exit(44);
           { name: "li_at", value: "li_at-token" },
           { name: "JSESSIONID", value: '"ajax:123"' },
         ],
+        pageInstance: "urn:li:page:messaging;test",
+        xLiTrack: "{}",
+        realtimeQueryMap: "{}",
+        realtimeRecipeMap: "{}",
         savedAt: 1234,
       },
     });
@@ -857,6 +959,7 @@ process.exit(44);
             keychainService: "so.cued.desktop.auth.linkedin",
             keychainAccount: "default",
             importedSavedAt: 1234,
+            authResult: expect.objectContaining({ realtimeReady: true }),
           }),
         }),
       ]),
@@ -870,6 +973,103 @@ process.exit(44);
     db.close();
   });
 
+  it("keeps cookie-only LinkedIn auth sync capable with degraded realtime", async () => {
+    installSecurityTool({
+      "so.cued.desktop.auth.linkedin:default": {
+        cookies: [
+          { name: "li_at", value: "li_at-token" },
+          { name: "JSESSIONID", value: '"ajax:123"' },
+        ],
+      },
+    });
+    process.env.CUED_SLACK_APP_BINARY = join(createTempDir("cued-no-slack-app-"), "Slack");
+
+    const db = createDb();
+    db.upsertIntegrationState({
+      platform: "linkedin",
+      accountKey: "default",
+      displayName: "LinkedIn",
+      authState: "authenticated",
+      enabled: true,
+      connectionKind: "browser-session",
+      syncCapable: true,
+      launchStrategy: "chromium-auth",
+      launchTarget: "https://www.linkedin.com/login",
+      importedFrom: "local-cli",
+      metadata: {
+        keychainService: "so.cued.desktop.auth.linkedin",
+        keychainAccount: "default",
+        authResult: { realtimeReady: true },
+      },
+    });
+
+    await refreshManagedIntegrationStates(db);
+
+    expect(listIntegrationStates(db)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          platform: "linkedin",
+          authState: "authenticated",
+          syncCapable: true,
+          metadata: expect.objectContaining({
+            authResult: expect.objectContaining({ realtimeReady: false }),
+          }),
+        }),
+      ]),
+    );
+    db.close();
+  });
+
+  it("repairs realtime metadata from a complete stored LinkedIn session", async () => {
+    installSecurityTool({
+      "so.cued.desktop.auth.linkedin:default": {
+        cookies: [
+          { name: "li_at", value: "li_at-token" },
+          { name: "JSESSIONID", value: '"ajax:123"' },
+        ],
+        pageInstance: "urn:li:page:messaging;test",
+        xLiTrack: "{}",
+        realtimeQueryMap: "{}",
+        realtimeRecipeMap: "{}",
+      },
+    });
+    process.env.CUED_SLACK_APP_BINARY = join(createTempDir("cued-no-slack-app-"), "Slack");
+
+    const db = createDb();
+    db.upsertIntegrationState({
+      platform: "linkedin",
+      accountKey: "default",
+      displayName: "LinkedIn",
+      authState: "authenticated",
+      enabled: true,
+      connectionKind: "browser-session",
+      syncCapable: true,
+      launchStrategy: "chromium-auth",
+      launchTarget: "https://www.linkedin.com/login",
+      importedFrom: "local-cli",
+      metadata: {
+        keychainService: "so.cued.desktop.auth.linkedin",
+        keychainAccount: "default",
+        authResult: { realtimeReady: false },
+      },
+    });
+
+    await refreshManagedIntegrationStates(db);
+
+    expect(listIntegrationStates(db)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          platform: "linkedin",
+          authState: "authenticated",
+          metadata: expect.objectContaining({
+            authResult: expect.objectContaining({ realtimeReady: true }),
+          }),
+        }),
+      ]),
+    );
+    db.close();
+  });
+
   it("revives user-removed LinkedIn auth only during explicit connect import", () => {
     installSecurityTool({
       "so.cued.desktop.auth.linkedin:default": {
@@ -877,6 +1077,10 @@ process.exit(44);
           { name: "li_at", value: "li_at-token" },
           { name: "JSESSIONID", value: '"ajax:123"' },
         ],
+        pageInstance: "urn:li:page:messaging;test",
+        xLiTrack: "{}",
+        realtimeQueryMap: "{}",
+        realtimeRecipeMap: "{}",
         savedAt: 1234,
       },
     });
