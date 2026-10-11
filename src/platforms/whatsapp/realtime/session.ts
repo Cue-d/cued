@@ -92,6 +92,7 @@ export interface WhatsAppRealtimeSupervisorSessionInput {
 }
 
 interface WhatsAppRealtimeSupervisorOptions {
+  recoverMissingSession?: () => Promise<void> | void;
   createSession?: (input: WhatsAppRealtimeSupervisorSessionInput) => WhatsAppRealtimeSessionLike;
   onEvent?: (accountKey: string, event: WhatsAppHelperEventEnvelope) => void;
   onConnected?: (accountKey: string, status: WhatsAppRealtimeStatus, reconnected: boolean) => void;
@@ -216,6 +217,7 @@ export class WhatsAppRealtimeSession implements WhatsAppRealtimeSessionLike {
     if (this.shouldReconnect && this.child) {
       return;
     }
+    this.clearReconnectTimer();
     this.shouldReconnect = true;
     this.setStatus({
       state: this.hasEverConnected ? "reconnecting" : "connecting",
@@ -420,7 +422,8 @@ export class WhatsAppRealtimeSession implements WhatsAppRealtimeSessionLike {
           typeof eventData.completedAt === "number" ? eventData.completedAt : eventAt,
       });
     } else if (parsed.event === "disconnected") {
-      this.clearConnectTimer();
+      this.rejectPendingRequests("WhatsApp realtime session disconnected");
+      this.ensureConnectTimer();
       this.setStatus({
         lastEventAt: eventAt,
         state: this.shouldReconnect ? "reconnecting" : "degraded",
@@ -432,7 +435,7 @@ export class WhatsAppRealtimeSession implements WhatsAppRealtimeSessionLike {
       typeof eventData.message === "string" &&
       this.status.state !== "connected"
     ) {
-      this.clearConnectTimer();
+      this.ensureConnectTimer();
       this.setStatus({
         lastEventAt: eventAt,
         state: this.shouldReconnect ? "reconnecting" : "degraded",
@@ -514,6 +517,14 @@ export class WhatsAppRealtimeSession implements WhatsAppRealtimeSessionLike {
     }
   }
 
+  private ensureConnectTimer(): void {
+    // Give the helper its own reconnect window without allowing repeated errors
+    // to postpone recovery indefinitely.
+    if (this.shouldReconnect && !this.connectTimer) {
+      this.startConnectTimer();
+    }
+  }
+
   private startConnectTimer(): void {
     this.clearConnectTimer();
     this.connectTimer = setTimeout(() => {
@@ -546,6 +557,7 @@ type ManagedSession = {
 };
 
 export class WhatsAppRealtimeSupervisor {
+  private readonly recoverMissingSession?: WhatsAppRealtimeSupervisorOptions["recoverMissingSession"];
   private readonly createSession: (
     input: WhatsAppRealtimeSupervisorSessionInput,
   ) => WhatsAppRealtimeSessionLike;
@@ -561,6 +573,7 @@ export class WhatsAppRealtimeSupervisor {
   >();
 
   constructor(options: WhatsAppRealtimeSupervisorOptions = {}) {
+    this.recoverMissingSession = options.recoverMissingSession;
     this.onEvent = options.onEvent;
     this.onConnected = options.onConnected;
     this.onDisconnected = options.onDisconnected;
@@ -651,6 +664,10 @@ export class WhatsAppRealtimeSupervisor {
     accountKey: string,
     timeoutMs: number,
   ): Promise<WhatsAppRealtimeSessionLike | null> {
+    // A transient startup status failure may have prevented session creation.
+    if (!this.getSession(accountKey)) {
+      await this.recoverMissingSession?.();
+    }
     const existing = this.getSession(accountKey);
     if (existing?.isConnected()) {
       return existing;

@@ -46,6 +46,7 @@ vi.mock("../../slack/auth/verify-session.js", async (importOriginal) => ({
 
 import { importSlackDesktopAuth } from "../../slack/auth/desktop-import.js";
 import * as sessionVerification from "../../slack/auth/verify-session.js";
+import { invalidateIntegrationAuth } from "./mutations.js";
 
 describe("slack desktop import removal tombstones", () => {
   const tempDirs: string[] = [];
@@ -95,6 +96,65 @@ describe("slack desktop import removal tombstones", () => {
     process.env.CUED_SLACK_APP_BINARY = appBinary;
     process.env.CUED_SLACK_USER_DATA_DIR = userDataDir;
   }
+
+  it("preserves provider invalidation through automatic import until explicit reconnect", async () => {
+    installFakeSlackDesktop();
+    execFileSyncMock.mockReturnValue(Buffer.from(""));
+    connectOverCDPMock.mockResolvedValue({
+      contexts: () => [
+        {
+          pages: () => [
+            {
+              url: () => "https://app.slack.com/client/T_REVOKED",
+              evaluate: vi.fn().mockResolvedValue(
+                JSON.stringify({
+                  teams: {
+                    T_REVOKED: {
+                      id: "T_REVOKED",
+                      name: "Revoked",
+                      token: "xoxc-token",
+                      user_id: "U1",
+                    },
+                  },
+                }),
+              ),
+            },
+          ],
+          cookies: vi
+            .fn()
+            .mockResolvedValue([{ name: "d", value: "cookie", domain: ".slack.com" }]),
+        },
+      ],
+      close: vi.fn(),
+    });
+    const db = createDb();
+    await importSlackDesktopAuth(db);
+    invalidateIntegrationAuth(db, "slack", "T_REVOKED", {
+      errorSummary: "invalid_auth",
+      reason: "slack_auth_invalidated",
+    });
+    expect(await importSlackDesktopAuth(db)).toEqual([
+      expect.objectContaining({ imported: false }),
+    ]);
+    expect(db.getIntegrationState("slack", "T_REVOKED")).toMatchObject({
+      auth_state: "needs_auth",
+      sync_capable: 0,
+    });
+    expect(db.listEnabledSyncTargets()).not.toContainEqual({
+      platform: "slack",
+      account_key: "T_REVOKED",
+    });
+    expect(await importSlackDesktopAuth(db, { reconnectInvalidated: true })).toEqual([
+      expect.objectContaining({ imported: true }),
+    ]);
+    const reconnected = db.getIntegrationState("slack", "T_REVOKED");
+    expect(reconnected?.auth_state).toBe("authenticated");
+    expect(JSON.parse(reconnected!.metadata_json!)).toMatchObject({
+      authInvalidatedAt: null,
+      authInvalidationReason: null,
+    });
+    db.close();
+  });
 
   it("imports unrelated teams without resurrecting a removed workspace", async () => {
     installFakeSlackDesktop();

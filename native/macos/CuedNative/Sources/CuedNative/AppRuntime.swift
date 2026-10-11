@@ -54,7 +54,7 @@ private func currentTimeMs() -> Int {
   Int(Date().timeIntervalSince1970 * 1000)
 }
 
-private struct SingletonLockMetadata: Codable {
+struct SingletonLockMetadata: Codable {
   let kind: String
   let pid: Int
   let startedAt: Int
@@ -64,7 +64,7 @@ private struct SingletonLockMetadata: Codable {
   let appPath: String?
 }
 
-private enum SingletonLockError: Error {
+enum SingletonLockError: Error {
   case held(SingletonLockMetadata?)
 }
 
@@ -72,7 +72,7 @@ private enum SingletonLockPersistenceError: Error {
   case metadataTooLarge
 }
 
-private final class SingletonLockLease {
+final class SingletonLockLease {
   private let path: String
   private var fileHandle: FileHandle?
   private(set) var metadata: SingletonLockMetadata
@@ -224,8 +224,9 @@ private func writeLockFile(
   metadata: SingletonLockMetadata,
   slot: Int
 ) throws {
+  // The lease describes a live process, not durable data. Kernel-visible writes
+  // are sufficient for other processes; flushing every heartbeat wastes disk I/O.
   try writeLockSlot(fileHandle, metadata: metadata, slot: slot)
-  try fileHandle.synchronize()
 }
 
 private func writeLockSlot(
@@ -1520,7 +1521,7 @@ final class MenuBarAppController: NSObject, NSApplicationDelegate {
     }
   )
   private lazy var statusMonitor = DatabaseActivityMonitor(dbPath: dbPath) { [weak self] in
-    self?.refreshStatus()
+    self?.rebuildMenu()
   }
   private var timer: Timer?
   private var shouldAutoStartDaemon = true
@@ -1555,10 +1556,15 @@ final class MenuBarAppController: NSObject, NSApplicationDelegate {
     daemonSupervisor.startIfNeeded()
     rebuildMenu()
     statusMonitor.start()
-    timer = Timer.scheduledTimer(timeInterval: 1, target: self, selector: #selector(refreshStatus), userInfo: nil, repeats: true)
+    timer = Timer.scheduledTimer(timeInterval: 5, target: self, selector: #selector(refreshStatus), userInfo: nil, repeats: true)
     if let timer {
+      // Stay comfortably inside the 15-second lease expiry, allowing coalescing.
+      timer.tolerance = 1
       RunLoop.main.add(timer, forMode: .common)
     }
+    NSWorkspace.shared.notificationCenter.addObserver(
+      self, selector: #selector(refreshStatus), name: NSWorkspace.didWakeNotification, object: nil
+    )
     DispatchQueue.main.asyncAfter(deadline: .now() + 0.75) { [weak self] in
       self?.openRootWindowIfNeeded()
     }
@@ -1566,6 +1572,7 @@ final class MenuBarAppController: NSObject, NSApplicationDelegate {
 
   func applicationWillTerminate(_ notification: Notification) {
     timer?.invalidate()
+    NSWorkspace.shared.notificationCenter.removeObserver(self)
     statusMonitor.stop()
     DistributedNotificationCenter.default().removeObserver(self)
     menuBarLease.release()

@@ -74,9 +74,9 @@ export class IntegrationAuthService {
     return IntegrationAuthService.usageText();
   }
 
-  listStatus() {
+  listStatus(options: { includeDiagnostics?: boolean } = {}) {
     reconcileAbandonedAuthSessions(this.db);
-    return buildIntegrationStatus(this.db);
+    return buildIntegrationStatus(this.db, options);
   }
 
   async refresh() {
@@ -426,6 +426,7 @@ export class IntegrationAuthService {
       await importSlackDesktopAuth(this.db, {
         skipWhenAnyAuthenticated: false,
         reviveUserRemoved: true,
+        reconnectInvalidated: true,
       }).catch(() => []);
     } else {
       importLinkedInStoredAuth(this.db, { reviveUserRemoved: true });

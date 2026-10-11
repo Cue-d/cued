@@ -812,11 +812,15 @@ export function getIntegrationSummary(
   if (!row) {
     throw new Error(`Integration not found: ${normalized}/${resolvedAccountKey}`);
   }
-  const [summary] = summarizeIntegrationStates(db, [row]);
+  // Connection lifecycle needs current auth state, not scans of historical messages.
+  const [summary] = summarizeIntegrationStates(db, [row], { includeDiagnostics: false });
   if (!summary) {
     throw new Error(`Integration summary unavailable: ${normalized}/${resolvedAccountKey}`);
   }
-  return summary;
+  return {
+    ...summary,
+    latestAuthSessionId: db.getLatestAuthSession(normalized, resolvedAccountKey)?.id ?? null,
+  };
 }
 
 export function firstNonEmptyDisplayName(

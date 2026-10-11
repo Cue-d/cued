@@ -54,7 +54,10 @@ import { isDiscordDmChannel } from "../../platforms/discord/types.js";
 import { GmailClient } from "../../platforms/gmail/api/client.js";
 import { DEFAULT_CALL_HISTORY_DB_PATH } from "../../platforms/imessage/call-history.js";
 import { DEFAULT_CHAT_DB_PATH } from "../../platforms/imessage/reader.js";
-import { loadLinkedInSessionSecret } from "../../platforms/linkedin/auth/session-store.js";
+import {
+  hasLinkedInRealtimeSessionHeaders,
+  loadLinkedInSessionSecret,
+} from "../../platforms/linkedin/auth/session-store.js";
 import { buildLinkedInRawEventsFromRealtimeEnvelope } from "../../platforms/linkedin/realtime/events.js";
 import {
   type LinkedInRealtimeStatus,
@@ -112,11 +115,8 @@ import type {
   WhatsAppReceiptSnapshot,
   WhatsAppSnapshot,
 } from "../../platforms/whatsapp/types.js";
-import {
-  durationBucket,
-  errorTelemetryProperties,
-  sendTelemetryEventSafe,
-} from "../../telemetry/context.js";
+import { durationBucket, errorTelemetryProperties } from "../../telemetry/context.js";
+import { DaemonTelemetryQueue } from "../../telemetry/queue.js";
 import { fetchAttachment, listAttachments, searchAttachments } from "../attachments.js";
 import { buildPermissionStatus } from "../doctor.js";
 import { emitHookEvent } from "../hooks.js";
@@ -398,7 +398,8 @@ export function getAutoSyncTargets(
 ): Array<{ platform: AdapterPlatform; accountKey: string }> {
   const configured = getConfiguredAutoSyncPlatforms();
 
-  if (configured) {
+  const integrationStates = db.listIntegrationStates();
+  if (configured && integrationStates.length === 0) {
     return configured.map((platform) => ({
       platform,
       accountKey: getDefaultAccountKeyForPlatform(platform),
@@ -414,10 +415,13 @@ export function getAutoSyncTargets(
       platform: target.platform,
       accountKey: target.account_key,
     }));
+  if (configured) {
+    return enabled.filter((target) => configured.includes(target.platform));
+  }
   if (enabled.length > 0) {
     return enabled;
   }
-  if (db.listIntegrationStates().length > 0) {
+  if (integrationStates.length > 0) {
     return [];
   }
 
@@ -524,11 +528,14 @@ export function shouldSkipConnectedDiscordSchedulerSync(
   return targetPlatform === "discord" && trigger === "scheduler" && status?.state === "connected";
 }
 
-export function isLinkedInAdapterAuthInvalidation(
+export function isAdapterAuthInvalidation(
   platform: string | null,
   error: unknown,
-): boolean {
-  return platform === "linkedin" && isAdapterWorkerError(error, "auth_invalid");
+): platform is "linkedin" | "slack" | "gmail" {
+  return (
+    (platform === "linkedin" || platform === "slack" || platform === "gmail") &&
+    isAdapterWorkerError(error, "auth_invalid")
+  );
 }
 
 export function shouldDrainOutboundQueue(input: {
@@ -1800,13 +1807,7 @@ async function collectDesiredLinkedInSessions(db: ReturnType<typeof openCuedData
 
     try {
       const session = loadLinkedInSessionSecret(integration.account_key);
-      if (
-        !session.cookies.length ||
-        !session.pageInstance ||
-        !session.xLiTrack ||
-        !session.realtimeQueryMap ||
-        !session.realtimeRecipeMap
-      ) {
+      if (!session.cookies.length || !hasLinkedInRealtimeSessionHeaders(session)) {
         degraded.push({
           accountKey: integration.account_key,
           state: "degraded",
@@ -1860,9 +1861,10 @@ export async function runDaemon(): Promise<void> {
     throw new Error("Failed to open Cued database");
   }
   const db = openedDb;
+  const telemetry = new DaemonTelemetryQueue(db);
   const startedAt = now();
   const runOwnerId = `daemon:${process.pid}:${startedAt}`;
-  await sendTelemetryEventSafe(db, "daemon_started", {
+  telemetry.enqueue("daemon_started", {
     component: "daemon",
     operation: "start",
   });
@@ -2103,13 +2105,14 @@ export async function runDaemon(): Promise<void> {
     trigger: string,
   ): Promise<void> => {
     try {
+      const platform = "slack" satisfies AdapterPlatform;
       if (rawEvents.length === 0) {
         return;
       }
       if (isProcessingProjection) {
         queueNativeTriggeredSync(
           db,
-          "discord",
+          platform,
           accountKey,
           `${trigger}:projection_busy`,
           schedulers.wakeIngest,
@@ -2119,7 +2122,7 @@ export async function runDaemon(): Promise<void> {
 
       db.upsertSourceAccounts([
         {
-          platform: "slack",
+          platform,
           accountKey,
           displayName: "Slack",
         },
@@ -2134,6 +2137,7 @@ export async function runDaemon(): Promise<void> {
           startRowId: insertResult.firstInsertedRowId,
           endRowId: insertResult.lastInsertedRowId,
           batchSize: realtimeProjectionBatchSize,
+          includeOverview: false,
         });
         scheduleSearchIndexDrain();
       }
@@ -2230,6 +2234,7 @@ export async function runDaemon(): Promise<void> {
           startRowId: insertResult.firstInsertedRowId,
           endRowId: insertResult.lastInsertedRowId,
           batchSize: realtimeProjectionBatchSize,
+          includeOverview: false,
         });
         scheduleSearchIndexDrain();
       }
@@ -2455,6 +2460,7 @@ export async function runDaemon(): Promise<void> {
           startRowId: insertResult.firstInsertedRowId,
           endRowId: insertResult.lastInsertedRowId,
           batchSize: realtimeProjectionBatchSize,
+          includeOverview: false,
         });
         scheduleSearchIndexDrain();
       }
@@ -2577,6 +2583,7 @@ export async function runDaemon(): Promise<void> {
           startRowId: insertResult.firstInsertedRowId,
           endRowId: insertResult.lastInsertedRowId,
           batchSize: realtimeProjectionBatchSize,
+          includeOverview: false,
         });
         scheduleSearchIndexDrain();
       }
@@ -2694,6 +2701,7 @@ export async function runDaemon(): Promise<void> {
           startRowId: insertResult.firstInsertedRowId,
           endRowId: insertResult.lastInsertedRowId,
           batchSize: realtimeProjectionBatchSize,
+          includeOverview: false,
         });
         scheduleSearchIndexDrain();
       }
@@ -2817,6 +2825,7 @@ export async function runDaemon(): Promise<void> {
             startRowId: insertResult.firstInsertedRowId,
             endRowId: insertResult.lastInsertedRowId,
             batchSize: realtimeProjectionBatchSize,
+            includeOverview: false,
           });
           scheduleSearchIndexDrain();
         }
@@ -3427,6 +3436,7 @@ export async function runDaemon(): Promise<void> {
     },
   });
   const whatsAppRealtime = new WhatsAppRealtimeSupervisor({
+    recoverMissingSession: () => requestWhatsAppRealtimeReconcile(),
     onEvent: (accountKey, event) => {
       void handleWhatsAppRealtimeEvent(accountKey, event);
     },
@@ -3568,7 +3578,7 @@ export async function runDaemon(): Promise<void> {
     }
     if (whatsAppRealtimeReconcilePromise) {
       whatsAppRealtimeReconcileQueued = true;
-      return;
+      return whatsAppRealtimeReconcilePromise;
     }
 
     whatsAppRealtimeReconcilePromise = reconcileWhatsAppRealtimeSessions()
@@ -3582,6 +3592,7 @@ export async function runDaemon(): Promise<void> {
           requestWhatsAppRealtimeReconcile();
         }
       });
+    return whatsAppRealtimeReconcilePromise;
   };
 
   db.recoverInProgressRuns();
@@ -3935,7 +3946,7 @@ export async function runDaemon(): Promise<void> {
       trigger: currentRun.trigger,
       runType: currentRun.run_type,
     });
-    await sendTelemetryEventSafe(db, "sync_started", {
+    telemetry.enqueue("sync_started", {
       component: "sync",
       operation: "ingest",
       stage: "ingest",
@@ -3966,7 +3977,7 @@ export async function runDaemon(): Promise<void> {
           null,
           runClaim,
         );
-        await sendTelemetryEventSafe(db, "sync_failed", {
+        telemetry.enqueue("sync_failed", {
           component: "sync",
           operation: "ingest",
           stage: "validation",
@@ -4029,7 +4040,7 @@ export async function runDaemon(): Promise<void> {
         firstInsertedRowId: null,
         lastInsertedRowId: null,
       };
-      await sendTelemetryEventSafe(db, "helper_started", {
+      telemetry.enqueue("helper_started", {
         component: "sync",
         operation: "adapter",
         stage: "adapter",
@@ -4040,9 +4051,7 @@ export async function runDaemon(): Promise<void> {
       });
 
       if (platform === "whatsapp" && runDetails?.source !== "whatsapp_desktop") {
-        const session =
-          whatsAppRealtime.getSession(accountKey) ??
-          (await whatsAppRealtime.waitForConnected(accountKey, 10_000));
+        const session = await whatsAppRealtime.waitForConnected(accountKey, 10_000);
         if (!session?.isConnected()) {
           throw new Error(`WhatsApp session is not connected for '${accountKey}'`);
         }
@@ -4435,7 +4444,7 @@ export async function runDaemon(): Promise<void> {
         insertedRawEvents: insertResult.insertedCount,
         timings,
       });
-      await sendTelemetryEventSafe(db, "sync_completed", {
+      telemetry.enqueue("sync_completed", {
         component: "sync",
         operation: "ingest",
         stage: "ingest",
@@ -4477,18 +4486,19 @@ export async function runDaemon(): Promise<void> {
         );
         requestDiscordRealtimeReconcile();
       }
-      if (isLinkedInAdapterAuthInvalidation(currentRun.platform, error)) {
+      if (isAdapterAuthInvalidation(currentRun.platform, error)) {
         invalidateIntegrationAuth(
           db,
-          "linkedin",
-          currentRun.account_key ?? getDefaultAccountKeyForPlatform("linkedin"),
+          currentRun.platform,
+          currentRun.account_key ?? getDefaultAccountKeyForPlatform(currentRun.platform),
           {
             errorSummary: errorMessage,
-            reason: "linkedin_auth_invalidated",
+            reason: `${currentRun.platform}_auth_invalidated`,
           },
         );
-        requestLinkedInRealtimeReconcile();
-        requestMenuBarStatusWrite("linkedin_auth_invalidated");
+        if (currentRun.platform === "linkedin") requestLinkedInRealtimeReconcile();
+        if (currentRun.platform === "slack") requestSlackRealtimeReconcile();
+        requestMenuBarStatusWrite(`${currentRun.platform}_auth_invalidated`);
       }
       db.failRun(currentRun.id, errorMessage, undefined, null, runClaim);
       if (currentRun.platform === "signal") {
@@ -4505,12 +4515,12 @@ export async function runDaemon(): Promise<void> {
         duration_bucket: durationBucket(now() - ingestStartedAt),
         ...errorTelemetryProperties(error, "sync_failed"),
       };
-      await sendTelemetryEventSafe(db, "helper_failed", {
+      telemetry.enqueue("helper_failed", {
         ...failureProperties,
         operation: "adapter",
         helper_kind: currentRun.platform ?? "unknown",
       });
-      await sendTelemetryEventSafe(db, "sync_failed", failureProperties);
+      telemetry.enqueue("sync_failed", failureProperties);
       await safeEmitHookEvent("sync.failed", {
         runId: currentRun.id,
         platform: currentRun.platform,
@@ -4541,7 +4551,7 @@ export async function runDaemon(): Promise<void> {
         interactiveAuthMode: isInteractiveAuthActive(),
       });
       db.updateRunProgress(currentRun.id, { leaseMs: PROJECTION_RUN_LEASE_MS, claim: runClaim });
-      await sendTelemetryEventSafe(db, "sync_started", {
+      telemetry.enqueue("sync_started", {
         component: "sync",
         operation: "projection",
         stage: "projection",
@@ -4617,7 +4627,7 @@ export async function runDaemon(): Promise<void> {
         projected,
         timings,
       });
-      await sendTelemetryEventSafe(db, "sync_completed", {
+      telemetry.enqueue("sync_completed", {
         component: "sync",
         operation: "projection",
         stage: "projection",
@@ -4653,7 +4663,7 @@ export async function runDaemon(): Promise<void> {
         null,
         runClaim,
       );
-      await sendTelemetryEventSafe(db, "sync_failed", {
+      telemetry.enqueue("sync_failed", {
         component: "sync",
         operation: "projection",
         stage: "projection",
@@ -4740,7 +4750,7 @@ export async function runDaemon(): Promise<void> {
     void runBootstrap();
   });
 
-  const shutdown = () => {
+  const shutdown = async () => {
     if (shutdownInitiated) {
       return;
     }
@@ -4786,6 +4796,7 @@ export async function runDaemon(): Promise<void> {
       details: daemonIdentity,
     });
     server.close();
+    await telemetry.close();
     db.close();
     daemonLease.release();
     if (existsSync(CUED_SOCKET_PATH)) {
@@ -5343,7 +5354,7 @@ async function dispatchRequest(
         return {
           id: request.id,
           ok: true,
-          result: integrationAuthService.listStatus(),
+          result: integrationAuthService.listStatus({ includeDiagnostics: false }),
         };
       }
       case "integrations-interaction-start":

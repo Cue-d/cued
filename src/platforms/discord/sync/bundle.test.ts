@@ -209,7 +209,7 @@ describe("buildDiscordSyncBundle", () => {
     expect(bundle.hasMore).toBe(true);
     expect(bundle.continuation).toEqual({
       reason: "scoped_proof_continuation",
-      detail: "Discord direct-message history proof is still running",
+      detail: "Discord direct-message initial hydration is incomplete",
       scope: {
         kind: "conversation",
         key: "dm-2",
@@ -423,6 +423,22 @@ describe("buildDiscordSyncBundle", () => {
         syncProofs: [
           {
             scopeKey: "dm-1",
+            proofKind: "messages",
+            status: "complete",
+            coverage: {},
+            resumeCursor: null,
+            lastObservedAt: 100,
+          },
+          {
+            scopeKey: "dm-2",
+            proofKind: "messages",
+            status: "complete",
+            coverage: {},
+            resumeCursor: null,
+            lastObservedAt: 100,
+          },
+          {
+            scopeKey: "dm-1",
             proofKind: "latest_messages",
             status: "complete",
             coverage: { latestMessageId: "150" },
@@ -516,19 +532,8 @@ describe("buildDiscordSyncBundle", () => {
       }),
     );
     expect(findDiscordProof(bundle, "conversation", "dm-1", "messages")).toBeUndefined();
-    expect(findDiscordProof(bundle, "conversation", "dm-2", "latest_messages")).toEqual(
-      expect.objectContaining({
-        status: "complete",
-        coverage: {
-          latestMessageId: "200",
-          previousLatestMessageId: "200",
-        },
-        stats: {
-          hydratedThisRun: false,
-          messagesFetched: 0,
-        },
-      }),
-    );
+    // An unchanged channel keeps its persisted proof when it is not hydrated this run.
+    expect(findDiscordProof(bundle, "conversation", "dm-2", "latest_messages")).toBeUndefined();
     expect(findDiscordProof(bundle, "conversation", "dm-3", "messages")).toEqual(
       expect.objectContaining({
         status: "complete",
@@ -607,6 +612,14 @@ describe("buildDiscordSyncBundle", () => {
           },
         },
         syncProofs: [
+          {
+            scopeKey: "dm-1",
+            proofKind: "messages",
+            status: "complete",
+            coverage: {},
+            resumeCursor: null,
+            lastObservedAt: 100,
+          },
           {
             scopeKey: "dm-1",
             proofKind: "latest_messages",
@@ -876,6 +889,14 @@ describe("buildDiscordSyncBundle", () => {
           },
         },
         syncProofs: [
+          {
+            scopeKey: "dm-1",
+            proofKind: "messages",
+            status: "complete",
+            coverage: {},
+            resumeCursor: null,
+            lastObservedAt: 100,
+          },
           {
             scopeKey: "dm-1",
             proofKind: "latest_messages",

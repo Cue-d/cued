@@ -48,6 +48,15 @@ export class SlackHelperError extends Error {
   }
 }
 
+export function isSlackAuthInvalidationError(error: unknown): boolean {
+  return (
+    error instanceof SlackHelperError &&
+    ["invalid_auth", "not_authed", "token_revoked", "token_expired", "account_inactive"].includes(
+      error.slackCode ?? "",
+    )
+  );
+}
+
 export class SlackHelperClient implements SlackTransport {
   private readonly helperPath: string;
   private readonly spawnImpl: SpawnImpl;

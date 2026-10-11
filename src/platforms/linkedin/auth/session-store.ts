@@ -12,6 +12,22 @@ export interface LinkedInSessionSecret {
   savedAt: number | null;
 }
 
+export type LinkedInRealtimeSessionHeaders = Pick<
+  LinkedInSessionSecret,
+  "pageInstance" | "xLiTrack" | "realtimeQueryMap" | "realtimeRecipeMap"
+>;
+
+export type CompleteLinkedInRealtimeSessionHeaders = {
+  pageInstance: string;
+  xLiTrack: string;
+  realtimeQueryMap: string;
+  realtimeRecipeMap: string;
+};
+
+export type LinkedInRealtimeSessionHeaderSource = LinkedInRealtimeSessionHeaders & {
+  serviceVersion?: string | null;
+};
+
 function asString(value: unknown): string | null {
   return typeof value === "string" && value.trim().length > 0 ? value : null;
 }
@@ -27,6 +43,28 @@ export function parseLinkedInSessionSecret(secret: Record<string, unknown>): Lin
     realtimeQueryMap: asString(secret.realtimeQueryMap),
     realtimeRecipeMap: asString(secret.realtimeRecipeMap),
     savedAt: typeof secret.savedAt === "number" ? secret.savedAt : null,
+  };
+}
+
+export function hasLinkedInRealtimeSessionHeaders(
+  session: LinkedInRealtimeSessionHeaders,
+): session is CompleteLinkedInRealtimeSessionHeaders {
+  return Boolean(
+    session.pageInstance &&
+      session.xLiTrack &&
+      session.realtimeQueryMap &&
+      session.realtimeRecipeMap,
+  );
+}
+
+export function buildLinkedInRealtimeAuthResult(source: LinkedInRealtimeSessionHeaderSource) {
+  return {
+    realtimeReady: hasLinkedInRealtimeSessionHeaders(source),
+    pageInstanceCaptured: Boolean(source.pageInstance),
+    xLiTrackCaptured: Boolean(source.xLiTrack),
+    realtimeQueryMapCaptured: Boolean(source.realtimeQueryMap),
+    realtimeRecipeMapCaptured: Boolean(source.realtimeRecipeMap),
+    serviceVersion: source.serviceVersion ?? null,
   };
 }
 
