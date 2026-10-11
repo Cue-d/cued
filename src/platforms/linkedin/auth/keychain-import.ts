@@ -7,13 +7,12 @@ import {
   loadKeychainSecret,
   storeKeychainSecret,
 } from "../../core/secrets/keychain.js";
-import { completeAuthSession, invalidateIntegrationAuth } from "../../core/state/mutations.js";
+import { completeAuthSession } from "../../core/state/mutations.js";
 import { isUserRemovedIntegrationMetadata } from "../../core/state/status.js";
 import { LinkedInClient } from "../api/client.js";
 import { LinkedInAuthError } from "../api/request.js";
 import {
   buildLinkedInRealtimeAuthResult,
-  hasLinkedInRealtimeSessionHeaders,
   type LinkedInSessionSecret,
   parseLinkedInSessionSecret,
 } from "./session-store.js";
@@ -74,7 +73,7 @@ export async function validateLinkedInStoredAuth(
   }
 
   const session = parseLinkedInSessionSecret(secret);
-  if (!hasRequiredCookies(getCookieNames(session)) || !hasLinkedInRealtimeSessionHeaders(session)) {
+  if (!hasRequiredCookies(getCookieNames(session))) {
     return { status: "invalid" };
   }
 
@@ -121,15 +120,6 @@ export function importLinkedInStoredAuth(
   if (userRemoved && !options.reviveUserRemoved) {
     return [];
   }
-  if (!hasLinkedInRealtimeSessionHeaders(parsed)) {
-    if (existing?.auth_state === "authenticated" && !userRemoved) {
-      invalidateIntegrationAuth(db, "linkedin", accountKey, {
-        errorSummary: "LinkedIn realtime headers were not captured during auth",
-        reason: "linkedin_realtime_headers_missing",
-      });
-    }
-    return [];
-  }
   const realtimeAuthResult = buildLinkedInRealtimeAuthResult(parsed);
   const alreadyImported =
     existing?.auth_state === "authenticated" &&
@@ -142,7 +132,7 @@ export function importLinkedInStoredAuth(
       typeof existingMetadata.authResult === "object" && existingMetadata.authResult
         ? (existingMetadata.authResult as Record<string, unknown>)
         : {};
-    if (existingAuthResult.realtimeReady !== true) {
+    if (existingAuthResult.realtimeReady !== realtimeAuthResult.realtimeReady) {
       db.upsertIntegrationState({
         platform: "linkedin",
         accountKey,

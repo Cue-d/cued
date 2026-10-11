@@ -2,6 +2,7 @@ import type { Page, Request } from "playwright";
 import {
   type CompleteLinkedInRealtimeSessionHeaders,
   hasLinkedInRealtimeSessionHeaders,
+  type LinkedInRealtimeSessionHeaders,
 } from "./session-store.js";
 
 const LINKEDIN_MESSAGING_URL = "https://www.linkedin.com/messaging/";
@@ -10,13 +11,6 @@ const LINKEDIN_REALTIME_CAPTURE_TIMEOUT_MS = 10_000;
 export type LinkedInRealtimeCapture = CompleteLinkedInRealtimeSessionHeaders & {
   serviceVersion: string | null;
 };
-
-export class LinkedInRealtimeCaptureError extends Error {
-  constructor() {
-    super("LinkedIn realtime headers were not captured during auth");
-    this.name = "LinkedInRealtimeCaptureError";
-  }
-}
 
 function header(headers: Record<string, string>, name: string): string | null {
   const value = headers[name]?.trim();
@@ -61,7 +55,9 @@ function captureLinkedInRealtimeRequest(request: Request): LinkedInRealtimeCaptu
   };
 }
 
-export async function captureLinkedInSessionData(page: Page): Promise<LinkedInRealtimeCapture> {
+export async function captureLinkedInSessionData(
+  page: Page,
+): Promise<LinkedInRealtimeSessionHeaders & { serviceVersion: string | null }> {
   let resolveReady: ((capture: LinkedInRealtimeCapture) => void) | null = null;
   const ready = new Promise<LinkedInRealtimeCapture>((resolve) => {
     resolveReady = resolve;
@@ -88,10 +84,16 @@ export async function captureLinkedInSessionData(page: Page): Promise<LinkedInRe
       timeout = setTimeout(() => resolve(null), LINKEDIN_REALTIME_CAPTURE_TIMEOUT_MS);
     });
     const capture = await Promise.race([ready, expired]);
-    if (!capture) {
-      throw new LinkedInRealtimeCaptureError();
-    }
-    return capture;
+    // Realtime is optional: cookies still support scheduled HTTP sync.
+    return (
+      capture ?? {
+        pageInstance: null,
+        xLiTrack: null,
+        realtimeQueryMap: null,
+        realtimeRecipeMap: null,
+        serviceVersion: null,
+      }
+    );
   } finally {
     if (timeout) {
       clearTimeout(timeout);

@@ -1,6 +1,6 @@
 import type { Page, Request } from "playwright";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { captureLinkedInSessionData, LinkedInRealtimeCaptureError } from "./realtime-capture.js";
+import { captureLinkedInSessionData } from "./realtime-capture.js";
 
 function request(url: string, headers: Record<string, string>): Request {
   return { url: () => url, headers: () => headers } as Request;
@@ -59,7 +59,7 @@ describe("LinkedIn realtime auth capture", () => {
     expect(page.off).toHaveBeenCalledOnce();
   });
 
-  it("rejects incomplete captures instead of authenticating a degraded session", async () => {
+  it("returns unavailable realtime headers without blocking cookie authentication", async () => {
     vi.useFakeTimers();
     const page = captureHarness([
       request("https://www.linkedin.com/realtime/connect?rc=1", {
@@ -69,10 +69,16 @@ describe("LinkedIn realtime auth capture", () => {
     ]);
 
     const capture = captureLinkedInSessionData(page);
-    const rejected = expect(capture).rejects.toBeInstanceOf(LinkedInRealtimeCaptureError);
+    const completed = expect(capture).resolves.toEqual({
+      pageInstance: null,
+      xLiTrack: null,
+      realtimeQueryMap: null,
+      realtimeRecipeMap: null,
+      serviceVersion: null,
+    });
     await vi.advanceTimersByTimeAsync(10_000);
 
-    await rejected;
+    await completed;
     expect(page.off).toHaveBeenCalledOnce();
   });
 });

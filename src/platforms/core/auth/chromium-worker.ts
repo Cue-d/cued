@@ -2,10 +2,7 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync } from "node:fs";
 import { type BrowserContext, type Cookie, chromium, type Page } from "playwright";
 import { cuedAuthKeychainService } from "../../../core/identity.js";
-import {
-  captureLinkedInSessionData,
-  LinkedInRealtimeCaptureError,
-} from "../../linkedin/auth/realtime-capture.js";
+import { captureLinkedInSessionData } from "../../linkedin/auth/realtime-capture.js";
 import { buildLinkedInRealtimeAuthResult } from "../../linkedin/auth/session-store.js";
 import {
   type ChromiumAuthFailureCode,
@@ -535,19 +532,6 @@ async function run(): Promise<void> {
           return;
         } catch (error) {
           lastExtractionError = error instanceof Error ? error.message : String(error);
-          if (error instanceof LinkedInRealtimeCaptureError) {
-            process.stdout.write(
-              JSON.stringify(
-                buildChromiumFailureResult({
-                  args,
-                  errorCode: "auth_extraction_failed",
-                  stage: "linkedin_realtime_capture",
-                  pageSummary: summarizeOpenPages(args.platform, openPages),
-                }),
-              ),
-            );
-            return;
-          }
         }
       }
 

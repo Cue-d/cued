@@ -875,7 +875,7 @@ process.exit(44);
     db.close();
   });
 
-  it("marks incomplete stored LinkedIn auth as needing authentication", async () => {
+  it("keeps cookie-only LinkedIn auth sync capable with degraded realtime", async () => {
     installSecurityTool({
       "so.cued.desktop.auth.linkedin:default": {
         cookies: [
@@ -901,6 +901,7 @@ process.exit(44);
       metadata: {
         keychainService: "so.cued.desktop.auth.linkedin",
         keychainAccount: "default",
+        authResult: { realtimeReady: true },
       },
     });
 
@@ -910,10 +911,10 @@ process.exit(44);
       expect.arrayContaining([
         expect.objectContaining({
           platform: "linkedin",
-          authState: "needs_auth",
-          syncCapable: false,
+          authState: "authenticated",
+          syncCapable: true,
           metadata: expect.objectContaining({
-            authInvalidationReason: "linkedin_realtime_headers_missing",
+            authResult: expect.objectContaining({ realtimeReady: false }),
           }),
         }),
       ]),
