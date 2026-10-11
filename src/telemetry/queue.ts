@@ -32,16 +32,19 @@ export class DaemonTelemetryQueue {
       // Only sanitized envelopes are retained; no caller objects, database handles per event,
       // durable spool, or retry backlog. Overload drops newest events.
       this.pending.push(buildTelemetryEnvelope(this.db, event, properties));
-      if (!this.timer && !this.draining) {
-        this.timer = setTimeout(() => {
-          this.timer = null;
-          void this.drain();
-        }, DRAIN_DELAY_MS);
-        this.timer.unref();
-      }
+      this.scheduleDrain();
     } catch {
       // Diagnostics must not interrupt ingestion, including during DB contention.
     }
+  }
+
+  private scheduleDrain(): void {
+    if (this.closed || this.timer || this.draining || this.pending.length === 0) return;
+    this.timer = setTimeout(() => {
+      this.timer = null;
+      void this.drain();
+    }, DRAIN_DELAY_MS);
+    this.timer.unref();
   }
 
   close(): Promise<void> {
@@ -71,6 +74,7 @@ export class DaemonTelemetryQueue {
     if (!this.draining) {
       this.draining = this.deliver().finally(() => {
         this.draining = null;
+        this.scheduleDrain();
       });
     }
     return this.draining;
