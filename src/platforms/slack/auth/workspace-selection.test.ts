@@ -15,6 +15,20 @@ describe("Slack browser workspace selection", () => {
       token: "xoxc-target",
     });
   });
+  it("allows one enterprise token candidate only under the requested workspace identity", () => {
+    const enterprise = JSON.stringify({ teams: { EORG: { token: "xoxc-enterprise" } } });
+    expect(select(enterprise, "TTARGET", "https://app.slack.com/client/EORG/C123")).toMatchObject({
+      teamId: "TTARGET",
+      token: "xoxc-enterprise",
+    });
+    expect(
+      select(
+        JSON.stringify({ teams: { EONE: { token: "xoxc-one" }, ETWO: { token: "xoxc-two" } } }),
+        "TTARGET",
+        "https://app.slack.com/client/EORG",
+      ),
+    ).toBeNull();
+  });
   it("waits when requested credentials are unavailable rather than completing another account", () => {
     expect(select(config, "TMISSING", "https://app.slack.com/client/TOTHER")).toBeNull();
     expect(

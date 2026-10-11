@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync } from "node:fs";
 import { type BrowserContext, type Cookie, chromium, type Page, type Request } from "playwright";
 import { cuedAuthKeychainService } from "../../../core/identity.js";
+import { verifySlackSession } from "../../slack/auth/verify-session.js";
 import { selectSlackWorkspaceCredentials } from "../../slack/auth/workspace-selection.js";
 import {
   type ChromiumAuthFailureCode,
@@ -326,21 +327,17 @@ async function extractSlackAuth(
 
   const team = selectSlackWorkspaceCredentials(localConfigRaw, accountKey, page.url());
   if (!team) return null;
-  const { teamId, teamName, userId } = team;
-  const cookies = await context.cookies(["https://slack.com", "https://app.slack.com"]);
-  const dCookie = cookies.find(
-    (cookie) => cookie.name === "d" && domainMatches(cookie, "slack.com"),
-  );
-  if (!dCookie?.value) {
-    return null;
-  }
+  const cookies = await context.cookies(["https://slack.com", "https://app.slack.com", page.url()]);
+  const verified = await verifySlackSession(team.token, team.teamId, cookies);
+  if (!verified) return null;
+  const { teamId, teamName, userId } = verified;
 
   return {
     keychainService: cuedAuthKeychainService("slack"),
     keychainAccount: teamId,
     secret: {
       token: team.token,
-      cookie: dCookie.value,
+      cookie: verified.cookie,
       teamId,
       teamName,
       userId,
