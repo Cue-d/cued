@@ -12,6 +12,7 @@ import {
   validateLinkedInStoredAuth,
 } from "../../linkedin/auth/keychain-import.js";
 import { importSlackDesktopAuth } from "../../slack/auth/desktop-import.js";
+import { SLACK_PENDING_ACCOUNT_KEY_PREFIX } from "../../slack/auth/workspace-selection.js";
 import { resolveIntegrationAccountKey } from "../account-keys.js";
 import {
   completeAuthSession,
@@ -47,7 +48,6 @@ type ConnectLifecycle = {
   onRuntimeStateChanged?: () => void;
 };
 
-const SLACK_PENDING_ACCOUNT_KEY_PREFIX = "pending-slack-";
 const GMAIL_PENDING_ACCOUNT_KEY_PREFIX = "pending-gmail-";
 
 function assertConnectPreflight(platform: string) {

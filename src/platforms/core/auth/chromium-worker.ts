@@ -4,6 +4,7 @@ import { type BrowserContext, type Cookie, chromium, type Page } from "playwrigh
 import { cuedAuthKeychainService } from "../../../core/identity.js";
 import { captureLinkedInSessionData } from "../../linkedin/auth/realtime-capture.js";
 import { buildLinkedInRealtimeAuthResult } from "../../linkedin/auth/session-store.js";
+import { selectSlackWorkspaceCredentials } from "../../slack/auth/workspace-selection.js";
 import {
   type ChromiumAuthFailureCode,
   classifyChromiumAuthWaitFailure,
@@ -245,7 +246,7 @@ async function fetchDiscordCurrentUser(token: string): Promise<{
 async function extractSlackAuth(
   context: BrowserContext,
   page: Page,
-  _accountKey: string,
+  accountKey: string,
 ): Promise<ExtractedAuth | null> {
   if (!isSlackWorkspaceUrl(page.url())) {
     return null;
@@ -258,25 +259,9 @@ async function extractSlackAuth(
     return null;
   }
 
-  let parsed: Record<string, unknown>;
-  try {
-    parsed = JSON.parse(localConfigRaw) as Record<string, unknown>;
-  } catch {
-    return null;
-  }
-
-  const teams =
-    typeof parsed.teams === "object" && parsed.teams
-      ? (parsed.teams as Record<string, Record<string, unknown>>)
-      : {};
-  const teamEntry = Object.entries(teams).find(
-    ([, team]) => typeof team?.token === "string" && team.token.startsWith("xoxc-"),
-  );
-  if (!teamEntry) {
-    return null;
-  }
-
-  const [teamId, team] = teamEntry;
+  const team = selectSlackWorkspaceCredentials(localConfigRaw, accountKey, page.url());
+  if (!team) return null;
+  const { teamId, teamName, userId } = team;
   const cookies = await context.cookies(["https://slack.com", "https://app.slack.com"]);
   const dCookie = cookies.find(
     (cookie) => cookie.name === "d" && domainMatches(cookie, "slack.com"),
@@ -285,8 +270,6 @@ async function extractSlackAuth(
     return null;
   }
 
-  const teamName = typeof team.name === "string" ? team.name : teamId;
-  const userId = typeof team.user_id === "string" ? team.user_id : "";
   return {
     keychainService: cuedAuthKeychainService("slack"),
     keychainAccount: teamId,
