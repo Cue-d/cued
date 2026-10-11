@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { verifySlackSession } from "./verify-session.js";
+import { SlackVerificationState, verifySlackSession } from "./verify-session.js";
 
 const cookies = ["stale-cookie", "valid-cookie"].map((value) => ({
   name: "d",
@@ -68,5 +68,38 @@ describe("Slack credential verification", () => {
     );
     expect(request).toHaveBeenCalledTimes(5);
     expect(request.mock.calls[0]?.[1].headers.cookie).toBe("d=stale-cookie");
+  });
+});
+
+describe("Slack auth-session request pacing", () => {
+  it("does not retry rejected pairs until the credential pair or workspace changes", async () => {
+    const state = new SlackVerificationState();
+    const request = vi
+      .fn()
+      .mockImplementation(async () => Response.json({ ok: false, error: "invalid_auth" }));
+    await verifySlackSession("xoxc-secret", "TTARGET", cookies, request, state);
+    await verifySlackSession("xoxc-secret", "TTARGET", cookies, request, state);
+    expect(request).toHaveBeenCalledTimes(2);
+    await verifySlackSession("xoxc-fresh", "TTARGET", cookies.slice(0, 1), request, state);
+    expect(request).toHaveBeenCalledTimes(3);
+  });
+  it("honors retry-after without poisoning credentials", async () => {
+    let time = 1000;
+    const state = new SlackVerificationState(() => time);
+    const request = vi
+      .fn()
+      .mockResolvedValueOnce(new Response("", { status: 429, headers: { "retry-after": "10" } }))
+      .mockResolvedValueOnce(Response.json(success));
+    await expect(
+      verifySlackSession("xoxc-secret", "TTARGET", cookies, request, state),
+    ).rejects.toThrow("HTTP 429");
+    time += 9999;
+    expect(await verifySlackSession("xoxc-secret", "TTARGET", cookies, request, state)).toBeNull();
+    expect(request).toHaveBeenCalledTimes(1);
+    time++;
+    expect(
+      await verifySlackSession("xoxc-secret", "TTARGET", cookies, request, state),
+    ).toMatchObject({ teamId: "TTARGET" });
+    expect(request).toHaveBeenCalledTimes(2);
   });
 });

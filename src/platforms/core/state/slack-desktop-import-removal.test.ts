@@ -25,7 +25,8 @@ vi.mock("playwright", () => ({
   },
 }));
 
-vi.mock("../../slack/auth/verify-session.js", () => ({
+vi.mock("../../slack/auth/verify-session.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../slack/auth/verify-session.js")>()),
   verifySlackSession: async (
     _token: string,
     teamId: string,
@@ -269,6 +270,15 @@ describe("slack desktop import removal tombstones", () => {
     expect(rejected.every((entry) => !entry.imported)).toBe(true);
     expect(db.listIntegrationStates()).toEqual(beforeRejectedImport);
     expect(keychainWrites()).toBe(beforeWrites);
+    verify.mockRejectedValue(
+      new sessionVerification.SlackSessionVerificationError("provider unavailable"),
+    );
+    const launches = spawnMock.mock.calls.length;
+    await expect(importSlackDesktopAuth(db, { skipWhenAnyAuthenticated: false })).rejects.toThrow(
+      "provider unavailable",
+    );
+    expect(spawnMock.mock.calls.length).toBe(launches);
+    expect(db.listIntegrationStates()).toEqual(beforeRejectedImport);
     verify.mockRestore();
 
     db.close();
