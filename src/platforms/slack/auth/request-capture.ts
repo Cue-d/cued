@@ -20,7 +20,7 @@ export function isSlackApiTokenRequest(
   if (
     url.protocol !== "https:" ||
     !(url.hostname === "slack.com" || url.hostname.endsWith(".slack.com")) ||
-    !/^\/api\/(?:auth\.test|client\.(?:boot|userBoot)|conversations\.(?:list|history|replies|info)|users\.(?:info|list|conversations)|team\.info)$/.test(
+    !/^\/api\/(?:auth\.test|client\.(?:boot|userBoot|init)|conversations\.(?:list|history|replies|info)|users\.(?:info|list|conversations)|team\.info)$/.test(
       url.pathname,
     )
   )
