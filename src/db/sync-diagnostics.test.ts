@@ -13,7 +13,7 @@ it("indexes latest completed sync diagnostics without changing account or run fi
     // Exercise an upgrade with existing history, not only fresh schema creation.
     db.orm().run(sql`DROP INDEX idx_sync_runs_platform_account_finished`);
     db.orm().run(
-      sql`DELETE FROM schema_migrations WHERE id = '0022_latest_finished_sync_run_index'`,
+      sql`DELETE FROM schema_migrations WHERE id = '0023_latest_finished_sync_run_index'`,
     );
     const rows = [
       { platform: "slack", account: "one", type: "sync", status: "completed", at: 100 },

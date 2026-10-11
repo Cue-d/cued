@@ -2246,7 +2246,7 @@ export const MIGRATIONS: Migration[] = [
     },
   },
   {
-    id: "0022_latest_finished_sync_run_index",
+    id: "0023_latest_finished_sync_run_index",
     apply: (db) => {
       if (!tableExists(db, "sync_runs")) return;
       db.exec(`
