@@ -73,7 +73,6 @@ describe("Gmail OAuth client config", () => {
         "google-oauth-client.json",
       );
       writeClient(bundledPath, "bundled-project");
-      process.env.HOME = join(dir, "home");
       process.env.CUED_APP_PATH = join(dir, "Cued.app");
       delete process.env.CUED_GOOGLE_OAUTH_CLIENT_FILE;
       delete process.env.GOOGLE_OAUTH_CLIENT_FILE;

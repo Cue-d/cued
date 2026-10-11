@@ -137,7 +137,7 @@ function expandHomePath(candidate: string | null): string | null {
     return null;
   }
   if (candidate.startsWith("~/")) {
-    return join(process.env.HOME ?? "", candidate.slice(2));
+    return join(homedir(), candidate.slice(2));
   }
   return candidate;
 }

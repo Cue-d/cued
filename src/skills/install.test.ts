@@ -1,5 +1,5 @@
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -24,11 +24,11 @@ import {
 
 describe("cued skill installer", () => {
   const tempDirs: string[] = [];
-  const originalHome = process.env.HOME;
+  const originalHome = homedir();
   const originalAppPath = process.env.CUED_APP_PATH;
 
   afterEach(() => {
-    process.env.HOME = originalHome;
+    vi.mocked(homedir).mockReturnValue(originalHome);
     process.env.CUED_APP_PATH = originalAppPath;
     vi.clearAllMocks();
     while (tempDirs.length > 0) {
@@ -47,7 +47,7 @@ describe("cued skill installer", () => {
 
   function setTempHome(): string {
     const homeDir = createTempDir("cued-skill-home-");
-    process.env.HOME = homeDir;
+    vi.mocked(homedir).mockReturnValue(homeDir);
     return homeDir;
   }
 

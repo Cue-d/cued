@@ -5,12 +5,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 describe("hooks service", () => {
   const tempDirs: string[] = [];
-  const originalHome = process.env.HOME;
-  const originalUserProfile = process.env.USERPROFILE;
 
   afterEach(() => {
-    process.env.HOME = originalHome;
-    process.env.USERPROFILE = originalUserProfile;
+    vi.unstubAllEnvs();
     while (tempDirs.length > 0) {
       const dir = tempDirs.pop();
       if (dir) {
@@ -22,8 +19,7 @@ describe("hooks service", () => {
   function setTempHome(): string {
     const dir = mkdtempSync(join(tmpdir(), "cued-hooks-"));
     tempDirs.push(dir);
-    process.env.HOME = dir;
-    process.env.USERPROFILE = dir;
+    vi.stubEnv("CUED_HOME", join(dir, ".cued"));
     return dir;
   }
 

@@ -1,5 +1,5 @@
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -26,11 +26,11 @@ import {
 
 describe("macOS app bundle resolution", () => {
   const tempDirs: string[] = [];
-  const originalHome = process.env.HOME;
+  const originalHome = homedir();
   const originalAppPath = process.env.CUED_APP_PATH;
 
   afterEach(() => {
-    process.env.HOME = originalHome;
+    vi.mocked(homedir).mockReturnValue(originalHome);
     process.env.CUED_APP_PATH = originalAppPath;
     vi.clearAllMocks();
     while (tempDirs.length > 0) {
@@ -49,7 +49,7 @@ describe("macOS app bundle resolution", () => {
 
   function setTempHome(): string {
     const homeDir = createTempDir("cued-home-");
-    process.env.HOME = homeDir;
+    vi.mocked(homedir).mockReturnValue(homeDir);
     return homeDir;
   }
 
