@@ -22,7 +22,7 @@ export class SlackVerificationState {
     this.failures = Math.min(this.failures + 1, 6);
     const requested = retryAfter == null ? NaN : Number(retryAfter) * 1000;
     const delay = Number.isFinite(requested)
-      ? Math.max(1000, Math.min(60_000, requested))
+      ? Math.max(1000, requested)
       : Math.min(30_000, 1000 * 2 ** this.failures);
     this.retryAt = this.clock() + delay;
   }
