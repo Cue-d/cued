@@ -179,6 +179,7 @@ describe("slack worker lib", () => {
       teamId: "T123",
       selfUserId: "U_SELF",
       lastSyncAt: undefined,
+      hydratedConversationIds: [],
       knownConversationIds: [],
       scan: {
         mode: "full",
@@ -236,6 +237,7 @@ describe("slack worker lib", () => {
       teamId: "T123",
       selfUserId: "U_SELF",
       lastSyncAt: 1710000000000,
+      hydratedConversationIds: [],
       knownConversationIds: [],
     });
   });
@@ -249,6 +251,11 @@ describe("slack worker lib", () => {
     await buildSlackSyncBundle({
       accountKey: "default",
       lastSyncAt,
+      sourceCursor: {
+        teamId: "T123",
+        selfUserId: "U_SELF",
+        hydratedConversationIds: ["D123", "C123"],
+      },
       client: {
         async testAuth() {
           return { ok: true, team_id: "T123", user_id: "U_SELF", team: "Acme", user: "Ava" };
@@ -301,6 +308,11 @@ describe("slack worker lib", () => {
     const bundle = await buildSlackSyncBundle({
       accountKey: "default",
       lastSyncAt: 1710000000000,
+      sourceCursor: {
+        teamId: "T123",
+        selfUserId: "U_SELF",
+        hydratedConversationIds: ["D123", "C123"],
+      },
       client: {
         async testAuth() {
           return { ok: true, team_id: "T123", user_id: "U_SELF", team: "Acme", user: "Ava" };
@@ -401,6 +413,7 @@ describe("slack worker lib", () => {
       teamId: "T123",
       selfUserId: "U_SELF",
       lastSyncAt: undefined,
+      hydratedConversationIds: [],
       knownConversationIds: [],
       scan: {
         mode: "full",
@@ -616,6 +629,11 @@ describe("slack worker lib", () => {
     const bundle = await buildSlackSyncBundle({
       accountKey: "default",
       lastSyncAt: 1709990000000,
+      sourceCursor: {
+        teamId: "T123",
+        selfUserId: "U_SELF",
+        hydratedConversationIds: ["C_HISTORY"],
+      },
       client: {
         async testAuth() {
           return { ok: true, team_id: "T123", user_id: "U_SELF", team: "Acme", user: "Ava" };
@@ -789,6 +807,7 @@ describe("slack worker lib", () => {
       teamId: "T123",
       selfUserId: "U_SELF",
       lastSyncAt: undefined,
+      hydratedConversationIds: [],
       knownConversationIds: ["C123"],
       scan: {
         mode: "full",
@@ -848,6 +867,7 @@ describe("slack worker lib", () => {
       teamId: "T123",
       selfUserId: "U_SELF",
       lastSyncAt: 1710000000000,
+      hydratedConversationIds: ["C123"],
       knownConversationIds: ["C123"],
     });
   });
@@ -945,6 +965,7 @@ describe("slack worker lib", () => {
       teamId: "T123",
       selfUserId: "U_SELF",
       lastSyncAt: undefined,
+      hydratedConversationIds: [],
       knownConversationIds: ["C123"],
       scan: {
         mode: "full",
@@ -1035,6 +1056,7 @@ describe("slack worker lib", () => {
           pendingThreadCount: 0,
         }),
       }),
+      expect.objectContaining({ proofKind: "history", status: "complete" }),
     ]);
     expect(second.proofs).toEqual(
       expect.arrayContaining([
@@ -1209,6 +1231,7 @@ describe("slack worker lib", () => {
         teamId: "T123",
         selfUserId: "U_SELF",
         lastSyncAt: 1_710_000_400_000,
+        hydratedConversationIds: ["D_KNOWN"],
         knownConversationIds: ["D_KNOWN"],
       },
       client: {
@@ -1290,6 +1313,7 @@ describe("slack worker lib", () => {
     ).toBe(true);
     expect(bundle.sourceCursor).toEqual(
       expect.objectContaining({
+        hydratedConversationIds: ["D_KNOWN", "D_NEW"],
         knownConversationIds: ["D_KNOWN", "D_NEW"],
       }),
     );

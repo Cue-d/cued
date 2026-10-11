@@ -510,7 +510,9 @@ echo '{"token":"xoxc-test","cookie":"cookie-test","teamId":"T123","teamName":"Ac
         }),
       );
 
-      expect(db.listSyncProofs("slack", "workspace-a")).toEqual([
+      expect(
+        db.listSyncProofs("slack", "workspace-a").filter((proof) => proof.proof_kind !== "history"),
+      ).toEqual([
         expect.objectContaining({
           scope_key: "C_ENG",
           proof_kind: "messages",
@@ -535,6 +537,13 @@ echo '{"token":"xoxc-test","cookie":"cookie-test","teamId":"T123","teamName":"Ac
         }),
       ]);
 
+      expect(
+        db
+          .listSyncProofs("slack", "workspace-a")
+          .filter((proof) => proof.proof_kind === "history")
+          .map((proof) => ({ scope: proof.scope_key, status: proof.status })),
+      ).toEqual(["C_ENG", "D_BEN", "G_TEAM"].map((scope) => ({ scope, status: "complete" })));
+
       phase = "rerun";
       const second = await runSlackPhase(db, {
         dbPath: db.dbPath,
@@ -558,7 +567,7 @@ echo '{"token":"xoxc-test","cookie":"cookie-test","teamId":"T123","teamName":"Ac
         apiURL,
         securityDir,
       });
-      expect(third.bundle.syncMode).toBe("incremental");
+      expect(third.bundle.syncMode).toBe("full");
       expect(third.totalInsertedCount).toBeGreaterThan(0);
 
       const finalConversations = db.orm().all<{ source_conversation_key: string }>(sql`
