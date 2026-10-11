@@ -139,7 +139,11 @@ function parseLocalConfig(raw: string): SlackDesktopLocalConfig {
 
 export async function importSlackDesktopAuth(
   db: CuedDatabase,
-  options: { skipWhenAnyAuthenticated?: boolean; reviveUserRemoved?: boolean } = {},
+  options: {
+    skipWhenAnyAuthenticated?: boolean;
+    reviveUserRemoved?: boolean;
+    reconnectInvalidated?: boolean;
+  } = {},
 ): Promise<
   Array<{
     platform: "slack";
@@ -227,6 +231,7 @@ export async function importSlackDesktopAuth(
             },
             {
               reviveUserRemoved: options.reviveUserRemoved,
+              reconnectInvalidated: options.reconnectInvalidated,
             },
           ),
         );

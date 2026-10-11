@@ -1,7 +1,7 @@
 import type { SourceAccountInput } from "../../../core/types/provider.js";
 import { loadIntegrationSecret } from "../../core/secrets/keychain.js";
 import type { SyncBundle } from "../../core/sync.js";
-import { SlackHelperClient } from "../helper/client.js";
+import { SlackHelperClient, SlackHelperError } from "../helper/client.js";
 import type { SlackMessagesResult, SlackTransport } from "../transport.js";
 import type { SlackConversation, SlackCredentials, SlackMessage, SlackUser } from "../types.js";
 import {
@@ -836,7 +836,10 @@ export async function buildSlackSyncBundle(options?: {
 
   const auth = await client.testAuth();
   if (!auth.ok || !auth.team_id || !auth.user_id) {
-    throw new Error(`Slack auth test failed for '${accountKey}': ${auth.error ?? "unknown_error"}`);
+    throw new SlackHelperError(
+      `Slack auth test failed for '${accountKey}': ${auth.error ?? "unknown_error"}`,
+      { slackCode: auth.error },
+    );
   }
 
   const teamId = auth.team_id;

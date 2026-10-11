@@ -498,12 +498,16 @@ process.exit(44);
     db.close();
   });
 
-  it("marks invalidated LinkedIn auth as needing auth and stops scheduled sync", () => {
+  it.each([
+    "linkedin",
+    "slack",
+    "gmail",
+  ] as const)("invalidated %s stops scheduled sync until reconnect", (platform) => {
     const db = createDb();
     db.upsertIntegrationState({
-      platform: "linkedin",
+      platform,
       accountKey: "default",
-      displayName: "LinkedIn",
+      displayName: platform,
       authState: "authenticated",
       enabled: true,
       connectionKind: "browser-session",
@@ -513,14 +517,14 @@ process.exit(44);
       importedFrom: "local-cli",
       metadata: {
         authenticatedAt: 123,
-        keychainService: "so.cued.desktop.auth.linkedin",
+        keychainService: `so.cued.desktop.auth.${platform}`,
         keychainAccount: "default",
       },
     });
 
-    const invalidated = invalidateIntegrationAuth(db, "linkedin", "default", {
+    const invalidated = invalidateIntegrationAuth(db, platform, "default", {
       errorSummary: "Authentication failed: 302 Found",
-      reason: "linkedin_auth_invalidated",
+      reason: `${platform}_auth_invalidated`,
     });
 
     expect(invalidated).toMatchObject({
@@ -530,20 +534,20 @@ process.exit(44);
       metadata: expect.objectContaining({
         authenticatedAt: null,
         lastAuthError: "Authentication failed: 302 Found",
-        authInvalidationReason: "linkedin_auth_invalidated",
+        authInvalidationReason: `${platform}_auth_invalidated`,
       }),
     });
     expect(db.listEnabledSyncTargets()).not.toContainEqual({
-      platform: "linkedin",
+      platform,
       account_key: "default",
     });
 
-    const requested = requestIntegrationAccess(db, "linkedin", "default");
+    const requested = requestIntegrationAccess(db, platform, "default");
     const completed = completeAuthSession(db, requested.authSession.id, {
       state: "authenticated",
-      keychainService: "so.cued.desktop.auth.linkedin",
+      keychainService: `so.cued.desktop.auth.${platform}`,
       keychainAccount: "default",
-      resultSummary: { provider: "linkedin" },
+      resultSummary: { provider: platform },
     });
     expect(completed.integration?.metadata).toEqual(
       expect.objectContaining({

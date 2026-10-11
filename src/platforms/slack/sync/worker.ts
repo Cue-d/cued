@@ -1,4 +1,5 @@
 import { readAdapterInvocationEnv } from "../../core/invocation.js";
+import { isSlackAuthInvalidationError } from "../helper/client.js";
 import { buildSlackSyncBundle } from "./bundle.js";
 
 async function main(): Promise<void> {
@@ -22,6 +23,7 @@ async function main(): Promise<void> {
     process.stdout.write(
       JSON.stringify({
         ok: false,
+        ...(isSlackAuthInvalidationError(error) ? { errorCode: "auth_invalid" as const } : {}),
         error: error instanceof Error ? error.message : String(error),
       }),
     );
