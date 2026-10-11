@@ -2256,4 +2256,11 @@ export const MIGRATIONS: Migration[] = [
       `);
     },
   },
+  {
+    id: "0024_recent_sync_runs_index",
+    apply: (db) => {
+      if (!tableExists(db, "sync_runs")) return;
+      db.exec(`CREATE INDEX IF NOT EXISTS idx_sync_runs_queued_at ON sync_runs(queued_at DESC)`);
+    },
+  },
 ];
