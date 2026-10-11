@@ -1,7 +1,9 @@
 import { execFileSync } from "node:child_process";
 import { mkdirSync } from "node:fs";
-import { type BrowserContext, type Cookie, chromium, type Page, type Request } from "playwright";
+import { type BrowserContext, type Cookie, chromium, type Page } from "playwright";
 import { cuedAuthKeychainService } from "../../../core/identity.js";
+import { captureLinkedInSessionData } from "../../linkedin/auth/realtime-capture.js";
+import { buildLinkedInRealtimeAuthResult } from "../../linkedin/auth/session-store.js";
 import {
   type ChromiumAuthFailureCode,
   classifyChromiumAuthWaitFailure,
@@ -240,73 +242,6 @@ async function fetchDiscordCurrentUser(token: string): Promise<{
   };
 }
 
-type LinkedInCapture = {
-  pageInstance: string | null;
-  xLiTrack: string | null;
-  serviceVersion: string | null;
-  realtimeQueryMap: string | null;
-  realtimeRecipeMap: string | null;
-};
-
-function captureLinkedInHeaders(capture: LinkedInCapture, request: Request): void {
-  if (!request.url().includes("linkedin.com")) {
-    return;
-  }
-
-  const headers = request.headers();
-  if (!capture.pageInstance && typeof headers["x-li-page-instance"] === "string") {
-    capture.pageInstance = headers["x-li-page-instance"];
-  }
-  if (!capture.xLiTrack && typeof headers["x-li-track"] === "string") {
-    capture.xLiTrack = headers["x-li-track"];
-    try {
-      const parsed = JSON.parse(headers["x-li-track"]) as Record<string, unknown>;
-      if (typeof parsed.mpVersion === "string") {
-        capture.serviceVersion = parsed.mpVersion;
-      } else if (typeof parsed.clientVersion === "string") {
-        capture.serviceVersion = parsed.clientVersion;
-      }
-    } catch {
-      capture.serviceVersion = null;
-    }
-  }
-  if (request.url().includes("/realtime/connect")) {
-    if (!capture.realtimeQueryMap && typeof headers["x-li-query-map"] === "string") {
-      capture.realtimeQueryMap = headers["x-li-query-map"];
-    }
-    if (!capture.realtimeRecipeMap && typeof headers["x-li-recipe-map"] === "string") {
-      capture.realtimeRecipeMap = headers["x-li-recipe-map"];
-    }
-  }
-}
-
-async function captureLinkedInSessionData(
-  context: BrowserContext,
-  page: Page,
-): Promise<LinkedInCapture> {
-  const capture: LinkedInCapture = {
-    pageInstance: null,
-    xLiTrack: null,
-    serviceVersion: null,
-    realtimeQueryMap: null,
-    realtimeRecipeMap: null,
-  };
-  const onRequest = (request: Request) => {
-    captureLinkedInHeaders(capture, request);
-  };
-  context.on("request", onRequest);
-  try {
-    if (!isLinkedInMessagingUrl(page.url())) {
-      await page.goto("https://www.linkedin.com/messaging/", { waitUntil: "domcontentloaded" });
-    }
-    await page.waitForLoadState("domcontentloaded", { timeout: 5_000 }).catch(() => {});
-    await page.waitForTimeout(500);
-    return capture;
-  } finally {
-    context.off("request", onRequest);
-  }
-}
-
 async function extractSlackAuth(
   context: BrowserContext,
   page: Page,
@@ -394,13 +329,7 @@ async function extractLinkedInAuth(
   }
 
   const userAgent = await page.evaluate(() => navigator.userAgent);
-  const captured = await captureLinkedInSessionData(context, page);
-  const realtimeReady = Boolean(
-    captured.pageInstance &&
-      captured.xLiTrack &&
-      captured.realtimeQueryMap &&
-      captured.realtimeRecipeMap,
-  );
+  const captured = await captureLinkedInSessionData(page);
 
   return {
     keychainService: cuedAuthKeychainService("linkedin"),
@@ -431,12 +360,7 @@ async function extractLinkedInAuth(
       runtime: runtimeKind(),
       cookieCount: cookies.length,
       userAgentCaptured: userAgent.length > 0,
-      realtimeReady,
-      pageInstanceCaptured: Boolean(captured.pageInstance),
-      xLiTrackCaptured: Boolean(captured.xLiTrack),
-      realtimeQueryMapCaptured: Boolean(captured.realtimeQueryMap),
-      realtimeRecipeMapCaptured: Boolean(captured.realtimeRecipeMap),
-      serviceVersion: captured.serviceVersion,
+      ...buildLinkedInRealtimeAuthResult(captured),
     },
   };
 }
