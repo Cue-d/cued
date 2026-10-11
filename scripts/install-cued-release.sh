@@ -60,8 +60,11 @@ validate_app_bundle() {
     exit 1
   fi
 
-  codesign --verify --deep --strict "$app_path" >/dev/null
-  spctl --assess --type execute "$app_path" >/dev/null
+  # Trusted release policy, mirrored in src/runtime/updater/signature.ts and
+  # checked for consistency by signature.test.ts. Never read this from the archive.
+  local release_requirement='=identifier "so.cued.desktop" and anchor apple generic and certificate 1[field.1.2.840.113635.100.6.2.6] exists and certificate leaf[field.1.2.840.113635.100.6.1.13] exists and certificate leaf[subject.OU] = "8MW6NC736H"'
+  /usr/bin/codesign --verify --deep --strict --test-requirement "$release_requirement" "$app_path" >/dev/null
+  /usr/sbin/spctl --assess --type execute "$app_path" >/dev/null
 }
 
 release_json="$(curl -fsSL -H 'Accept: application/vnd.github+json' "${API_BASE}/repos/${REPO}/releases")"
