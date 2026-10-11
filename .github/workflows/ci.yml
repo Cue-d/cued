@@ -37,6 +37,24 @@ jobs:
       - name: App quality
         run: pnpm check:app-quality
 
+  whatsapp-helper:
+    name: WhatsApp Helper
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: native/helpers/whatsapp-go/go.mod
+          cache-dependency-path: native/helpers/whatsapp-go/go.sum
+
+      - name: Test helper
+        working-directory: native/helpers/whatsapp-go
+        run: go test -race ./...
+
   native-macos:
     name: Native macOS Build
     # GitHub-hosted macOS runners are currently billing-gated for this repo.
