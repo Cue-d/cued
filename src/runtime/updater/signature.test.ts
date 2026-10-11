@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
 import { validateBundleSignature } from "./signature.js";
 
@@ -19,6 +20,22 @@ describe("update publisher verification", () => {
       ],
       ["/usr/sbin/spctl", ["--assess", "--type", "execute", "/private/staging/Cued.app"]],
     ]);
+  });
+
+  it("keeps the standalone installer pinned to the identical signing policy", () => {
+    const run = vi.fn();
+    validateBundleSignature("/staging/Cued.app", run);
+    const requirement = run.mock.calls[0]?.[1][4];
+    const installer = readFileSync(
+      new URL("../../../scripts/install-cued-release.sh", import.meta.url),
+      "utf8",
+    );
+    expect(requirement).toBeTypeOf("string");
+    expect(installer).toContain(`local release_requirement='${requirement}'`);
+    expect(installer).toContain(
+      '/usr/bin/codesign --verify --deep --strict --test-requirement "$release_requirement" "$app_path"',
+    );
+    expect(installer).toContain('/usr/sbin/spctl --assess --type execute "$app_path"');
   });
 
   // codesign owns certificate validation; simulate its rejection at the command
