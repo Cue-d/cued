@@ -22,11 +22,14 @@ describe("passive Slack API token capture", () => {
     capture.stop();
     expect(capture.candidates()).toEqual([]);
   });
-  it("parses multipart enterprise API token", async () => {
+  it.each([
+    "client.userBoot",
+    "client.init",
+  ])("parses multipart enterprise API token from %s", async (method) => {
     const capture = new SlackRequestTokenCapture();
     await capture.observe({
       ...base,
-      url: "https://harvard.enterprise.slack.com/api/client.boot",
+      url: `https://harvard.enterprise.slack.com/api/${method}`,
       contentType: "multipart/form-data; boundary=cued-test-boundary-long",
       body: `--cued-test-boundary-long\r\nContent-Disposition: form-data; name="token"\r\n\r\n${token}\r\n--cued-test-boundary-long--\r\n`,
     });
