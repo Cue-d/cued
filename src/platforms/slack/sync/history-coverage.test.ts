@@ -2,16 +2,30 @@ import { describe, expect, it } from "vitest";
 import type { SlackTransport } from "../transport.js";
 import { buildSlackSyncBundle, type SlackSourceCursor } from "./bundle.js";
 
+function createClient(
+  overrides: Pick<SlackTransport, "listConversations" | "getHistory">,
+): SlackTransport {
+  return {
+    async testAuth() {
+      return { ok: true, team_id: "T", user_id: "SELF" };
+    },
+    async listUsers() {
+      return { users: [] };
+    },
+    async getConversationMembers() {
+      return { members: [] };
+    },
+    async getReplies() {
+      return { messages: [], hasMore: false };
+    },
+    ...overrides,
+  };
+}
+
 describe("Slack durable initial history coverage", () => {
   it("repairs legacy empty-window proofs across pages and never repeats empty backfills", async () => {
     const calls: Array<{ channel: string; oldest?: string }> = [];
-    const client: SlackTransport = {
-      async testAuth() {
-        return { ok: true, team_id: "T", user_id: "SELF" };
-      },
-      async listUsers() {
-        return { users: [] };
-      },
+    const client = createClient({
       async listConversations(types, cursor) {
         if (!types.includes("im")) return { conversations: [] };
         return cursor
@@ -23,9 +37,6 @@ describe("Slack durable initial history coverage", () => {
               ],
               nextCursor: "page2",
             };
-      },
-      async getConversationMembers() {
-        return { members: [] };
       },
       async getHistory(channel, options) {
         calls.push({ channel, oldest: options?.oldest });
@@ -45,10 +56,7 @@ describe("Slack durable initial history coverage", () => {
           hasMore: false,
         };
       },
-      async getReplies() {
-        return { messages: [], hasMore: false };
-      },
-    };
+    });
     let sourceCursor: SlackSourceCursor = {
       teamId: "T",
       selfUserId: "SELF",
@@ -92,13 +100,7 @@ describe("Slack durable initial history coverage", () => {
   it("preserves the incremental watermark while repairing another channel", async () => {
     const checkpoint = 1_710_000_000_000;
     const missedMessageTs = "1710000600.000001";
-    const client: SlackTransport = {
-      async testAuth() {
-        return { ok: true, team_id: "T", user_id: "SELF" };
-      },
-      async listUsers() {
-        return { users: [] };
-      },
+    const client = createClient({
       async listConversations(types) {
         return {
           conversations: types.includes("im")
@@ -109,9 +111,6 @@ describe("Slack durable initial history coverage", () => {
             : [],
         };
       },
-      async getConversationMembers() {
-        return { members: [] };
-      },
       async getHistory(channel, options) {
         return {
           messages:
@@ -121,10 +120,7 @@ describe("Slack durable initial history coverage", () => {
           hasMore: false,
         };
       },
-      async getReplies() {
-        return { messages: [], hasMore: false };
-      },
-    };
+    });
     let sourceCursor: SlackSourceCursor = {
       teamId: "T",
       selfUserId: "SELF",

@@ -1,4 +1,11 @@
 import { createHash } from "node:crypto";
+import { isSlackAuthInvalidationCode } from "../helper/client.js";
+
+function credentialPairKey(token: string, cookie: string, teamId: string): string {
+  return createHash("sha256")
+    .update(JSON.stringify([token, cookie, teamId]))
+    .digest("hex");
+}
 
 export class SlackSessionVerificationError extends Error {}
 
@@ -23,11 +30,7 @@ export class SlackVerificationState {
     return this.rejected.has(key);
   }
   rejectPair(token: string, cookie: string, teamId: string): void {
-    this.reject(
-      createHash("sha256")
-        .update(JSON.stringify([token, cookie, teamId]))
-        .digest("hex"),
-    );
+    this.reject(credentialPairKey(token, cookie, teamId));
   }
   reject(key: string): void {
     this.rejected.add(key);
@@ -80,9 +83,7 @@ export async function verifySlackSession(
     ),
   ].slice(0, 5);
   for (const cookie of candidates) {
-    const key = createHash("sha256")
-      .update(JSON.stringify([token, cookie, expectedTeamId]))
-      .digest("hex");
+    const key = credentialPairKey(token, cookie, expectedTeamId);
     if (state.wasRejected(key)) continue;
     let response: Response;
     try {
@@ -119,15 +120,7 @@ export async function verifySlackSession(
       );
     }
     if (result.ok !== true) {
-      if (
-        [
-          "invalid_auth",
-          "not_authed",
-          "token_revoked",
-          "token_expired",
-          "account_inactive",
-        ].includes(String(result.error))
-      ) {
+      if (isSlackAuthInvalidationCode(String(result.error))) {
         state.reject(key);
         continue;
       }

@@ -1138,31 +1138,18 @@ describe("CuedDatabase", () => {
     db.close();
   });
 
-  it("keeps direct Signal phone sends as passthrough when there is no better contact match", () => {
+  it.each([
+    "+14155550123",
+    "4155550123",
+  ])("formats unmatched Signal phone target %s as E.164 passthrough", (input) => {
     const db = createDb();
-
-    expect(db.resolveSignalSendTarget("+14155550123")).toEqual({
+    expect(db.resolveSignalSendTarget(input)).toEqual({
       target: "+14155550123",
       threadId: "dm:+14155550123",
       resolution: "passthrough",
       matchedContactIds: [],
       matchedName: null,
     });
-
-    db.close();
-  });
-
-  it("formats local Signal phone sends as E.164 passthrough", () => {
-    const db = createDb();
-
-    expect(db.resolveSignalSendTarget("4155550123")).toEqual({
-      target: "+14155550123",
-      threadId: "dm:+14155550123",
-      resolution: "passthrough",
-      matchedContactIds: [],
-      matchedName: null,
-    });
-
     db.close();
   });
 
