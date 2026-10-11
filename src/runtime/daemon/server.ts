@@ -115,11 +115,8 @@ import type {
   WhatsAppReceiptSnapshot,
   WhatsAppSnapshot,
 } from "../../platforms/whatsapp/types.js";
-import {
-  durationBucket,
-  errorTelemetryProperties,
-  sendTelemetryEventSafe,
-} from "../../telemetry/context.js";
+import { durationBucket, errorTelemetryProperties } from "../../telemetry/context.js";
+import { DaemonTelemetryQueue } from "../../telemetry/queue.js";
 import { fetchAttachment, listAttachments, searchAttachments } from "../attachments.js";
 import { buildPermissionStatus } from "../doctor.js";
 import { emitHookEvent } from "../hooks.js";
@@ -1864,9 +1861,10 @@ export async function runDaemon(): Promise<void> {
     throw new Error("Failed to open Cued database");
   }
   const db = openedDb;
+  const telemetry = new DaemonTelemetryQueue(db);
   const startedAt = now();
   const runOwnerId = `daemon:${process.pid}:${startedAt}`;
-  await sendTelemetryEventSafe(db, "daemon_started", {
+  telemetry.enqueue("daemon_started", {
     component: "daemon",
     operation: "start",
   });
@@ -3942,7 +3940,7 @@ export async function runDaemon(): Promise<void> {
       trigger: currentRun.trigger,
       runType: currentRun.run_type,
     });
-    await sendTelemetryEventSafe(db, "sync_started", {
+    telemetry.enqueue("sync_started", {
       component: "sync",
       operation: "ingest",
       stage: "ingest",
@@ -3973,7 +3971,7 @@ export async function runDaemon(): Promise<void> {
           null,
           runClaim,
         );
-        await sendTelemetryEventSafe(db, "sync_failed", {
+        telemetry.enqueue("sync_failed", {
           component: "sync",
           operation: "ingest",
           stage: "validation",
@@ -4036,7 +4034,7 @@ export async function runDaemon(): Promise<void> {
         firstInsertedRowId: null,
         lastInsertedRowId: null,
       };
-      await sendTelemetryEventSafe(db, "helper_started", {
+      telemetry.enqueue("helper_started", {
         component: "sync",
         operation: "adapter",
         stage: "adapter",
@@ -4440,7 +4438,7 @@ export async function runDaemon(): Promise<void> {
         insertedRawEvents: insertResult.insertedCount,
         timings,
       });
-      await sendTelemetryEventSafe(db, "sync_completed", {
+      telemetry.enqueue("sync_completed", {
         component: "sync",
         operation: "ingest",
         stage: "ingest",
@@ -4511,12 +4509,12 @@ export async function runDaemon(): Promise<void> {
         duration_bucket: durationBucket(now() - ingestStartedAt),
         ...errorTelemetryProperties(error, "sync_failed"),
       };
-      await sendTelemetryEventSafe(db, "helper_failed", {
+      telemetry.enqueue("helper_failed", {
         ...failureProperties,
         operation: "adapter",
         helper_kind: currentRun.platform ?? "unknown",
       });
-      await sendTelemetryEventSafe(db, "sync_failed", failureProperties);
+      telemetry.enqueue("sync_failed", failureProperties);
       await safeEmitHookEvent("sync.failed", {
         runId: currentRun.id,
         platform: currentRun.platform,
@@ -4547,7 +4545,7 @@ export async function runDaemon(): Promise<void> {
         interactiveAuthMode: isInteractiveAuthActive(),
       });
       db.updateRunProgress(currentRun.id, { leaseMs: PROJECTION_RUN_LEASE_MS, claim: runClaim });
-      await sendTelemetryEventSafe(db, "sync_started", {
+      telemetry.enqueue("sync_started", {
         component: "sync",
         operation: "projection",
         stage: "projection",
@@ -4623,7 +4621,7 @@ export async function runDaemon(): Promise<void> {
         projected,
         timings,
       });
-      await sendTelemetryEventSafe(db, "sync_completed", {
+      telemetry.enqueue("sync_completed", {
         component: "sync",
         operation: "projection",
         stage: "projection",
@@ -4659,7 +4657,7 @@ export async function runDaemon(): Promise<void> {
         null,
         runClaim,
       );
-      await sendTelemetryEventSafe(db, "sync_failed", {
+      telemetry.enqueue("sync_failed", {
         component: "sync",
         operation: "projection",
         stage: "projection",
@@ -4746,7 +4744,7 @@ export async function runDaemon(): Promise<void> {
     void runBootstrap();
   });
 
-  const shutdown = () => {
+  const shutdown = async () => {
     if (shutdownInitiated) {
       return;
     }
@@ -4792,6 +4790,7 @@ export async function runDaemon(): Promise<void> {
       details: daemonIdentity,
     });
     server.close();
+    await telemetry.close();
     db.close();
     daemonLease.release();
     if (existsSync(CUED_SOCKET_PATH)) {
