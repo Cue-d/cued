@@ -25,7 +25,27 @@ vi.mock("playwright", () => ({
   },
 }));
 
+vi.mock("../../slack/auth/verify-session.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../slack/auth/verify-session.js")>()),
+  verifySlackSession: async (
+    _token: string,
+    teamId: string,
+    cookies: Array<{ value: string }>,
+  ) => ({
+    teamId,
+    teamName:
+      teamId === "T_ACTIVE"
+        ? "Active Workspace"
+        : teamId === "T_RECOVERED"
+          ? "Recovered Workspace"
+          : teamId,
+    userId: "U_TEST",
+    cookie: cookies[0]?.value,
+  }),
+}));
+
 import { importSlackDesktopAuth } from "../../slack/auth/desktop-import.js";
+import * as sessionVerification from "../../slack/auth/verify-session.js";
 import { invalidateIntegrationAuth } from "./mutations.js";
 
 describe("slack desktop import removal tombstones", () => {
@@ -238,6 +258,28 @@ describe("slack desktop import removal tombstones", () => {
     );
     expect(spawnMock).not.toHaveBeenCalled();
     expect(closeMock).toHaveBeenCalledTimes(1);
+
+    const beforeRejectedImport = db.listIntegrationStates();
+    const keychainWrites = () =>
+      execFileSyncMock.mock.calls.filter(
+        ([command, args]) => command === "security" && args[0] === "add-generic-password",
+      ).length;
+    const beforeWrites = keychainWrites();
+    const verify = vi.spyOn(sessionVerification, "verifySlackSession").mockResolvedValue(null);
+    const rejected = await importSlackDesktopAuth(db, { skipWhenAnyAuthenticated: false });
+    expect(rejected.every((entry) => !entry.imported)).toBe(true);
+    expect(db.listIntegrationStates()).toEqual(beforeRejectedImport);
+    expect(keychainWrites()).toBe(beforeWrites);
+    verify.mockRejectedValue(
+      new sessionVerification.SlackSessionVerificationError("provider unavailable"),
+    );
+    const launches = spawnMock.mock.calls.length;
+    await expect(importSlackDesktopAuth(db, { skipWhenAnyAuthenticated: false })).rejects.toThrow(
+      "provider unavailable",
+    );
+    expect(spawnMock.mock.calls.length).toBe(launches);
+    expect(db.listIntegrationStates()).toEqual(beforeRejectedImport);
+    verify.mockRestore();
 
     db.close();
   });

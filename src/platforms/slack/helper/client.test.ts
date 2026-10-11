@@ -70,6 +70,23 @@ describe("slack helper client", () => {
     });
   });
 
+  it("bounds auth preflight subprocesses and rejects a killed helper", async () => {
+    const child = new MockChild();
+    spawnMock.mockReturnValue(child);
+    const client = new SlackHelperClient(
+      { token: "xoxc-test", cookie: "cookie-test" },
+      { helperPath: "/tmp/cued-slack-helper", timeoutMs: 10000, retryAttempts: 1 },
+    );
+    const promise = client.testAuth();
+    expect(spawnMock).toHaveBeenCalledWith(
+      "/tmp/cued-slack-helper",
+      ["authTest"],
+      expect.objectContaining({ timeout: 10000, killSignal: "SIGKILL" }),
+    );
+    child.emit("close", null);
+    await expect(promise).rejects.toThrow();
+  });
+
   it("surfaces helper envelope errors", async () => {
     const child = new MockChild();
     spawnMock.mockReturnValue(child);

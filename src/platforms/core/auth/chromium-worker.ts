@@ -1,9 +1,19 @@
 import { execFileSync } from "node:child_process";
 import { mkdirSync } from "node:fs";
-import { type BrowserContext, type Cookie, chromium, type Page } from "playwright";
+import { type BrowserContext, type Cookie, chromium, type Page, type Request } from "playwright";
 import { cuedAuthKeychainService } from "../../../core/identity.js";
 import { captureLinkedInSessionData } from "../../linkedin/auth/realtime-capture.js";
 import { buildLinkedInRealtimeAuthResult } from "../../linkedin/auth/session-store.js";
+import { SlackCaptureConfirmation } from "../../slack/auth/capture-confirmation.js";
+import {
+  isSlackApiTokenRequest,
+  SlackRequestTokenCapture,
+} from "../../slack/auth/request-capture.js";
+import { SlackVerificationState, verifySlackSession } from "../../slack/auth/verify-session.js";
+import {
+  SLACK_PENDING_ACCOUNT_KEY_PREFIX,
+  selectSlackWorkspaceCredentials,
+} from "../../slack/auth/workspace-selection.js";
 import {
   type ChromiumAuthFailureCode,
   classifyChromiumAuthWaitFailure,
@@ -245,67 +255,90 @@ async function fetchDiscordCurrentUser(token: string): Promise<{
 async function extractSlackAuth(
   context: BrowserContext,
   page: Page,
-  _accountKey: string,
+  accountKey: string,
+  requestTokens: SlackRequestTokenCapture,
+  verificationState: SlackVerificationState,
+  confirmation: SlackCaptureConfirmation,
 ): Promise<ExtractedAuth | null> {
-  if (!isSlackWorkspaceUrl(page.url())) {
+  if (!confirmation.ready() || !isSlackWorkspaceUrl(page.url())) {
     return null;
   }
 
   const localConfigRaw = await page
     .evaluate(() => localStorage.getItem("localConfig_v2"))
     .catch(() => null);
-  if (!localConfigRaw) {
-    return null;
-  }
-
-  let parsed: Record<string, unknown>;
-  try {
-    parsed = JSON.parse(localConfigRaw) as Record<string, unknown>;
-  } catch {
-    return null;
-  }
-
-  const teams =
-    typeof parsed.teams === "object" && parsed.teams
-      ? (parsed.teams as Record<string, Record<string, unknown>>)
-      : {};
-  const teamEntry = Object.entries(teams).find(
-    ([, team]) => typeof team?.token === "string" && team.token.startsWith("xoxc-"),
+  const team = selectSlackWorkspaceCredentials(localConfigRaw ?? "{}", accountKey, page.url());
+  const explicitAccount =
+    accountKey !== "default" && !accountKey.startsWith(SLACK_PENDING_ACCOUNT_KEY_PREFIX);
+  const expectedTeamId = explicitAccount ? accountKey : team?.teamId;
+  if (!expectedTeamId) return null;
+  const cookies = await context.cookies(["https://slack.com", "https://app.slack.com", page.url()]);
+  const tokens = [...new Set([...requestTokens.candidates(), ...(team ? [team.token] : [])])].slice(
+    0,
+    5,
   );
-  if (!teamEntry) {
-    return null;
-  }
+  for (const token of tokens) {
+    const verified = await verifySlackSession(
+      token,
+      expectedTeamId,
+      cookies,
+      fetch,
+      verificationState,
+    );
+    if (!verified) continue;
+    if (
+      !(await confirmation.confirm(
+        token,
+        verified,
+        async () => {
+          const currentCookies = await context.cookies([
+            "https://slack.com",
+            "https://app.slack.com",
+            page.url(),
+          ]);
+          if (
+            !currentCookies.some(
+              (cookie) => cookie.name === "d" && cookie.value === verified.cookie,
+            )
+          )
+            return false;
+          const rechecked = await verifySlackSession(
+            token,
+            expectedTeamId,
+            currentCookies.filter((cookie) => cookie.value === verified.cookie),
+            fetch,
+            verificationState,
+          );
+          return rechecked?.cookie === verified.cookie && rechecked.userId === verified.userId;
+        },
+        undefined,
+        () => verificationState.rejectPair(token, verified.cookie, expectedTeamId),
+      ))
+    )
+      return null;
+    const { teamId, teamName, userId } = verified;
 
-  const [teamId, team] = teamEntry;
-  const cookies = await context.cookies(["https://slack.com", "https://app.slack.com"]);
-  const dCookie = cookies.find(
-    (cookie) => cookie.name === "d" && domainMatches(cookie, "slack.com"),
-  );
-  if (!dCookie?.value) {
-    return null;
+    return {
+      keychainService: cuedAuthKeychainService("slack"),
+      keychainAccount: teamId,
+      secret: {
+        token,
+        cookie: verified.cookie,
+        teamId,
+        teamName,
+        userId,
+        savedAt: Date.now(),
+      },
+      resultSummary: {
+        provider: "slack",
+        teamId,
+        teamName,
+        userId,
+        cookieNames: cookies.map((cookie) => cookie.name).sort(),
+      },
+    };
   }
-
-  const teamName = typeof team.name === "string" ? team.name : teamId;
-  const userId = typeof team.user_id === "string" ? team.user_id : "";
-  return {
-    keychainService: cuedAuthKeychainService("slack"),
-    keychainAccount: teamId,
-    secret: {
-      token: team.token,
-      cookie: dCookie.value,
-      teamId,
-      teamName,
-      userId,
-      savedAt: Date.now(),
-    },
-    resultSummary: {
-      provider: "slack",
-      teamId,
-      teamName,
-      userId,
-      cookieNames: cookies.map((cookie) => cookie.name).sort(),
-    },
-  };
+  return null;
 }
 
 async function extractLinkedInAuth(
@@ -416,10 +449,20 @@ async function maybeExtractAuth(
   args: WorkerArgs,
   context: BrowserContext,
   page: Page,
+  requestTokens: SlackRequestTokenCapture,
+  verificationState: SlackVerificationState,
+  confirmation: SlackCaptureConfirmation,
 ): Promise<ExtractedAuth | null> {
   switch (args.platform) {
     case "slack":
-      return extractSlackAuth(context, page, args.accountKey);
+      return extractSlackAuth(
+        context,
+        page,
+        args.accountKey,
+        requestTokens,
+        verificationState,
+        confirmation,
+      );
     case "discord":
       return extractDiscordAuth(context, page, args.accountKey);
     case "linkedin":
@@ -468,6 +511,13 @@ async function run(): Promise<void> {
 
   mkdirSync(args.profileDir, { recursive: true });
   let context: BrowserContext | null = null;
+  const requestTokens = new SlackRequestTokenCapture();
+  const reportCaptureDiagnostic = (event: string) => {
+    process.stderr.write(`${JSON.stringify({ provider: "slack", captureDiagnostic: event })}\n`);
+  };
+  const verificationState = new SlackVerificationState(Date.now, reportCaptureDiagnostic);
+  const confirmation = new SlackCaptureConfirmation(reportCaptureDiagnostic);
+  let detachSlackCapture: (() => void) | null = null;
   try {
     context = await chromium.launchPersistentContext(args.profileDir, {
       headless: false,
@@ -476,6 +526,26 @@ async function run(): Promise<void> {
       viewport: { width: 1280, height: 900 },
     });
 
+    if (args.platform === "slack") {
+      const onSlackRequest = (request: Request) => {
+        const url = request.url();
+        const method = request.method();
+        const headers = request.headers();
+        const contentType = headers["content-type"] ?? "";
+        if (!isSlackApiTokenRequest(url, method, contentType, headers["content-length"])) return;
+        void requestTokens
+          .observe({
+            url,
+            method,
+            contentType,
+            body: method === "POST" ? request.postData() : null,
+          })
+          .catch(() => {});
+      };
+      context.on("request", onSlackRequest);
+      const captureContext = context;
+      detachSlackCapture = () => captureContext.off("request", onSlackRequest);
+    }
     let page = firstOpenPage(context) ?? (await context.newPage());
     if (!page.url() || page.url() === "about:blank") {
       await page.goto(args.launchTarget, { waitUntil: "domcontentloaded" });
@@ -510,7 +580,14 @@ async function run(): Promise<void> {
           if (args.platform === "slack") {
             await continueSlackInBrowser(candidatePage);
           }
-          const extracted = await maybeExtractAuth(args, context, candidatePage);
+          const extracted = await maybeExtractAuth(
+            args,
+            context,
+            candidatePage,
+            requestTokens,
+            verificationState,
+            confirmation,
+          );
           if (!extracted) {
             continue;
           }
@@ -553,6 +630,8 @@ async function run(): Promise<void> {
     });
     process.stdout.write(JSON.stringify(failed));
   } finally {
+    detachSlackCapture?.();
+    requestTokens.stop();
     await context?.close().catch(() => {});
   }
 }

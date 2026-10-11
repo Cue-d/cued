@@ -1,8 +1,10 @@
 import { type ChildProcess, execFileSync, spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
+import { createInterface } from "node:readline";
 import type { AuthSessionState, Platform } from "../../../core/types/provider.js";
 import type { CuedDatabase } from "../../../db/database.js";
+import { parseSlackCaptureDiagnostic } from "../../slack/auth/capture-diagnostics.js";
 import type { AuthSessionSummary, IntegrationStateSummary } from "../state/types.js";
 
 export interface ChromiumAuthResult {
@@ -102,7 +104,14 @@ export function startChromiumAuthSession(
 
   const stdoutChunks: Buffer[] = [];
   child.stdout.on("data", (chunk) => stdoutChunks.push(Buffer.from(chunk)));
-  child.stderr.on("data", () => {});
+  createInterface({ input: child.stderr }).on("line", (line: string) => {
+    const event = parseSlackCaptureDiagnostic(line);
+    if (event && session.platform === "slack") {
+      process.stderr.write(
+        `${JSON.stringify({ event: "slack.auth.capture", sessionId: session.id, stage: event })}\n`,
+      );
+    }
+  });
 
   const completion = new Promise<ChromiumAuthResult>((resolve, reject) => {
     child.once("error", reject);
