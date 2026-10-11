@@ -116,6 +116,11 @@ export function importLinkedInStoredAuth(
   const existingMetadata = existing?.metadata_json
     ? (safeParseJsonRecord(existing.metadata_json, "integration_states.metadata_json") ?? {})
     : {};
+  // A cached secret is not evidence that credentials rejected by LinkedIn work
+  // again. Only a completed authentication flow may clear this marker.
+  if (existingMetadata.authInvalidatedAt != null) {
+    return [];
+  }
   const userRemoved = isUserRemovedIntegrationMetadata(existingMetadata);
   if (userRemoved && !options.reviveUserRemoved) {
     return [];

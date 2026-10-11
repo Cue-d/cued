@@ -560,6 +560,84 @@ process.exit(44);
     db.close();
   });
 
+  it("keeps invalidated LinkedIn auth paused across refresh until authentication completes", async () => {
+    installSecurityTool({
+      "so.cued.desktop.auth.linkedin:default": {
+        cookies: [
+          { name: "li_at", value: "rejected-token" },
+          { name: "JSESSIONID", value: '"ajax:123"' },
+        ],
+      },
+    });
+    const db = createDb();
+    db.upsertIntegrationState({
+      platform: "linkedin",
+      accountKey: "default",
+      displayName: "LinkedIn",
+      authState: "authenticated",
+      enabled: true,
+      connectionKind: "browser-session",
+      syncCapable: true,
+      launchStrategy: "chromium-auth",
+      launchTarget: "https://www.linkedin.com/login",
+      importedFrom: "local-cli",
+      metadata: {
+        authenticatedAt: 123,
+        keychainService: "so.cued.desktop.auth.linkedin",
+        keychainAccount: "default",
+      },
+    });
+
+    const invalidated = invalidateIntegrationAuth(db, "linkedin", "default", {
+      errorSummary: "Authentication failed: 302 Found",
+      reason: "linkedin_auth_invalidated",
+    });
+
+    expect(invalidated).toMatchObject({
+      authState: "needs_auth",
+      enabled: true,
+      syncCapable: false,
+      metadata: expect.objectContaining({
+        authenticatedAt: null,
+        lastAuthError: "Authentication failed: 302 Found",
+        authInvalidationReason: "linkedin_auth_invalidated",
+      }),
+    });
+    expect(db.listEnabledSyncTargets()).not.toContainEqual({
+      platform: "linkedin",
+      account_key: "default",
+    });
+
+    expect(importLinkedInStoredAuth(db)).toEqual([]);
+    expect(importLinkedInStoredAuth(db, { reviveUserRemoved: true })).toEqual([]);
+    await refreshManagedIntegrationStates(db);
+    expect(db.getIntegrationState("linkedin", "default")).toMatchObject({
+      auth_state: "needs_auth",
+      sync_capable: 0,
+    });
+    expect(db.listEnabledSyncTargets()).not.toContainEqual({
+      platform: "linkedin",
+      account_key: "default",
+    });
+
+    const requested = requestIntegrationAccess(db, "linkedin", "default");
+    const completed = completeAuthSession(db, requested.authSession.id, {
+      state: "authenticated",
+      keychainService: "so.cued.desktop.auth.linkedin",
+      keychainAccount: "default",
+      resultSummary: { provider: "linkedin" },
+    });
+    expect(completed.integration?.metadata).toEqual(
+      expect.objectContaining({
+        authInvalidatedAt: null,
+        authInvalidationReason: null,
+        lastAuthError: null,
+      }),
+    );
+
+    db.close();
+  });
+
   it("includes projection stats in integration status", () => {
     const db = createDb();
     const requested = requestIntegrationAccess(db, "discord");
