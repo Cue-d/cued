@@ -1,7 +1,7 @@
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { resolveHostOS } from "../../../core/platform-capabilities.js";
 import { CuedDatabase } from "../../../db/database.js";
 import { openSqliteDatabase } from "../../../db/sqlite.js";
@@ -25,6 +25,7 @@ import { refreshManagedIntegrationStates } from "./refresh.js";
 import {
   buildIntegrationStatus,
   getAuthSessionSummary,
+  getIntegrationSummary,
   listIntegrationStates,
   listRequestableIntegrationPlatforms,
   reconcileAbandonedAuthSessions,
@@ -203,8 +204,23 @@ process.exit(44);
     );
 
     const db = createDb();
+    const historicalStats = vi.spyOn(db, "getIntegrationProjectionStats").mockImplementation(() => {
+      throw new Error("Historical scans must not block connection refresh");
+    });
+    const latestRun = vi.spyOn(db, "getLatestFinishedSyncRun").mockImplementation(() => {
+      throw new Error("Historical run scans must not block connection refresh");
+    });
     const refreshed = await refreshManagedIntegrationStates(db);
     expect(refreshed.refreshed).toBe(4);
+    expect(getIntegrationSummary(db, "contacts", "local").authState).toBe("authorized");
+    expect(historicalStats).not.toHaveBeenCalled();
+    expect(latestRun).not.toHaveBeenCalled();
+    historicalStats.mockRestore();
+    latestRun.mockRestore();
+    const explicitDiagnostics = vi.spyOn(db, "getIntegrationProjectionStats");
+    listIntegrationStates(db);
+    expect(explicitDiagnostics).toHaveBeenCalled();
+    explicitDiagnostics.mockRestore();
     expect(listIntegrationStates(db)).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
