@@ -2260,4 +2260,15 @@ export const MIGRATIONS: Migration[] = [
       `);
     },
   },
+  {
+    id: "0023_latest_finished_sync_run_index",
+    apply: (db) => {
+      if (!tableExists(db, "sync_runs")) return;
+      db.exec(`
+        CREATE INDEX IF NOT EXISTS idx_sync_runs_platform_account_finished
+        ON sync_runs(platform, account_key, finished_at DESC)
+        WHERE finished_at IS NOT NULL;
+      `);
+    },
+  },
 ];
