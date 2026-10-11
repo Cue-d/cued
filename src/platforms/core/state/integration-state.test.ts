@@ -498,7 +498,15 @@ process.exit(44);
     db.close();
   });
 
-  it("marks invalidated LinkedIn auth as needing auth and stops scheduled sync", () => {
+  it("keeps invalidated LinkedIn auth paused across refresh until authentication completes", async () => {
+    installSecurityTool({
+      "so.cued.desktop.auth.linkedin:default": {
+        cookies: [
+          { name: "li_at", value: "rejected-token" },
+          { name: "JSESSIONID", value: '"ajax:123"' },
+        ],
+      },
+    });
     const db = createDb();
     db.upsertIntegrationState({
       platform: "linkedin",
@@ -532,6 +540,18 @@ process.exit(44);
         lastAuthError: "Authentication failed: 302 Found",
         authInvalidationReason: "linkedin_auth_invalidated",
       }),
+    });
+    expect(db.listEnabledSyncTargets()).not.toContainEqual({
+      platform: "linkedin",
+      account_key: "default",
+    });
+
+    expect(importLinkedInStoredAuth(db)).toEqual([]);
+    expect(importLinkedInStoredAuth(db, { reviveUserRemoved: true })).toEqual([]);
+    await refreshManagedIntegrationStates(db);
+    expect(db.getIntegrationState("linkedin", "default")).toMatchObject({
+      auth_state: "needs_auth",
+      sync_capable: 0,
     });
     expect(db.listEnabledSyncTargets()).not.toContainEqual({
       platform: "linkedin",
