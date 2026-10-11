@@ -1,3 +1,4 @@
+import { safeParseJsonRecord } from "../../../db/codecs.js";
 import type { CuedDatabase, IntegrationStateRow } from "../../../db/database.js";
 import { importLinkedInStoredAuth } from "../../linkedin/auth/keychain-import.js";
 import {
@@ -90,6 +91,9 @@ async function buildWhatsAppManagedState(
   let pushName: string | null = null;
   let helperVersion = inspected.version;
   let helperStatus: Awaited<ReturnType<typeof readWhatsAppHelperStatus>> | null = null;
+  const previousMetadata =
+    safeParseJsonRecord(existing?.metadata_json ?? null, "integration_states.metadata_json") ?? {};
+  let statusError: string | null = null;
 
   if (!inspected.helperPath) {
     authState = existing?.auth_state === "cancelled" ? "cancelled" : "missing";
@@ -108,8 +112,22 @@ async function buildWhatsAppManagedState(
       } else {
         authState = "needs_auth";
       }
-    } catch {
-      authState = existing?.auth_state === "cancelled" ? "cancelled" : "blocked";
+    } catch (error) {
+      // A failed local probe does not establish that a previously linked account
+      // lost authorization. Keep it eligible for the scheduler's bounded retry.
+      authState =
+        existing?.auth_state === "authenticated" || existing?.auth_state === "cancelled"
+          ? existing.auth_state
+          : "blocked";
+      accountJid =
+        typeof previousMetadata.whatsappAccountJid === "string"
+          ? previousMetadata.whatsappAccountJid
+          : null;
+      pushName =
+        typeof previousMetadata.whatsappPushName === "string"
+          ? previousMetadata.whatsappPushName
+          : null;
+      statusError = error instanceof Error ? error.message : String(error);
     }
   }
 
@@ -137,6 +155,8 @@ async function buildWhatsAppManagedState(
       storeDir,
       whatsappHelperPath: inspected.helperPath,
       whatsappHelperVersion: helperVersion,
+      whatsappStatusError: statusError,
+      whatsappStatusCheckedAt: now(),
       whatsappAccountJid: accountJid,
       whatsappPushName: pushName,
       whatsappLastHistorySyncAt: helperStatus?.lastHistorySyncAt ?? null,
@@ -146,7 +166,7 @@ async function buildWhatsAppManagedState(
       whatsappQueuedHistorySyncCount: helperStatus?.queuedHistorySyncCount ?? null,
       whatsappLastHistorySyncError: helperStatus?.lastHistorySyncError ?? null,
       whatsappLastHistoryNotificationAt: helperStatus?.lastHistoryNotificationAt ?? null,
-      lastVerifiedAt: now(),
+      lastVerifiedAt: helperStatus ? now() : (previousMetadata.lastVerifiedAt ?? null),
     },
   };
 }
