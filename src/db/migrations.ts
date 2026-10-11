@@ -2245,4 +2245,19 @@ export const MIGRATIONS: Migration[] = [
       `);
     },
   },
+  {
+    id: "0022_repair_missing_sync_run_schedules",
+    apply: (db) => {
+      if (!tableExists(db, "sync_runs")) {
+        return;
+      }
+      // Older runtimes could keep writing unscheduled rows after 0013 ran.
+      // Those rows block duplicate syncs but cannot pass the queue's due-time filter.
+      db.exec(`
+        UPDATE sync_runs
+        SET scheduled_at = COALESCE(queued_at, started_at, 0)
+        WHERE scheduled_at IS NULL;
+      `);
+    },
+  },
 ];
