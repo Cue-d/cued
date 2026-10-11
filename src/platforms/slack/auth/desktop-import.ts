@@ -1,5 +1,6 @@
 import { type ChildProcess, execFileSync, spawn } from "node:child_process";
 import { existsSync } from "node:fs";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import { chromium } from "playwright";
 import type { CuedDatabase } from "../../../db/database.js";
@@ -10,12 +11,7 @@ declare const localStorage: {
 };
 
 const DEFAULT_SLACK_APP_BINARY = "/Applications/Slack.app/Contents/MacOS/Slack";
-const DEFAULT_SLACK_USER_DATA_DIR = join(
-  process.env.HOME ?? "",
-  "Library",
-  "Application Support",
-  "Slack",
-);
+const DEFAULT_SLACK_USER_DATA_DIR = join(homedir(), "Library", "Application Support", "Slack");
 const DEFAULT_DEBUGGING_PORT = 9222;
 const DEFAULT_SLACK_DESKTOP_IMPORT_TIMEOUT_MS = 20_000;
 
