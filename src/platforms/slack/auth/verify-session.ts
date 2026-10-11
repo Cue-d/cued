@@ -6,13 +6,28 @@ export class SlackVerificationState {
   private readonly rejected = new Set<string>();
   private retryAt = 0;
   private failures = 0;
-  constructor(private readonly clock: () => number = Date.now) {}
+  constructor(
+    private readonly clock: () => number = Date.now,
+    private readonly report: (event: "session_cookie_returned") => void = () => {},
+  ) {}
+
+  observeResponse(response: Response): void {
+    if (response.headers.getSetCookie().some((cookie) => /^d=/i.test(cookie)))
+      this.report("session_cookie_returned");
+  }
 
   ready(): boolean {
     return this.clock() >= this.retryAt;
   }
   wasRejected(key: string): boolean {
     return this.rejected.has(key);
+  }
+  rejectPair(token: string, cookie: string, teamId: string): void {
+    this.reject(
+      createHash("sha256")
+        .update(JSON.stringify([token, cookie, teamId]))
+        .digest("hex"),
+    );
   }
   reject(key: string): void {
     this.rejected.add(key);
@@ -84,6 +99,7 @@ export async function verifySlackSession(
         "Slack credential verification request failed; retry connecting",
       );
     }
+    state.observeResponse(response);
     if (!response.ok) {
       state.defer(response.headers.get("retry-after"));
       throw new SlackSessionVerificationError(

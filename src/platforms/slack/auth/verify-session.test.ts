@@ -105,3 +105,13 @@ describe("Slack auth-session request pacing", () => {
     expect(request).toHaveBeenCalledTimes(2);
   });
 });
+
+it("reports only the presence of a replacement session cookie", async () => {
+  const report = vi.fn();
+  const state = new SlackVerificationState(Date.now, report);
+  const request = vi.fn(async () =>
+    Response.json(success, { headers: { "set-cookie": "d=secret-replacement; Secure" } }),
+  );
+  await verifySlackSession("token", "TTARGET", cookies, request, state);
+  expect(report.mock.calls).toEqual([["session_cookie_returned"]]);
+});
