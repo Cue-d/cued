@@ -2103,13 +2103,14 @@ export async function runDaemon(): Promise<void> {
     trigger: string,
   ): Promise<void> => {
     try {
+      const platform = "slack" satisfies AdapterPlatform;
       if (rawEvents.length === 0) {
         return;
       }
       if (isProcessingProjection) {
         queueNativeTriggeredSync(
           db,
-          "discord",
+          platform,
           accountKey,
           `${trigger}:projection_busy`,
           schedulers.wakeIngest,
@@ -2119,7 +2120,7 @@ export async function runDaemon(): Promise<void> {
 
       db.upsertSourceAccounts([
         {
-          platform: "slack",
+          platform,
           accountKey,
           displayName: "Slack",
         },
