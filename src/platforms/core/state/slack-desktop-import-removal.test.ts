@@ -25,7 +25,26 @@ vi.mock("playwright", () => ({
   },
 }));
 
+vi.mock("../../slack/auth/verify-session.js", () => ({
+  verifySlackSession: async (
+    _token: string,
+    teamId: string,
+    cookies: Array<{ value: string }>,
+  ) => ({
+    teamId,
+    teamName:
+      teamId === "T_ACTIVE"
+        ? "Active Workspace"
+        : teamId === "T_RECOVERED"
+          ? "Recovered Workspace"
+          : teamId,
+    userId: "U_TEST",
+    cookie: cookies[0]?.value,
+  }),
+}));
+
 import { importSlackDesktopAuth } from "../../slack/auth/desktop-import.js";
+import * as sessionVerification from "../../slack/auth/verify-session.js";
 
 describe("slack desktop import removal tombstones", () => {
   const tempDirs: string[] = [];
@@ -178,6 +197,19 @@ describe("slack desktop import removal tombstones", () => {
     );
     expect(spawnMock).not.toHaveBeenCalled();
     expect(closeMock).toHaveBeenCalledTimes(1);
+
+    const beforeRejectedImport = db.listIntegrationStates();
+    const keychainWrites = () =>
+      execFileSyncMock.mock.calls.filter(
+        ([command, args]) => command === "security" && args[0] === "add-generic-password",
+      ).length;
+    const beforeWrites = keychainWrites();
+    const verify = vi.spyOn(sessionVerification, "verifySlackSession").mockResolvedValue(null);
+    const rejected = await importSlackDesktopAuth(db, { skipWhenAnyAuthenticated: false });
+    expect(rejected.every((entry) => !entry.imported)).toBe(true);
+    expect(db.listIntegrationStates()).toEqual(beforeRejectedImport);
+    expect(keychainWrites()).toBe(beforeWrites);
+    verify.mockRestore();
 
     db.close();
   });

@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { chromium } from "playwright";
 import type { CuedDatabase } from "../../../db/database.js";
 import { storeSlackSession } from "./session-store.js";
+import { verifySlackSession } from "./verify-session.js";
 
 declare const localStorage: {
   getItem(key: string): string | null;
@@ -199,37 +200,42 @@ export async function importSlackDesktopAuth(
         }
 
         const cookies = await withTimeout(
-          context.cookies(["https://slack.com", "https://app.slack.com"]),
+          context.cookies(["https://slack.com", "https://app.slack.com", page.url()]),
           timeoutMs,
           "Timed out reading Slack desktop cookies",
         );
-        const dCookie = cookies.find(
-          (cookie) => cookie.name === "d" && cookie.domain.includes("slack.com"),
-        );
-        if (!dCookie?.value) {
-          throw new Error("Slack desktop app did not expose the required d cookie");
-        }
-
         const sourcePath = getSlackUserDataDir();
-        return teams.map((team) =>
-          storeSlackSession(
-            db,
-            {
+        const imported = [];
+        for (const team of teams) {
+          const verified = await verifySlackSession(team.token, team.id, cookies);
+          if (!verified) {
+            imported.push({
+              platform: "slack" as const,
               accountKey: team.id,
-              teamId: team.id,
-              teamName: team.name,
-              userId: team.user_id,
-              token: team.token,
-              cookie: dCookie.value,
-              savedAt: Date.now(),
               sourcePath,
-              importMethod: "slack-desktop-cdp",
-            },
-            {
-              reviveUserRemoved: options.reviveUserRemoved,
-            },
-          ),
-        );
+              imported: false,
+            });
+            continue;
+          }
+          imported.push(
+            storeSlackSession(
+              db,
+              {
+                accountKey: verified.teamId,
+                teamId: verified.teamId,
+                teamName: verified.teamName,
+                userId: verified.userId,
+                token: team.token,
+                cookie: verified.cookie,
+                savedAt: Date.now(),
+                sourcePath,
+                importMethod: "slack-desktop-cdp",
+              },
+              { reviveUserRemoved: options.reviveUserRemoved },
+            ),
+          );
+        }
+        return imported;
       } finally {
         await browser.close();
       }

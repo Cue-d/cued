@@ -37,6 +37,7 @@ export async function verifySlackSession(
     try {
       response = await fetchImpl("https://slack.com/api/auth.test", {
         method: "POST",
+        redirect: "error",
         headers: { "content-type": "application/x-www-form-urlencoded", cookie: `d=${cookie}` },
         body: new URLSearchParams({ token, team_id: expectedTeamId }),
         signal: AbortSignal.timeout(5_000),
