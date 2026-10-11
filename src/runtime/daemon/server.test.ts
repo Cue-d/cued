@@ -7,8 +7,8 @@ import {
   getAdaptiveProjectionContinueDelayMs,
   getAutoSyncTargets,
   InteractiveAuthSessions,
+  isAdapterAuthInvalidation,
   isDisconnectedSocketError,
-  isLinkedInAdapterAuthInvalidation,
   requestWhatsAppHistoryBackfillOnce,
   shouldDeferContinuationProjection,
   shouldDrainOutboundQueue,
@@ -16,26 +16,27 @@ import {
   shouldSkipConnectedDiscordSchedulerSync,
 } from "./server.js";
 
-describe("LinkedIn auth invalidation", () => {
-  it("recognizes typed LinkedIn auth failures from adapter workers", () => {
+describe("adapter auth invalidation", () => {
+  it.each([
+    "linkedin",
+    "slack",
+    "gmail",
+  ])("recognizes typed %s auth failures from adapter workers", (platform) => {
     expect(
-      isLinkedInAdapterAuthInvalidation(
-        "linkedin",
-        new AdapterWorkerError("Authentication failed: 302 Found", "auth_invalid"),
+      isAdapterAuthInvalidation(
+        platform,
+        new AdapterWorkerError("Authentication failed", "auth_invalid"),
       ),
     ).toBe(true);
   });
 
   it("does not invalidate auth for transient or unrelated adapter failures", () => {
     expect(
-      isLinkedInAdapterAuthInvalidation(
-        "linkedin",
-        new AdapterWorkerError("LinkedIn rate limited"),
-      ),
+      isAdapterAuthInvalidation("linkedin", new AdapterWorkerError("LinkedIn rate limited")),
     ).toBe(false);
     expect(
-      isLinkedInAdapterAuthInvalidation(
-        "slack",
+      isAdapterAuthInvalidation(
+        "imessage",
         new AdapterWorkerError("Authentication failed", "auth_invalid"),
       ),
     ).toBe(false);
@@ -369,6 +370,28 @@ describe("sync resume targets", () => {
       } else {
         process.env.CUED_AUTOSYNC_PLATFORMS = previous;
       }
+    }
+  });
+
+  it("configured platforms cannot re-enable an invalidated account or discard account keys", () => {
+    const previous = process.env.CUED_AUTOSYNC_PLATFORMS;
+    process.env.CUED_AUTOSYNC_PLATFORMS = "gmail,slack";
+    try {
+      expect(
+        getAutoSyncTargets({
+          listEnabledSyncTargets: () => [
+            { platform: "gmail", account_key: "healthy@example.com" },
+            { platform: "discord", account_key: "default" },
+          ],
+          listIntegrationStates: () =>
+            [{ platform: "slack", auth_state: "needs_auth" }] as ReturnType<
+              Parameters<typeof getAutoSyncTargets>[0]["listIntegrationStates"]
+            >,
+        }),
+      ).toEqual([{ platform: "gmail", accountKey: "healthy@example.com" }]);
+    } finally {
+      if (previous == null) delete process.env.CUED_AUTOSYNC_PLATFORMS;
+      else process.env.CUED_AUTOSYNC_PLATFORMS = previous;
     }
   });
 

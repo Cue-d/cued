@@ -398,7 +398,8 @@ export function getAutoSyncTargets(
 ): Array<{ platform: AdapterPlatform; accountKey: string }> {
   const configured = getConfiguredAutoSyncPlatforms();
 
-  if (configured) {
+  const integrationStates = db.listIntegrationStates();
+  if (configured && integrationStates.length === 0) {
     return configured.map((platform) => ({
       platform,
       accountKey: getDefaultAccountKeyForPlatform(platform),
@@ -414,10 +415,13 @@ export function getAutoSyncTargets(
       platform: target.platform,
       accountKey: target.account_key,
     }));
+  if (configured) {
+    return enabled.filter((target) => configured.includes(target.platform));
+  }
   if (enabled.length > 0) {
     return enabled;
   }
-  if (db.listIntegrationStates().length > 0) {
+  if (integrationStates.length > 0) {
     return [];
   }
 
@@ -524,11 +528,14 @@ export function shouldSkipConnectedDiscordSchedulerSync(
   return targetPlatform === "discord" && trigger === "scheduler" && status?.state === "connected";
 }
 
-export function isLinkedInAdapterAuthInvalidation(
+export function isAdapterAuthInvalidation(
   platform: string | null,
   error: unknown,
-): boolean {
-  return platform === "linkedin" && isAdapterWorkerError(error, "auth_invalid");
+): platform is "linkedin" | "slack" | "gmail" {
+  return (
+    (platform === "linkedin" || platform === "slack" || platform === "gmail") &&
+    isAdapterWorkerError(error, "auth_invalid")
+  );
 }
 
 export function shouldDrainOutboundQueue(input: {
@@ -4477,18 +4484,19 @@ export async function runDaemon(): Promise<void> {
         );
         requestDiscordRealtimeReconcile();
       }
-      if (isLinkedInAdapterAuthInvalidation(currentRun.platform, error)) {
+      if (isAdapterAuthInvalidation(currentRun.platform, error)) {
         invalidateIntegrationAuth(
           db,
-          "linkedin",
-          currentRun.account_key ?? getDefaultAccountKeyForPlatform("linkedin"),
+          currentRun.platform,
+          currentRun.account_key ?? getDefaultAccountKeyForPlatform(currentRun.platform),
           {
             errorSummary: errorMessage,
-            reason: "linkedin_auth_invalidated",
+            reason: `${currentRun.platform}_auth_invalidated`,
           },
         );
-        requestLinkedInRealtimeReconcile();
-        requestMenuBarStatusWrite("linkedin_auth_invalidated");
+        if (currentRun.platform === "linkedin") requestLinkedInRealtimeReconcile();
+        if (currentRun.platform === "slack") requestSlackRealtimeReconcile();
+        requestMenuBarStatusWrite(`${currentRun.platform}_auth_invalidated`);
       }
       db.failRun(currentRun.id, errorMessage, undefined, null, runClaim);
       if (currentRun.platform === "signal") {
