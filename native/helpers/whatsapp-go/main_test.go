@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -1025,6 +1026,48 @@ func TestHandleAppStateEventDeletesPeerCallLogRecords(t *testing.T) {
 	}
 	if len(page.Calls) != 0 {
 		t.Fatalf("expected peer call log delete to remove outbound calls, got %+v", page.Calls)
+	}
+}
+
+func TestPermanentDisconnectClearsConnectionAndReportsReason(t *testing.T) {
+	cases := []struct {
+		name    string
+		event   interface{}
+		message string
+	}{
+		{"outdated client", &events.ClientOutdated{}, "client outdated"},
+		{"replaced stream", &events.StreamReplaced{}, "stream replaced"},
+		{"connection rejected", &events.ConnectFailure{Reason: events.ConnectFailureBadUserAgent}, "connect failure: 409: client user agent was rejected"},
+		// LoggedOut implements PermanentDisconnect too; keep its existing wire message.
+		{"logged out", &events.LoggedOut{}, "logged out from WhatsApp"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var output bytes.Buffer
+			// A disconnect must only change runtime state, never mutate a linked device.
+			runtime := newHelperRuntime(nil, nil, json.NewEncoder(&output))
+			runtime.setConnected(true)
+			runtime.handleEvent(tc.event)
+			if runtime.isConnected() {
+				t.Fatal("permanent disconnect left runtime marked connected")
+			}
+			var envelope struct {
+				Event string `json:"event"`
+				Data  struct {
+					Message string `json:"message"`
+				} `json:"data"`
+			}
+			decoder := json.NewDecoder(&output)
+			if err := decoder.Decode(&envelope); err != nil {
+				t.Fatalf("decode helper event: %v", err)
+			}
+			if envelope.Event != "error" || envelope.Data.Message != tc.message {
+				t.Fatalf("unexpected disconnect event: %+v", envelope)
+			}
+			if err := decoder.Decode(&envelope); err != io.EOF {
+				t.Fatalf("expected exactly one event, got %v", err)
+			}
+		})
 	}
 }
 

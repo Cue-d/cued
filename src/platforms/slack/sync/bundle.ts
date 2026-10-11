@@ -1,7 +1,7 @@
 import type { SourceAccountInput } from "../../../core/types/provider.js";
 import { loadIntegrationSecret } from "../../core/secrets/keychain.js";
 import type { SyncBundle } from "../../core/sync.js";
-import { SlackHelperClient } from "../helper/client.js";
+import { SlackHelperClient, SlackHelperError } from "../helper/client.js";
 import type { SlackMessagesResult, SlackTransport } from "../transport.js";
 import type { SlackConversation, SlackCredentials, SlackMessage, SlackUser } from "../types.js";
 import {
@@ -35,6 +35,7 @@ const SLACK_CONVERSATION_TYPES: Record<SlackConversationFamily, string> = {
 
 export interface SlackScanCursor {
   mode: SlackScanMode;
+  repairHistory?: boolean;
   startedAt: number;
   oldestMs: number;
   usersComplete: boolean;
@@ -57,6 +58,7 @@ export interface SlackSourceCursor {
   selfUserId: string;
   lastSyncAt?: number;
   knownConversationIds?: string[];
+  hydratedConversationIds?: string[];
   scan?: SlackScanCursor;
 }
 
@@ -244,6 +246,7 @@ function parseSlackSourceCursor(raw: unknown): SlackSourceCursor | undefined {
   const teamId = typeof value.teamId === "string" ? value.teamId : "";
   const selfUserId = typeof value.selfUserId === "string" ? value.selfUserId : "";
   const knownConversationIds = parseStringArray(value.knownConversationIds);
+  const hydratedConversationIds = parseStringArray(value.hydratedConversationIds);
   const rawScan = value.scan;
   const scan =
     rawScan && typeof rawScan === "object"
@@ -258,6 +261,7 @@ function parseSlackSourceCursor(raw: unknown): SlackSourceCursor | undefined {
           }
           return {
             mode,
+            repairHistory: parsed.repairHistory === true ? true : undefined,
             startedAt,
             oldestMs,
             usersComplete: parsed.usersComplete === true,
@@ -322,6 +326,7 @@ function parseSlackSourceCursor(raw: unknown): SlackSourceCursor | undefined {
       selfUserId,
       lastSyncAt,
       knownConversationIds,
+      hydratedConversationIds,
       scan,
     };
   }
@@ -331,6 +336,7 @@ function parseSlackSourceCursor(raw: unknown): SlackSourceCursor | undefined {
     selfUserId,
     lastSyncAt,
     knownConversationIds,
+    hydratedConversationIds,
     scan,
   };
 }
@@ -752,6 +758,13 @@ function buildSlackBackfillConversationProof(input: {
     conversationFamily: input.family,
     conversationPhase: input.messageBatch.resumeState.conversationPhase,
     historyComplete: input.messageBatch.resumeState.historyComplete,
+    historyFromStart:
+      getConversationHistoryOldestMs(
+        input.scan.mode,
+        input.scan.oldestMs,
+        input.conversation,
+        input.observedAt,
+      ) === 0,
     historyCursor: input.messageBatch.resumeState.historyCursor,
     threadRootCount: input.messageBatch.resumeState.threadRootCount,
     completedThreadCount: input.messageBatch.resumeState.completedThreadCount,
@@ -836,7 +849,10 @@ export async function buildSlackSyncBundle(options?: {
 
   const auth = await client.testAuth();
   if (!auth.ok || !auth.team_id || !auth.user_id) {
-    throw new Error(`Slack auth test failed for '${accountKey}': ${auth.error ?? "unknown_error"}`);
+    throw new SlackHelperError(
+      `Slack auth test failed for '${accountKey}': ${auth.error ?? "unknown_error"}`,
+      { slackCode: auth.error },
+    );
   }
 
   const teamId = auth.team_id;
@@ -878,6 +894,7 @@ export async function buildSlackSyncBundle(options?: {
   const slackConversationProofs: SlackBackfillConversationProof[] = [];
   const usersById = new Map<string, SlackUser>();
   const knownConversationIds = new Set(savedCursor?.knownConversationIds ?? []);
+  const hydratedConversationIds = new Set(savedCursor?.hydratedConversationIds ?? []);
 
   if (scan.mode === "full" && !scan.usersComplete) {
     const users = await listAllUsers(client);
@@ -913,6 +930,21 @@ export async function buildSlackSyncBundle(options?: {
 
   for (const { page, family } of conversationPages) {
     const orderedConversations = [...page.conversations].sort(compareConversationPriority);
+    if (scan.mode === "incremental") {
+      const missingHistoryIndex = orderedConversations.findIndex(
+        (conversation) => !hydratedConversationIds.has(conversation.id),
+      );
+      if (missingHistoryIndex >= 0) {
+        // A recent account checkpoint proves nothing about older messages in this channel.
+        // Reuse the bounded full-scan cursor to recover legacy and newly discovered history.
+        scan.mode = "full";
+        scan.repairHistory = true;
+        scan.oldestMs = 0;
+        scan.conversationFamily = family;
+        scan.conversationCursor = null;
+        scan.conversationIndex = missingHistoryIndex;
+      }
+    }
     if (scan.mode === "full") {
       if (orderedConversations.length === 0) {
         continue;
@@ -931,6 +963,14 @@ export async function buildSlackSyncBundle(options?: {
       if (conversationIndex >= orderedConversations.length) {
         conversationIndex = orderedConversations.length - 1;
       }
+
+      while (
+        conversationIndex < orderedConversations.length &&
+        hydratedConversationIds.has(orderedConversations[conversationIndex].id)
+      ) {
+        conversationIndex += 1;
+      }
+      if (conversationIndex >= orderedConversations.length) continue;
 
       const conversation = orderedConversations[conversationIndex];
       const conversationOldestMs = getConversationHistoryOldestMs(
@@ -1002,6 +1042,15 @@ export async function buildSlackSyncBundle(options?: {
         }),
       );
 
+      if (
+        conversationOldestMs === 0 &&
+        messageBatch.complete &&
+        !messageBatch.historyError &&
+        !messageBatch.repliesError
+      ) {
+        hydratedConversationIds.add(conversation.id);
+      }
+
       let sourceCursor: SlackSourceCursor;
       let hasMore = false;
       const nextCursor = page.conversations.length > 0 ? page.nextCursor || null : null;
@@ -1016,8 +1065,10 @@ export async function buildSlackSyncBundle(options?: {
           selfUserId,
           lastSyncAt: previousLastSyncAt,
           knownConversationIds: Array.from(knownConversationIds).sort(),
+          hydratedConversationIds: Array.from(hydratedConversationIds).sort(),
           scan: {
             mode: scan.mode,
+            repairHistory: scan.repairHistory,
             startedAt: scan.startedAt,
             oldestMs: scan.oldestMs,
             usersComplete: scan.usersComplete,
@@ -1051,6 +1102,7 @@ export async function buildSlackSyncBundle(options?: {
           selfUserId,
           lastSyncAt: previousLastSyncAt,
           knownConversationIds: Array.from(knownConversationIds).sort(),
+          hydratedConversationIds: Array.from(hydratedConversationIds).sort(),
           scan: {
             ...scan,
             usersComplete: scan.usersComplete,
@@ -1077,6 +1129,7 @@ export async function buildSlackSyncBundle(options?: {
             selfUserId,
             lastSyncAt: previousLastSyncAt,
             knownConversationIds: Array.from(knownConversationIds).sort(),
+            hydratedConversationIds: Array.from(hydratedConversationIds).sort(),
             scan: {
               ...scan,
               usersComplete: scan.usersComplete,
@@ -1098,8 +1151,9 @@ export async function buildSlackSyncBundle(options?: {
           sourceCursor = {
             teamId,
             selfUserId,
-            lastSyncAt: scan.startedAt,
+            lastSyncAt: scan.repairHistory ? previousLastSyncAt : scan.startedAt,
             knownConversationIds: Array.from(knownConversationIds).sort(),
+            hydratedConversationIds: Array.from(hydratedConversationIds).sort(),
           };
         }
       }
@@ -1217,27 +1271,32 @@ export async function buildSlackSyncBundle(options?: {
         selfUserId,
         lastSyncAt: previousLastSyncAt,
         knownConversationIds: Array.from(knownConversationIds).sort(),
+        hydratedConversationIds: Array.from(hydratedConversationIds).sort(),
         scan: {
           ...scan,
           usersComplete: scan.usersComplete,
           conversationFamily: nextScanFamily,
           conversationCursor: nextCursor != null ? nextCursor : null,
+          conversationIndex: undefined,
+          activeConversationId: undefined,
         },
       };
     } else {
       sourceCursor = {
         teamId,
         selfUserId,
-        lastSyncAt: scan.startedAt,
+        lastSyncAt: scan.repairHistory ? previousLastSyncAt : scan.startedAt,
         knownConversationIds: Array.from(knownConversationIds).sort(),
+        hydratedConversationIds: Array.from(hydratedConversationIds).sort(),
       };
     }
   } else {
     sourceCursor = {
       teamId,
       selfUserId,
-      lastSyncAt: scan.startedAt,
+      lastSyncAt: scan.repairHistory ? previousLastSyncAt : scan.startedAt,
       knownConversationIds: Array.from(knownConversationIds).sort(),
+      hydratedConversationIds: Array.from(hydratedConversationIds).sort(),
     };
   }
 

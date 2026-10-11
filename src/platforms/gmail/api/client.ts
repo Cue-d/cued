@@ -69,6 +69,23 @@ export class GmailApiError extends Error {
   }
 }
 
+export class GmailRefreshError extends Error {
+  constructor(
+    public readonly status: number,
+    public readonly oauthError: string | null,
+  ) {
+    super(`Gmail token refresh failed (${status}): ${oauthError ?? "invalid_response"}`);
+  }
+}
+
+export function isGmailAuthInvalidationError(error: unknown): boolean {
+  return (
+    error instanceof GmailRefreshError &&
+    error.status === 400 &&
+    error.oauthError === "invalid_grant"
+  );
+}
+
 export function isGmailNotFoundError(error: unknown): boolean {
   return error instanceof GmailApiError && error.status === 404;
 }
@@ -165,9 +182,16 @@ export class GmailClient {
 
   private async request<T>(path: string): Promise<T> {
     await this.refreshIfNeeded();
-    const response = await fetch(`https://gmail.googleapis.com${path}`, {
-      headers: { authorization: `Bearer ${this.credentials.accessToken}` },
-    });
+    const send = () =>
+      fetch(`https://gmail.googleapis.com${path}`, {
+        headers: { authorization: `Bearer ${this.credentials.accessToken}` },
+      });
+    let response = await send();
+    if (response.status === 401) {
+      await response.body?.cancel();
+      await this.refreshIfNeeded(true);
+      response = await send();
+    }
     const parsed = (await response.json()) as Record<string, unknown>;
     if (!response.ok) {
       throw new GmailApiError(response.status, parsed);
@@ -175,8 +199,8 @@ export class GmailClient {
     return parsed as T;
   }
 
-  private async refreshIfNeeded(): Promise<void> {
-    if (this.credentials.expiresAt - Date.now() > 60_000) {
+  private async refreshIfNeeded(force = false): Promise<void> {
+    if (!force && this.credentials.expiresAt - Date.now() > 60_000) {
       return;
     }
     const { config } = readGoogleOAuthClientConfigForCredentials(this.credentials);
@@ -192,7 +216,10 @@ export class GmailClient {
     });
     const parsed = (await response.json()) as Record<string, unknown>;
     if (!response.ok || typeof parsed.access_token !== "string") {
-      throw new Error(`Gmail token refresh failed: ${JSON.stringify(parsed)}`);
+      throw new GmailRefreshError(
+        response.status,
+        typeof parsed.error === "string" ? parsed.error : null,
+      );
     }
     this.credentials = {
       ...this.credentials,

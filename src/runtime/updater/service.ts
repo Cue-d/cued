@@ -48,6 +48,7 @@ import {
   errorTelemetryProperties,
   sendTelemetryEventSafe,
 } from "../../telemetry/context.js";
+import { validateBundleSignature } from "./signature.js";
 import type {
   PendingRollbackState,
   UpdateErrorState,
@@ -218,11 +219,11 @@ export function pickReleaseForChannel(
     return null;
   }
 
-  const wantsPrerelease = channel !== "stable";
+  let selected: ReleaseCandidate | null = null;
   for (const entry of releases) {
     const version = typeof entry.tag_name === "string" ? normalizeVersion(entry.tag_name) : null;
     const prerelease = Boolean(entry.prerelease);
-    if (!version || prerelease !== wantsPrerelease) {
+    if (!version || !parseSemver(version) || (channel === "stable" && prerelease)) {
       continue;
     }
 
@@ -233,15 +234,17 @@ export function pickReleaseForChannel(
       continue;
     }
 
-    return {
-      version,
-      prerelease,
-      releaseUrl: typeof entry.html_url === "string" ? entry.html_url : null,
-      tarballUrl,
-    };
+    if (!selected || compareVersions(version, selected.version) > 0) {
+      selected = {
+        version,
+        prerelease,
+        releaseUrl: typeof entry.html_url === "string" ? entry.html_url : null,
+        tarballUrl,
+      };
+    }
   }
 
-  return null;
+  return selected;
 }
 
 export function isUpdateCheckDue(
@@ -457,11 +460,6 @@ async function downloadReleaseAsset(url: string, destinationPath: string): Promi
     rmSync(temporaryPath, { force: true });
     throw error;
   }
-}
-
-function validateBundleSignature(appPath: string): void {
-  execFileSync("codesign", ["--verify", "--deep", "--strict", appPath], { stdio: "ignore" });
-  execFileSync("spctl", ["--assess", "--type", "execute", appPath], { stdio: "ignore" });
 }
 
 function waitForDaemonExit(db: CuedDatabase, timeoutMs: number): void {

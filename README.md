@@ -46,6 +46,12 @@ That installer downloads the latest release tarball from GitHub Releases, instal
 
 If `~/.local/bin` is not already on your `PATH`, add it before relying on the `cued` command.
 
+### Update channels
+
+Stable builds receive stable releases. Internal builds can receive stable releases and prereleases; the updater selects the highest available version with an installable macOS archive. Development builds do not check for updates.
+
+Run `cued update check --force` to refresh release information, then `cued update install` to install an available update. Older internal builds that cannot discover stable releases can be upgraded using the latest GitHub release above.
+
 ## Quick Start
 
 After the app is installed:
