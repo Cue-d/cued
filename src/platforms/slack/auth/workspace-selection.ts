@@ -39,7 +39,12 @@ export function selectSlackWorkspaceCredentials(
   }
   if (accountKey !== "default" && !accountKey.startsWith(SLACK_PENDING_ACCOUNT_KEY_PREFIX)) {
     // Reconnect must never authenticate another workspace from the same browser.
-    return candidates.find((team) => team.teamId === accountKey) ?? null;
+    const exact = candidates.find((team) => team.teamId === accountKey);
+    if (exact) return exact;
+    // Grid may expose only an enterprise token. This is a candidate, never an
+    // identity claim: auth.test must confirm the requested workspace before use.
+    const enterprise = candidates.filter((team) => team.teamId.startsWith("E"));
+    return enterprise.length === 1 ? { ...enterprise[0]!, teamId: accountKey } : null;
   }
   let visibleTeamId: string | undefined;
   try {
