@@ -73,6 +73,69 @@ describe("updater service", () => {
     expect(pickReleaseForChannel(releases, "dev")).toBeNull();
   });
 
+  it.each([
+    ["internal", ["0.1.43", "0.1.42"], "0.1.43"],
+    ["internal", ["0.2.0-internal.1", "0.2.0"], "0.2.0"],
+    ["internal", ["0.1.43", "0.2.0-internal.1"], "0.2.0-internal.1"],
+    ["stable", ["0.1.42", "0.2.0-internal.1", "0.1.43"], "0.1.43"],
+  ])("selects the newest eligible version on %s from %j", (channel, versions, expected) => {
+    const releases = versions.map((version) => ({
+      tag_name: `v${version}`,
+      prerelease: version.includes("-"),
+      assets: [
+        { name: "cued-macos-arm64.tar.gz", browser_download_url: "https://example.com/app.tgz" },
+      ],
+    }));
+    expect(pickReleaseForChannel(releases, channel)?.version).toBe(expected);
+  });
+
+  it("skips invalid versions and releases without an installable asset", () => {
+    const assets = [
+      { name: "cued-macos-arm64.tar.gz", browser_download_url: "https://example.com/app.tgz" },
+    ];
+    expect(
+      pickReleaseForChannel(
+        [
+          { tag_name: "not-semver", assets },
+          { tag_name: "v9.0.0", assets: [] },
+          { tag_name: "v0.1.43", assets },
+        ],
+        "internal",
+      )?.version,
+    ).toBe("0.1.43");
+  });
+
+  it("offers a stable release to an installed internal build", async () => {
+    vi.stubEnv("CUED_APP_VERSION", "0.1.41");
+    vi.stubEnv("CUED_RELEASE_CHANNEL", "internal");
+    const db = createDb();
+    const fetchImpl = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify([
+          {
+            tag_name: "v0.1.43",
+            prerelease: false,
+            html_url: "https://example.com/release",
+            assets: [
+              {
+                name: "cued-macos-arm64.tar.gz",
+                browser_download_url: "https://example.com/app.tgz",
+              },
+            ],
+          },
+        ]),
+      ),
+    );
+    try {
+      const status = await checkForUpdates(db, { force: true, fetchImpl });
+      expect(status.available).toBe(true);
+      expect(status.availableVersion).toBe("0.1.43");
+      expect(db.getUpdateReleaseState()?.tarballUrl).toBe("https://example.com/app.tgz");
+    } finally {
+      db.close();
+    }
+  });
+
   it("reuses cached update metadata on scheduled 304 responses", async () => {
     vi.stubEnv("CUED_APP_VERSION", "0.1.0");
     vi.stubEnv("CUED_RELEASE_CHANNEL", "stable");
