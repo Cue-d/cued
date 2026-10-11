@@ -20,6 +20,7 @@ export interface SlackBackfillConversationProof {
   conversationFamily: "direct" | "channels";
   conversationPhase: SlackBackfillConversationPhase;
   historyComplete: boolean;
+  historyFromStart?: boolean;
   historyCursor: string | null;
   threadRootCount: number;
   completedThreadCount: number;
@@ -116,6 +117,24 @@ export function buildSlackBackfillSyncProofs(
     });
   }
 
+  if (
+    proof.syncMode === "full" &&
+    proof.historyFromStart === true &&
+    proof.conversationPhase === "complete" &&
+    !proof.historyError &&
+    !proof.repliesError
+  ) {
+    // Incremental windows must never overwrite evidence of exhaustive initial hydration.
+    proofs.push({
+      scope,
+      proofKind: "history",
+      status: "complete",
+      syncMode: "full",
+      observedAt: proof.observedAt,
+      completedAt: proof.observedAt,
+      coverage: { version: 1 },
+    });
+  }
   return proofs;
 }
 
