@@ -268,6 +268,111 @@ describe("whatsapp realtime", () => {
     session.stop();
   });
 
+  it.each(["disconnected", "error"])("restarts a live helper stuck after %s", async (event) => {
+    vi.useFakeTimers();
+    const first = new MockChild();
+    const replacement = new MockChild();
+    spawnMock.mockReturnValueOnce(first).mockReturnValueOnce(replacement);
+    const session = new WhatsAppRealtimeSession({
+      accountKey: "default",
+      helperPath: "/tmp/helper",
+      storeDir: "/tmp/store",
+      connectTimeoutMs: 100,
+      reconnectBaseMs: 10,
+    });
+    session.start();
+    first.emit("spawn");
+    if (event === "disconnected") {
+      first.stdout.write('{"event":"connected","data":{"accountJid":"test"}}\n');
+    }
+    const line = JSON.stringify({ event, data: { reason: "lost", message: "failed" } }) + "\n";
+    first.stdout.write(line);
+    vi.advanceTimersByTime(50);
+    first.stdout.write(line);
+    vi.advanceTimersByTime(50);
+    expect(first.kill).toHaveBeenCalled();
+    vi.advanceTimersByTime(10);
+    replacement.emit("spawn");
+    replacement.stdout.write('{"event":"connected","data":{"accountJid":"test"}}\n');
+    expect(session.isConnected()).toBe(true);
+    expect(spawnMock).toHaveBeenCalledTimes(2);
+    session.stop();
+  });
+
+  it("allows helper self-reconnect before the deadline and rejects interrupted requests", async () => {
+    vi.useFakeTimers();
+    const child = new MockChild();
+    spawnMock.mockReturnValue(child);
+    const session = new WhatsAppRealtimeSession({
+      accountKey: "default",
+      helperPath: "/tmp/helper",
+      storeDir: "/tmp/store",
+      connectTimeoutMs: 100,
+    });
+    session.start();
+    child.emit("spawn");
+    const connected = '{"event":"connected","data":{"accountJid":"test"}}\n';
+    child.stdout.write(connected);
+    const request = session.resync();
+    child.stdout.write('{"event":"disconnected","data":{"reason":"lost"}}\n');
+    await expect(request).rejects.toThrow("session disconnected");
+    vi.advanceTimersByTime(50);
+    child.stdout.write(connected);
+    vi.advanceTimersByTime(100);
+    expect(session.isConnected()).toBe(true);
+    expect(child.kill).not.toHaveBeenCalled();
+    session.stop();
+  });
+
+  it("awaits recovery after a failed startup probe, including concurrent waiters", async () => {
+    const child = new MockChild();
+    spawnMock.mockReturnValue(child);
+    let finishProbe!: () => void;
+    const pendingProbe = new Promise<void>((resolve) => {
+      finishProbe = resolve;
+    });
+    const recover = vi.fn(async () => {
+      await pendingProbe;
+      supervisor.reconcile([
+        { accountKey: "default", helperPath: "/tmp/helper", storeDir: "/tmp/store" },
+      ]);
+    });
+    const supervisor = new WhatsAppRealtimeSupervisor({ recoverMissingSession: recover });
+    supervisor.reconcile(
+      [],
+      [
+        {
+          accountKey: "default",
+          helperPath: "/tmp/helper",
+          storeDir: "/tmp/store",
+          state: "degraded",
+          accountJid: null,
+          connectedAt: null,
+          lastEventAt: null,
+          lastHistorySyncAt: null,
+          lastReconnectAt: null,
+          reconnectAttempts: 0,
+          lastSessionError: "Unexpected end of JSON input",
+        },
+      ],
+    );
+    const first = supervisor.waitForConnected("default", 100);
+    const second = supervisor.waitForConnected("default", 100);
+    expect(spawnMock).not.toHaveBeenCalled();
+    finishProbe();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(spawnMock).toHaveBeenCalledTimes(1);
+    child.emit("spawn");
+    child.stdout.write('{"event":"connected","data":{"accountJid":"test"}}\n');
+    expect((await first)?.isConnected()).toBe(true);
+    expect(await second).toBe(await first);
+    expect(supervisor.getStatuses()).toHaveLength(1);
+    await supervisor.waitForConnected("default", 100);
+    expect(recover).toHaveBeenCalledTimes(2);
+    supervisor.stopAll();
+  });
+
   it("starts and stops managed sessions through the supervisor", async () => {
     const started: string[] = [];
     const stopped: string[] = [];

@@ -3425,6 +3425,7 @@ export async function runDaemon(): Promise<void> {
     },
   });
   const whatsAppRealtime = new WhatsAppRealtimeSupervisor({
+    recoverMissingSession: () => requestWhatsAppRealtimeReconcile(),
     onEvent: (accountKey, event) => {
       void handleWhatsAppRealtimeEvent(accountKey, event);
     },
@@ -3566,7 +3567,7 @@ export async function runDaemon(): Promise<void> {
     }
     if (whatsAppRealtimeReconcilePromise) {
       whatsAppRealtimeReconcileQueued = true;
-      return;
+      return whatsAppRealtimeReconcilePromise;
     }
 
     whatsAppRealtimeReconcilePromise = reconcileWhatsAppRealtimeSessions()
@@ -3580,6 +3581,7 @@ export async function runDaemon(): Promise<void> {
           requestWhatsAppRealtimeReconcile();
         }
       });
+    return whatsAppRealtimeReconcilePromise;
   };
 
   db.recoverInProgressRuns();
@@ -4038,9 +4040,7 @@ export async function runDaemon(): Promise<void> {
       });
 
       if (platform === "whatsapp" && runDetails?.source !== "whatsapp_desktop") {
-        const session =
-          whatsAppRealtime.getSession(accountKey) ??
-          (await whatsAppRealtime.waitForConnected(accountKey, 10_000));
+        const session = await whatsAppRealtime.waitForConnected(accountKey, 10_000);
         if (!session?.isConnected()) {
           throw new Error(`WhatsApp session is not connected for '${accountKey}'`);
         }
