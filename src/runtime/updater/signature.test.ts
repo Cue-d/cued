@@ -40,13 +40,8 @@ describe("update publisher verification", () => {
 
   // codesign owns certificate validation; simulate its rejection at the command
   // boundary to ensure no failed verification can fall through to installation.
-  it.each([
-    "wrong publisher",
-    "wrong bundle identifier",
-    "ad-hoc signature",
-    "modified bundle",
-  ])("fails closed when codesign rejects a %s", (reason) => {
-    const failure = new Error(reason);
+  it("fails closed when codesign rejects the bundle", () => {
+    const failure = new Error("signature verification failed");
     const run = vi.fn(() => {
       throw failure;
     });

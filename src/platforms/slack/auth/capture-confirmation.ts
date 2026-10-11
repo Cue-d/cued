@@ -1,4 +1,8 @@
-import { SlackHelperClient, SlackHelperError } from "../helper/client.js";
+import {
+  isSlackAuthInvalidationError,
+  SlackHelperClient,
+  SlackHelperError,
+} from "../helper/client.js";
 import type { SlackCaptureDiagnostic } from "./capture-diagnostics.js";
 import type { VerifiedSlackSession } from "./verify-session.js";
 
@@ -38,15 +42,8 @@ export class SlackCaptureConfirmation {
     } catch (error) {
       this.report("helper_rejected");
       const rejected =
-        error instanceof SlackHelperError &&
-        [
-          "invalid_auth",
-          "not_authed",
-          "token_revoked",
-          "token_expired",
-          "account_inactive",
-          "identity_mismatch",
-        ].includes(error.slackCode ?? "");
+        isSlackAuthInvalidationError(error) ||
+        (error instanceof SlackHelperError && error.slackCode === "identity_mismatch");
       if (rejected) {
         try {
           this.report((await recheck()) ? "node_recheck_accepted" : "node_recheck_rejected");

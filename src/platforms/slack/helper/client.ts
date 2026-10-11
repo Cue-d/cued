@@ -48,13 +48,18 @@ export class SlackHelperError extends Error {
   }
 }
 
+export function isSlackAuthInvalidationCode(code: string): boolean {
+  return [
+    "invalid_auth",
+    "not_authed",
+    "token_revoked",
+    "token_expired",
+    "account_inactive",
+  ].includes(code);
+}
+
 export function isSlackAuthInvalidationError(error: unknown): boolean {
-  return (
-    error instanceof SlackHelperError &&
-    ["invalid_auth", "not_authed", "token_revoked", "token_expired", "account_inactive"].includes(
-      error.slackCode ?? "",
-    )
-  );
+  return error instanceof SlackHelperError && isSlackAuthInvalidationCode(error.slackCode ?? "");
 }
 
 export class SlackHelperClient implements SlackTransport {

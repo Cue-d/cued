@@ -1252,7 +1252,13 @@ export async function buildSlackSyncBundle(options?: {
     }
   }
 
-  let sourceCursor: SlackSourceCursor;
+  let sourceCursor: SlackSourceCursor = {
+    teamId,
+    selfUserId,
+    lastSyncAt: scan.repairHistory ? previousLastSyncAt : scan.startedAt,
+    knownConversationIds: Array.from(knownConversationIds).sort(),
+    hydratedConversationIds: Array.from(hydratedConversationIds).sort(),
+  };
   let hasMore = false;
 
   if (scan.mode === "full") {
@@ -1267,11 +1273,8 @@ export async function buildSlackSyncBundle(options?: {
     if (nextScanFamily) {
       hasMore = true;
       sourceCursor = {
-        teamId,
-        selfUserId,
+        ...sourceCursor,
         lastSyncAt: previousLastSyncAt,
-        knownConversationIds: Array.from(knownConversationIds).sort(),
-        hydratedConversationIds: Array.from(hydratedConversationIds).sort(),
         scan: {
           ...scan,
           usersComplete: scan.usersComplete,
@@ -1281,23 +1284,7 @@ export async function buildSlackSyncBundle(options?: {
           activeConversationId: undefined,
         },
       };
-    } else {
-      sourceCursor = {
-        teamId,
-        selfUserId,
-        lastSyncAt: scan.repairHistory ? previousLastSyncAt : scan.startedAt,
-        knownConversationIds: Array.from(knownConversationIds).sort(),
-        hydratedConversationIds: Array.from(hydratedConversationIds).sort(),
-      };
     }
-  } else {
-    sourceCursor = {
-      teamId,
-      selfUserId,
-      lastSyncAt: scan.repairHistory ? previousLastSyncAt : scan.startedAt,
-      knownConversationIds: Array.from(knownConversationIds).sort(),
-      hydratedConversationIds: Array.from(hydratedConversationIds).sort(),
-    };
   }
 
   return {

@@ -2,8 +2,6 @@ export const SLACK_PENDING_ACCOUNT_KEY_PREFIX = "pending-slack-";
 
 interface SlackWorkspaceCredentials {
   teamId: string;
-  teamName: string;
-  userId: string;
   token: string;
 }
 
@@ -32,8 +30,6 @@ export function selectSlackWorkspaceCredentials(
     if (!team || typeof team.token !== "string" || !team.token.startsWith("xoxc-")) continue;
     candidates.push({
       teamId,
-      teamName: typeof team.name === "string" ? team.name : teamId,
-      userId: typeof team.user_id === "string" ? team.user_id : "",
       token: team.token,
     });
   }

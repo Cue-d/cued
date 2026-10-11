@@ -20,7 +20,6 @@ describe("contacts memory CLI", () => {
   function createHome(): string {
     const home = mkdtempSync(join(tmpdir(), "cued-cli-memory-"));
     tempDirs.push(home);
-    runCli(home, ["status"]);
     insertContact(home, "contact-1", "Ava Chen");
     return home;
   }
@@ -28,6 +27,7 @@ describe("contacts memory CLI", () => {
   function insertContact(home: string, id: string, name: string): void {
     const db = new CuedDatabase(join(home, "local.db"));
     try {
+      db.migrate();
       (
         db as unknown as {
           sqlite: {
@@ -47,7 +47,7 @@ describe("contacts memory CLI", () => {
   }
 
   function runCli(home: string, args: string[]): string {
-    return execFileSync("pnpm", ["--silent", "exec", "tsx", "src/cli.ts", ...args], {
+    return execFileSync(process.execPath, ["--import", "tsx", "src/cli.ts", ...args], {
       cwd: process.cwd(),
       env: { ...process.env, CUED_HOME: home },
       encoding: "utf8",
