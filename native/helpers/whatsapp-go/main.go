@@ -1957,6 +1957,11 @@ func (r *helperRuntime) handleEvent(evt interface{}) {
 		r.emitEvent("error", map[string]string{
 			"message": "logged out from WhatsApp",
 		})
+	case events.PermanentDisconnect:
+		r.setConnected(false)
+		r.emitEvent("error", map[string]string{
+			"message": event.PermanentDisconnectDescription(),
+		})
 	case *events.PushNameSetting:
 		if event.Action != nil {
 			r.state.updateMetadata(func(metadata *helperMetadata) {
