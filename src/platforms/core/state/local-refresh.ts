@@ -19,6 +19,6 @@ export function refreshLocalIntegrationStates(db: CuedDatabase): {
 
   return {
     refreshed: refreshedPersistedRequestables + managed.length,
-    integrations: listIntegrationStates(db),
+    integrations: listIntegrationStates(db, { includeDiagnostics: false }),
   };
 }

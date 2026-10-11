@@ -161,7 +161,7 @@ export async function refreshDesktopImportedIntegrations(db: CuedDatabase): Prom
     refreshed:
       importedDesktop.filter((entry) => entry.imported).length +
       importedLinkedIn.filter((entry) => entry.imported).length,
-    integrations: listIntegrationStates(db),
+    integrations: listIntegrationStates(db, { includeDiagnostics: false }),
   };
 }
 
@@ -198,7 +198,7 @@ export async function refreshManagedHelperIntegrationStates(db: CuedDatabase): P
 
   return {
     refreshed,
-    integrations: listIntegrationStates(db),
+    integrations: listIntegrationStates(db, { includeDiagnostics: false }),
   };
 }
 
@@ -211,6 +211,6 @@ export async function refreshManagedIntegrationStates(db: CuedDatabase): Promise
   const helpers = await refreshManagedHelperIntegrationStates(db);
   return {
     refreshed: local.refreshed + desktopImported.refreshed + helpers.refreshed,
-    integrations: listIntegrationStates(db),
+    integrations: listIntegrationStates(db, { includeDiagnostics: false }),
   };
 }

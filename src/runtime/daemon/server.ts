@@ -5343,7 +5343,7 @@ async function dispatchRequest(
         return {
           id: request.id,
           ok: true,
-          result: integrationAuthService.listStatus(),
+          result: integrationAuthService.listStatus({ includeDiagnostics: false }),
         };
       }
       case "integrations-interaction-start":
