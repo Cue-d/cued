@@ -2137,6 +2137,7 @@ export async function runDaemon(): Promise<void> {
           startRowId: insertResult.firstInsertedRowId,
           endRowId: insertResult.lastInsertedRowId,
           batchSize: realtimeProjectionBatchSize,
+          includeOverview: false,
         });
         scheduleSearchIndexDrain();
       }
@@ -2233,6 +2234,7 @@ export async function runDaemon(): Promise<void> {
           startRowId: insertResult.firstInsertedRowId,
           endRowId: insertResult.lastInsertedRowId,
           batchSize: realtimeProjectionBatchSize,
+          includeOverview: false,
         });
         scheduleSearchIndexDrain();
       }
@@ -2458,6 +2460,7 @@ export async function runDaemon(): Promise<void> {
           startRowId: insertResult.firstInsertedRowId,
           endRowId: insertResult.lastInsertedRowId,
           batchSize: realtimeProjectionBatchSize,
+          includeOverview: false,
         });
         scheduleSearchIndexDrain();
       }
@@ -2580,6 +2583,7 @@ export async function runDaemon(): Promise<void> {
           startRowId: insertResult.firstInsertedRowId,
           endRowId: insertResult.lastInsertedRowId,
           batchSize: realtimeProjectionBatchSize,
+          includeOverview: false,
         });
         scheduleSearchIndexDrain();
       }
@@ -2697,6 +2701,7 @@ export async function runDaemon(): Promise<void> {
           startRowId: insertResult.firstInsertedRowId,
           endRowId: insertResult.lastInsertedRowId,
           batchSize: realtimeProjectionBatchSize,
+          includeOverview: false,
         });
         scheduleSearchIndexDrain();
       }
