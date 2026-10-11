@@ -50,3 +50,36 @@ it("indexes latest completed sync diagnostics without changing account or run fi
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+it("indexes recent runs globally while retaining the requested history limit", () => {
+  const dir = mkdtempSync(join(tmpdir(), "cued-recent-runs-"));
+  const db = new CuedDatabase(join(dir, "local.db"));
+  try {
+    db.migrate();
+    db.orm().run(sql`DROP INDEX idx_sync_runs_queued_at`);
+    db.orm().run(sql`DELETE FROM schema_migrations WHERE id = '0024_recent_sync_runs_index'`);
+    for (const [id, queuedAt] of [
+      ["old", 1],
+      ["new", 9],
+      ["middle", 4],
+    ] as const) {
+      db.orm().run(sql`INSERT INTO sync_runs
+        (id, platform, account_key, run_type, status, trigger, queued_at, scheduled_at, attempt)
+        VALUES (${id}, 'slack', 'default', 'sync', 'completed', 'test', ${queuedAt}, 1, 0)`);
+    }
+    const before = db.listRecentRuns(2);
+    expect(before.map((row) => row.id)).toEqual(["new", "middle"]);
+    db.migrate();
+    db.migrate();
+    expect(db.listRecentRuns(2)).toEqual(before);
+    const plan = db.orm().all<{ detail: string }>(sql`EXPLAIN QUERY PLAN
+      SELECT id, platform, account_key, run_type, status, trigger, queued_at, started_at, finished_at
+      FROM sync_runs ORDER BY queued_at DESC LIMIT ${2}`);
+    const details = plan.map((row) => row.detail).join("\n");
+    expect(details).toContain("idx_sync_runs_queued_at");
+    expect(details).not.toContain("USE TEMP B-TREE");
+  } finally {
+    db.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
