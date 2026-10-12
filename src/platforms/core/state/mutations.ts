@@ -68,7 +68,7 @@ export function invalidateIntegrationAuth(
       ...(integration.metadata ?? {}),
       authenticatedAt: null,
       lastAuthError: input.errorSummary,
-      authInvalidatedAt: now(),
+      authInvalidatedAt: Date.now(),
       authInvalidationReason: input.reason,
     },
   });

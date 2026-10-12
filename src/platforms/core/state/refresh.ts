@@ -155,7 +155,7 @@ async function buildWhatsAppManagedState(
       whatsappHelperPath: inspected.helperPath,
       whatsappHelperVersion: helperVersion,
       whatsappStatusError: statusError,
-      whatsappStatusCheckedAt: now(),
+      whatsappStatusCheckedAt: Date.now(),
       whatsappAccountJid: accountJid,
       whatsappPushName: pushName,
       whatsappLastHistorySyncAt: helperStatus?.lastHistorySyncAt ?? null,

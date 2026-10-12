@@ -241,7 +241,6 @@ function writeMenuBarStatusSnapshot(
   writeMenuBarStatusCache(snapshot);
 }
 
-
 function getDaemonIdentity(): {
   executablePath: string;
   appPath?: string;
