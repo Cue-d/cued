@@ -2283,6 +2283,7 @@ export class CuedDatabase {
     contactId: string;
     includeStale?: boolean;
     limit?: number;
+    all?: boolean;
   }): ContactMemoryRow[] {
     const contactId = input.contactId.trim();
     if (!contactId) {
@@ -2297,7 +2298,9 @@ export class CuedDatabase {
     if (!input.includeStale) {
       filters.push("cn.stale_at IS NULL");
     }
-    params.push(limit);
+    if (!input.all) {
+      params.push(limit);
+    }
 
     return this.sqlite
       .prepare(
@@ -2319,7 +2322,7 @@ export class CuedDatabase {
         LEFT JOIN contacts c ON c.id = cn.contact_id
         WHERE ${filters.join(" AND ")}
         ORDER BY cn.created_at DESC
-        LIMIT ?
+        ${input.all ? "" : "LIMIT ?"}
       `,
       )
       .all(...params) as ContactMemoryRow[];

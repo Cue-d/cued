@@ -126,6 +126,53 @@ describe("contacts memory CLI", () => {
     ).toThrow();
   });
 
+  it("lists the full memory history and invalidates a selected memory", () => {
+    const home = createHome();
+    const memory = JSON.parse(
+      runCli(home, ["contacts", "memory", "add", "contact-1", "No longer current"]),
+    ) as { id: string };
+
+    const invalidated = JSON.parse(
+      runCli(home, ["contacts", "memory", "invalidate", memory.id]),
+    ) as { id: string; stale_at: number | null };
+    expect(invalidated).toMatchObject({ id: memory.id, stale_at: expect.any(Number) });
+
+    const current = JSON.parse(runCli(home, ["contacts", "memory", "list", "contact-1"])) as Array<{
+      id: string;
+    }>;
+    const all = JSON.parse(
+      runCli(home, ["contacts", "memory", "list", "contact-1", "--all"]),
+    ) as Array<{ id: string }>;
+
+    expect(current).toEqual([]);
+    expect(all.map((row) => row.id)).toEqual([memory.id]);
+  });
+
+  it("does not truncate exhaustive memory reads", () => {
+    const home = createHome();
+    const db = new CuedDatabase(join(home, "local.db"));
+    try {
+      for (let index = 0; index < 501; index += 1) {
+        db.addContactMemory({ contactId: "contact-1", body: `Memory ${index}` });
+      }
+    } finally {
+      db.close();
+    }
+
+    const all = JSON.parse(
+      runCli(home, ["contacts", "memory", "list", "contact-1", "--all"]),
+    ) as Array<{ id: string }>;
+    expect(all).toHaveLength(501);
+    const current = JSON.parse(runCli(home, ["contacts", "memory", "list", "contact-1"])) as Array<{
+      id: string;
+    }>;
+    expect(current).toHaveLength(501);
+    const limited = JSON.parse(
+      runCli(home, ["contacts", "memory", "list", "contact-1", "--all", "--limit", "10"]),
+    ) as Array<{ id: string }>;
+    expect(limited).toHaveLength(10);
+  });
+
   it("dry-runs contact merge batches from a JSON file", () => {
     const home = createHome();
     insertContact(home, "contact-2", "Ava Duplicate");

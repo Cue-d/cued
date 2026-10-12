@@ -8,7 +8,7 @@ These evals are lightweight checks for agents using `$cued` to enrich contacts a
 - Requires deterministic identity evidence or strong local interaction evidence before writing.
 - Stores compact natural-language `body` plus structured `evidence_json`.
 - Does not update canonical profile fields from weak evidence.
-- Uses `--supersedes` or `cued contacts memory stale` for incorrect or outdated memories.
+- Uses `--supersedes` or `cued contacts memory invalidate` for incorrect or outdated memories.
 - Treats `no_write` as success for weak, bot, duplicate, or ambiguous contacts.
 
 ## Positive Cases
@@ -107,14 +107,23 @@ Expected behavior:
 
 ## Supersede Case
 
-1. Write a memory with local evidence.
-2. Write a replacement memory using `--supersedes <old-memory-id>`.
-3. Verify the old memory no longer appears in the default list and appears with `--include-stale`.
+1. Load the full history with `memory list <contact-id> --all`.
+2. Write a memory with local evidence.
+3. Write a replacement memory using `--supersedes <old-memory-id>`.
+4. Verify the old memory no longer appears in the current view and appears with `--all`.
 
 ```bash
 cued contacts memory list contact-id-here
-cued contacts memory list contact-id-here --include-stale
+cued contacts memory list contact-id-here --all
 ```
+
+## Omitted Evidence Case
+
+1. Load a supported current memory and its evidence.
+2. Inspect a newer verified source that does not mention the claim and does not contradict it.
+3. Verify the agent leaves the memory current and writes no duplicate.
+
+Expected behavior: absence from the newer source is not invalidation evidence. The agent uses `invalidate` only when evidence disproves the claim or makes it unusable.
 
 ## Web Enrichment Cases
 

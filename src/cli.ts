@@ -156,8 +156,8 @@ Usage:
   cued contacts merge <primary-contact-id> <secondary-contact-id> [--reason TEXT]
   cued contacts merge-batch <merges.json> [--apply]
   cued contacts memory add <contact-id> <memory> [--source SOURCE] [--confidence 0-100] [--evidence JSON] [--supersedes MEMORY_ID]
-  cued contacts memory list <contact-id> [--limit N] [--include-stale]
-  cued contacts memory stale <memory-id>
+  cued contacts memory list <contact-id> [--all] [--limit N]
+  cued contacts memory invalidate <memory-id>
   cued attachments list [--message ID] [--conversation ID] [--platform PLATFORM] [--account ACCOUNT] [--limit N]
   cued attachments fetch <attachment-id> [--variant original] [--max-bytes N] [--allow-large] [--no-extract]
   cued attachments search <query> [--conversation ID] [--platform PLATFORM] [--account ACCOUNT] [--limit N]
@@ -1197,29 +1197,33 @@ async function main(): Promise<void> {
               const contactId = args[0];
               if (!contactId) {
                 throw new Error(
-                  "Usage: cued contacts memory list <contact-id> [--limit N] [--include-stale]",
+                  "Usage: cued contacts memory list <contact-id> [--all] [--limit N]",
                 );
               }
+              const includeAll = args.includes("--all") || args.includes("--include-stale");
+              const explicitLimit = parseIntegerFlag(args, "--limit");
               printJson(
                 db.listContactMemories({
                   contactId,
-                  limit: parseIntegerFlag(args, "--limit"),
-                  includeStale: args.includes("--include-stale"),
+                  limit: explicitLimit,
+                  all: explicitLimit === undefined,
+                  includeStale: includeAll,
                 }),
               );
               return;
             }
+            case "invalidate":
             case "stale": {
               const memoryId = args[0];
               if (!memoryId) {
-                throw new Error("Usage: cued contacts memory stale <memory-id>");
+                throw new Error("Usage: cued contacts memory invalidate <memory-id>");
               }
               printJson(db.markContactMemoryStale(memoryId));
               return;
             }
             default:
               throw new Error(
-                "Usage: cued contacts memory add <contact-id> <memory> [--source SOURCE] [--confidence 0-100] [--evidence JSON] [--supersedes MEMORY_ID] | cued contacts memory list <contact-id> [--limit N] [--include-stale] | cued contacts memory stale <memory-id>",
+                "Usage: cued contacts memory add <contact-id> <memory> [--source SOURCE] [--confidence 0-100] [--evidence JSON] [--supersedes MEMORY_ID] | cued contacts memory list <contact-id> [--all] [--limit N] | cued contacts memory invalidate <memory-id>",
               );
           }
         } finally {
@@ -1256,7 +1260,7 @@ async function main(): Promise<void> {
       }
       if (subcommand !== "merge" || !rest[0] || !rest[1]) {
         throw new Error(
-          "Usage: cued contacts merge <primary-contact-id> <secondary-contact-id> [--reason TEXT] | cued contacts merge-batch <merges.json> [--apply] | cued contacts memory add|list|stale ...",
+          "Usage: cued contacts merge <primary-contact-id> <secondary-contact-id> [--reason TEXT] | cued contacts merge-batch <merges.json> [--apply] | cued contacts memory add|list|invalidate ...",
         );
       }
       response = await sendDaemonRequest({
