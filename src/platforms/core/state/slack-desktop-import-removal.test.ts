@@ -25,7 +25,28 @@ vi.mock("playwright", () => ({
   },
 }));
 
+vi.mock("../../slack/auth/verify-session.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../slack/auth/verify-session.js")>()),
+  verifySlackSession: async (
+    _token: string,
+    teamId: string,
+    cookies: Array<{ value: string }>,
+  ) => ({
+    teamId,
+    teamName:
+      teamId === "T_ACTIVE"
+        ? "Active Workspace"
+        : teamId === "T_RECOVERED"
+          ? "Recovered Workspace"
+          : teamId,
+    userId: "U_TEST",
+    cookie: cookies[0]?.value,
+  }),
+}));
+
 import { importSlackDesktopAuth } from "../../slack/auth/desktop-import.js";
+import * as sessionVerification from "../../slack/auth/verify-session.js";
+import { invalidateIntegrationAuth } from "./mutations.js";
 
 describe("slack desktop import removal tombstones", () => {
   const tempDirs: string[] = [];
@@ -75,6 +96,65 @@ describe("slack desktop import removal tombstones", () => {
     process.env.CUED_SLACK_APP_BINARY = appBinary;
     process.env.CUED_SLACK_USER_DATA_DIR = userDataDir;
   }
+
+  it("preserves provider invalidation through automatic import until explicit reconnect", async () => {
+    installFakeSlackDesktop();
+    execFileSyncMock.mockReturnValue(Buffer.from(""));
+    connectOverCDPMock.mockResolvedValue({
+      contexts: () => [
+        {
+          pages: () => [
+            {
+              url: () => "https://app.slack.com/client/T_REVOKED",
+              evaluate: vi.fn().mockResolvedValue(
+                JSON.stringify({
+                  teams: {
+                    T_REVOKED: {
+                      id: "T_REVOKED",
+                      name: "Revoked",
+                      token: "xoxc-token",
+                      user_id: "U1",
+                    },
+                  },
+                }),
+              ),
+            },
+          ],
+          cookies: vi
+            .fn()
+            .mockResolvedValue([{ name: "d", value: "cookie", domain: ".slack.com" }]),
+        },
+      ],
+      close: vi.fn(),
+    });
+    const db = createDb();
+    await importSlackDesktopAuth(db);
+    invalidateIntegrationAuth(db, "slack", "T_REVOKED", {
+      errorSummary: "invalid_auth",
+      reason: "slack_auth_invalidated",
+    });
+    expect(await importSlackDesktopAuth(db)).toEqual([
+      expect.objectContaining({ imported: false }),
+    ]);
+    expect(db.getIntegrationState("slack", "T_REVOKED")).toMatchObject({
+      auth_state: "needs_auth",
+      sync_capable: 0,
+    });
+    expect(db.listEnabledSyncTargets()).not.toContainEqual({
+      platform: "slack",
+      account_key: "T_REVOKED",
+    });
+    expect(await importSlackDesktopAuth(db, { reconnectInvalidated: true })).toEqual([
+      expect.objectContaining({ imported: true }),
+    ]);
+    const reconnected = db.getIntegrationState("slack", "T_REVOKED");
+    expect(reconnected?.auth_state).toBe("authenticated");
+    expect(JSON.parse(reconnected!.metadata_json!)).toMatchObject({
+      authInvalidatedAt: null,
+      authInvalidationReason: null,
+    });
+    db.close();
+  });
 
   it("imports unrelated teams without resurrecting a removed workspace", async () => {
     installFakeSlackDesktop();
@@ -178,6 +258,28 @@ describe("slack desktop import removal tombstones", () => {
     );
     expect(spawnMock).not.toHaveBeenCalled();
     expect(closeMock).toHaveBeenCalledTimes(1);
+
+    const beforeRejectedImport = db.listIntegrationStates();
+    const keychainWrites = () =>
+      execFileSyncMock.mock.calls.filter(
+        ([command, args]) => command === "security" && args[0] === "add-generic-password",
+      ).length;
+    const beforeWrites = keychainWrites();
+    const verify = vi.spyOn(sessionVerification, "verifySlackSession").mockResolvedValue(null);
+    const rejected = await importSlackDesktopAuth(db, { skipWhenAnyAuthenticated: false });
+    expect(rejected.every((entry) => !entry.imported)).toBe(true);
+    expect(db.listIntegrationStates()).toEqual(beforeRejectedImport);
+    expect(keychainWrites()).toBe(beforeWrites);
+    verify.mockRejectedValue(
+      new sessionVerification.SlackSessionVerificationError("provider unavailable"),
+    );
+    const launches = spawnMock.mock.calls.length;
+    await expect(importSlackDesktopAuth(db, { skipWhenAnyAuthenticated: false })).rejects.toThrow(
+      "provider unavailable",
+    );
+    expect(spawnMock.mock.calls.length).toBe(launches);
+    expect(db.listIntegrationStates()).toEqual(beforeRejectedImport);
+    verify.mockRestore();
 
     db.close();
   });

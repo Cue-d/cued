@@ -48,9 +48,24 @@ export class SlackHelperError extends Error {
   }
 }
 
+export function isSlackAuthInvalidationCode(code: string): boolean {
+  return [
+    "invalid_auth",
+    "not_authed",
+    "token_revoked",
+    "token_expired",
+    "account_inactive",
+  ].includes(code);
+}
+
+export function isSlackAuthInvalidationError(error: unknown): boolean {
+  return error instanceof SlackHelperError && isSlackAuthInvalidationCode(error.slackCode ?? "");
+}
+
 export class SlackHelperClient implements SlackTransport {
   private readonly helperPath: string;
   private readonly spawnImpl: SpawnImpl;
+  private readonly timeoutMs?: number;
   private readonly retryAttempts: number;
   private readonly retryBaseMs: number;
 
@@ -59,6 +74,7 @@ export class SlackHelperClient implements SlackTransport {
     options: {
       helperPath?: string | null;
       spawnImpl?: SpawnImpl;
+      timeoutMs?: number;
       retryAttempts?: number;
       retryBaseMs?: number;
     } = {},
@@ -70,6 +86,7 @@ export class SlackHelperClient implements SlackTransport {
 
     this.helperPath = helperPath;
     this.spawnImpl = options.spawnImpl ?? spawn;
+    this.timeoutMs = options.timeoutMs;
     this.retryAttempts = Math.max(1, options.retryAttempts ?? DEFAULT_RETRY_ATTEMPTS);
     this.retryBaseMs = Math.max(0, options.retryBaseMs ?? DEFAULT_RETRY_BASE_MS);
   }
@@ -191,6 +208,8 @@ export class SlackHelperClient implements SlackTransport {
   ): Promise<TResult> {
     const child = this.spawnImpl(this.helperPath, [command], {
       stdio: ["pipe", "pipe", "pipe"],
+      timeout: this.timeoutMs,
+      killSignal: "SIGKILL",
       env: process.env,
     });
 

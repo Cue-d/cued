@@ -152,20 +152,31 @@ export async function sendTelemetryEvent(
     return { sent: false, skipped: true };
   }
 
-  const envelope = buildTelemetryEnvelope(db, eventName, properties);
+  return sendTelemetryEnvelope(buildTelemetryEnvelope(db, eventName, properties), options);
+}
+
+export async function sendTelemetryEnvelope(
+  envelope: TelemetryEnvelope,
+  options: { fetchImpl?: typeof fetch; signal?: AbortSignal } = {},
+): Promise<{ sent: boolean; skipped: boolean; status?: number }> {
   const fetchImpl = options.fetchImpl ?? fetch;
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), TELEMETRY_TIMEOUT_MS);
-  const response = await fetchImpl(TELEMETRY_ENDPOINT, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    signal: controller.signal,
-    body: JSON.stringify(envelope),
-  }).finally(() => clearTimeout(timeout));
-
-  return {
-    sent: response.ok,
-    skipped: false,
-    status: response.status,
-  };
+  try {
+    const response = await fetchImpl(TELEMETRY_ENDPOINT, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      signal: options.signal
+        ? AbortSignal.any([controller.signal, options.signal])
+        : controller.signal,
+      body: JSON.stringify(envelope),
+    });
+    return {
+      sent: response.ok,
+      skipped: false,
+      status: response.status,
+    };
+  } finally {
+    clearTimeout(timeout);
+  }
 }

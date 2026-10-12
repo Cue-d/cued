@@ -1,6 +1,6 @@
 import { lookup } from "node:dns/promises";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CuedDatabase } from "../db/database.js";
@@ -20,11 +20,11 @@ describe("attachment service", () => {
   const lookupMock = vi.mocked(lookup);
   const tempDirs: string[] = [];
   const cleanupPaths: string[] = [];
-  const originalHome = process.env.HOME;
+  const originalHome = homedir();
 
   afterEach(() => {
     lookupMock.mockReset();
-    process.env.HOME = originalHome;
+    vi.mocked(homedir).mockReturnValue(originalHome);
     while (cleanupPaths.length > 0) {
       const path = cleanupPaths.pop();
       if (path) {
@@ -105,7 +105,7 @@ describe("attachment service", () => {
     const db = createDb();
     const homeDir = mkdtempSync(join(tmpdir(), "cued-attachments-src-"));
     tempDirs.push(homeDir);
-    process.env.HOME = homeDir;
+    vi.mocked(homedir).mockReturnValue(homeDir);
 
     const attachmentDir = join(homeDir, "Library", "Messages", "Attachments");
     mkdirSync(attachmentDir, { recursive: true });
@@ -284,7 +284,7 @@ describe("attachment service", () => {
     const db = createDb();
     const homeDir = mkdtempSync(join(tmpdir(), "cued-attachments-variant-"));
     tempDirs.push(homeDir);
-    process.env.HOME = homeDir;
+    vi.mocked(homedir).mockReturnValue(homeDir);
 
     const attachmentDir = join(homeDir, "Library", "Messages", "Attachments");
     mkdirSync(attachmentDir, { recursive: true });
@@ -369,7 +369,7 @@ describe("attachment service", () => {
     const db = createDb();
     const homeDir = mkdtempSync(join(tmpdir(), "cued-attachments-home-"));
     tempDirs.push(homeDir);
-    process.env.HOME = homeDir;
+    vi.mocked(homedir).mockReturnValue(homeDir);
 
     const attachmentDir = join(homeDir, "Library", "Messages", "Attachments");
     mkdirSync(attachmentDir, { recursive: true });
@@ -773,7 +773,7 @@ describe("attachment service", () => {
     const db = createDb();
     const homeDir = mkdtempSync(join(tmpdir(), "cued-attachments-shared-"));
     tempDirs.push(homeDir);
-    process.env.HOME = homeDir;
+    vi.mocked(homedir).mockReturnValue(homeDir);
 
     const attachmentDir = join(homeDir, "Library", "Messages", "Attachments");
     mkdirSync(attachmentDir, { recursive: true });
@@ -868,7 +868,7 @@ describe("attachment service", () => {
     const db = createDb();
     const homeDir = mkdtempSync(join(tmpdir(), "cued-attachments-allow-large-"));
     tempDirs.push(homeDir);
-    process.env.HOME = homeDir;
+    vi.mocked(homedir).mockReturnValue(homeDir);
 
     const attachmentDir = join(homeDir, "Library", "Messages", "Attachments");
     mkdirSync(attachmentDir, { recursive: true });

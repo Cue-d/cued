@@ -14,7 +14,7 @@ vi.mock("node:child_process", async (importOriginal) => {
   };
 });
 
-import { SlackHelperClient, type SlackHelperError } from "./client.js";
+import { isSlackAuthInvalidationError, SlackHelperClient, SlackHelperError } from "./client.js";
 
 class MockChild extends EventEmitter {
   readonly stdout = new PassThrough();
@@ -68,6 +68,23 @@ describe("slack helper client", () => {
       cursor: "cursor-a",
       limit: 50,
     });
+  });
+
+  it("bounds auth preflight subprocesses and rejects a killed helper", async () => {
+    const child = new MockChild();
+    spawnMock.mockReturnValue(child);
+    const client = new SlackHelperClient(
+      { token: "xoxc-test", cookie: "cookie-test" },
+      { helperPath: "/tmp/cued-slack-helper", timeoutMs: 10000, retryAttempts: 1 },
+    );
+    const promise = client.testAuth();
+    expect(spawnMock).toHaveBeenCalledWith(
+      "/tmp/cued-slack-helper",
+      ["authTest"],
+      expect.objectContaining({ timeout: 10000, killSignal: "SIGKILL" }),
+    );
+    child.emit("close", null);
+    await expect(promise).rejects.toThrow();
   });
 
   it("surfaces helper envelope errors", async () => {
@@ -164,4 +181,27 @@ describe("slack helper client", () => {
     });
     expect(spawnMock).toHaveBeenCalledTimes(2);
   }, 10_000);
+});
+
+describe("Slack authentication failures", () => {
+  it.each([
+    "invalid_auth",
+    "not_authed",
+    "token_revoked",
+    "token_expired",
+    "account_inactive",
+  ])("invalidates %s", (slackCode) => {
+    expect(isSlackAuthInvalidationError(new SlackHelperError("failed", { slackCode }))).toBe(true);
+  });
+  it.each([
+    "ratelimited",
+    "missing_scope",
+    "channel_not_found",
+    "internal_error",
+  ])("preserves auth on %s", (slackCode) => {
+    expect(isSlackAuthInvalidationError(new SlackHelperError("failed", { slackCode }))).toBe(false);
+  });
+  it("does not infer invalidation from free text", () => {
+    expect(isSlackAuthInvalidationError(new Error("invalid_auth"))).toBe(false);
+  });
 });

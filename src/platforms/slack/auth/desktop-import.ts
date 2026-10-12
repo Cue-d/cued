@@ -1,21 +1,18 @@
 import { type ChildProcess, execFileSync, spawn } from "node:child_process";
 import { existsSync } from "node:fs";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import { chromium } from "playwright";
 import type { CuedDatabase } from "../../../db/database.js";
 import { storeSlackSession } from "./session-store.js";
+import { SlackSessionVerificationError, verifySlackSession } from "./verify-session.js";
 
 declare const localStorage: {
   getItem(key: string): string | null;
 };
 
 const DEFAULT_SLACK_APP_BINARY = "/Applications/Slack.app/Contents/MacOS/Slack";
-const DEFAULT_SLACK_USER_DATA_DIR = join(
-  process.env.HOME ?? "",
-  "Library",
-  "Application Support",
-  "Slack",
-);
+const DEFAULT_SLACK_USER_DATA_DIR = join(homedir(), "Library", "Application Support", "Slack");
 const DEFAULT_DEBUGGING_PORT = 9222;
 const DEFAULT_SLACK_DESKTOP_IMPORT_TIMEOUT_MS = 20_000;
 
@@ -143,7 +140,11 @@ function parseLocalConfig(raw: string): SlackDesktopLocalConfig {
 
 export async function importSlackDesktopAuth(
   db: CuedDatabase,
-  options: { skipWhenAnyAuthenticated?: boolean; reviveUserRemoved?: boolean } = {},
+  options: {
+    skipWhenAnyAuthenticated?: boolean;
+    reviveUserRemoved?: boolean;
+    reconnectInvalidated?: boolean;
+  } = {},
 ): Promise<
   Array<{
     platform: "slack";
@@ -203,37 +204,45 @@ export async function importSlackDesktopAuth(
         }
 
         const cookies = await withTimeout(
-          context.cookies(["https://slack.com", "https://app.slack.com"]),
+          context.cookies(["https://slack.com", "https://app.slack.com", page.url()]),
           timeoutMs,
           "Timed out reading Slack desktop cookies",
         );
-        const dCookie = cookies.find(
-          (cookie) => cookie.name === "d" && cookie.domain.includes("slack.com"),
-        );
-        if (!dCookie?.value) {
-          throw new Error("Slack desktop app did not expose the required d cookie");
-        }
-
         const sourcePath = getSlackUserDataDir();
-        return teams.map((team) =>
-          storeSlackSession(
-            db,
-            {
+        const imported = [];
+        for (const team of teams) {
+          const verified = await verifySlackSession(team.token, team.id, cookies);
+          if (!verified) {
+            imported.push({
+              platform: "slack" as const,
               accountKey: team.id,
-              teamId: team.id,
-              teamName: team.name,
-              userId: team.user_id,
-              token: team.token,
-              cookie: dCookie.value,
-              savedAt: Date.now(),
               sourcePath,
-              importMethod: "slack-desktop-cdp",
-            },
-            {
-              reviveUserRemoved: options.reviveUserRemoved,
-            },
-          ),
-        );
+              imported: false,
+            });
+            continue;
+          }
+          imported.push(
+            storeSlackSession(
+              db,
+              {
+                accountKey: verified.teamId,
+                teamId: verified.teamId,
+                teamName: verified.teamName,
+                userId: verified.userId,
+                token: team.token,
+                cookie: verified.cookie,
+                savedAt: Date.now(),
+                sourcePath,
+                importMethod: "slack-desktop-cdp",
+              },
+              {
+                reviveUserRemoved: options.reviveUserRemoved,
+                reconnectInvalidated: options.reconnectInvalidated,
+              },
+            ),
+          );
+        }
+        return imported;
       } finally {
         await browser.close();
       }
@@ -252,7 +261,7 @@ export async function importSlackDesktopAuth(
   try {
     return await attemptImport(firstLaunch);
   } catch (error) {
-    if (!debuggerAlreadyRunning) {
+    if (!debuggerAlreadyRunning || error instanceof SlackSessionVerificationError) {
       throw error;
     }
 

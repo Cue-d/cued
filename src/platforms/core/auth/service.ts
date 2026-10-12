@@ -12,6 +12,7 @@ import {
   validateLinkedInStoredAuth,
 } from "../../linkedin/auth/keychain-import.js";
 import { importSlackDesktopAuth } from "../../slack/auth/desktop-import.js";
+import { SLACK_PENDING_ACCOUNT_KEY_PREFIX } from "../../slack/auth/workspace-selection.js";
 import { resolveIntegrationAccountKey } from "../account-keys.js";
 import {
   completeAuthSession,
@@ -47,7 +48,6 @@ type ConnectLifecycle = {
   onRuntimeStateChanged?: () => void;
 };
 
-const SLACK_PENDING_ACCOUNT_KEY_PREFIX = "pending-slack-";
 const GMAIL_PENDING_ACCOUNT_KEY_PREFIX = "pending-gmail-";
 
 function assertConnectPreflight(platform: string) {
@@ -74,9 +74,9 @@ export class IntegrationAuthService {
     return IntegrationAuthService.usageText();
   }
 
-  listStatus() {
+  listStatus(options: { includeDiagnostics?: boolean } = {}) {
     reconcileAbandonedAuthSessions(this.db);
-    return buildIntegrationStatus(this.db);
+    return buildIntegrationStatus(this.db, options);
   }
 
   async refresh() {
@@ -426,6 +426,7 @@ export class IntegrationAuthService {
       await importSlackDesktopAuth(this.db, {
         skipWhenAnyAuthenticated: false,
         reviveUserRemoved: true,
+        reconnectInvalidated: true,
       }).catch(() => []);
     } else {
       importLinkedInStoredAuth(this.db, { reviveUserRemoved: true });

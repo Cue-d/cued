@@ -1138,31 +1138,18 @@ describe("CuedDatabase", () => {
     db.close();
   });
 
-  it("keeps direct Signal phone sends as passthrough when there is no better contact match", () => {
+  it.each([
+    "+14155550123",
+    "4155550123",
+  ])("formats unmatched Signal phone target %s as E.164 passthrough", (input) => {
     const db = createDb();
-
-    expect(db.resolveSignalSendTarget("+14155550123")).toEqual({
+    expect(db.resolveSignalSendTarget(input)).toEqual({
       target: "+14155550123",
       threadId: "dm:+14155550123",
       resolution: "passthrough",
       matchedContactIds: [],
       matchedName: null,
     });
-
-    db.close();
-  });
-
-  it("formats local Signal phone sends as E.164 passthrough", () => {
-    const db = createDb();
-
-    expect(db.resolveSignalSendTarget("4155550123")).toEqual({
-      target: "+14155550123",
-      threadId: "dm:+14155550123",
-      resolution: "passthrough",
-      matchedContactIds: [],
-      matchedName: null,
-    });
-
     db.close();
   });
 
@@ -1957,6 +1944,68 @@ describe("CuedDatabase", () => {
         .get("0003_repair_conversation_removal_reason"),
     ).toBeTruthy();
 
+    db.close();
+  });
+
+  it("recovers unscheduled runs written after the scheduling migration", () => {
+    const db = createDb();
+    const raw = sqlite(db);
+    // Match an upgraded database: 0013 added a nullable column, while fresh
+    // databases have NOT NULL. The older app continued writing after migration.
+    raw.exec(`
+      DROP INDEX idx_sync_runs_status_type_queue;
+      DROP INDEX idx_sync_runs_platform_account_status_queue;
+      ALTER TABLE sync_runs DROP COLUMN scheduled_at;
+    `);
+    raw.exec(`
+      ALTER TABLE sync_runs ADD COLUMN scheduled_at INTEGER;
+      CREATE INDEX idx_sync_runs_status_type_queue
+        ON sync_runs(status, run_type, scheduled_at, queued_at);
+      CREATE INDEX idx_sync_runs_platform_account_status_queue
+        ON sync_runs(platform, account_key, status, scheduled_at, queued_at);
+    `);
+    raw.exec("DELETE FROM schema_migrations WHERE id = '0022_repair_missing_sync_run_schedules'");
+    const runId = db.queueSyncRun({
+      platform: "imessage",
+      accountKey: "local",
+      runType: "sync",
+      trigger: "scheduler",
+    });
+    raw
+      .prepare("UPDATE sync_runs SET scheduled_at = NULL, queued_at = 123 WHERE id = ?")
+      .run(runId);
+    const future = Date.now() + 60_000;
+    const futureRunId = db.queueSyncRun({
+      platform: "contacts",
+      accountKey: "local",
+      runType: "sync",
+      trigger: "scheduler",
+      scheduledAt: future,
+    });
+
+    expect(db.hasQueuedOrRunningRun("imessage", "local")).toBe(true);
+    expect(db.claimNextQueuedRun(["sync"])).toBeNull();
+    db.migrate();
+    expect(db.getNextQueuedRunScheduledAt(["sync"])).toBe(123);
+    expect(db.getNextClaimableRunAt(["sync"])).toBe(123);
+    expect(db.claimNextQueuedRun(["sync"], "ingesting", { ownerId: "test" })).toMatchObject({
+      id: runId,
+      scheduled_at: 123,
+      owner_id: "test",
+      attempt: 1,
+    });
+    expect(db.claimNextQueuedRun(["sync"])).toBeNull();
+    expect(raw.prepare("SELECT scheduled_at FROM sync_runs WHERE id = ?").get(futureRunId)).toEqual(
+      {
+        scheduled_at: future,
+      },
+    );
+    db.finishRun(runId);
+    db.migrate();
+    expect(db.claimNextQueuedRun(["sync"])).toBeNull();
+    expect(raw.prepare("SELECT status FROM sync_runs WHERE id = ?").get(runId)).toEqual({
+      status: "completed",
+    });
     db.close();
   });
 

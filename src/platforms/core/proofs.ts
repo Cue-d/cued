@@ -76,6 +76,17 @@ const PROOF_KIND_CONTRACTS: SyncProofKindContract[] = [
   },
   {
     platform: "slack",
+    proofKind: "history",
+    scopeKind: "conversation",
+    completeMeans:
+      "An initial unbounded history and known-thread traversal completed successfully, including empty conversations; this does not assert current freshness.",
+    invalidatedBy:
+      "A deliberate historical rescan when the provider exposes previously unavailable history; incremental windows do not replace this evidence.",
+    resumeCursorMeans:
+      "Written only on completion. Incomplete traversals resume through messages and replies proofs.",
+  },
+  {
+    platform: "slack",
     proofKind: "messages",
     scopeKind: "conversation",
     completeMeans:
