@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import type {
   ContactHandleInput,
   ContactObservationPayload,
@@ -8,6 +7,7 @@ import type {
   ReactionPayload,
   TimelineEventPayload,
 } from "../../../core/types/provider.js";
+import { providerStableHash } from "../../core/utils.js";
 import type {
   Conversation,
   Message,
@@ -15,10 +15,6 @@ import type {
   ReactionSummary,
   SeenReceipt,
 } from "../api/types.js";
-
-function stableId(seed: string): string {
-  return createHash("sha256").update(seed).digest("hex");
-}
 
 export function normalizeConversationUrn(urn: string): string {
   return urn
@@ -110,7 +106,7 @@ export function buildParticipantContactEvent(
   observedAt: number,
 ): ProviderRawEventInput<ContactObservationPayload> {
   const normalizedParticipantUrn = normalizeMemberUrn(participant.entityURN);
-  const id = stableId(
+  const id = providerStableHash(
     `linkedin:participant:${accountKey}:${normalizedParticipantUrn}:${bestParticipantName(participant)}:${participant.participantType.member?.headline ?? ""}`,
   );
   return {
@@ -282,10 +278,6 @@ export function isLinkedInMessageEdited(message: Message): boolean {
   return message.messageBodyRenderFormat === "EDITED";
 }
 
-export function isLinkedInSystemMessage(message: Message): boolean {
-  return message.messageBodyRenderFormat === "SYSTEM";
-}
-
 export function conversationSourceKey(conversationUrn: string): string {
   return `linkedin:${normalizeConversationUrn(conversationUrn)}`;
 }
@@ -301,7 +293,7 @@ export function buildLinkedInConversationEvent(
   observedAt: number,
 ): ProviderRawEventInput<ConversationObservationPayload> {
   const normalizedConversation = normalizeConversationUrn(conversation.entityURN);
-  const id = stableId(
+  const id = providerStableHash(
     `linkedin:conversation:${accountKey}:${normalizedConversation}:${conversation.title}:${conversation.conversationParticipants
       .map((participant) => participantSourceKey(participant))
       .join(",")}`,
@@ -343,7 +335,7 @@ export function buildLinkedInConversationRemovalEvents(input: {
 }): ProviderRawEventInput[] {
   const normalizedConversation = normalizeConversationUrn(input.conversationUrn);
   const sourceConversationKey = conversationSourceKey(normalizedConversation);
-  const removalId = stableId(
+  const removalId = providerStableHash(
     `linkedin:conversation:removed:${input.accountKey}:${sourceConversationKey}:${input.reason}:${input.observedAt}`,
   );
   return [
@@ -387,7 +379,7 @@ export function buildLinkedInSystemTimelineEvent(
   const sourceConversationKey = conversationSourceKey(message.conversationURN);
   const sender = message.sender?.entityURN ? participantSourceKey(message.sender) : null;
   return {
-    id: stableId(
+    id: providerStableHash(
       `linkedin:timeline:system:${accountKey}:${message.entityURN}:${message.deliveredAt}`,
     ),
     platform: "linkedin",
@@ -398,7 +390,7 @@ export function buildLinkedInSystemTimelineEvent(
     conversationExternalId: normalizeConversationUrn(message.conversationURN),
     occurredAt: message.deliveredAt,
     observedAt,
-    dedupeKey: stableId(`linkedin:timeline:system:${accountKey}:${message.entityURN}`),
+    dedupeKey: providerStableHash(`linkedin:timeline:system:${accountKey}:${message.entityURN}`),
     payload: {
       sourceEventKey: `linkedin:system:${message.entityURN}`,
       sourceConversationKey,
@@ -431,7 +423,7 @@ export function buildLinkedInMessageEvent(input: {
   const senderUrn = normalizeMemberUrn(input.message.sender.entityURN);
   const isDeleted = isLinkedInMessageDeleted(input.message);
   const isEdited = isLinkedInMessageEdited(input.message);
-  const id = stableId(
+  const id = providerStableHash(
     `linkedin:message:${input.accountKey}:${normalizedConversation}:${input.message.entityURN}:${input.message.body.text}:${input.message.messageBodyRenderFormat}:${input.readAt ?? ""}`,
   );
   return {
@@ -481,7 +473,7 @@ export function buildLinkedInReactionEvent(input: {
   const sourceConversationKey = conversationSourceKey(input.conversationUrn);
   const reactorSourceKey = input.reactor ? participantSourceKey(input.reactor) : null;
   const transitionTime = input.timestamp ?? input.observedAt;
-  const id = stableId(
+  const id = providerStableHash(
     `linkedin:reaction:${input.accountKey}:${sourceMessageKey}:${reactorSourceKey ?? "__me__"}:${input.emoji}:${input.isActive}:${transitionTime}`,
   );
   return {
@@ -517,7 +509,7 @@ export function buildLinkedInGroupReceiptTimelineEvent(input: {
   const sourceConversationKey = conversationSourceKey(conversationUrn);
   const actorSourceKey = participantSourceKey(input.receipt.seenByParticipant);
   return {
-    id: stableId(
+    id: providerStableHash(
       `linkedin:timeline:receipt:${input.accountKey}:${input.receipt.message.entityURN}:${actorSourceKey}:${input.receipt.seenAt}`,
     ),
     platform: "linkedin",
@@ -528,7 +520,7 @@ export function buildLinkedInGroupReceiptTimelineEvent(input: {
     conversationExternalId: normalizeConversationUrn(conversationUrn),
     occurredAt: input.receipt.seenAt,
     observedAt: input.observedAt,
-    dedupeKey: stableId(
+    dedupeKey: providerStableHash(
       `linkedin:timeline:receipt:${input.accountKey}:${input.receipt.message.entityURN}:${actorSourceKey}:${input.receipt.seenAt}`,
     ),
     payload: {

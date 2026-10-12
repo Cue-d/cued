@@ -74,10 +74,6 @@ type SlackSyncProofSnapshot = {
 
 type SlackSyncProofState = Map<string, Map<string, SlackSyncProofSnapshot>>;
 
-function now(): number {
-  return Date.now();
-}
-
 function positiveInt(value: number, fallback: number): number {
   return Number.isFinite(value) && value > 0 ? Math.trunc(value) : fallback;
 }
@@ -858,7 +854,7 @@ export async function buildSlackSyncBundle(options?: {
   const teamId = auth.team_id;
   const teamName = auth.team ?? teamId;
   const selfUserId = auth.user_id;
-  const observedBase = now();
+  const observedBase = Date.now();
   const conversationPageLimit = positiveInt(
     options?.conversationPageLimit ?? DEFAULT_SLACK_CONVERSATIONS_PER_RUN,
     25,

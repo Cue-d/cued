@@ -65,14 +65,6 @@ export const RETRY_CONFIG = {
   authErrorStatusCodes: [401, 403],
 } as const;
 
-export const REALTIME_TOPICS = {
-  conversations: "conversationsTopic",
-  conversationDeletes: "conversationDeletesTopic",
-  messageSeenReceipts: "messageSeenReceiptsTopic",
-  messages: "messagesTopic",
-  messageReactionSummaries: "messageReactionSummariesTopic",
-} as const;
-
 export const PAGINATION_DEFAULTS = {
   conversationsCount: 20,
   messagesCount: 20,

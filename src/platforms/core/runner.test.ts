@@ -8,7 +8,6 @@ const { getAdapterDefinitionMock, spawnMock } = vi.hoisted(() => ({
   getAdapterDefinitionMock: vi.fn(() => ({
     platform: "slack",
     workerEntrypoint: "/tmp/fake-worker.js",
-    autoSync: true,
     workerTimeoutMs: 50,
   })),
   spawnMock: vi.fn(),
@@ -39,7 +38,6 @@ describe("adapter runner", () => {
     getAdapterDefinitionMock.mockReturnValue({
       platform: "slack",
       workerEntrypoint: "/tmp/fake-worker.js",
-      autoSync: true,
       workerTimeoutMs: 50,
     });
     while (tempDirs.length > 0) {
@@ -127,7 +125,6 @@ describe("adapter runner", () => {
     getAdapterDefinitionMock.mockReturnValue({
       platform: "signal",
       workerEntrypoint: join(dir, "signal-worker.js"),
-      autoSync: true,
       workerTimeoutMs: 50,
     });
 

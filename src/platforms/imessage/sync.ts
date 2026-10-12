@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import type {
   CallPayload,
   ContactObservationPayload,
@@ -10,6 +10,7 @@ import type {
 } from "../../core/types/provider.js";
 import { resolveMacOSNativeBinary } from "../../runtime/native-binary.js";
 import type { SyncBundle } from "../core/sync.js";
+import { providerStableHash } from "../core/utils.js";
 import {
   DEFAULT_CALL_HISTORY_DB_PATH,
   type ImsCallSyncBatch,
@@ -25,10 +26,6 @@ type IMessageSourceCursor = {
   rowId?: number;
   callPk?: number;
 };
-
-function dedupeKey(seed: string): string {
-  return createHash("sha256").update(seed).digest("hex");
-}
 
 function guessHandleType(identifier: string): string {
   if (identifier.includes("@")) return "email";
@@ -213,7 +210,7 @@ export function buildIMessageSyncBundle(options?: {
       eventKind: "observed",
       externalEntityId: String(handle.id),
       observedAt: observedBase + handle.id,
-      dedupeKey: dedupeKey(`imessage:contact:${handle.id}:${handle.identifier}`),
+      dedupeKey: providerStableHash(`imessage:contact:${handle.id}:${handle.identifier}`),
       payload: {
         sourceEntityKey: `imessage:${handle.identifier}`,
         fields: {
@@ -246,7 +243,7 @@ export function buildIMessageSyncBundle(options?: {
       eventKind: "observed",
       conversationExternalId: String(chat.id),
       observedAt: observedBase + chat.id,
-      dedupeKey: dedupeKey(`imessage:conversation:${chat.id}:${batch.cursor}`),
+      dedupeKey: providerStableHash(`imessage:conversation:${chat.id}:${batch.cursor}`),
       payload: {
         sourceConversationKey: String(chat.id),
         conversationType: chat.isGroup ? "group" : "dm",
@@ -271,7 +268,7 @@ export function buildIMessageSyncBundle(options?: {
       conversationExternalId: String(message.chatId),
       occurredAt: message.timestamp * 1000,
       observedAt: observedBase + message.id,
-      dedupeKey: dedupeKey(`imessage:message:${message.guid}`),
+      dedupeKey: providerStableHash(`imessage:message:${message.guid}`),
       payload: {
         sourceMessageKey: message.guid,
         sourceConversationKey: String(message.chatId),
@@ -317,7 +314,7 @@ export function buildIMessageSyncBundle(options?: {
         conversationExternalId: String(message.chatId),
         occurredAt: reaction.timestamp * 1000,
         observedAt: observedBase + message.id + reaction.timestamp,
-        dedupeKey: dedupeKey(
+        dedupeKey: providerStableHash(
           `imessage:reaction:${message.guid}:${reaction.reactorIdentifier}:${reaction.emoji}:${reaction.timestamp}`,
         ),
         payload: {
@@ -345,7 +342,7 @@ export function buildIMessageSyncBundle(options?: {
         eventKind: "observed",
         externalEntityId: call.remoteAddress ?? call.sourceCallKey,
         observedAt: observedBase + call.pk,
-        dedupeKey: dedupeKey(`imessage:call-contact:${call.remoteSourceKey}`),
+        dedupeKey: providerStableHash(`imessage:call-contact:${call.remoteSourceKey}`),
         payload: {
           sourceEntityKey: call.remoteSourceKey,
           fields: {
@@ -378,7 +375,7 @@ export function buildIMessageSyncBundle(options?: {
         eventKind: "observed",
         conversationExternalId: call.sourceConversationKey,
         observedAt: observedBase + call.pk,
-        dedupeKey: dedupeKey(`imessage:call-conversation:${call.sourceConversationKey}`),
+        dedupeKey: providerStableHash(`imessage:call-conversation:${call.sourceConversationKey}`),
         payload: {
           sourceConversationKey: call.sourceConversationKey,
           conversationType: "dm",
@@ -400,7 +397,7 @@ export function buildIMessageSyncBundle(options?: {
       conversationExternalId: call.sourceConversationKey,
       occurredAt: call.startedAt,
       observedAt: observedBase + call.pk,
-      dedupeKey: dedupeKey(`imessage:call:${call.sourceCallKey}`),
+      dedupeKey: providerStableHash(`imessage:call:${call.sourceCallKey}`),
       payload: {
         sourceCallKey: call.sourceCallKey,
         sourceConversationKey: call.sourceConversationKey,

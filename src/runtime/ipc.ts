@@ -8,7 +8,6 @@ export type DaemonRequest =
       id: string;
       command: "onboarding-snapshot";
       refreshManagedIntegrations?: boolean;
-      refreshPermissions?: boolean;
     }
   | { id: string; command: "permissions-status" }
   | { id: string; command: "sql"; query: string }

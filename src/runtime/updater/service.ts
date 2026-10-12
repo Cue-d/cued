@@ -105,10 +105,6 @@ type InstallResult = {
   installedAppPath: string;
 };
 
-function now(): number {
-  return Date.now();
-}
-
 function sqlString(value: string): string {
   return `'${value.replaceAll("'", "''")}'`;
 }
@@ -249,7 +245,7 @@ export function pickReleaseForChannel(
 
 export function isUpdateCheckDue(
   lastCheckedAt: number | null,
-  at = now(),
+  at = Date.now(),
   intervalMs = RELEASE_CHECK_INTERVAL_MS,
 ): boolean {
   if (!Number.isFinite(lastCheckedAt ?? Number.NaN)) {
@@ -284,7 +280,7 @@ function setUpdateError(
   targetVersion: string | null,
 ): UpdateErrorState {
   const errorState: UpdateErrorState = {
-    at: now(),
+    at: Date.now(),
     stage,
     message,
     targetVersion,
@@ -338,7 +334,7 @@ export async function checkForUpdates(
   db: CuedDatabase,
   options: CheckOptions = {},
 ): Promise<UpdateStatusSnapshot> {
-  const startedAt = now();
+  const startedAt = Date.now();
   const channel = getCurrentReleaseChannel();
   const currentVersion = getCurrentAppVersion();
   const cached = db.getUpdateReleaseState();
@@ -352,7 +348,7 @@ export async function checkForUpdates(
 
   if (channel === "dev") {
     const releaseState: UpdateReleaseState = {
-      checkedAt: now(),
+      checkedAt: Date.now(),
       channel,
       currentVersion,
       latestVersion: currentVersion,
@@ -395,7 +391,7 @@ export async function checkForUpdates(
       latestVersion && compareVersions(latestVersion, currentVersion) > 0 ? latestVersion : null;
 
     const releaseState: UpdateReleaseState = {
-      checkedAt: now(),
+      checkedAt: Date.now(),
       channel,
       currentVersion,
       latestVersion,
@@ -419,7 +415,7 @@ export async function checkForUpdates(
         current_version: currentVersion,
         target_version: availableVersion,
         release_channel: channel,
-        duration_bucket: durationBucket(now() - startedAt),
+        duration_bucket: durationBucket(Date.now() - startedAt),
       });
     }
     return toUpdateStatus(releaseState, db);
@@ -433,7 +429,7 @@ export async function checkForUpdates(
       update_stage: "check",
       current_version: currentVersion,
       release_channel: channel,
-      duration_bucket: durationBucket(now() - startedAt),
+      duration_bucket: durationBucket(Date.now() - startedAt),
       ...errorTelemetryProperties(error, "update_check_failed"),
     });
     return db.getUpdateStatus();
@@ -463,8 +459,8 @@ async function downloadReleaseAsset(url: string, destinationPath: string): Promi
 }
 
 function waitForDaemonExit(db: CuedDatabase, timeoutMs: number): void {
-  const startedAt = now();
-  while (now() - startedAt < timeoutMs) {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
     const daemon = db.getDaemonState();
     const pidRunning =
       typeof daemon?.pid === "number" && daemon.pid > 0 ? isProcessRunning(daemon.pid) : false;
@@ -552,7 +548,7 @@ export function setUpdateHelperLastError(dbPath: string, message: string | null)
     db.setUpdateLastError(
       message
         ? {
-            at: now(),
+            at: Date.now(),
             stage: "install",
             message,
             targetVersion: null,
@@ -800,7 +796,7 @@ function spawnUpdateHelper(
 }
 
 export async function installAvailableUpdate(db: CuedDatabase): Promise<InstallResult> {
-  const startedAt = now();
+  const startedAt = Date.now();
   ensureCuedDirs();
   const { installedAppPath } = assertInstalledContext();
   const prepared = await prepareReleaseInstall(db);
@@ -821,7 +817,7 @@ export async function installAvailableUpdate(db: CuedDatabase): Promise<InstallR
     });
 
     const currentVersion = getCurrentAppVersion();
-    const backupStamp = `${now()}-preupdate-${currentVersion}-to-${prepared.version}`;
+    const backupStamp = `${Date.now()}-preupdate-${currentVersion}-to-${prepared.version}`;
     const rollbackDir = join(CUED_UPDATE_ROLLBACK_DIR, backupStamp);
     const appBackupPath = join(rollbackDir, "Cued.app");
     const dbBackupPath = join(CUED_BACKUPS_DIR, `${backupStamp}.db`);
@@ -837,7 +833,7 @@ export async function installAvailableUpdate(db: CuedDatabase): Promise<InstallR
     runPreflight(prepared.stagedAppPath, preflightDbPath);
 
     const pendingRollback: PendingRollbackState = {
-      startedAt: now(),
+      startedAt: Date.now(),
       previousVersion: currentVersion,
       targetVersion: prepared.version,
       installedAppPath,
@@ -858,7 +854,7 @@ export async function installAvailableUpdate(db: CuedDatabase): Promise<InstallR
       update_stage: "helper_spawned",
       current_version: currentVersion,
       target_version: prepared.version,
-      duration_bucket: durationBucket(now() - startedAt),
+      duration_bucket: durationBucket(Date.now() - startedAt),
     });
     return {
       started: true,
@@ -876,7 +872,7 @@ export async function installAvailableUpdate(db: CuedDatabase): Promise<InstallR
       update_stage: "install",
       current_version: getCurrentAppVersion(),
       target_version: prepared.version,
-      duration_bucket: durationBucket(now() - startedAt),
+      duration_bucket: durationBucket(Date.now() - startedAt),
       ...errorTelemetryProperties(error, "update_install_failed"),
     });
     throw error;

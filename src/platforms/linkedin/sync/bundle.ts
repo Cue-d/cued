@@ -1,8 +1,8 @@
-import { createHash } from "node:crypto";
 import type { SourceAccountInput, SyncProofInput } from "../../../core/types/provider.js";
 import { mapWithConcurrency } from "../../../core/utils/async.js";
 import { openCuedDatabaseReadOnly } from "../../../db/database.js";
 import type { SyncBundle } from "../../core/sync.js";
+import { providerStableHash } from "../../core/utils.js";
 import {
   type Connection,
   type Conversation,
@@ -102,14 +102,6 @@ interface LinkedInMessageBatchResult {
   };
   messageCount: number;
   error?: unknown;
-}
-
-function now(): number {
-  return Date.now();
-}
-
-function stableId(seed: string): string {
-  return createHash("sha256").update(seed).digest("hex");
 }
 
 function getLinkedInFetchConcurrency(): number {
@@ -298,7 +290,7 @@ function buildLinkedInConnectionContactEvent(
   observedAt: number,
 ): SyncBundle["rawEvents"][number] {
   const sourceEntityKey = `linkedin:urn:li:member:${connection.profileId}`;
-  const id = stableId(
+  const id = providerStableHash(
     `linkedin:contact:${accountKey}:${sourceEntityKey}:${connection.firstName}:${connection.lastName}:${connection.headline ?? ""}`,
   );
   return {
@@ -392,7 +384,7 @@ async function listConversations(
       complete: false,
       resumeScan: {
         mode: "full",
-        startedAt: resumeScan?.startedAt ?? now(),
+        startedAt: resumeScan?.startedAt ?? Date.now(),
         conversationCursor: resumeScan?.conversationCursor ?? null,
         oldestLastActivity: resumeScan?.oldestLastActivity ?? null,
       },
@@ -460,7 +452,7 @@ async function listConversations(
       ? null
       : {
           mode: "full",
-          startedAt: resumeScan?.startedAt ?? now(),
+          startedAt: resumeScan?.startedAt ?? Date.now(),
           conversationCursor: nextCursor,
           oldestLastActivity: Number.isFinite(oldestLastActivity) ? oldestLastActivity : null,
         },
@@ -871,7 +863,7 @@ export async function buildLinkedInSyncBundle(options?: {
     ((lookupAccountKey: string, sourceMessageKey: string) =>
       loadProjectedReactions(db!, lookupAccountKey, sourceMessageKey));
   try {
-    const observedBase = now();
+    const observedBase = Date.now();
     const cutoffMs = incrementalOldestMs(previousLastSyncAt);
     const incremental = Boolean(!resumeScan && (previousLastSyncAt || savedSyncToken));
     const syncMode = incremental ? "incremental" : "full";

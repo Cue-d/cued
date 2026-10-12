@@ -241,8 +241,6 @@ export interface ProviderRawEventInput<TPayload = RawEventPayload> {
   sourceVersion?: string | null;
 }
 
-const contactFieldNameSet = new Set<string>(CONTACT_FIELD_NAME_VALUES);
-
 export function buildNormalizedRawEventSchema(
   entityKind: RawEventEntityKind,
   eventKind: string,
@@ -272,12 +270,4 @@ export function resolveRawEventNormalizedSchema(
     input.normalizedSchema?.trim() ||
     buildNormalizedRawEventSchema(input.entityKind, input.eventKind)
   );
-}
-
-export function parseConversationType(value: string): ConversationType {
-  return value === "group" ? "group" : "dm";
-}
-
-export function isContactFieldName(value: string): value is ContactFieldName {
-  return contactFieldNameSet.has(value);
 }

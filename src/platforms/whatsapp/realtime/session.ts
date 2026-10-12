@@ -100,10 +100,6 @@ interface WhatsAppRealtimeSupervisorOptions {
   onStatusChange?: (accountKey: string, status: WhatsAppRealtimeStatus) => void;
 }
 
-function now(): number {
-  return Date.now();
-}
-
 function makeStatus(input: {
   accountKey: string;
   helperPath: string;
@@ -401,7 +397,7 @@ export class WhatsAppRealtimeSession implements WhatsAppRealtimeSessionLike {
     }
 
     const eventData = parsed.data as Record<string, unknown>;
-    const eventAt = now();
+    const eventAt = Date.now();
     if (parsed.event === "connected") {
       const reconnected = this.hasEverConnected;
       this.hasEverConnected = true;
@@ -467,7 +463,7 @@ export class WhatsAppRealtimeSession implements WhatsAppRealtimeSessionLike {
       state: this.shouldReconnect ? "reconnecting" : "degraded",
       connectedAt: null,
       reconnectAttempts,
-      lastReconnectAt: this.shouldReconnect ? now() : this.status.lastReconnectAt,
+      lastReconnectAt: this.shouldReconnect ? Date.now() : this.status.lastReconnectAt,
       lastSessionError: error.message,
     });
     this.onDisconnected?.(this.getStatus());

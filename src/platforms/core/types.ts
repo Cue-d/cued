@@ -40,8 +40,6 @@ export type PlatformFeature = (typeof PLATFORM_FEATURE_VALUES)[number];
 export const PLATFORM_FEATURE_SUPPORT_VALUES = ["yes", "partial", "no"] as const;
 export type PlatformFeatureSupport = (typeof PLATFORM_FEATURE_SUPPORT_VALUES)[number];
 
-export type PlatformFutureFeatureNotes = Record<string, never>;
-
 type PlatformDefinition = {
   adapter: boolean;
   defaultAccountKey: "default" | "local";
@@ -365,7 +363,6 @@ const adapterPlatformSet = new Set<string>(ADAPTER_PLATFORM_VALUES);
 const requestableIntegrationPlatformSet = new Set<string>(REQUESTABLE_INTEGRATION_PLATFORM_VALUES);
 const integrationAuthStateSet = new Set<string>(INTEGRATION_AUTH_STATE_VALUES);
 const integrationRuntimeKindSet = new Set<string>(INTEGRATION_RUNTIME_KIND_VALUES);
-const hostOsSet = new Set<string>(HOST_OS_VALUES);
 
 export function isPlatform(value: string): value is Platform {
   return platformSet.has(value);
@@ -383,14 +380,6 @@ export function isRequestableIntegrationPlatform(
 
 export function parsePlatform(value: string): Platform | null {
   return isPlatform(value) ? value : null;
-}
-
-export function isHostOS(value: string): value is HostOS {
-  return hostOsSet.has(value);
-}
-
-export function parseHostOS(value: string | null | undefined): HostOS | null {
-  return value && isHostOS(value) ? value : null;
 }
 
 export function getDefaultAccountKeyForPlatform(platform: Platform): string {
@@ -436,11 +425,6 @@ export function getPlatformFeatureMatrixRow(
   platform: Platform,
 ): Readonly<Record<PlatformFeature, PlatformFeatureSupport>> {
   return PLATFORM_FEATURE_MATRIX[platform];
-}
-
-export function getPlatformFutureFeatureNotes(platform: Platform): PlatformFutureFeatureNotes {
-  void platform;
-  return {};
 }
 
 export function isIntegrationAuthState(value: string): value is IntegrationAuthState {

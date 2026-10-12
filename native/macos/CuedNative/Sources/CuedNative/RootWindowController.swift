@@ -159,12 +159,13 @@ final class RootWindowController: NSWindowController {
     let daemonSupervisor = self.daemonSupervisor
     let statusStore = self.statusStore
     let shouldEnsurePrerequisites = consumePrerequisiteSetupIntent()
-    let shouldRefreshPermissions = forceActivePermissionRefresh || shouldRefreshLivePermissions()
-    let fastPermissionKeys = shouldRefreshPermissions
+    let shouldRefreshFastPermissions = forceActivePermissionRefresh || shouldRefreshLivePermissions()
+    let shouldRefreshManagedIntegrations = shouldRefreshFastPermissions
+    let fastPermissionKeys = shouldRefreshFastPermissions
       ? (pendingLivePermissionKeys.isEmpty ? liveRefreshPermissionKeys : pendingLivePermissionKeys)
       : []
 
-    if shouldRefreshPermissions {
+    if shouldRefreshFastPermissions {
       applyFastPermissionStatuses(for: fastPermissionKeys)
     }
 
@@ -190,7 +191,7 @@ final class RootWindowController: NSWindowController {
       let snapshot = Self.decodeJSON(
         daemonSupervisor: daemonSupervisor,
         RootSnapshotResponse.self,
-        arguments: onboardingSnapshotArguments(refreshPermissions: shouldRefreshPermissions)
+        arguments: onboardingSnapshotArguments(refreshManagedIntegrations: shouldRefreshManagedIntegrations)
       )
 
       guard let snapshot else {
@@ -272,11 +273,7 @@ final class RootWindowController: NSWindowController {
     guard let result = daemonSupervisor.runCLI(arguments: arguments) else {
       return nil
     }
-    guard result.status == 0,
-          let data = result.stdout.data(using: .utf8) else {
-      return nil
-    }
-    return try? JSONDecoder().decode(type, from: data)
+    return decodeCLIJSON(type, status: result.status, stdout: result.stdout)
   }
 
   private nonisolated static func fastRootSnapshot(
@@ -460,12 +457,7 @@ final class RootWindowController: NSWindowController {
         daemonSupervisor.runCLI(arguments: ["skill", "install-global"])
       }.value
       let installResult: SkillInstallResponse? =
-        installCommandResult.flatMap { result in
-          guard result.status == 0, let data = result.stdout.data(using: .utf8) else {
-            return nil
-          }
-          return try? JSONDecoder().decode(SkillInstallResponse.self, from: data)
-        }
+        installCommandResult.flatMap { decodeCLIJSON(SkillInstallResponse.self, status: $0.status, stdout: $0.stdout) }
       let installFailed = ((installCommandResult?.status ?? 1) != 0 || installResult?.ok == false)
 
       refresh()
@@ -866,10 +858,6 @@ final class RootWindowController: NSWindowController {
     return !pendingLivePermissionKeys.isDisjoint(with: liveRefreshPermissionKeys)
   }
 
-  private func trackLivePermissionRequests(flags: [String]) {
-    trackLivePermissionKeys(permissionKeys(for: flags))
-  }
-
   private func trackLivePermissionKeys(_ keys: Set<String>) {
     pendingLivePermissionKeys.formUnion(
       keys.filter { liveRefreshPermissionKeys.contains($0) }
@@ -947,7 +935,7 @@ func shouldActivelyRefreshPermissions(for flags: [String]) -> Bool {
   return !keys.isDisjoint(with: liveRefreshPermissionKeys)
 }
 
-func onboardingSnapshotArguments(refreshPermissions: Bool) -> [String] {
+func onboardingSnapshotArguments(refreshManagedIntegrations: Bool) -> [String] {
   ["onboarding", "snapshot"] +
-    (refreshPermissions ? ["--refresh-managed", "--refresh-permissions"] : [])
+    (refreshManagedIntegrations ? ["--refresh-managed"] : [])
 }

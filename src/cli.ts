@@ -6,9 +6,8 @@ import { dirname, join, resolve } from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 import { DaemonRequestTimeoutError, sendDaemonRequest } from "./client.js";
-import { getCurrentAppVersion, getCurrentReleaseChannel } from "./core/app-metadata.js";
+import { getCurrentAppVersion } from "./core/app-metadata.js";
 import { CUED_DB_PATH, CUED_SOCKET_PATH, ensureCuedDirs } from "./core/config.js";
-import { resolveHostOS } from "./core/platform-capabilities.js";
 import {
   openCuedDatabase,
   openCuedDatabaseReadOnly,
@@ -32,7 +31,6 @@ import {
 } from "./platforms/core/state/status.js";
 import {
   getPlatformFeatureMatrixRow,
-  getPlatformFutureFeatureNotes,
   getPlatformHelperRequirements,
   getPlatformPermissionRequirements,
   getSupportedHostOsForPlatform,
@@ -44,7 +42,7 @@ import { runDaemon } from "./runtime/daemon/server.js";
 import { buildDoctorReport, buildPermissionStatus } from "./runtime/doctor.js";
 import {
   doctorHooksConfig,
-  emitHookEvent,
+  emitHookEventSafe,
   HOOK_EVENT_NAMES,
   initHooksConfig,
   testHookEvent,
@@ -55,10 +53,10 @@ import {
   parseLogsCommandArgs,
   readRecentLogLines,
 } from "./runtime/logs.js";
-import { readMenuBarStatusCache } from "./runtime/menu-bar-status-cache.js";
+import { readMenuBarStatusSnapshot } from "./runtime/menu-bar-status-cache.js";
 import { buildOnboardingSnapshot } from "./runtime/onboarding.js";
 import { runProjectionWorkerFromEnv } from "./runtime/projection/worker.js";
-import { hydrateIntegrationProjectionCounts } from "./runtime/status.js";
+import { buildAppStatusMetadata, hydrateIntegrationProjectionCounts } from "./runtime/status.js";
 import {
   checkForUpdates,
   clearUpdateHelperPendingState,
@@ -137,7 +135,7 @@ Usage:
   cued update install
   cued cli install|status
   cued login-item enable|disable|status
-  cued onboarding complete|snapshot|status [--refresh-managed] [--refresh-permissions]
+  cued onboarding complete|snapshot|status [--refresh-managed]
   cued telemetry status|enable|disable|smoke
   cued skill install-global|status
   cued permissions doctor|status|request [--all|--contacts|--full-disk-access]
@@ -254,30 +252,21 @@ function parseContactMergeBatchFile(path: string): Array<{
   });
 }
 
-function getAppStatusMetadata(db: ReturnType<typeof openCuedDatabase>) {
-  return {
-    hostOs: resolveHostOS(),
-    version: getCurrentAppVersion(),
-    releaseChannel: getCurrentReleaseChannel(),
-    install: db.getAppMetadata(),
-  };
-}
-
 async function safeEmitHookEvent(
   event: (typeof HOOK_EVENT_NAMES)[number],
   payload: unknown,
 ): Promise<void> {
-  try {
-    await emitHookEvent(event, payload as Record<string, unknown>);
-  } catch (error) {
+  await emitHookEventSafe(event, payload as Record<string, unknown>, (failedEvent, error) => {
     console.warn(
-      `[cued hooks] ${event} failed: ${error instanceof Error ? error.message : String(error)}`,
+      `[cued hooks] ${failedEvent} failed: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
     );
-  }
+  });
 }
 
 async function buildLocalStatusFallback(error: DaemonRequestTimeoutError) {
-  const cached = readCachedStatusSnapshot();
+  const cached = readMenuBarStatusSnapshot();
   if (cached) {
     return {
       ...cached,
@@ -295,7 +284,7 @@ async function buildLocalStatusFallback(error: DaemonRequestTimeoutError) {
     const db = openExistingCuedDatabase(undefined, { readonly: true });
     try {
       return {
-        app: getAppStatusMetadata(db),
+        app: buildAppStatusMetadata(db),
         daemon: db.getDaemonState(),
         overview: db.getOverview(),
         projection: db.getProjectionBacklog({ initializeProjectionState: false }),
@@ -323,16 +312,12 @@ async function buildLocalStatusFallback(error: DaemonRequestTimeoutError) {
   }
 }
 
-function readCachedStatusSnapshot(): Record<string, unknown> | null {
-  return readMenuBarStatusCache()?.snapshot ?? null;
-}
-
 async function buildLocalDoctorFallback(error: DaemonRequestTimeoutError) {
   try {
     const db = openExistingCuedDatabase(undefined, { readonly: true });
     try {
       return {
-        app: getAppStatusMetadata(db),
+        app: buildAppStatusMetadata(db),
         ...(await buildDoctorReport(db)),
         projection: db.getProjectionBacklog({ initializeProjectionState: false }),
         hooks: doctorHooksConfig(),
@@ -369,7 +354,6 @@ async function handleLocalIntegrationCommand(
       permissionRequirements: getPlatformPermissionRequirements(platform),
       helperRequirements: getPlatformHelperRequirements(platform),
       features: getPlatformFeatureMatrixRow(platform),
-      futureFeatures: getPlatformFutureFeatureNotes(platform),
     }));
   }
 
@@ -574,7 +558,7 @@ async function main(): Promise<void> {
       const overview = db.getMenuBarOverview();
       const phoneCalls = db.countObservedPhoneCalls();
       printJson({
-        app: getAppStatusMetadata(db),
+        app: buildAppStatusMetadata(db),
         daemon: db.getDaemonState(),
         overview,
         relationshipSummary: {
@@ -608,14 +592,14 @@ async function main(): Promise<void> {
       printJson(
         command === "doctor"
           ? {
-              app: getAppStatusMetadata(db),
+              app: buildAppStatusMetadata(db),
               ...(await buildDoctorReport(db)),
               projection: db.getProjectionBacklog(),
               hooks: doctorHooksConfig(),
               update: getUpdateStatus(db),
             }
           : {
-              app: getAppStatusMetadata(db),
+              app: buildAppStatusMetadata(db),
               daemon: db.getDaemonState(),
               overview: db.getOverview(),
               projection: db.getProjectionBacklog({
@@ -689,7 +673,6 @@ async function main(): Promise<void> {
       }
     case "onboarding": {
       const refreshManaged = rest.includes("--refresh-managed");
-      const refreshPermissions = rest.includes("--refresh-permissions");
       let daemonResponse: Awaited<ReturnType<typeof sendDaemonRequest>> | null = null;
       try {
         switch (subcommand) {
@@ -700,7 +683,6 @@ async function main(): Promise<void> {
             daemonResponse = await sendDaemonRequest({
               command: "onboarding-snapshot",
               refreshManagedIntegrations: refreshManaged,
-              refreshPermissions,
             });
             break;
           case "status":
@@ -719,7 +701,7 @@ async function main(): Promise<void> {
       }
 
       const db =
-        subcommand === "snapshot" && !refreshManaged && !refreshPermissions
+        subcommand === "snapshot" && !refreshManaged
           ? openCuedDatabaseReadOnly()
           : openCuedDatabase();
       try {
@@ -737,12 +719,11 @@ async function main(): Promise<void> {
             await sendTelemetryEventSafe(db, "onboarding_started", {
               component: "onboarding",
               operation: "snapshot",
-              stage: refreshPermissions ? "permissions" : refreshManaged ? "managed" : "status",
+              stage: refreshManaged ? "managed" : "status",
             });
             printJson(
               await buildOnboardingSnapshot(db, {
                 refreshManagedIntegrations: refreshManaged,
-                refreshPermissions,
               }),
             );
             return;
@@ -751,7 +732,7 @@ async function main(): Promise<void> {
             return;
           default:
             throw new Error(
-              "Usage: cued onboarding complete | snapshot [--refresh-managed] [--refresh-permissions] | status",
+              "Usage: cued onboarding complete | snapshot [--refresh-managed] | status",
             );
         }
       } finally {
@@ -911,17 +892,7 @@ async function main(): Promise<void> {
               printJson(daemonResponse.result ?? null);
               return;
             }
-            const db = openCuedDatabaseReadOnly();
-            try {
-              printJson(
-                await buildPermissionStatus({
-                  mode: "passive",
-                  db,
-                }),
-              );
-            } finally {
-              db.close();
-            }
+            printJson(await buildPermissionStatus());
           }
           return;
         case "request": {

@@ -30,7 +30,6 @@ export async function buildOnboardingSnapshot(
   db: CuedDatabase,
   options: {
     refreshManagedIntegrations?: boolean;
-    refreshPermissions?: boolean;
     installGlobalSkill?: boolean;
   } = {},
 ): Promise<OnboardingSnapshot> {
@@ -43,10 +42,7 @@ export async function buildOnboardingSnapshot(
     }
   }
 
-  const permissions = await buildPermissionStatus({
-    mode: options.refreshPermissions ? "active" : "passive",
-    db,
-  });
+  const permissions = await buildPermissionStatus();
   permissions.permissions.push({
     key: "diagnostics",
     status: isTelemetryEnabled(db) ? "granted" : "disabled",

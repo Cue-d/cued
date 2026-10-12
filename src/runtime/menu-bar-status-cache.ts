@@ -54,6 +54,12 @@ export function readMenuBarStatusCache(
   }
 }
 
+export function readMenuBarStatusSnapshot(
+  options: ReadMenuBarStatusCacheOptions = {},
+): Record<string, unknown> | null {
+  return readMenuBarStatusCache(options)?.snapshot ?? null;
+}
+
 export function writeMenuBarStatusCache(
   snapshot: unknown,
   options: WriteMenuBarStatusCacheOptions = {},

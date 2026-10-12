@@ -25,13 +25,9 @@ export type ProjectionWorkerMessage =
   | { ok: true; result: ProjectionWorkerSuccess }
   | { ok: false; error: string };
 
-function now(): number {
-  return Date.now();
-}
-
 export async function runProjectionWorker(run: QueuedSyncRun): Promise<ProjectionWorkerSuccess> {
   const db = openCuedDatabase();
-  const projectionStartedAt = now();
+  const projectionStartedAt = Date.now();
   const runClaim = { ownerId: run.owner_id, attempt: run.attempt };
   try {
     const projectionDetails = parseProjectionRunDetails(run.details_json);
@@ -59,7 +55,7 @@ export async function runProjectionWorker(run: QueuedSyncRun): Promise<Projectio
                     includeOverview: false,
                   });
             })();
-    const projectionFinishedAt = now();
+    const projectionFinishedAt = Date.now();
     const timings = {
       projectionMs: projectionFinishedAt - projectionStartedAt,
       totalMs: projectionFinishedAt - projectionStartedAt,
