@@ -118,12 +118,14 @@ cued contacts memory add contact-id-here "Works on applied AI; likely useful for
 
 Load current memories before answering about a person or writing new memory:
 ```bash
-cued contacts memory show contact-id-here --limit 50
+cued contacts memory list contact-id-here
 ```
+
+Memory lists are exhaustive by default; use `--limit N` only when intentionally bounding the result.
 
 Load the full history before reconciling new evidence, including invalidated memories:
 ```bash
-cued contacts memory show contact-id-here --all
+cued contacts memory list contact-id-here --all
 ```
 
 Replace stale or incorrect information:
@@ -137,7 +139,7 @@ cued contacts memory invalidate memory-id-here
 ```
 
 Whenever new evidence could change an existing memory, reconcile before writing:
-1. Load the full memory history with `cued contacts memory show <contact-id> --all`.
+1. Load the full memory history with `cued contacts memory list <contact-id> --all`.
 2. Leave supported current memories unchanged; a newer source alone does not make a memory stale.
 3. Add genuinely new, non-conflicting facts once with evidence.
 4. Replace a contradicted current memory atomically with `memory add ... --supersedes <memory-id>`.

@@ -156,7 +156,7 @@ Usage:
   cued contacts merge <primary-contact-id> <secondary-contact-id> [--reason TEXT]
   cued contacts merge-batch <merges.json> [--apply]
   cued contacts memory add <contact-id> <memory> [--source SOURCE] [--confidence 0-100] [--evidence JSON] [--supersedes MEMORY_ID]
-  cued contacts memory show <contact-id> [--all] [--limit N]
+  cued contacts memory list <contact-id> [--all] [--limit N]
   cued contacts memory invalidate <memory-id>
   cued attachments list [--message ID] [--conversation ID] [--platform PLATFORM] [--account ACCOUNT] [--limit N]
   cued attachments fetch <attachment-id> [--variant original] [--max-bytes N] [--allow-large] [--no-extract]
@@ -1193,12 +1193,11 @@ async function main(): Promise<void> {
               );
               return;
             }
-            case "list":
-            case "show": {
+            case "list": {
               const contactId = args[0];
               if (!contactId) {
                 throw new Error(
-                  "Usage: cued contacts memory show <contact-id> [--all] [--limit N]",
+                  "Usage: cued contacts memory list <contact-id> [--all] [--limit N]",
                 );
               }
               const includeAll = args.includes("--all") || args.includes("--include-stale");
@@ -1207,7 +1206,7 @@ async function main(): Promise<void> {
                 db.listContactMemories({
                   contactId,
                   limit: explicitLimit,
-                  all: memoryCommand === "show" && explicitLimit === undefined,
+                  all: explicitLimit === undefined,
                   includeStale: includeAll,
                 }),
               );
@@ -1224,7 +1223,7 @@ async function main(): Promise<void> {
             }
             default:
               throw new Error(
-                "Usage: cued contacts memory add <contact-id> <memory> [--source SOURCE] [--confidence 0-100] [--evidence JSON] [--supersedes MEMORY_ID] | cued contacts memory show <contact-id> [--all] [--limit N] | cued contacts memory invalidate <memory-id>",
+                "Usage: cued contacts memory add <contact-id> <memory> [--source SOURCE] [--confidence 0-100] [--evidence JSON] [--supersedes MEMORY_ID] | cued contacts memory list <contact-id> [--all] [--limit N] | cued contacts memory invalidate <memory-id>",
               );
           }
         } finally {
@@ -1261,7 +1260,7 @@ async function main(): Promise<void> {
       }
       if (subcommand !== "merge" || !rest[0] || !rest[1]) {
         throw new Error(
-          "Usage: cued contacts merge <primary-contact-id> <secondary-contact-id> [--reason TEXT] | cued contacts merge-batch <merges.json> [--apply] | cued contacts memory add|show|invalidate ...",
+          "Usage: cued contacts merge <primary-contact-id> <secondary-contact-id> [--reason TEXT] | cued contacts merge-batch <merges.json> [--apply] | cued contacts memory add|list|invalidate ...",
         );
       }
       response = await sendDaemonRequest({

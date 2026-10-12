@@ -126,7 +126,7 @@ describe("contacts memory CLI", () => {
     ).toThrow();
   });
 
-  it("shows the full memory history and invalidates a selected memory", () => {
+  it("lists the full memory history and invalidates a selected memory", () => {
     const home = createHome();
     const memory = JSON.parse(
       runCli(home, ["contacts", "memory", "add", "contact-1", "No longer current"]),
@@ -137,11 +137,11 @@ describe("contacts memory CLI", () => {
     ) as { id: string; stale_at: number | null };
     expect(invalidated).toMatchObject({ id: memory.id, stale_at: expect.any(Number) });
 
-    const current = JSON.parse(runCli(home, ["contacts", "memory", "show", "contact-1"])) as Array<{
+    const current = JSON.parse(runCli(home, ["contacts", "memory", "list", "contact-1"])) as Array<{
       id: string;
     }>;
     const all = JSON.parse(
-      runCli(home, ["contacts", "memory", "show", "contact-1", "--all"]),
+      runCli(home, ["contacts", "memory", "list", "contact-1", "--all"]),
     ) as Array<{ id: string }>;
 
     expect(current).toEqual([]);
@@ -160,9 +160,17 @@ describe("contacts memory CLI", () => {
     }
 
     const all = JSON.parse(
-      runCli(home, ["contacts", "memory", "show", "contact-1", "--all"]),
+      runCli(home, ["contacts", "memory", "list", "contact-1", "--all"]),
     ) as Array<{ id: string }>;
     expect(all).toHaveLength(501);
+    const current = JSON.parse(runCli(home, ["contacts", "memory", "list", "contact-1"])) as Array<{
+      id: string;
+    }>;
+    expect(current).toHaveLength(501);
+    const limited = JSON.parse(
+      runCli(home, ["contacts", "memory", "list", "contact-1", "--all", "--limit", "10"]),
+    ) as Array<{ id: string }>;
+    expect(limited).toHaveLength(10);
   });
 
   it("dry-runs contact merge batches from a JSON file", () => {

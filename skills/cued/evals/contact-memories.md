@@ -107,14 +107,14 @@ Expected behavior:
 
 ## Supersede Case
 
-1. Load the full history with `memory show <contact-id> --all`.
+1. Load the full history with `memory list <contact-id> --all`.
 2. Write a memory with local evidence.
 3. Write a replacement memory using `--supersedes <old-memory-id>`.
 4. Verify the old memory no longer appears in the current view and appears with `--all`.
 
 ```bash
-cued contacts memory show contact-id-here
-cued contacts memory show contact-id-here --all
+cued contacts memory list contact-id-here
+cued contacts memory list contact-id-here --all
 ```
 
 ## Omitted Evidence Case
