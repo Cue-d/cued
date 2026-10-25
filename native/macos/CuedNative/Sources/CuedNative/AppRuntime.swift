@@ -603,7 +603,7 @@ final class AppStatusStore: @unchecked Sendable {
     return snapshot
   }
 
-  private func parseStatusPayload(
+  func parseStatusPayload(
     _ payload: [String: Any],
     daemonLockState: (running: Bool, pid: Int?, updatedAt: Int?)
   ) -> AppStatusSnapshot {
@@ -624,8 +624,9 @@ final class AppStatusStore: @unchecked Sendable {
       && daemonRowFresh
       && daemonPID.map { isProcessRunning($0) } == true
     let daemonRunning =
-      boolValue(payload["socketRunning"]) == true
-      || boolValue(payload["daemonRunning"]) == true
+      ((boolValue(payload["socketRunning"]) == true
+        || boolValue(payload["daemonRunning"]) == true)
+        && daemonPID.map { isProcessRunning($0) } == true)
       || daemonRowRunning
       || daemonLockState.running
 
@@ -1074,125 +1075,83 @@ final class AppStatusStore: @unchecked Sendable {
   }
 }
 
-private final class DatabaseActivityMonitor: @unchecked Sendable {
-  private let dbPath: String
+// Watch the daemon's published snapshot, not every SQLite/WAL mutation. The
+// directory watcher handles atomic replacement and first creation of the file.
+final class StatusFileMonitor: @unchecked Sendable {
+  private let path: String
   private let queue = DispatchQueue(label: "so.cued.desktop.status-watch")
   private let onChange: @MainActor () -> Void
   private var directorySource: DispatchSourceFileSystemObject?
-  private var dbSource: DispatchSourceFileSystemObject?
-  private var walSource: DispatchSourceFileSystemObject?
-  private var pendingChangeWorkItem: DispatchWorkItem?
+  private var fileSource: DispatchSourceFileSystemObject?
+  private var lastContents: Data?
+  private var running = false
+  private var pendingChange = false
 
-  init(dbPath: String, onChange: @escaping @MainActor () -> Void) {
-    self.dbPath = dbPath
+  init(path: String, onChange: @escaping @MainActor () -> Void) {
+    self.path = path
     self.onChange = onChange
   }
 
   func start() {
     queue.async { [weak self] in
-      self?.installWatchers()
+      guard let self, !self.running else { return }
+      self.running = true
+      self.lastContents = FileManager.default.contents(atPath: self.path)
+      self.directorySource = self.watch(
+        URL(fileURLWithPath: self.path).deletingLastPathComponent().path
+      ) { [weak self] in
+        self?.installFileWatcher()
+        self?.scheduleChange()
+      }
+      self.installFileWatcher()
     }
   }
 
   func stop() {
     queue.async { [weak self] in
-      self?.pendingChangeWorkItem?.cancel()
-      self?.cancelWatchers()
+      guard let self else { return }
+      self.running = false
+      self.directorySource?.cancel()
+      self.directorySource = nil
+      self.fileSource?.cancel()
+      self.fileSource = nil
     }
   }
 
-  private func installWatchers() {
-    cancel(&directorySource)
-    directorySource = makeWatcher(
-      path: directoryPath(),
-      eventMask: [.write, .delete, .rename, .attrib]
-    ) { [weak self] _ in
-      self?.installPathWatchers()
-      self?.scheduleChange()
-    }
-    installPathWatchers()
+  private func installFileWatcher() {
+    fileSource?.cancel()
+    fileSource = watch(path) { [weak self] in self?.scheduleChange() }
   }
 
-  private func installPathWatchers() {
-    cancel(&dbSource)
-    dbSource = makeWatcher(
-      path: dbPath,
-      eventMask: [.write, .extend, .delete, .rename, .revoke, .attrib]
-    ) { [weak self] events in
-      if events.contains(.delete) || events.contains(.rename) || events.contains(.revoke) {
-        self?.installPathWatchers()
-      }
-      self?.scheduleChange()
-    }
-    cancel(&walSource)
-    walSource = makeWatcher(
-      path: "\(dbPath)-wal",
-      eventMask: [.write, .extend, .delete, .rename, .revoke, .attrib]
-    ) { [weak self] events in
-      if events.contains(.delete) || events.contains(.rename) || events.contains(.revoke) {
-        self?.installPathWatchers()
-      }
-      self?.scheduleChange()
-    }
-  }
-
-  private func makeWatcher(
-    path: String,
-    eventMask: DispatchSource.FileSystemEvent,
-    handler: @escaping (DispatchSource.FileSystemEvent) -> Void
-  ) -> DispatchSourceFileSystemObject? {
+  private func watch(_ path: String, onEvent: @escaping () -> Void) -> DispatchSourceFileSystemObject? {
     let fd = open(path, O_EVTONLY)
-    guard fd >= 0 else {
-      return nil
-    }
-
-    var source: DispatchSourceFileSystemObject?
-    source = DispatchSource.makeFileSystemObjectSource(
+    guard fd >= 0 else { return nil }
+    let source = DispatchSource.makeFileSystemObjectSource(
       fileDescriptor: fd,
-      eventMask: eventMask,
+      eventMask: [.write, .extend, .delete, .rename, .revoke, .attrib],
       queue: queue
     )
-    source?.setEventHandler { [weak source] in
-      guard let source else {
-        return
-      }
-      handler(source.data)
-    }
-    source?.setCancelHandler {
-      close(fd)
-    }
-    source?.resume()
+    source.setEventHandler(handler: onEvent)
+    source.setCancelHandler { close(fd) }
+    source.resume()
     return source
   }
 
-  private func cancelWatchers() {
-    cancel(&directorySource)
-    cancel(&dbSource)
-    cancel(&walSource)
-  }
-
-  private func cancel(_ source: inout DispatchSourceFileSystemObject?) {
-    source?.cancel()
-    source = nil
-  }
-
-  private func directoryPath() -> String {
-    URL(fileURLWithPath: dbPath).deletingLastPathComponent().path
-  }
-
   private func scheduleChange() {
-    pendingChangeWorkItem?.cancel()
-    let workItem = DispatchWorkItem { [weak self] in
-      guard let self else {
-        return
-      }
+    // Throttle instead of trailing-edge debounce so sustained writes cannot
+    // indefinitely postpone a UI update. Ignore unrelated directory changes.
+    guard running, !pendingChange else { return }
+    pendingChange = true
+    queue.asyncAfter(deadline: .now() + .milliseconds(150)) { [weak self] in
+      guard let self else { return }
+      self.pendingChange = false
+      guard self.running else { return }
+      let contents = FileManager.default.contents(atPath: self.path)
+      guard contents != self.lastContents else { return }
+      self.lastContents = contents
       let onChange = self.onChange
-      Task { @MainActor in
-        onChange()
-      }
+      Task { @MainActor in onChange() }
     }
-    pendingChangeWorkItem = workItem
-    queue.asyncAfter(deadline: .now() + .milliseconds(150), execute: workItem)
   }
 }
 
@@ -1287,13 +1246,11 @@ final class DaemonSupervisor {
     guard daemonLaunchPath != nil || !daemonCommand.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
       return
     }
-    let snapshot = statusStore.readSnapshot()
-    if let daemonProcess, !daemonProcess.isRunning {
+    if let daemonProcess {
+      guard !daemonProcess.isRunning else { return }
       self.daemonProcess = nil
     }
-    guard daemonProcess == nil, !snapshot.daemonRunning else {
-      return
-    }
+    guard !statusStore.readSnapshot().daemonRunning else { return }
     daemonProcess = launchDaemonProcess()
   }
 
@@ -1502,14 +1459,19 @@ private struct UpdateInstallResponse: Decodable {
   let started: Bool
 }
 
+// Cached status files can outlive a stopped daemon. A PID check preserves the
+// icon's lifecycle updates without rebuilding menus on every watchdog tick.
+func shouldRefreshExitedDaemon(renderedPID: Int?) -> Bool {
+  renderedPID.map { !isProcessRunning($0) } ?? false
+}
+
 @MainActor
-final class MenuBarAppController: NSObject, NSApplicationDelegate {
+final class MenuBarAppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
   private static let statusItemImageHeight: CGFloat = 18
   private static let statusItemHorizontalPadding: CGFloat = 0
   private static let fallbackStatusItemLength: CGFloat = 18
 
   private let statusItem = NSStatusBar.system.statusItem(withLength: fallbackStatusItemLength)
-  private let dbPath: String
   private let menuBarLease: SingletonLockLease
   private let statusStore: AppStatusStore
   private let daemonSupervisor: DaemonSupervisor
@@ -1520,11 +1482,12 @@ final class MenuBarAppController: NSObject, NSApplicationDelegate {
       self?.refreshStatus()
     }
   )
-  private lazy var statusMonitor = DatabaseActivityMonitor(dbPath: dbPath) { [weak self] in
+  private lazy var statusMonitor = StatusFileMonitor(path: configuredMenuBarStatusPath()) { [weak self] in
     self?.rebuildMenu()
   }
   private var timer: Timer?
   private var shouldAutoStartDaemon = true
+  private var renderedDaemonPID: Int?
   private let statusItemImage = MenuBarAppController.loadStatusItemImage()
 
   fileprivate init(
@@ -1533,7 +1496,6 @@ final class MenuBarAppController: NSObject, NSApplicationDelegate {
     daemonCommand: String,
     menuBarLease: SingletonLockLease
   ) {
-    self.dbPath = dbPath
     self.menuBarLease = menuBarLease
     self.statusStore = AppStatusStore(dbPath: dbPath)
     self.daemonSupervisor = DaemonSupervisor(
@@ -1556,7 +1518,7 @@ final class MenuBarAppController: NSObject, NSApplicationDelegate {
     daemonSupervisor.startIfNeeded()
     rebuildMenu()
     statusMonitor.start()
-    timer = Timer.scheduledTimer(timeInterval: 5, target: self, selector: #selector(refreshStatus), userInfo: nil, repeats: true)
+    timer = Timer.scheduledTimer(timeInterval: 5, target: self, selector: #selector(maintainRuntime), userInfo: nil, repeats: true)
     if let timer {
       // Stay comfortably inside the 15-second lease expiry, allowing coalescing.
       timer.tolerance = 1
@@ -1600,12 +1562,23 @@ final class MenuBarAppController: NSObject, NSApplicationDelegate {
     rebuildMenu()
   }
 
-  @objc private func refreshStatus() {
+  @objc private func maintainRuntime() {
     menuBarLease.heartbeat()
     if shouldAutoStartDaemon {
       daemonSupervisor.startIfNeeded()
     }
+    if shouldRefreshExitedDaemon(renderedPID: renderedDaemonPID) {
+      rebuildMenu()
+    }
+  }
+
+  @objc private func refreshStatus() {
+    maintainRuntime()
     rebuildMenu()
+  }
+
+  func menuWillOpen(_ menu: NSMenu) {
+    rebuildMenu(menu: menu)
   }
 
   @objc private func handleMenuBarReopenNotification(_ notification: Notification) {
@@ -1679,8 +1652,9 @@ final class MenuBarAppController: NSObject, NSApplicationDelegate {
     }
   }
 
-  private func rebuildMenu() {
+  private func rebuildMenu(menu existingMenu: NSMenu? = nil) {
     let snapshot = statusStore.readSnapshot()
+    renderedDaemonPID = snapshot.daemonRunning ? snapshot.daemonPID : nil
     let daemonStarting = daemonSupervisor.isLaunching(snapshot: snapshot)
     if let button = statusItem.button {
       if let statusItemImage {
@@ -1702,7 +1676,9 @@ final class MenuBarAppController: NSObject, NSApplicationDelegate {
       button.appearsDisabled = !(snapshot.daemonRunning || daemonStarting)
     }
 
-    let menu = NSMenu()
+    let menu = existingMenu ?? NSMenu()
+    menu.removeAllItems()
+    menu.delegate = self
     let visibleIntegrations = snapshot.integrations.filter { $0.enabled }
     let connectedIntegrations = visibleIntegrations.filter { isConnectedIntegrationState($0.authState) }
     let needsAttentionIntegrations = visibleIntegrations.filter { !isConnectedIntegrationState($0.authState) }
@@ -1746,7 +1722,7 @@ final class MenuBarAppController: NSObject, NSApplicationDelegate {
     menu.addItem(.separator())
     menu.addItem(withTitle: "Quit", action: #selector(quitApp), keyEquivalent: "q").target = self
 
-    statusItem.menu = menu
+    if existingMenu == nil { statusItem.menu = menu }
   }
 
   private func presentUpdateStatus(_ status: UpdateStatusResponse) {
