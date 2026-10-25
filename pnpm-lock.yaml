@@ -8,12 +8,15 @@ importers:
 
   .:
     dependencies:
+      better-sqlite3:
+        specifier: npm:better-sqlite3-multiple-ciphers@^12.9.0
+        version: better-sqlite3-multiple-ciphers@12.9.0
       better-sqlite3-multiple-ciphers:
         specifier: ^12.4.1
         version: 12.9.0
       drizzle-orm:
         specifier: ^0.45.1
-        version: 0.45.1(@opentelemetry/api@1.9.0)(@types/better-sqlite3@7.6.13)(better-sqlite3@12.6.0)
+        version: 0.45.1(@opentelemetry/api@1.9.0)(@types/better-sqlite3@7.6.13)(better-sqlite3-multiple-ciphers@12.9.0)
       playwright:
         specifier: ^1.57.0
         version: 1.57.0
@@ -650,10 +653,6 @@ packages:
   better-sqlite3-multiple-ciphers@12.9.0:
     resolution: {integrity: sha512-471izuwJKCgvCGJ0VP10Z0IN7NWFW+pk/A8KXItZXVJ0V2AEAB5HZfmc9U3VLMmJ46bRaPbdgaBbgWpBJ/biUg==}
     engines: {node: 20.x || 22.x || 23.x || 24.x}
-
-  better-sqlite3@12.6.0:
-    resolution: {integrity: sha512-FXI191x+D6UPWSze5IzZjhz+i9MK9nsuHsmTX9bXVl52k06AfZ2xql0lrgIUuzsMsJ7Vgl5kIptvDgBLIV3ZSQ==}
-    engines: {node: 20.x || 22.x || 23.x || 24.x || 25.x}
 
   bindings@1.5.0:
     resolution: {integrity: sha512-p2q/t/mhvuOj/UeLlV6566GD/guowlr0hHxClI0W9m7MWYkL1F0hLo+0Aexs9HSPCtR1SXQ0TD3MMKrXZajbiQ==}
@@ -1695,12 +1694,6 @@ snapshots:
       bindings: 1.5.0
       prebuild-install: 7.1.3
 
-  better-sqlite3@12.6.0:
-    dependencies:
-      bindings: 1.5.0
-      prebuild-install: 7.1.3
-    optional: true
-
   bindings@1.5.0:
     dependencies:
       file-uri-to-path: 1.0.0
@@ -1765,11 +1758,11 @@ snapshots:
 
   detect-libc@2.1.2: {}
 
-  drizzle-orm@0.45.1(@opentelemetry/api@1.9.0)(@types/better-sqlite3@7.6.13)(better-sqlite3@12.6.0):
+  drizzle-orm@0.45.1(@opentelemetry/api@1.9.0)(@types/better-sqlite3@7.6.13)(better-sqlite3-multiple-ciphers@12.9.0):
     optionalDependencies:
       '@opentelemetry/api': 1.9.0
       '@types/better-sqlite3': 7.6.13
-      better-sqlite3: 12.6.0
+      better-sqlite3: better-sqlite3-multiple-ciphers@12.9.0
 
   end-of-stream@1.4.5:
     dependencies:
