@@ -10,6 +10,7 @@ import {
   readSignalLinkedAccount,
   startSignalLinkSession,
 } from "../../signal/cli/client.js";
+import { ensureSignalCliAvailable } from "../../signal/cli/install.js";
 import {
   getWhatsAppStoreDir,
   inspectWhatsAppHelper,
@@ -246,6 +247,10 @@ export function startQrNativeAuthSession(
         : getSignalConfigDir(session.accountKey);
     const child = startAuthSentinelProcess();
     const completion = (async (): Promise<QrNativeAuthResult> => {
+      await ensureSignalCliAvailable();
+      if (child.exitCode !== null || child.signalCode !== null || child.killed) {
+        throw new Error("Signal linking cancelled");
+      }
       const inspected = await inspectSignalCli();
       if (!inspected.cliPath) {
         return {

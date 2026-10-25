@@ -251,7 +251,7 @@ native/
 scripts/            Packaging, runtime fetch, signing, and permission helpers
 ```
 
-Signal support ships as a bundled `signal-cli` payload fetched by `scripts/fetch-signal-cli-macos.sh` and staged into the app bundle.
+Signal downloads its pinned, SHA-256-verified `signal-cli` and Java runtime when first connected, storing them under `~/.cued/helpers/signal-cli`. Existing linked accounts install the helper in the background after upgrading from a bundled distribution; their account data remains in place. First-time setup requires internet access. For an offline-ready app build, set `CUED_BUNDLE_SIGNAL=1` when running `pnpm build:app:macos`. The Node runtime includes its executable and license, excluding npm/Corepack.
 
 ## Packaging And Release Scripts
 

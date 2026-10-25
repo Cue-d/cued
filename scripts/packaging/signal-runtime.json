@@ -1,0 +1,11 @@
+{
+  "signalVersion": "0.14.9",
+  "signalArchiveSha256": "c32b87f587198cbd277c9d71228716ee6047ee2b63e8e88728e8280d9407d65a",
+  "jreVersion": "25.0.2+10",
+  "jreVersionLabel": "25.0.2_10",
+  "jreRelease": "jdk-25.0.2%2B10",
+  "arm64": {
+    "jreArchiveSha256": "ada9e68c0e525e36ecd354877866da3eb51bfdd5926ef43cdf881d9c4fd03f17"
+  },
+  "x64": { "jreArchiveSha256": "df93fe61138672424ccb4cca5133903dc1f0d773c14c2afe0db7ce139e261264" }
+}
