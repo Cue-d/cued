@@ -363,7 +363,6 @@ func (r helperRunner) runSession(ctx context.Context, stdin io.Reader, stdout io
 		userVersions:         make(map[string]string),
 	}
 	usersByID := make(map[string]slackUser)
-	pollInterval := sessionPositiveDuration(input.PollIntervalMs, defaultSessionPollInterval)
 	userRefreshInterval := sessionPositiveDuration(input.UserRefreshMs, defaultSessionUserRefresh)
 	conversationLimit := sessionPositiveInt(input.ConversationLimit, defaultSessionPageLimit)
 	messageLimit := sessionPositiveInt(input.MessageLimit, defaultSessionPageLimit)
@@ -508,7 +507,7 @@ func (r helperRunner) runSession(ctx context.Context, stdin io.Reader, stdout io
 		} else if quietPolls < 2 {
 			quietPolls++
 		}
-		timer := time.NewTimer(adaptiveSessionPollInterval(pollInterval, quietPolls))
+		timer := time.NewTimer(adaptiveSessionPollInterval(input.PollIntervalMs, quietPolls))
 		select {
 		case <-ctx.Done():
 			timer.Stop()
@@ -519,10 +518,11 @@ func (r helperRunner) runSession(ctx context.Context, stdin io.Reader, stdout io
 }
 
 // Keep the timer after the completed request cycle: slow APIs never overlap polls.
-// Explicit non-default intervals retain their configured freshness contract.
-func adaptiveSessionPollInterval(base time.Duration, quietPolls int) time.Duration {
-	if base != defaultSessionPollInterval {
-		return base
+// Explicit intervals retain their configured freshness contract, even when
+// their value happens to equal the default.
+func adaptiveSessionPollInterval(configuredMs int, quietPolls int) time.Duration {
+	if configuredMs > 0 {
+		return time.Duration(configuredMs) * time.Millisecond
 	}
 	if quietPolls < 0 {
 		quietPolls = 0
@@ -530,5 +530,5 @@ func adaptiveSessionPollInterval(base time.Duration, quietPolls int) time.Durati
 	if quietPolls > 2 {
 		quietPolls = 2
 	}
-	return base * time.Duration(1<<quietPolls)
+	return defaultSessionPollInterval * time.Duration(1<<quietPolls)
 }

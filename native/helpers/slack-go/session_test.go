@@ -44,11 +44,14 @@ func TestAdaptiveSessionPollInterval(t *testing.T) {
 	}{
 		{0, 15 * time.Second}, {1, 30 * time.Second}, {2, 60 * time.Second}, {100, 60 * time.Second}, {-1, 15 * time.Second},
 	} {
-		if got := adaptiveSessionPollInterval(defaultSessionPollInterval, test.quiet); got != test.want {
+		if got := adaptiveSessionPollInterval(0, test.quiet); got != test.want {
 			t.Fatalf("quiet=%d: got %v want %v", test.quiet, got, test.want)
 		}
 	}
-	if got := adaptiveSessionPollInterval(5*time.Second, 2); got != 5*time.Second {
+	if got := adaptiveSessionPollInterval(15000, 2); got != 15*time.Second {
+		t.Fatalf("explicit default interval changed: %v", got)
+	}
+	if got := adaptiveSessionPollInterval(5000, 2); got != 5*time.Second {
 		t.Fatalf("explicit interval changed: %v", got)
 	}
 }
@@ -61,7 +64,7 @@ func TestQuietSessionPollCountOverOneHour(t *testing.T) {
 			quiet++
 			interval := defaultSessionPollInterval
 			if adaptive {
-				interval = adaptiveSessionPollInterval(interval, quiet)
+				interval = adaptiveSessionPollInterval(0, quiet)
 			}
 			elapsed += interval
 		}
