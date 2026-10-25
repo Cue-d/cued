@@ -37,6 +37,24 @@ jobs:
       - name: App quality
         run: pnpm check:app-quality
 
+  slack-helper:
+    name: Slack Helper
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: native/helpers/slack-go/go.mod
+          cache-dependency-path: native/helpers/slack-go/go.sum
+
+      - name: Test helper
+        working-directory: native/helpers/slack-go
+        run: go test -race ./...
+
   whatsapp-helper:
     name: WhatsApp Helper
     runs-on: ubuntu-latest
