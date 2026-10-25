@@ -9,7 +9,7 @@ APP_BUNDLE_NAME="${APP_DISPLAY_NAME}.app"
 APP_EXECUTABLE_NAME="CuedDaemon"
 SWIFT_PACKAGE_DIR="$ROOT_DIR/native/macos/CuedNative"
 SWIFT_BINARY="$SWIFT_PACKAGE_DIR/.build/release/CuedNative"
-APP_DIST_DIR="$ROOT_DIR/native/macos/dist"
+APP_DIST_DIR="${CUED_APP_DIST_DIR:-$ROOT_DIR/native/macos/dist}"
 APP_BUNDLE="$APP_DIST_DIR/${APP_BUNDLE_NAME}"
 CONTENTS_DIR="$APP_BUNDLE/Contents"
 MACOS_DIR="$CONTENTS_DIR/MacOS"
@@ -235,7 +235,9 @@ swift build --package-path "$SWIFT_PACKAGE_DIR" -c release >/dev/null
 SWIFT_RESOURCE_BUNDLES=("$SWIFT_PACKAGE_DIR"/.build/*/release/*.bundle)
 NODE_RUNTIME_SOURCE_DIR="$(bash "$NODE_RUNTIME_FETCH_SCRIPT" "$NODE_VERSION" "$NODE_ARCH")"
 PLAYWRIGHT_CHROMIUM_SOURCE_DIR="$(bash "$PLAYWRIGHT_CHROMIUM_FETCH_SCRIPT")"
-bash "$SIGNAL_FETCH_SCRIPT" >/dev/null
+if [[ "${CUED_BUNDLE_SIGNAL:-0}" == "1" ]]; then
+  bash "$SIGNAL_FETCH_SCRIPT" >/dev/null
+fi
 mkdir -p "$(dirname "$SLACK_HELPER_SOURCE")"
 (cd "$ROOT_DIR/native/helpers/slack-go" && GOWORK=off go build -o "$SLACK_HELPER_SOURCE" .) >/dev/null
 mkdir -p "$(dirname "$WHATSAPP_HELPER_SOURCE")"
@@ -261,11 +263,14 @@ for resource_bundle in "${SWIFT_RESOURCE_BUNDLES[@]}"; do
   cp -R "$resource_bundle" "$RESOURCES_DIR/$bundle_name"
 done
 cp "$NODE_RUNTIME_SOURCE_DIR/bin/node" "$RUNTIME_NODE_BIN_DIR/node"
-cp -R "$NODE_RUNTIME_SOURCE_DIR/lib" "$RUNTIME_NODE_ROOT/lib"
+cp "$NODE_RUNTIME_SOURCE_DIR/LICENSE" "$RUNTIME_NODE_ROOT/LICENSE"
+# Node embeds its standard library; npm/Corepack are build tools, not runtime dependencies.
 chmod +x "$RUNTIME_NODE_BIN_DIR/node"
 ditto --noextattr --norsrc "$PLAYWRIGHT_CHROMIUM_SOURCE_DIR" "$PLAYWRIGHT_CHROMIUM_PAYLOAD_DIR"
 cp -R "$DEPLOY_STAGING_DIR/." "$RUNTIME_DIR/"
-cp -R "$SIGNAL_HELPER_SOURCE_DIR" "$HELPERS_DIR/signal-cli"
+if [[ "${CUED_BUNDLE_SIGNAL:-0}" == "1" ]]; then
+  cp -R "$SIGNAL_HELPER_SOURCE_DIR" "$HELPERS_DIR/signal-cli"
+fi
 cp "$SLACK_HELPER_SOURCE" "$HELPERS_DIR/cued-slack-helper"
 chmod +x "$HELPERS_DIR/cued-slack-helper"
 cp "$WHATSAPP_HELPER_SOURCE" "$HELPERS_DIR/cued-whatsapp-helper"
@@ -326,6 +331,9 @@ if [[ -d "$RUNTIME_DIR/dist" ]]; then
 fi
 
 mkdir -p "$RESOURCES_DIR/scripts"
+cp "$SIGNAL_FETCH_SCRIPT" "$RESOURCES_DIR/scripts/fetch-signal-cli-macos.sh"
+mkdir -p "$RESOURCES_DIR/scripts/packaging"
+cp "$ROOT_DIR/scripts/packaging/signal-runtime.json" "$RESOURCES_DIR/scripts/packaging/signal-runtime.json"
 cp "$PERMISSIONS_SCRIPT_SOURCE" "$RESOURCES_DIR/scripts/request-macos-access.sh"
 chmod +x "$RESOURCES_DIR/scripts/request-macos-access.sh"
 if [[ -n "$GOOGLE_OAUTH_CLIENT_SOURCE" ]]; then

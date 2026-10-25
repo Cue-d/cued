@@ -1,8 +1,9 @@
 import { type ChildProcess, execFile, spawn } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
+import { resolveCuedHome } from "../../../core/config.js";
 import { validateIntegrationAccountKey } from "../../core/account-keys.js";
 import { getSignalConfigRoot } from "../../core/runtime-paths.js";
 
@@ -140,6 +141,7 @@ export function getSignalCliHelperRootCandidates(
       ? join(env.CUED_APP_PATH.trim(), "Contents", "Resources", "helpers", "signal-cli")
       : null,
     runtimeBundledSignalCliRoot(),
+    join(resolveCuedHome(env), "helpers", "signal-cli", "current"),
     join(repoRoot, "native", "helpers", "signal-cli", ".build", "cued-signal-cli"),
   ].filter((value): value is string => Boolean(value));
 
@@ -173,7 +175,9 @@ export function resolveSignalCliPath(
 ): string | null {
   for (const candidate of getSignalCliBinaryCandidates(env, repoRoot)) {
     if (existsSync(candidate)) {
-      return candidate;
+      return candidate.startsWith(join(resolveCuedHome(env), "helpers", "signal-cli") + "/")
+        ? realpathSync(candidate)
+        : candidate;
     }
   }
 
@@ -206,13 +210,18 @@ export function isSignalCliVersionSupported(version: SignalCliVersion | null): b
   return version.patch >= MIN_SIGNAL_CLI_VERSION.patch;
 }
 
-export async function inspectSignalCli(env: NodeJS.ProcessEnv = process.env): Promise<{
+type SignalInspection = {
   cliPath: string | null;
   helperRoot: string | null;
   distributionPath: string | null;
   javaHome: string | null;
   version: SignalCliVersion | null;
-}> {
+};
+const inspections = new Map<string, { expiresAt: number; promise: Promise<SignalInspection> }>();
+
+export async function inspectSignalCli(
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<SignalInspection> {
   const cliPath = resolveSignalCliPath(env);
   if (!cliPath) {
     return {
@@ -224,28 +233,46 @@ export async function inspectSignalCli(env: NodeJS.ProcessEnv = process.env): Pr
     };
   }
 
-  const helperRoot = signalCliHelperRootFromPath(cliPath);
+  // Starting a JVM just to read its version on every refresh is expensive. Bound
+  // the cache and revalidate periodically, including failures after repair.
+  let key: string;
+  try {
+    const stat = statSync(cliPath);
+    key = `${cliPath}:${stat.mtimeMs}:${stat.size}:${stat.ino}`;
+  } catch {
+    return { cliPath, helperRoot: null, distributionPath: null, javaHome: null, version: null };
+  }
+  const cached = inspections.get(key);
+  if (cached && cached.expiresAt > Date.now()) return cached.promise;
+  if (inspections.size >= 8) inspections.clear();
+  const entry = {
+    expiresAt: Number.POSITIVE_INFINITY,
+    promise: Promise.resolve({} as SignalInspection),
+  };
+  entry.promise = inspectSignalBinary(cliPath).then((result) => {
+    entry.expiresAt = Date.now() + (result.version ? 5 * 60_000 : 10_000);
+    return result;
+  });
+  inspections.set(key, entry);
+  return entry.promise;
+}
 
+async function inspectSignalBinary(cliPath: string): Promise<SignalInspection> {
+  const helperRoot = signalCliHelperRootFromPath(cliPath);
+  const result = {
+    cliPath,
+    helperRoot,
+    distributionPath: signalCliDistributionPathFromRoot(helperRoot),
+    javaHome: signalCliJavaHomeFromRoot(helperRoot),
+  };
   try {
     const { stdout, stderr } = await execFileAsync(cliPath, ["--version"], {
       timeout: 10_000,
       maxBuffer: 1024 * 1024,
     });
-    return {
-      cliPath,
-      helperRoot,
-      distributionPath: signalCliDistributionPathFromRoot(helperRoot),
-      javaHome: signalCliJavaHomeFromRoot(helperRoot),
-      version: parseSignalCliVersion(`${stdout}\n${stderr}`),
-    };
+    return { ...result, version: parseSignalCliVersion(`${stdout}\n${stderr}`) };
   } catch {
-    return {
-      cliPath,
-      helperRoot,
-      distributionPath: signalCliDistributionPathFromRoot(helperRoot),
-      javaHome: signalCliJavaHomeFromRoot(helperRoot),
-      version: null,
-    };
+    return { ...result, version: null };
   }
 }
 

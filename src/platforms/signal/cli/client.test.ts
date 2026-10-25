@@ -1,4 +1,12 @@
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -7,6 +15,7 @@ import {
   contactHandleType,
   getSignalCliBinaryCandidates,
   getSignalCliHelperRootCandidates,
+  inspectSignalCli,
   isSignalCliVersionSupported,
   parseSignalCliVersion,
   readSignalLinkedAccount,
@@ -206,6 +215,33 @@ printf '%s\\n' '[{"uuid":"${uuid}"},{"number":"+14155550123"}]'
     expect(candidates[0]).toBe(
       resolve(dirname(fileURLToPath(import.meta.url)), "../../../../../helpers/signal-cli"),
     );
+  });
+
+  it("resolves an on-demand helper without a bundled distribution", () => {
+    const home = createTempDir("cued-signal-home-");
+    const helper = join(home, "helpers", "signal-cli", "current", "cued-signal-cli");
+    mkdirSync(dirname(helper), { recursive: true });
+    createSignalHelperBinary(helper);
+    expect(resolveSignalCliPath({ CUED_HOME: home }, createTempDir("cued-empty-repo-"))).toBe(
+      realpathSync(helper),
+    );
+  });
+
+  it("coalesces version probes and invalidates a replaced helper", async () => {
+    const home = createTempDir("cued-signal-inspect-");
+    const app = join(home, "Cued.app");
+    const helper = join(app, "Contents", "Resources", "helpers", "signal-cli", "cued-signal-cli");
+    const calls = join(home, "calls");
+    mkdirSync(dirname(helper), { recursive: true });
+    writeFileSync(helper, `#!/bin/sh\necho x >> '${calls}'\necho signal-cli 0.14.1\n`);
+    chmodSync(helper, 0o755);
+    const env = { CUED_HOME: home, CUED_APP_PATH: app };
+    const results = await Promise.all(Array.from({ length: 10 }, () => inspectSignalCli(env)));
+    expect(results.every((result) => result.version?.raw === "0.14.1")).toBe(true);
+    expect(readFileSync(calls, "utf8").trim().split("\n")).toHaveLength(1);
+    writeFileSync(helper, `#!/bin/sh\necho x >> '${calls}'\necho signal-cli 0.14.2\n# replaced\n`);
+    expect((await inspectSignalCli(env)).version?.raw).toBe("0.14.2");
+    expect(readFileSync(calls, "utf8").trim().split("\n")).toHaveLength(2);
   });
 
   it("normalizes received signal envelopes into message payloads", () => {

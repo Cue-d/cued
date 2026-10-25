@@ -7,6 +7,7 @@ import {
   isSignalCliVersionSupported,
   readSignalLinkedAccount,
 } from "../../signal/cli/binary.js";
+import { ensureSignalCliAvailable } from "../../signal/cli/install.js";
 import { importSlackDesktopAuth } from "../../slack/auth/desktop-import.js";
 import { getWhatsAppStoreDir, inspectWhatsAppHelper } from "../../whatsapp/helper/binary.js";
 import { readWhatsAppHelperStatus } from "../../whatsapp/helper/status.js";
@@ -30,16 +31,27 @@ async function buildSignalManagedState(
   const inspected = await inspectSignalCli();
   const linkedAccount = readSignalLinkedAccount(configDir);
   const supportedByDaemon = new Set<string>(listAdapterPlatforms()).has("signal");
+  // Upgrades from a bundled helper must preserve existing linked accounts. Download
+  // in the background so offline startup and other integrations remain responsive.
+  if (linkedAccount && existing?.enabled === 1) {
+    void ensureSignalCliAvailable().catch(() => {
+      // Auth remains recoverable; explicit Connect reports the actionable failure.
+    });
+  }
 
   let authState: IntegrationAuthState;
-  if (!inspected.cliPath) {
-    authState = existing?.auth_state === "cancelled" ? "cancelled" : "missing";
+  if (existing?.auth_state === "requested" || existing?.auth_state === "in_progress") {
+    authState = existing.auth_state;
+  } else if (!inspected.cliPath) {
+    authState = linkedAccount
+      ? "authenticated"
+      : existing?.auth_state === "cancelled"
+        ? "cancelled"
+        : "missing";
   } else if (!isSignalCliVersionSupported(inspected.version)) {
     authState = existing?.auth_state === "cancelled" ? "cancelled" : "outdated";
   } else if (linkedAccount) {
     authState = "authenticated";
-  } else if (existing?.auth_state === "requested" || existing?.auth_state === "in_progress") {
-    authState = existing.auth_state;
   } else if (existing?.auth_state === "cancelled") {
     authState = "cancelled";
   } else {
@@ -55,7 +67,7 @@ async function buildSignalManagedState(
     enabled: existing ? existing.enabled === 1 : true,
     connectionKind: "local-cli",
     runtimeKind: "qr_native",
-    syncCapable: authState === "authenticated" && supportedByDaemon,
+    syncCapable: authState === "authenticated" && supportedByDaemon && Boolean(inspected.cliPath),
     launchStrategy: "qr-native",
     launchTarget: null,
     importedFrom: existing?.imported_from ?? "bundled-helper",
