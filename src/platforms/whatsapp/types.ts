@@ -1,3 +1,8 @@
+export interface WhatsAppIdentityAlias {
+  lid: string;
+  pn: string;
+}
+
 export interface WhatsAppContactSnapshot {
   jid: string;
   phone?: string | null;
@@ -60,6 +65,7 @@ export interface WhatsAppCallDeleteSnapshot {
 }
 
 export interface WhatsAppSnapshot {
+  identityAliases?: WhatsAppIdentityAlias[];
   contacts?: WhatsAppContactSnapshot[];
   chats?: WhatsAppChatSnapshot[];
   messages?: WhatsAppMessageSnapshot[];
@@ -133,6 +139,7 @@ export type WhatsAppHelperEventData = {
 export interface WhatsAppHelperEventEnvelope<
   TEvent extends WhatsAppHelperEventName = WhatsAppHelperEventName,
 > {
+  identityAliases?: WhatsAppIdentityAlias[];
   event: TEvent;
   data: WhatsAppHelperEventData[TEvent];
 }

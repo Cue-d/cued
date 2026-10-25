@@ -4981,6 +4981,7 @@ export class CuedDatabase {
     }
 
     this.db.transaction((tx) => {
+      tx.run(sql.raw("DELETE FROM provider_identity_aliases"));
       tx.run(sql.raw("DELETE FROM messages_fts"));
       tx.run(sql.raw("DELETE FROM message_fts_index_queue"));
       tx.run(sql.raw("DELETE FROM attachment_content_fts"));

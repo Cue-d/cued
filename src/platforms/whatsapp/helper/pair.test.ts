@@ -110,7 +110,7 @@ exit 1
     });
   });
 
-  it("resolves completion as soon as the pair helper reports connected", async () => {
+  it("waits for successful helper exit after connected before completing pairing", async () => {
     const child = new MockPairChild();
     spawnMock.mockReturnValue(child);
 
@@ -134,11 +134,8 @@ exit 1
     const settled = vi.fn();
     handle.completion.then(settled).catch(() => {});
     await Promise.resolve();
-    expect(settled).toHaveBeenCalledWith({
-      accountJid: "15551234567:18@s.whatsapp.net",
-      pushName: "Avery",
-      helperVersion: "0.1.0",
-    });
+    expect(settled).not.toHaveBeenCalled();
+    child.emit("exit", 0);
 
     await expect(handle.completion).resolves.toEqual({
       accountJid: "15551234567:18@s.whatsapp.net",
@@ -146,4 +143,22 @@ exit 1
       helperVersion: "0.1.0",
     });
   });
+});
+
+it("rejects pairing when encryption key upload fails after connection", async () => {
+  const child = new MockPairChild();
+  spawnMock.mockReturnValue(child);
+  const handle = startWhatsAppPairSession({
+    helperPath: "/tmp/helper",
+    storeDir: "/tmp/store",
+    deviceName: "Cued",
+  });
+  handle.qrCode.catch(() => {});
+  const result = expect(handle.completion).rejects.toThrow("initial encryption keys");
+  child.stdout.write(
+    `${JSON.stringify({ event: "connected", data: { accountJid: "123@s.whatsapp.net" } })}\n`,
+  );
+  child.stderr.write("initial encryption keys were not uploaded");
+  child.emit("exit", 1);
+  await result;
 });

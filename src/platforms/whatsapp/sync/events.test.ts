@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildWhatsAppCallDeleteEvent,
+  buildWhatsAppIdentityAliasEvents,
   buildWhatsAppMessageEvent,
   buildWhatsAppRawEventsFromSnapshot,
   extractWhatsAppPhone,
@@ -227,5 +228,33 @@ describe("whatsapp events", () => {
       deletedAt: 1_710_000_003_000,
     });
     expect(messageEvents[1]?.eventKind).toBe("deleted");
+  });
+});
+
+describe("WhatsApp provider identity aliases", () => {
+  it("emits explicit account-scoped aliases before observations without guessing identities", () => {
+    const aliases = [{ lid: "123@lid", pn: "15551234567@s.whatsapp.net" }];
+    const events = buildWhatsAppRawEventsFromSnapshot({
+      accountKey: "personal",
+      observedBase: 100,
+      snapshot: { identityAliases: [...aliases, ...aliases], contacts: [{ jid: "123@lid" }] },
+    });
+    expect(events).toHaveLength(2);
+    expect(events[0]).toMatchObject({
+      entityKind: "contact",
+      eventKind: "aliased",
+      accountKey: "personal",
+      payload: {
+        aliasSourceEntityKey: "whatsapp:123@lid",
+        canonicalSourceEntityKey: "whatsapp:15551234567@s.whatsapp.net",
+      },
+    });
+    expect(events[1]?.eventKind).toBe("observed");
+    expect(buildWhatsAppIdentityAliasEvents(aliases, "other", 100)[0]?.dedupeKey).not.toBe(
+      events[0]?.dedupeKey,
+    );
+    expect(() =>
+      buildWhatsAppIdentityAliasEvents([{ lid: "123@g.us", pn: aliases[0]!.pn }], "personal", 100),
+    ).toThrow("Invalid WhatsApp provider identity alias");
   });
 });

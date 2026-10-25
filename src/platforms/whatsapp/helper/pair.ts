@@ -230,10 +230,6 @@ export function startWhatsAppPairSession(options: {
           pushName: data.pushName ?? null,
           helperVersion: data.helperVersion ?? null,
         };
-        if (!completionSettled) {
-          completionSettled = true;
-          resolveCompletion(connectedResult);
-        }
         continue;
       }
       if (parsed.event === "error") {
@@ -250,7 +246,7 @@ export function startWhatsAppPairSession(options: {
     rejectPending(error instanceof Error ? error : new Error(String(error)));
   });
   child.once("exit", (code) => {
-    if (code && code !== 0) {
+    if (code !== 0) {
       rejectPending(new Error(stderrBuffer.trim() || `WhatsApp helper exited with code ${code}`));
       return;
     }

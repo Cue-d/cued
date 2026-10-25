@@ -27,6 +27,7 @@ import {
   timelineEvents,
 } from "../../db/schema.js";
 import { normalizeStoredRawEventForProjection } from "./events.js";
+import { canonicalizeWhatsAppPayload, projectWhatsAppIdentityAlias } from "./identity-alias.js";
 import {
   createProjectionCacheOverlay,
   type ProjectionCache,
@@ -612,6 +613,14 @@ function hydrateProjectionCache(db: CuedDatabase, cache: StoredProjectionCache):
     cache.contactMergeAliasMap.set(row.contact_id, row.canonical_contact_id);
   }
 
+  for (const row of db
+    .orm()
+    .all<{ former_contact_id: string; canonical_contact_id: string }>(
+      sql`SELECT former_contact_id, canonical_contact_id FROM provider_identity_aliases WHERE former_contact_id IS NOT NULL AND canonical_contact_id IS NOT NULL AND former_contact_id != canonical_contact_id`,
+    )) {
+    cache.contactMergeAliasMap.set(row.former_contact_id, row.canonical_contact_id);
+  }
+
   for (const row of db.listProjectedContactSourceMap()) {
     const canonicalContactId = resolveCanonicalContactId(cache, row.contact_id) ?? row.contact_id;
     cache.sourceContactMap.set(
@@ -947,7 +956,14 @@ function ensureMessageStub(
   platformMessageId: string,
   observedAt: number,
 ): { messageId: string; conversationId: string } {
-  const messageId = hashId("message", `${platform}:${accountKey}:${platformMessageId}`);
+  const existingMessage =
+    platform === "whatsapp"
+      ? conn.get<{ id: string }>(
+          sql`SELECT id FROM messages WHERE platform = ${platform} AND account_key = ${accountKey} AND platform_message_id = ${platformMessageId}`,
+        )
+      : undefined;
+  const messageId =
+    existingMessage?.id ?? hashId("message", `${platform}:${accountKey}:${platformMessageId}`);
   const conversationId = ensureConversationStub(
     conn,
     cache,
@@ -1025,6 +1041,7 @@ function resolveProjectedSenderName(
 }
 
 function clearProjectedState(conn: LocalDbExecutor): void {
+  conn.run(sql.raw("DELETE FROM provider_identity_aliases"));
   conn.run(sql.raw("DELETE FROM messages_fts"));
   conn.run(sql.raw("DELETE FROM message_fts_index_queue"));
   conn.delete(timelineEvents).run();
@@ -1202,7 +1219,12 @@ function projectContactObservation(
     conn
       .insert(contactHandles)
       .values({
-        id: hashId("handle", `${contactId}:${handle.type}:${normalizedValue}`),
+        id:
+          (event.platform === "whatsapp"
+            ? conn.get<{ id: string }>(
+                sql`SELECT id FROM contact_handles WHERE contact_id = ${contactId} AND type = ${handle.type} AND normalized_value = ${normalizedValue} LIMIT 1`,
+              )?.id
+            : undefined) ?? hashId("handle", `${contactId}:${handle.type}:${normalizedValue}`),
         contactId,
         type: handle.type,
         value: handle.value,
@@ -1366,6 +1388,11 @@ function projectMessageEvent(
     event.observed_at,
   );
 
+  if (event.event_kind === "deleted" || payload.isDeleted) {
+    conn.delete(messageReactions).where(eq(messageReactions.messageId, messageId)).run();
+    changes.touchedReactions = true;
+  }
+
   if (event.event_kind === "deleted") {
     conn
       .update(messages)
@@ -1380,6 +1407,13 @@ function projectMessageEvent(
     changes.dirtyMessageIds.add(messageId);
     return;
   }
+
+  if (
+    event.platform === "whatsapp" &&
+    conn.get<{ is_deleted: number }>(sql`SELECT is_deleted FROM messages WHERE id = ${messageId}`)
+      ?.is_deleted
+  )
+    return;
 
   const senderContactId = resolveOrEnsureContact(
     conn,
@@ -1455,7 +1489,14 @@ function projectMessageAttachments(
       String(index);
     const sourceAttachmentKey =
       explicitSourceAttachmentKey ?? `${payload.sourceMessageKey}:${attachmentIdentity}`;
-    const attachmentId = hashId("attachment", `${messageId}:${sourceAttachmentKey}`);
+    const existingAttachment =
+      event.platform === "whatsapp"
+        ? conn.get<{ id: string }>(
+            sql`SELECT id FROM message_attachments WHERE platform = ${event.platform} AND account_key = ${event.account_key} AND source_attachment_key = ${sourceAttachmentKey}`,
+          )
+        : undefined;
+    const attachmentId =
+      existingAttachment?.id ?? hashId("attachment", `${messageId}:${sourceAttachmentKey}`);
     desiredAttachmentIds.add(attachmentId);
     const inferred = inferAttachmentProjection(normalizedAttachment);
 
@@ -1571,10 +1612,13 @@ function projectReactionEvent(
   conn
     .insert(messageReactions)
     .values({
-      id: hashId(
-        "reaction",
-        `${messageId}:${payload.reactorSourceKey ?? "__me__"}:${payload.emoji}`,
-      ),
+      id:
+        (event.platform === "whatsapp"
+          ? conn.get<{ id: string }>(
+              sql`SELECT id FROM message_reactions WHERE platform = ${event.platform} AND account_key = ${event.account_key} AND source_reaction_key = ${`${payload.sourceMessageKey}:${payload.reactorSourceKey ?? "__me__"}:${payload.emoji}`}`,
+            )?.id
+          : undefined) ??
+        hashId("reaction", `${messageId}:${payload.reactorSourceKey ?? "__me__"}:${payload.emoji}`),
       messageId,
       platform: event.platform,
       accountKey: event.account_key,
@@ -1706,10 +1750,16 @@ function projectTimelineEvent(
   conn
     .insert(timelineEvents)
     .values({
-      id: hashId(
-        "timeline_event",
-        `${event.platform}:${event.account_key}:${payload.sourceEventKey}`,
-      ),
+      id:
+        (event.platform === "whatsapp"
+          ? conn.get<{ id: string }>(
+              sql`SELECT id FROM timeline_events WHERE platform = ${event.platform} AND account_key = ${event.account_key} AND source_event_key = ${payload.sourceEventKey}`,
+            )?.id
+          : undefined) ??
+        hashId(
+          "timeline_event",
+          `${event.platform}:${event.account_key}:${payload.sourceEventKey}`,
+        ),
       platform: event.platform,
       accountKey: event.account_key,
       conversationId,
@@ -1809,10 +1859,13 @@ function projectCallEvent(
   conn
     .insert(timelineEvents)
     .values({
-      id: hashId(
-        "timeline_event",
-        `${event.platform}:${event.account_key}:${payload.sourceCallKey}`,
-      ),
+      id:
+        (event.platform === "whatsapp"
+          ? conn.get<{ id: string }>(
+              sql`SELECT id FROM timeline_events WHERE platform = ${event.platform} AND account_key = ${event.account_key} AND source_event_key = ${payload.sourceCallKey}`,
+            )?.id
+          : undefined) ??
+        hashId("timeline_event", `${event.platform}:${event.account_key}:${payload.sourceCallKey}`),
       platform: event.platform,
       accountKey: event.account_key,
       conversationId,
@@ -2371,24 +2424,34 @@ function projectEventBatch(
         const eventChanges = createProjectionChangeSet();
         tx.run(sql.raw(`SAVEPOINT projection_event_${shapedEvent.rawEvent.rowid}`));
         try {
-          if (shapedEvent.entity_kind === "contact") {
-            projectContactObservation(tx, eventCache, eventChanges, shapedEvent);
-          } else if (shapedEvent.entity_kind === "conversation") {
-            projectConversationObservation(tx, eventCache, eventChanges, shapedEvent);
-          } else if (shapedEvent.entity_kind === "call") {
-            if (shapedEvent.event_kind === "deleted") {
-              projectCallDeleteEvent(tx, eventCache, eventChanges, shapedEvent);
-            } else {
-              projectCallEvent(tx, eventCache, eventChanges, shapedEvent);
+          if (shapedEvent.entity_kind === "contact" && shapedEvent.event_kind === "aliased") {
+            projectWhatsAppIdentityAlias(tx, eventCache, eventChanges, shapedEvent);
+          } else {
+            shapedEvent.payload_json = canonicalizeWhatsAppPayload(
+              tx,
+              shapedEvent.platform,
+              shapedEvent.account_key,
+              shapedEvent.payload_json,
+            );
+            if (shapedEvent.entity_kind === "contact") {
+              projectContactObservation(tx, eventCache, eventChanges, shapedEvent);
+            } else if (shapedEvent.entity_kind === "conversation") {
+              projectConversationObservation(tx, eventCache, eventChanges, shapedEvent);
+            } else if (shapedEvent.entity_kind === "call") {
+              if (shapedEvent.event_kind === "deleted") {
+                projectCallDeleteEvent(tx, eventCache, eventChanges, shapedEvent);
+              } else {
+                projectCallEvent(tx, eventCache, eventChanges, shapedEvent);
+              }
+            } else if (shapedEvent.entity_kind === "message") {
+              projectMessageEvent(tx, eventCache, eventChanges, shapedEvent);
+            } else if (shapedEvent.entity_kind === "reaction") {
+              projectReactionEvent(tx, eventCache, eventChanges, shapedEvent);
+            } else if (shapedEvent.entity_kind === "participant") {
+              projectParticipantEvent(tx, eventCache, eventChanges, shapedEvent);
+            } else if (shapedEvent.entity_kind === "timeline_event") {
+              projectTimelineEvent(tx, eventCache, eventChanges, shapedEvent);
             }
-          } else if (shapedEvent.entity_kind === "message") {
-            projectMessageEvent(tx, eventCache, eventChanges, shapedEvent);
-          } else if (shapedEvent.entity_kind === "reaction") {
-            projectReactionEvent(tx, eventCache, eventChanges, shapedEvent);
-          } else if (shapedEvent.entity_kind === "participant") {
-            projectParticipantEvent(tx, eventCache, eventChanges, shapedEvent);
-          } else if (shapedEvent.entity_kind === "timeline_event") {
-            projectTimelineEvent(tx, eventCache, eventChanges, shapedEvent);
           }
           tx.run(sql.raw(`RELEASE projection_event_${shapedEvent.rawEvent.rowid}`));
           eventOverlay.commit();
