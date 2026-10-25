@@ -154,6 +154,7 @@ import {
   shouldRunLocalWatcher as shouldRunLocalWatcherForState,
 } from "./local-watchers.js";
 import { continuationDelay, readHostPowerState } from "./power-pacing.js";
+import { AutoSyncPacing } from "./sync-pacing.js";
 
 const DAEMON_VERSION = getCurrentAppVersion();
 const DEFAULT_AUTOSYNC_INTERVAL_MS = 60_000;
@@ -1918,6 +1919,7 @@ export async function runDaemon(): Promise<void> {
   let projectionDrainDueAt: number | null = null;
   let searchIndexDrainDueAt: number | null = null;
   const lastAutoSyncQueuedAt = new Map<string, number>();
+  const autoSyncPacing = new AutoSyncPacing();
   const lastSignalReconnectSyncQueuedAt = new Map<string, number>();
   const lastContinuationProjectionQueuedAt = new Map<string, number>();
   const pendingSignalSendEchoes = new Map<string, PendingSignalEcho[]>();
@@ -3344,6 +3346,7 @@ export async function runDaemon(): Promise<void> {
   const queueDebouncedNativeSync = createDebouncedSyncEnqueuer(db, schedulers.wakeIngest);
   const discordRealtime = new DiscordRealtimeSupervisor({
     onEvent: (accountKey, event) => {
+      autoSyncPacing.reset(`discord:${accountKey}`);
       void handleDiscordRealtimeEvent(accountKey, event);
     },
     onAuthInvalidated: (accountKey, _status, reason) => {
@@ -3365,6 +3368,7 @@ export async function runDaemon(): Promise<void> {
   });
   const slackRealtime = new SlackRealtimeSupervisor({
     onEvent: (accountKey, event) => {
+      autoSyncPacing.reset(`slack:${accountKey}`);
       void handleSlackRealtimeEvent(accountKey, event);
     },
     onConnected: (accountKey, _status, reconnected) => {
@@ -3430,6 +3434,7 @@ export async function runDaemon(): Promise<void> {
   };
   const linkedInRealtime = new LinkedInRealtimeSupervisor({
     onEvent: (accountKey, event, userEntityUrn) => {
+      autoSyncPacing.reset(`linkedin:${accountKey}`);
       void ingestLinkedInRealtimeEnvelope(accountKey, event, userEntityUrn);
     },
     onConnected: (accountKey, _status, reconnected) => {
@@ -3447,6 +3452,7 @@ export async function runDaemon(): Promise<void> {
   });
   const signalRealtime = new SignalRealtimeSupervisor({
     onMessage: (accountKey, message) => {
+      autoSyncPacing.reset(`signal:${accountKey}`);
       void ingestSignalRealtimeMessages(accountKey, [message]);
     },
     onConnected: (accountKey, _status, reconnected) => {
@@ -3475,6 +3481,7 @@ export async function runDaemon(): Promise<void> {
   const whatsAppRealtime = new WhatsAppRealtimeSupervisor({
     recoverMissingSession: () => requestWhatsAppRealtimeReconcile(),
     onEvent: (accountKey, event) => {
+      autoSyncPacing.reset(`whatsapp:${accountKey}`);
       void handleWhatsAppRealtimeEvent(accountKey, event);
     },
     onConnected: (accountKey, _status, reconnected) => {
@@ -3727,6 +3734,20 @@ export async function runDaemon(): Promise<void> {
   writeMenuBarStatus();
   const menuBarStatusLoop = setInterval(writeMenuBarStatus, MENU_BAR_STATUS_WRITE_INTERVAL_MS);
 
+  // Slack history polling misses old-thread replies; Gmail history blocks live ingestion.
+  const hasConnectedRealtime = (platform: Platform, accountKey: string): boolean =>
+    [
+      ...discordRealtime.getStatuses(),
+      ...linkedInRealtime.getStatuses(),
+      ...signalRealtime.getStatuses(),
+      ...whatsAppRealtime.getStatuses(),
+    ].some(
+      (status) =>
+        status.platform === platform &&
+        status.accountKey === accountKey &&
+        status.state === "connected",
+    );
+
   const queueAutoSyncRuns = (trigger: string) => {
     if (isUpdateShutdownRequested) {
       return;
@@ -3753,7 +3774,20 @@ export async function runDaemon(): Promise<void> {
           if (trigger === "scheduler") {
             const targetKey = `${target.platform}:${target.accountKey}`;
             const lastQueuedAt = lastAutoSyncQueuedAt.get(targetKey) ?? startedAt;
-            if (queuedAt - lastQueuedAt < getAutoSyncIntervalMs(target.platform)) {
+            const realtimeConnected = hasConnectedRealtime(target.platform, target.accountKey);
+            const configuredInterval =
+              process.env.CUED_AUTOSYNC_INTERVAL_MS != null ||
+              process.env[`CUED_AUTOSYNC_INTERVAL_${target.platform.toUpperCase()}_MS`] != null;
+            if (
+              queuedAt - lastQueuedAt <
+              (configuredInterval
+                ? getAutoSyncIntervalMs(target.platform)
+                : autoSyncPacing.interval(
+                    targetKey,
+                    getAutoSyncIntervalMs(target.platform),
+                    realtimeConnected,
+                  ))
+            ) {
               continue;
             }
           }
@@ -4451,28 +4485,17 @@ export async function runDaemon(): Promise<void> {
       if (platform === "signal") {
         requestSignalRealtimeReconcile();
       }
+      autoSyncPacing.record(`${platform}:${accountKey}`, insertResult.insertedCount, bundleHasMore);
       if (bundleHasMore && !db.hasQueuedOrRunningRun(currentRun.platform, accountKey)) {
         const baseDelayMs = getEffectiveSyncContinueDelayMs(currentRun.platform);
         const originTrigger =
           typeof runDetails?.originTrigger === "string"
             ? runDetails.originTrigger
             : currentRun.trigger;
-        // Slack history polling misses old-thread replies; Gmail history blocks live ingestion.
-        const liveCoverage = [
-          ...discordRealtime.getStatuses(),
-          ...linkedInRealtime.getStatuses(),
-          ...signalRealtime.getStatuses(),
-          ...whatsAppRealtime.getStatuses(),
-        ].some(
-          (status) =>
-            status.platform === platform &&
-            status.accountKey === accountKey &&
-            status.state === "connected",
-        );
         const continuationDelayMs = continuationDelay({
           baseMs: baseDelayMs,
           originTrigger,
-          liveCoverage,
+          liveCoverage: hasConnectedRealtime(platform, accountKey),
           syncMode: bundleSyncMode,
           continuation: bundleContinuation,
           power: readHostPowerState(),
@@ -4527,6 +4550,9 @@ export async function runDaemon(): Promise<void> {
         ...(runDiagnostics ? { diagnostics: runDiagnostics } : {}),
       });
     } catch (error) {
+      autoSyncPacing.reset(
+        `${currentRun.platform}:${currentRun.account_key ?? getDefaultAccountKeyForPlatform(currentRun.platform as Platform)}`,
+      );
       const errorMessage = error instanceof Error ? error.message : String(error);
       daemonLogger.error("ingest run failed", {
         runId: currentRun.id,
