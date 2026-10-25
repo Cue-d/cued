@@ -1459,6 +1459,12 @@ private struct UpdateInstallResponse: Decodable {
   let started: Bool
 }
 
+// Cached status files can outlive a stopped daemon. A PID check preserves the
+// icon's lifecycle updates without rebuilding menus on every watchdog tick.
+func shouldRefreshExitedDaemon(renderedPID: Int?) -> Bool {
+  renderedPID.map { !isProcessRunning($0) } ?? false
+}
+
 @MainActor
 final class MenuBarAppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
   private static let statusItemImageHeight: CGFloat = 18
@@ -1481,6 +1487,7 @@ final class MenuBarAppController: NSObject, NSApplicationDelegate, NSMenuDelegat
   }
   private var timer: Timer?
   private var shouldAutoStartDaemon = true
+  private var renderedDaemonPID: Int?
   private let statusItemImage = MenuBarAppController.loadStatusItemImage()
 
   fileprivate init(
@@ -1559,6 +1566,9 @@ final class MenuBarAppController: NSObject, NSApplicationDelegate, NSMenuDelegat
     menuBarLease.heartbeat()
     if shouldAutoStartDaemon {
       daemonSupervisor.startIfNeeded()
+    }
+    if shouldRefreshExitedDaemon(renderedPID: renderedDaemonPID) {
+      rebuildMenu()
     }
   }
 
@@ -1644,6 +1654,7 @@ final class MenuBarAppController: NSObject, NSApplicationDelegate, NSMenuDelegat
 
   private func rebuildMenu(menu existingMenu: NSMenu? = nil) {
     let snapshot = statusStore.readSnapshot()
+    renderedDaemonPID = snapshot.daemonRunning ? snapshot.daemonPID : nil
     let daemonStarting = daemonSupervisor.isLaunching(snapshot: snapshot)
     if let button = statusItem.button {
       if let statusItemImage {

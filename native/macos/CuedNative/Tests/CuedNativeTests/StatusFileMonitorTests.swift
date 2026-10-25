@@ -4,6 +4,20 @@ import XCTest
 
 @MainActor
 final class StatusFileMonitorTests: XCTestCase {
+  func testStoppedDaemonRefreshesEvenWithoutAnotherStatusPublication() throws {
+    let daemon = Process()
+    daemon.executableURL = URL(fileURLWithPath: "/bin/sleep")
+    daemon.arguments = ["30"]
+    try daemon.run()
+    let renderedPID = Int(daemon.processIdentifier)
+    XCTAssertFalse(shouldRefreshExitedDaemon(renderedPID: renderedPID))
+    daemon.terminate()
+    daemon.waitUntilExit()
+    XCTAssertTrue(shouldRefreshExitedDaemon(renderedPID: renderedPID))
+    // Rendering stopped status clears the PID, keeping later idle ticks cheap.
+    XCTAssertFalse(shouldRefreshExitedDaemon(renderedPID: nil))
+  }
+
   func testCachedRunningFlagDoesNotHideDeadDaemon() {
     let store = AppStatusStore(dbPath: "/nonexistent/cued-test.db")
     let dead = store.parseStatusPayload(
