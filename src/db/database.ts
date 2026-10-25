@@ -42,6 +42,7 @@ import { safeParseJson, safeStringifyJson } from "./codecs.js";
 import { MIGRATIONS } from "./migrations.js";
 import * as schema from "./schema.js";
 import { openSqliteDatabase } from "./sqlite.js";
+import { StatusReadCache } from "./status-read-cache.js";
 
 const {
   attachmentCache,
@@ -588,11 +589,7 @@ function buildRawEventValues(event: RawEventInput) {
 export class CuedDatabase {
   private readonly sqlite: Database.Database;
   private readonly db: LocalDrizzleDatabase;
-  private menuBarProjectionCountsCache: {
-    projectionWatermark: number;
-    lastRebuildAt: number | null;
-    rows: IntegrationProjectionCount[];
-  } | null = null;
+  private readonly statusReadCache: StatusReadCache;
 
   constructor(
     public readonly dbPath: string = CUED_DB_PATH,
@@ -602,6 +599,7 @@ export class CuedDatabase {
   ) {
     ensureCuedDirs();
     this.sqlite = openSqliteDatabase(dbPath, { readonly: options.readonly });
+    this.statusReadCache = new StatusReadCache(this.sqlite);
     this.sqlite.exec(`PRAGMA busy_timeout = ${DEFAULT_SQLITE_BUSY_TIMEOUT_MS}`);
     this.sqlite.exec("PRAGMA foreign_keys = ON");
     if (!options.readonly) {
@@ -1027,29 +1025,31 @@ export class CuedDatabase {
     version?: string | null;
     details?: unknown;
   }): void {
-    this.db
-      .insert(daemonState)
-      .values({
-        singletonKey: "daemon",
-        pid: input.pid,
-        startedAt: input.startedAt,
-        updatedAt: input.updatedAt,
-        status: input.status,
-        version: input.version ?? null,
-        detailsJson: safeStringifyJson(input.details),
-      })
-      .onConflictDoUpdate({
-        target: daemonState.singletonKey,
-        set: {
+    this.statusReadCache.preserveAcrossDaemonHeartbeat(() => {
+      this.db
+        .insert(daemonState)
+        .values({
+          singletonKey: "daemon",
           pid: input.pid,
           startedAt: input.startedAt,
           updatedAt: input.updatedAt,
           status: input.status,
           version: input.version ?? null,
           detailsJson: safeStringifyJson(input.details),
-        },
-      })
-      .run();
+        })
+        .onConflictDoUpdate({
+          target: daemonState.singletonKey,
+          set: {
+            pid: input.pid,
+            startedAt: input.startedAt,
+            updatedAt: input.updatedAt,
+            status: input.status,
+            version: input.version ?? null,
+            detailsJson: safeStringifyJson(input.details),
+          },
+        })
+        .run();
+    });
   }
 
   listCheckpointSummary(): Array<{
@@ -1404,16 +1404,18 @@ export class CuedDatabase {
       messages: number;
     }>;
   } {
-    return {
-      contacts: this.countRows(contacts),
-      conversations: this.countRows(conversations),
-      messages: this.countRows(messages),
-      rawEvents: this.countRows(rawEvents),
-      sourceAccounts: this.countRows(sourceAccounts),
-      integrations: this.countRows(integrationStates),
-      authSessions: this.countRows(authSessions),
-      messageBreakdown: this.listMessageCountsByPlatform(),
-    };
+    return this.statusReadCache.read("overview", () => {
+      return {
+        contacts: this.countRows(contacts),
+        conversations: this.countRows(conversations),
+        messages: this.countRows(messages),
+        rawEvents: this.countRows(rawEvents),
+        sourceAccounts: this.countRows(sourceAccounts),
+        integrations: this.countRows(integrationStates),
+        authSessions: this.countRows(authSessions),
+        messageBreakdown: this.listMessageCountsByPlatform(),
+      };
+    });
   }
 
   getMenuBarOverview(): {
@@ -1430,123 +1432,113 @@ export class CuedDatabase {
     }>;
     integrationBreakdown: IntegrationProjectionCount[];
   } {
-    const integrationBreakdown = this.listProjectionCountsByIntegration();
-    const messagesByPlatform = new Map<Platform, number>();
-    for (const row of integrationBreakdown) {
-      messagesByPlatform.set(
-        row.platform,
-        (messagesByPlatform.get(row.platform) ?? 0) + row.messages,
-      );
-    }
-    const messageBreakdown = [...messagesByPlatform]
-      .map(([platform, messages]) => ({ platform, messages }))
-      .sort(
-        (left, right) =>
-          right.messages - left.messages || left.platform.localeCompare(right.platform),
-      );
-    return {
-      contacts: this.countRows(contacts),
-      conversations: this.countRows(conversations),
-      messages: messageBreakdown.reduce((total, row) => total + row.messages, 0),
-      rawEvents: this.countRows(rawEvents),
-      sourceAccounts: this.countRows(sourceAccounts),
-      integrations: this.countRows(integrationStates),
-      authSessions: this.countRows(authSessions),
-      messageBreakdown,
-      integrationBreakdown,
-    };
+    return this.statusReadCache.read("menu-overview", () => {
+      const integrationBreakdown = this.listProjectionCountsByIntegration();
+      const messagesByPlatform = new Map<Platform, number>();
+      for (const row of integrationBreakdown) {
+        messagesByPlatform.set(
+          row.platform,
+          (messagesByPlatform.get(row.platform) ?? 0) + row.messages,
+        );
+      }
+      const messageBreakdown = [...messagesByPlatform]
+        .map(([platform, messages]) => ({ platform, messages }))
+        .sort(
+          (left, right) =>
+            right.messages - left.messages || left.platform.localeCompare(right.platform),
+        );
+      return {
+        contacts: this.countRows(contacts),
+        conversations: this.countRows(conversations),
+        messages: messageBreakdown.reduce((total, row) => total + row.messages, 0),
+        rawEvents: this.countRows(rawEvents),
+        sourceAccounts: this.countRows(sourceAccounts),
+        integrations: this.countRows(integrationStates),
+        authSessions: this.countRows(authSessions),
+        messageBreakdown,
+        integrationBreakdown,
+      };
+    });
   }
 
   listProjectionCountsByIntegration(): IntegrationProjectionCount[] {
-    const projectionState = this.getProjectionState({ initialize: false });
-    if (
-      this.menuBarProjectionCountsCache?.projectionWatermark ===
-        projectionState.projection_watermark &&
-      this.menuBarProjectionCountsCache.lastRebuildAt === projectionState.last_rebuild_at
-    ) {
-      return this.menuBarProjectionCountsCache.rows;
-    }
-
-    const byIntegration = new Map<string, IntegrationProjectionCount>();
-    const getOrCreate = (platform: Platform, accountKey: string) => {
-      const key = `${platform}\u0000${accountKey}`;
-      const existing = byIntegration.get(key);
-      if (existing) {
-        return existing;
-      }
-      const created = { platform, accountKey, contacts: 0, messages: 0 };
-      byIntegration.set(key, created);
-      return created;
-    };
-    const contactCounts = this.sqlite
-      .prepare(
-        `
+    return this.statusReadCache.read("integration-counts", () => {
+      const byIntegration = new Map<string, IntegrationProjectionCount>();
+      const getOrCreate = (platform: Platform, accountKey: string) => {
+        const key = `${platform}\u0000${accountKey}`;
+        const existing = byIntegration.get(key);
+        if (existing) {
+          return existing;
+        }
+        const created = { platform, accountKey, contacts: 0, messages: 0 };
+        byIntegration.set(key, created);
+        return created;
+      };
+      const contactCounts = this.sqlite
+        .prepare(
+          `
         SELECT platform, account_key, COUNT(*) AS count
         FROM contact_sources
         GROUP BY platform, account_key
       `,
-      )
-      .all() as Array<{ platform: Platform; account_key: string; count: number | null }>;
-    for (const row of contactCounts) {
-      getOrCreate(row.platform, row.account_key).contacts = Number(row.count ?? 0);
-    }
-    const messageCounts = this.sqlite
-      .prepare(
-        `
+        )
+        .all() as Array<{ platform: Platform; account_key: string; count: number | null }>;
+      for (const row of contactCounts) {
+        getOrCreate(row.platform, row.account_key).contacts = Number(row.count ?? 0);
+      }
+      const messageCounts = this.sqlite
+        .prepare(
+          `
         SELECT platform, account_key, COUNT(*) AS count
         FROM messages
         GROUP BY platform, account_key
       `,
-      )
-      .all() as Array<{ platform: Platform; account_key: string; count: number | null }>;
-    for (const row of messageCounts) {
-      getOrCreate(row.platform, row.account_key).messages = Number(row.count ?? 0);
-    }
-    const rows = [...byIntegration.values()];
-    this.menuBarProjectionCountsCache = {
-      projectionWatermark: projectionState.projection_watermark,
-      lastRebuildAt: projectionState.last_rebuild_at,
-      rows,
-    };
-    return rows;
-  }
-
-  invalidateMenuBarProjectionCounts(): void {
-    this.menuBarProjectionCountsCache = null;
+        )
+        .all() as Array<{ platform: Platform; account_key: string; count: number | null }>;
+      for (const row of messageCounts) {
+        getOrCreate(row.platform, row.account_key).messages = Number(row.count ?? 0);
+      }
+      const rows = [...byIntegration.values()];
+      return rows;
+    });
   }
 
   listMessageCountsByPlatform(): Array<{
     platform: Platform;
     messages: number;
   }> {
-    return this.sqlite
-      .prepare(
-        `
+    return this.statusReadCache.read("message-counts", () => {
+      return this.sqlite
+        .prepare(
+          `
         SELECT platform, COUNT(*) AS messages
         FROM messages
         GROUP BY platform
         ORDER BY messages DESC, platform ASC
       `,
-      )
-      .all() as Array<{
-      platform: Platform;
-      messages: number;
-    }>;
+        )
+        .all() as Array<{
+        platform: Platform;
+        messages: number;
+      }>;
+    });
   }
 
   countObservedPhoneCalls(): number {
-    const row = this.sqlite
-      .prepare(
-        `
+    return this.statusReadCache.read("phone-calls", () => {
+      const row = this.sqlite
+        .prepare(
+          `
         SELECT COUNT(*) AS calls
         FROM raw_events
         WHERE platform = 'imessage'
           AND account_key = 'local'
           AND COALESCE(normalized_schema, entity_kind || '.' || event_kind || '@1') = 'call.observed@1'
       `,
-      )
-      .get() as { calls: number | null };
-    return Number(row.calls ?? 0);
+        )
+        .get() as { calls: number | null };
+      return Number(row.calls ?? 0);
+    });
   }
 
   getProjectionState(options: { initialize?: boolean } = {}): ProjectionStateRow {
@@ -3815,25 +3807,27 @@ export class CuedDatabase {
     failed: number;
     pending: number;
   } {
-    const rows = this.sqlite
-      .prepare(
-        `
+    return this.statusReadCache.read("fts-backlog", () => {
+      const rows = this.sqlite
+        .prepare(
+          `
         SELECT status, COUNT(*) AS count
         FROM message_fts_index_queue
         GROUP BY status
       `,
-      )
-      .all() as Array<{ status: string; count: number }>;
-    const counts = { queued: 0, indexing: 0, failed: 0 };
-    for (const row of rows) {
-      if (row.status === "queued" || row.status === "indexing" || row.status === "failed") {
-        counts[row.status] = Number(row.count ?? 0);
+        )
+        .all() as Array<{ status: string; count: number }>;
+      const counts = { queued: 0, indexing: 0, failed: 0 };
+      for (const row of rows) {
+        if (row.status === "queued" || row.status === "indexing" || row.status === "failed") {
+          counts[row.status] = Number(row.count ?? 0);
+        }
       }
-    }
-    return {
-      ...counts,
-      pending: counts.queued + counts.indexing,
-    };
+      return {
+        ...counts,
+        pending: counts.queued + counts.indexing,
+      };
+    });
   }
 
   hasQueuedOrRunningRun(platform: Platform, accountKey?: string | null): boolean {
@@ -4997,7 +4991,6 @@ export class CuedDatabase {
       tx.delete(contactSources).run();
       tx.delete(contacts).run();
     });
-    this.invalidateMenuBarProjectionCounts();
   }
 
   private countRows(table: SQLiteTable): number {

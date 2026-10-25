@@ -166,7 +166,7 @@ describe("CuedDatabase", () => {
       db
         .listProjectionCountsByIntegration()
         .find((row) => row.platform === "imessage" && row.accountKey === "local")?.messages,
-    ).toBe(1);
+    ).toBe(2);
 
     db.upsertProjectionState({ projectionWatermark: 1 });
     expect(

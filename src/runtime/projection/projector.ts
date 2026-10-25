@@ -2479,7 +2479,6 @@ function projectEventBatch(
     throw error;
   }
   batchCache.commit();
-  db.invalidateMenuBarProjectionCounts();
   for (const failure of projectionFailures) {
     db.quarantineRawEventProjectionFailure(
       {
