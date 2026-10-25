@@ -53,6 +53,9 @@ type MessageRow = {
   error: number;
   cache_has_attachments: number;
   associated_message_type: number;
+  edited_at: number | null;
+  deleted_at: number | null;
+  mutation_stamp: string;
 };
 
 type ReactionRow = {
@@ -208,8 +211,61 @@ export class IMessageReader {
     return row?.chat_id ?? null;
   }
 
-  buildSyncBatch(lastRowid: number, limit = 500): ImsSyncBatch {
-    const rows = this.db
+  buildSyncBatch(lastRowid: number, limit = 500, mutationRowid = 0): ImsSyncBatch {
+    if (
+      !Number.isSafeInteger(limit) ||
+      limit <= 0 ||
+      !Number.isSafeInteger(lastRowid) ||
+      lastRowid < 0 ||
+      !Number.isSafeInteger(mutationRowid) ||
+      mutationRowid < 0
+    ) {
+      throw new Error("iMessage requires a positive batch limit and nonnegative integer cursors");
+    }
+    const rows = this.fetchMessageRows(lastRowid, limit);
+    // Sweep historical mutations by ROWID, not mutation time: delayed iCloud
+    // updates can carry old timestamps. Persist progress, then restart each sweep.
+    const mutations = this.fetchMessageRows(mutationRowid, limit, lastRowid);
+    const batchRows = [...rows, ...mutations];
+    const mutationHasMore = mutations.length >= limit;
+    const mutationCursor = mutationHasMore ? (mutations.at(-1)?.rowid ?? 0) : 0;
+    const messages = this.transformMessages(batchRows);
+    const attachments = this.getAttachmentsForMessageIds(messages.map((message) => message.id));
+    const reactions = this.getReactionsForGuids(messages.map((message) => message.guid));
+    for (const message of messages) {
+      message.attachments = message.deletedAt ? [] : (attachments.get(message.id) ?? []);
+      message.reactions = message.deletedAt ? [] : (reactions.get(message.guid) ?? []);
+    }
+    const chats = this.getChats([...new Set(messages.map((message) => message.chatId))]);
+    const handles = new Map<number, ImsHandle>();
+    for (const chat of chats) {
+      for (const handle of chat.participants) handles.set(handle.id, handle);
+    }
+    for (const message of messages) {
+      if (message.sender) handles.set(message.sender.id, message.sender);
+    }
+    return {
+      cursor: rows.at(-1)?.rowid ?? lastRowid,
+      fetchedCount: rows.length,
+      mutationCursor,
+      mutationHasMore,
+      chats,
+      messages,
+      handles: [...handles.values()],
+    };
+  }
+
+  private fetchMessageRows(afterRowid: number, limit: number, throughRowid?: number): MessageRow[] {
+    const columns = new Set(
+      (this.db.prepare("PRAGMA table_info(message)").all() as { name: string }[]).map(
+        (row) => row.name,
+      ),
+    );
+    const edited = columns.has("date_edited") ? "COALESCE(m.date_edited, 0)" : "0";
+    const retracted = columns.has("date_retracted") ? "COALESCE(m.date_retracted, 0)" : "0";
+    const mutationFilter =
+      throughRowid === undefined ? "" : `AND m.ROWID <= ? AND (${edited} > 0 OR ${retracted} > 0)`;
+    return this.db
       .prepare(
         `
       SELECT
@@ -233,53 +289,21 @@ export class IMessageReader {
         END as unix_date_read,
         m.error,
         m.cache_has_attachments,
-        m.associated_message_type
+        m.associated_message_type,
+        CASE WHEN ${edited} > 0 THEN CAST(${edited} / 1000000 AS INTEGER) + ${APPLE_EPOCH_OFFSET * 1000} END AS edited_at,
+        CASE WHEN ${retracted} > 0 THEN CAST(${retracted} / 1000000 AS INTEGER) + ${APPLE_EPOCH_OFFSET * 1000} END AS deleted_at,
+        CAST(${edited} AS TEXT) || ':' || CAST(${retracted} AS TEXT) AS mutation_stamp
       FROM message m
       INNER JOIN chat_message_join cmj ON cmj.message_id = m.ROWID
       LEFT JOIN handle h ON h.ROWID = m.handle_id
-      WHERE m.ROWID > ? AND m.item_type IN (0, 1, 2)
+      WHERE m.ROWID > ? AND m.item_type IN (0, 1, 2) ${mutationFilter}
       ORDER BY m.ROWID
       LIMIT ?
     `,
       )
-      .all(lastRowid, limit) as MessageRow[];
-
-    if (rows.length === 0) {
-      return { cursor: lastRowid, fetchedCount: 0, chats: [], messages: [], handles: [] };
-    }
-
-    const messages = this.transformMessages(rows);
-    const attachments = this.getAttachmentsForMessageIds(messages.map((message) => message.id));
-    for (const message of messages) {
-      message.attachments = attachments.get(message.id) ?? [];
-    }
-    const cursor = rows[rows.length - 1]?.rowid ?? lastRowid;
-    const reactions = this.getReactionsForGuids(messages.map((message) => message.guid));
-    for (const message of messages) {
-      message.reactions = reactions.get(message.guid) ?? [];
-    }
-
-    const chatIds = [...new Set(messages.map((message) => message.chatId))];
-    const chats = this.getChats(chatIds);
-    const handlesMap = new Map<number, ImsHandle>();
-    for (const chat of chats) {
-      for (const handle of chat.participants) {
-        handlesMap.set(handle.id, handle);
-      }
-    }
-    for (const message of messages) {
-      if (message.sender) {
-        handlesMap.set(message.sender.id, message.sender);
-      }
-    }
-
-    return {
-      cursor,
-      fetchedCount: rows.length,
-      chats,
-      messages,
-      handles: [...handlesMap.values()],
-    };
+      .all(
+        ...(throughRowid === undefined ? [afterRowid, limit] : [afterRowid, throughRowid, limit]),
+      ) as MessageRow[];
   }
 
   private transformMessages(rows: MessageRow[]): ImsMessage[] {
@@ -302,7 +326,14 @@ export class IMessageReader {
           guid: row.guid,
           chatId: row.chat_id,
           itemType: row.item_type,
-          text: getMessageText(row.text, row.attributedBody),
+          text: row.deleted_at
+            ? null
+            : row.edited_at
+              ? (getMessageText(null, row.attributedBody) ?? row.text)
+              : getMessageText(row.text, row.attributedBody),
+          editedAt: row.edited_at,
+          deletedAt: row.deleted_at,
+          mutationStamp: row.mutation_stamp,
           timestamp: row.unix_date ?? 0,
           isFromMe,
           isRead,
@@ -315,7 +346,7 @@ export class IMessageReader {
             row.error,
           ),
           errorCode: row.error,
-          hasAttachments: row.cache_has_attachments === 1,
+          hasAttachments: !row.deleted_at && row.cache_has_attachments === 1,
           attachments: [],
           sender,
           reactions: [],

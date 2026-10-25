@@ -24,6 +24,7 @@ const IMESSAGE_NATIVE_HELPER_MAX_BUFFER_BYTES = 64 * 1024 * 1024;
 type IMessageSourceCursor = {
   rowId?: number;
   callPk?: number;
+  mutationRowId?: number;
 };
 
 function dedupeKey(seed: string): string {
@@ -47,6 +48,7 @@ function resolveIMessageSourceCursor(options?: {
   return {
     rowId: typeof sourceCursor?.rowId === "number" ? sourceCursor.rowId : (options?.lastRowId ?? 0),
     callPk: typeof sourceCursor?.callPk === "number" ? sourceCursor.callPk : 0,
+    mutationRowId: typeof sourceCursor?.mutationRowId === "number" ? sourceCursor.mutationRowId : 0,
   };
 }
 
@@ -83,6 +85,7 @@ function loadBatchFromNativeBinary(
   options?: {
     path?: string;
     lastRowId?: number;
+    mutationRowId?: number;
     limit?: number;
   },
 ): ImsSyncBatch {
@@ -93,6 +96,8 @@ function loadBatchFromNativeBinary(
     options?.path ?? DEFAULT_CHAT_DB_PATH,
     "--after-rowid",
     String(options?.lastRowId ?? 0),
+    "--mutations-after-rowid",
+    String(options?.mutationRowId ?? 0),
     "--limit",
     String(options?.limit ?? DEFAULT_IMESSAGE_BATCH_LIMIT),
   ];
@@ -134,6 +139,7 @@ function loadCallBatchFromNativeBinary(
 function loadBatchFromTypeScript(options?: {
   path?: string;
   lastRowId?: number;
+  mutationRowId?: number;
   limit?: number;
 }): ImsSyncBatch {
   const reader = new IMessageReader(options?.path ?? DEFAULT_CHAT_DB_PATH);
@@ -141,6 +147,7 @@ function loadBatchFromTypeScript(options?: {
     return reader.buildSyncBatch(
       options?.lastRowId ?? 0,
       options?.limit ?? DEFAULT_IMESSAGE_BATCH_LIMIT,
+      options?.mutationRowId ?? 0,
     );
   } finally {
     reader.close();
@@ -165,11 +172,13 @@ export function buildIMessageSyncBundle(options?: {
       ? loadBatchFromNativeBinary(loader.path, {
           path: options?.path,
           lastRowId: cursor.rowId,
+          mutationRowId: cursor.mutationRowId,
           limit,
         })
       : loadBatchFromTypeScript({
           path: options?.path,
           lastRowId: cursor.rowId,
+          mutationRowId: cursor.mutationRowId,
           limit,
         });
   const effectiveCallBatch =
@@ -192,7 +201,10 @@ export function buildIMessageSyncBundle(options?: {
           afterPk: cursor.callPk,
           limit,
         });
-  const hasMore = batch.fetchedCount >= limit || effectiveCallBatch.fetchedCount >= limit;
+  const hasMore =
+    batch.fetchedCount >= limit ||
+    effectiveCallBatch.fetchedCount >= limit ||
+    Boolean(batch.mutationHasMore);
   const observedBase = Date.now();
 
   const sourceAccounts: SourceAccountInput[] = [
@@ -266,12 +278,16 @@ export function buildIMessageSyncBundle(options?: {
       platform: "imessage",
       accountKey: "local",
       entityKind: "message",
-      eventKind: "created",
+      eventKind: message.editedAt || message.deletedAt ? "updated" : "created",
       externalEntityId: message.guid,
       conversationExternalId: String(message.chatId),
       occurredAt: message.timestamp * 1000,
       observedAt: observedBase + message.id,
-      dedupeKey: dedupeKey(`imessage:message:${message.guid}`),
+      dedupeKey: dedupeKey(
+        message.editedAt || message.deletedAt
+          ? `imessage:message:${message.guid}:${message.mutationStamp}:${message.text ?? ""}`
+          : `imessage:message:${message.guid}`,
+      ),
       payload: {
         sourceMessageKey: message.guid,
         sourceConversationKey: String(message.chatId),
@@ -282,8 +298,10 @@ export function buildIMessageSyncBundle(options?: {
         status: message.status,
         isFromMe: message.isFromMe,
         readAt: message.readAt ? message.readAt * 1000 : null,
-        isEdited: false,
-        isDeleted: false,
+        isEdited: Boolean(message.editedAt),
+        isDeleted: Boolean(message.deletedAt),
+        editedAt: message.editedAt ?? null,
+        deletedAt: message.deletedAt ?? null,
         attachments: message.attachments.map((attachment) => ({
           id: attachment.guid,
           kind: attachment.isSticker ? "sticker" : "file",
@@ -428,7 +446,11 @@ export function buildIMessageSyncBundle(options?: {
   return {
     sourceAccounts,
     rawEvents,
-    sourceCursor: { rowId: batch.cursor, callPk: effectiveCallBatch.cursor },
+    sourceCursor: {
+      rowId: batch.cursor,
+      callPk: effectiveCallBatch.cursor,
+      mutationRowId: batch.mutationCursor ?? 0,
+    },
     syncMode: (cursor.rowId > 0 || cursor.callPk > 0) && !hasMore ? "incremental" : "full",
     hasMore,
     continuation: hasMore

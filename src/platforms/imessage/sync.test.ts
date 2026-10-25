@@ -2,7 +2,13 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { sql } from "drizzle-orm";
 import { afterEach, describe, expect, it } from "vitest";
+import { CuedDatabase } from "../../db/database.js";
+import {
+  projectPendingRawEvents,
+  rebuildProjectedState,
+} from "../../runtime/projection/projector.js";
 import { loadCallHistoryBatch } from "./call-history.js";
 import { IMessageReader } from "./reader.js";
 import { buildIMessageSyncBundle, resolveIMessageLoader } from "./sync.js";
@@ -282,6 +288,168 @@ describe("imessage worker loader resolution", () => {
     });
   });
 
+  it("reconciles edits and unsends behind the cursor, including delayed old timestamps", () => {
+    const path = createSyntheticChatDb(4, { attachmentRowIds: [1], filteredRowIds: [4] });
+    const callHistoryPath = createSyntheticCallHistoryDb();
+    const repoRoot = createTempDir("cued-mutations-");
+    const local = new CuedDatabase(join(repoRoot, "local.db"));
+    local.migrate();
+    const source = new DatabaseSync(path);
+    source.exec(
+      "ALTER TABLE message ADD COLUMN date_edited INTEGER; ALTER TABLE message ADD COLUMN date_retracted INTEGER",
+    );
+    source.exec("UPDATE message SET associated_message_guid = 'message-1' WHERE ROWID = 4");
+    const build = (sourceCursor?: unknown) =>
+      buildIMessageSyncBundle({
+        path,
+        callHistoryPath,
+        repoRoot,
+        env: {},
+        sourceCursor,
+        limit: 10,
+      });
+    const ingest = (bundle: ReturnType<typeof build>) => {
+      local.insertRawEvents(bundle.rawEvents);
+      projectPendingRawEvents(local);
+    };
+    try {
+      const initial = build();
+      ingest(initial);
+      expect(
+        local.orm().get(sql`SELECT COUNT(*) AS n FROM message_reactions WHERE is_active = 1`),
+      ).toEqual({ n: 1 });
+      source
+        .prepare("UPDATE message SET text = ?, date_edited = ? WHERE ROWID = 2")
+        .run("corrected", 9000000001n);
+      const edited = build(initial.sourceCursor);
+      ingest(edited);
+      expect(edited.sourceCursor).toEqual(initial.sourceCursor);
+      expect(edited.rawEvents.find((e) => e.entityKind === "message")?.payload).toMatchObject({
+        content: "corrected",
+        isEdited: true,
+        editedAt: 978307209000,
+      });
+      expect(
+        local
+          .orm()
+          .get(
+            sql`SELECT content, is_edited FROM messages WHERE platform_message_id = 'message-2'`,
+          ),
+      ).toEqual({ content: "corrected", is_edited: 1 });
+
+      // This edit arrives later with an older timestamp; a timestamp watermark loses it.
+      source
+        .prepare("UPDATE message SET text = ?, date_edited = ? WHERE ROWID = 3")
+        .run("late cloud edit", 5000000000n);
+      source.prepare("UPDATE message SET date_retracted = ? WHERE ROWID = 1").run(7000000000n);
+      const deleted = build(edited.sourceCursor);
+      ingest(deleted);
+      const expected = [
+        { platform_message_id: "message-1", content: "", is_deleted: 1 },
+        { platform_message_id: "message-2", content: "corrected", is_deleted: 0 },
+        { platform_message_id: "message-3", content: "late cloud edit", is_deleted: 0 },
+      ];
+      const read = () =>
+        local
+          .orm()
+          .all(
+            sql`SELECT platform_message_id, content, is_deleted FROM messages ORDER BY platform_message_id`,
+          );
+      expect(read()).toEqual(expected);
+      expect(local.orm().get(sql`SELECT COUNT(*) AS n FROM message_attachments`)).toEqual({ n: 0 });
+      expect(
+        local.orm().get(sql`SELECT COUNT(*) AS n FROM message_reactions WHERE is_active = 1`),
+      ).toEqual({ n: 0 });
+      const repeat = build(deleted.sourceCursor);
+      expect(
+        repeat.rawEvents.filter((e) => e.entityKind === "message").map((e) => e.dedupeKey),
+      ).toEqual(
+        deleted.rawEvents.filter((e) => e.entityKind === "message").map((e) => e.dedupeKey),
+      );
+      ingest(repeat);
+      expect(read()).toEqual(expected);
+      rebuildProjectedState(local);
+      expect(read()).toEqual(expected);
+      expect(
+        local.orm().get(sql`SELECT COUNT(*) AS n FROM message_reactions WHERE is_active = 1`),
+      ).toEqual({ n: 0 });
+    } finally {
+      source.close();
+      local.close();
+    }
+  });
+
+  it("pages historical mutations independently and restarts the sweep", () => {
+    const path = createSyntheticChatDb(4);
+    const db = new DatabaseSync(path);
+    db.exec(
+      "ALTER TABLE message ADD COLUMN date_edited INTEGER; UPDATE message SET date_edited = 1234567890",
+    );
+    const reader = new IMessageReader(path);
+    try {
+      expect(() => reader.buildSyncBatch(4, 0)).toThrow("positive batch limit");
+      expect(() => reader.buildSyncBatch(-1, 2)).toThrow("nonnegative integer cursors");
+      expect(() => reader.buildSyncBatch(4, 2, -1)).toThrow("nonnegative integer cursors");
+      const first = reader.buildSyncBatch(4, 2);
+      expect(first.messages.map((m) => m.id)).toEqual([1, 2]);
+      expect(first).toMatchObject({
+        cursor: 4,
+        fetchedCount: 0,
+        mutationCursor: 2,
+        mutationHasMore: true,
+      });
+      const second = reader.buildSyncBatch(4, 2, first.mutationCursor);
+      expect(second.messages.map((m) => m.id)).toEqual([3, 4]);
+      const final = reader.buildSyncBatch(4, 2, second.mutationCursor);
+      expect(final).toMatchObject({
+        cursor: 4,
+        mutationCursor: 0,
+        mutationHasMore: false,
+        messages: [],
+      });
+      db.exec("UPDATE message SET text = 'second edit', date_edited = 1234567891 WHERE ROWID = 1");
+      const next = reader.buildSyncBatch(4, 2, final.mutationCursor);
+      expect(next.messages[0]).toMatchObject({
+        text: "second edit",
+        mutationStamp: "1234567891:0",
+      });
+      expect(next.messages[0].mutationStamp).not.toBe(first.messages[0].mutationStamp);
+    } finally {
+      reader.close();
+      db.close();
+    }
+  });
+
+  it("reads current attributed text for edits and clears unsent attachments", () => {
+    const path = createSyntheticChatDb(1, { attachmentRowIds: [1] });
+    const db = new DatabaseSync(path);
+    db.exec(
+      "ALTER TABLE message ADD COLUMN date_edited INTEGER; ALTER TABLE message ADD COLUMN date_retracted INTEGER",
+    );
+    const text = "current edit";
+    const body = Buffer.concat([
+      Buffer.from("NSString"),
+      Buffer.from([0x2b, text.length]),
+      Buffer.from(text),
+      Buffer.from([0x86, 0x84]),
+    ]);
+    db.prepare("UPDATE message SET attributedBody = ?, date_edited = 1").run(body);
+    const reader = new IMessageReader(path);
+    try {
+      expect(reader.buildSyncBatch(0).messages[0].text).toBe(text);
+      db.exec("UPDATE message SET date_retracted = 2");
+      expect(reader.buildSyncBatch(1).messages[0]).toMatchObject({
+        text: null,
+        attachments: [],
+        reactions: [],
+        hasAttachments: false,
+      });
+    } finally {
+      reader.close();
+      db.close();
+    }
+  });
+
   it("marks multi-page initial syncs as full until the final page", () => {
     const chatDbPath = createSyntheticChatDb(650);
     const callHistoryPath = createSyntheticCallHistoryDb();
@@ -297,7 +465,7 @@ describe("imessage worker loader resolution", () => {
     });
     expect(first.hasMore).toBe(true);
     expect(first.syncMode).toBe("full");
-    expect(first.sourceCursor).toEqual({ rowId: 500, callPk: 0 });
+    expect(first.sourceCursor).toEqual({ rowId: 500, callPk: 0, mutationRowId: 0 });
     expect(first.continuation).toEqual({
       reason: "account_pagination",
       detail: "iMessage message or call batch limit was reached",
@@ -313,7 +481,7 @@ describe("imessage worker loader resolution", () => {
     });
     expect(second.hasMore).toBe(false);
     expect(second.syncMode).toBe("incremental");
-    expect(second.sourceCursor).toEqual({ rowId: 650, callPk: 0 });
+    expect(second.sourceCursor).toEqual({ rowId: 650, callPk: 0, mutationRowId: 0 });
   });
 
   it("keeps paging when the fetched batch includes filtered tapback rows", () => {
@@ -331,7 +499,7 @@ describe("imessage worker loader resolution", () => {
     });
     expect(first.rawEvents.some((event) => event.entityKind === "message")).toBe(true);
     expect(first.hasMore).toBe(true);
-    expect(first.sourceCursor).toEqual({ rowId: 500, callPk: 0 });
+    expect(first.sourceCursor).toEqual({ rowId: 500, callPk: 0, mutationRowId: 0 });
 
     const second = buildIMessageSyncBundle({
       path: chatDbPath,
@@ -343,7 +511,7 @@ describe("imessage worker loader resolution", () => {
     });
     expect(second.hasMore).toBe(false);
     expect(second.syncMode).toBe("incremental");
-    expect(second.sourceCursor).toEqual({ rowId: 650, callPk: 0 });
+    expect(second.sourceCursor).toEqual({ rowId: 650, callPk: 0, mutationRowId: 0 });
   });
 
   it("projects iMessage attachment metadata when the chat db has local attachment rows", () => {
@@ -412,7 +580,7 @@ describe("imessage worker loader resolution", () => {
         durationSeconds: 75,
       }),
     );
-    expect(bundle.sourceCursor).toEqual({ rowId: 1, callPk: 7 });
+    expect(bundle.sourceCursor).toEqual({ rowId: 1, callPk: 7, mutationRowId: 0 });
   });
 
   it("keeps short unanswered outgoing calls as canceled instead of completed", () => {

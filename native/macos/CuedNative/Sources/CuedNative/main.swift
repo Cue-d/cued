@@ -63,6 +63,9 @@ struct IMessageMessage: Encodable {
   let chatId: Int
   let itemType: Int?
   let text: String?
+  let editedAt: Int?
+  let deletedAt: Int?
+  let mutationStamp: String
   let timestamp: Int
   let isFromMe: Bool
   let isRead: Bool
@@ -76,6 +79,8 @@ struct IMessageMessage: Encodable {
 }
 
 struct IMessageSyncBatch: Encodable {
+  let mutationCursor: Int
+  let mutationHasMore: Bool
   let cursor: Int
   let fetchedCount: Int
   let chats: [IMessageChat]
@@ -86,6 +91,7 @@ struct IMessageSyncBatch: Encodable {
 struct IMessageDumpOptions {
   var dbPath: String = defaultMessagesDBPath
   var afterRowID = 0
+  var mutationsAfterRowID = 0
   var limit = 500
 }
 
@@ -180,6 +186,9 @@ private struct MessageRow {
   let errorCode: Int
   let hasAttachments: Bool
   let associatedMessageType: Int
+  let editedAt: Int?
+  let deletedAt: Int?
+  let mutationStamp: String
 }
 
 private struct AttachmentRow {
@@ -217,7 +226,7 @@ enum CLIError: Error, LocalizedError {
   var errorDescription: String? {
     switch self {
     case .invalidCommand:
-      return "usage: CuedNative contacts dump|status|watch | CuedNative imessage dump [--db-path PATH] [--after-rowid N] [--limit N] | CuedNative imessage watch [--db-path PATH] | CuedNative callhistory dump [--db-path PATH] [--chat-db-path PATH] [--after-pk N] [--limit N] | CuedNative callhistory watch [--db-path PATH] | CuedNative browser open --url URL | CuedNative browser close --url-prefix PREFIX | CuedNative auth open --platform PLATFORM --account-key KEY --session-id ID --db-path PATH | CuedNative auth qr --title TITLE --subtitle TEXT --uri URI | CuedNative login-item status|enable|disable | CuedNative --menu-bar"
+      return "usage: CuedNative contacts dump|status|watch | CuedNative imessage dump [--db-path PATH] [--after-rowid N] [--mutations-after-rowid N] [--limit N] | CuedNative imessage watch [--db-path PATH] | CuedNative callhistory dump [--db-path PATH] [--chat-db-path PATH] [--after-pk N] [--limit N] | CuedNative callhistory watch [--db-path PATH] | CuedNative browser open --url URL | CuedNative browser close --url-prefix PREFIX | CuedNative auth open --platform PLATFORM --account-key KEY --session-id ID --db-path PATH | CuedNative auth qr --title TITLE --subtitle TEXT --uri URI | CuedNative login-item status|enable|disable | CuedNative --menu-bar"
     case .invalidOption(let message):
       return message
     case .contactsAccessDenied:
@@ -406,6 +415,12 @@ struct Command {
           throw CLIError.invalidOption("--db-path requires a value")
         }
         options.dbPath = arguments[index]
+      case "--mutations-after-rowid":
+        index += 1
+        guard index < arguments.count, let value = Int(arguments[index]), value >= 0 else {
+          throw CLIError.invalidOption("--mutations-after-rowid requires a nonnegative integer")
+        }
+        options.mutationsAfterRowID = value
       case "--after-rowid":
         index += 1
         guard index < arguments.count, let value = Int(arguments[index]) else {
@@ -831,7 +846,10 @@ struct Command {
     }
   }
 
-  private static func dumpIMessage(options: IMessageDumpOptions) throws -> IMessageSyncBatch {
+  static func dumpIMessage(options: IMessageDumpOptions) throws -> IMessageSyncBatch {
+    guard options.limit > 0, options.afterRowID >= 0, options.mutationsAfterRowID >= 0 else {
+      throw CLIError.invalidOption("iMessage cursors must be nonnegative and limit must be positive")
+    }
     let connection = try SQLiteConnection(path: options.dbPath)
     let messageRows = try fetchMessageRows(
       connection: connection,
@@ -839,23 +857,22 @@ struct Command {
       limit: options.limit
     )
 
-    if messageRows.isEmpty {
-      return IMessageSyncBatch(
-        cursor: options.afterRowID,
-        fetchedCount: 0,
-        chats: [],
-        messages: [],
-        handles: []
-      )
-    }
-
-    var messages = transformMessages(rows: messageRows)
+    // Cycle historical ROWIDs so late iCloud changes with old timestamps are seen.
+    let mutationRows = try fetchMessageRows(
+      connection: connection,
+      afterRowID: options.mutationsAfterRowID,
+      limit: options.limit,
+      throughRowID: options.afterRowID
+    )
+    let mutationHasMore = mutationRows.count >= options.limit
+    let mutationCursor = mutationHasMore ? (mutationRows.last?.rowID ?? 0) : 0
+    var messages = transformMessages(rows: messageRows + mutationRows)
     let attachments = try fetchAttachments(
       connection: connection,
       messageIDs: messages.map(\.id)
     )
     for index in messages.indices {
-      messages[index].attachments = attachments[messages[index].id] ?? []
+      messages[index].attachments = messages[index].deletedAt == nil ? (attachments[messages[index].id] ?? []) : []
     }
     let cursor = messageRows.last?.rowID ?? options.afterRowID
     let reactions = try fetchReactions(
@@ -864,7 +881,7 @@ struct Command {
     )
 
     for index in messages.indices {
-      messages[index].reactions = reactions[messages[index].guid] ?? []
+      messages[index].reactions = messages[index].deletedAt == nil ? (reactions[messages[index].guid] ?? []) : []
     }
 
     let chatIDs = Array(Set(messages.map(\.chatId))).sorted()
@@ -885,6 +902,8 @@ struct Command {
     }
 
     return IMessageSyncBatch(
+      mutationCursor: mutationCursor,
+      mutationHasMore: mutationHasMore,
       cursor: cursor,
       fetchedCount: messageRows.count,
       chats: chats,
@@ -1103,8 +1122,16 @@ struct Command {
   private static func fetchMessageRows(
     connection: SQLiteConnection,
     afterRowID: Int,
-    limit: Int
+    limit: Int,
+    throughRowID: Int? = nil
   ) throws -> [MessageRow] {
+    let columns = Set(try connection.query(sql: "PRAGMA table_info(message)") {
+      stringColumn($0, 1) ?? ""
+    })
+    let edited = columns.contains("date_edited") ? "COALESCE(m.date_edited, 0)" : "0"
+    let retracted = columns.contains("date_retracted") ? "COALESCE(m.date_retracted, 0)" : "0"
+    let mutationFilter = throughRowID == nil ? "" :
+      "AND m.ROWID <= ? AND (\(edited) > 0 OR \(retracted) > 0)"
     let sql = """
       SELECT
         m.ROWID as rowid,
@@ -1127,11 +1154,14 @@ struct Command {
         END as unix_date_read,
         m.error,
         m.cache_has_attachments,
-        m.associated_message_type
+        m.associated_message_type,
+        CASE WHEN \(edited) > 0 THEN CAST(\(edited) / 1000000 AS INTEGER) + \(appleEpochOffset * 1000) END,
+        CASE WHEN \(retracted) > 0 THEN CAST(\(retracted) / 1000000 AS INTEGER) + \(appleEpochOffset * 1000) END,
+        CAST(\(edited) AS TEXT) || ':' || CAST(\(retracted) AS TEXT)
       FROM message m
       INNER JOIN chat_message_join cmj ON cmj.message_id = m.ROWID
       LEFT JOIN handle h ON h.ROWID = m.handle_id
-      WHERE m.ROWID > ? AND m.item_type IN (0, 1, 2)
+      WHERE m.ROWID > ? AND m.item_type IN (0, 1, 2) \(mutationFilter)
       ORDER BY m.ROWID
       LIMIT ?
     """
@@ -1140,7 +1170,10 @@ struct Command {
       sql: sql,
       bind: { statement in
         sqlite3_bind_int64(statement, 1, sqlite3_int64(afterRowID))
-        sqlite3_bind_int64(statement, 2, sqlite3_int64(limit))
+        if let throughRowID {
+          sqlite3_bind_int64(statement, 2, sqlite3_int64(throughRowID))
+        }
+        sqlite3_bind_int64(statement, throughRowID == nil ? 2 : 3, sqlite3_int64(limit))
       },
       mapRow: { statement in
         MessageRow(
@@ -1161,7 +1194,10 @@ struct Command {
           unixDateRead: intColumn(statement, 14),
           errorCode: intColumn(statement, 15) ?? 0,
           hasAttachments: boolColumn(statement, 16),
-          associatedMessageType: intColumn(statement, 17) ?? 0
+          associatedMessageType: intColumn(statement, 17) ?? 0,
+          editedAt: intColumn(statement, 18),
+          deletedAt: intColumn(statement, 19),
+          mutationStamp: stringColumn(statement, 20) ?? "0:0"
         )
       }
     )
@@ -1192,7 +1228,10 @@ struct Command {
           guid: row.guid,
           chatId: row.chatID,
           itemType: row.itemType,
-          text: messageText,
+          text: row.deletedAt == nil ? messageText : nil,
+          editedAt: row.editedAt,
+          deletedAt: row.deletedAt,
+          mutationStamp: row.mutationStamp,
           timestamp: row.unixDate ?? 0,
           isFromMe: row.isFromMe,
           isRead: row.isRead,
@@ -1205,7 +1244,7 @@ struct Command {
             errorCode: row.errorCode
           ),
           errorCode: row.errorCode,
-          hasAttachments: row.hasAttachments,
+          hasAttachments: row.deletedAt == nil && row.hasAttachments,
           attachments: [],
           sender: sender,
           reactions: []

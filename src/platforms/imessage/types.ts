@@ -38,6 +38,9 @@ export interface ImsMessage {
   itemType?: number;
   text: string | null;
   timestamp: number;
+  editedAt?: number | null;
+  deletedAt?: number | null;
+  mutationStamp?: string;
   isFromMe: boolean;
   isRead: boolean;
   readAt: number | null;
@@ -52,6 +55,8 @@ export interface ImsMessage {
 export interface ImsSyncBatch {
   cursor: number;
   fetchedCount: number;
+  mutationCursor?: number;
+  mutationHasMore?: boolean;
   chats: ImsChat[];
   messages: ImsMessage[];
   handles: ImsHandle[];
