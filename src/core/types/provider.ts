@@ -18,6 +18,11 @@ export interface ContactHandleInput {
   deterministic?: boolean;
 }
 
+export interface ContactAliasPayload {
+  aliasSourceEntityKey: string;
+  canonicalSourceEntityKey: string;
+}
+
 export interface ContactObservationPayload {
   sourceEntityKey: string;
   fields: ContactFields;
@@ -142,6 +147,7 @@ export interface CallPayload {
 
 export type RawEventPayload =
   | ContactObservationPayload
+  | ContactAliasPayload
   | ConversationObservationPayload
   | CallPayload
   | MessagePayload

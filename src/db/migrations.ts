@@ -2278,4 +2278,17 @@ export const MIGRATIONS: Migration[] = [
       db.exec(`CREATE INDEX IF NOT EXISTS idx_sync_runs_queued_at ON sync_runs(queued_at DESC)`);
     },
   },
+  {
+    id: "0025_provider_identity_aliases",
+    sql: `CREATE TABLE IF NOT EXISTS provider_identity_aliases (
+      platform TEXT NOT NULL,
+      account_key TEXT NOT NULL,
+      alias_source_key TEXT NOT NULL,
+      canonical_source_key TEXT NOT NULL,
+      former_contact_id TEXT,
+      canonical_contact_id TEXT,
+      observed_at INTEGER NOT NULL,
+      PRIMARY KEY (platform, account_key, alias_source_key)
+    );`,
+  },
 ];

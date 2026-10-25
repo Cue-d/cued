@@ -14,6 +14,7 @@ import type {
   WhatsAppCallSnapshot,
   WhatsAppChatSnapshot,
   WhatsAppContactSnapshot,
+  WhatsAppIdentityAlias,
   WhatsAppMessageSnapshot,
   WhatsAppSnapshot,
 } from "../types.js";
@@ -156,7 +157,7 @@ export function buildWhatsAppContactEvent(
     {
       type: "whatsapp_jid",
       value: jid,
-      deterministic: true,
+      deterministic: !jid.endsWith("@lid"),
     },
   ];
   const phone = contact.phone?.trim() || extractWhatsAppPhone(jid);
@@ -501,13 +502,52 @@ function appendCalls(
   }
 }
 
+export function buildWhatsAppIdentityAliasEvents(
+  aliases: WhatsAppIdentityAlias[],
+  accountKey: string,
+  observedAt: number,
+): SyncBundle["rawEvents"] {
+  const seen = new Set<string>();
+  return aliases.flatMap(({ lid, pn }) => {
+    const normalizedLid = normalizeWhatsAppJid(lid);
+    const normalizedPn = normalizeWhatsAppJid(pn);
+    if (!/^\d+@lid$/.test(normalizedLid) || !/^\d+@s\.whatsapp\.net$/.test(normalizedPn)) {
+      throw new Error("Invalid WhatsApp provider identity alias");
+    }
+    const dedupeKey = stableId(`whatsapp:alias:${accountKey}:${normalizedLid}:${normalizedPn}`);
+    if (seen.has(dedupeKey)) return [];
+    seen.add(dedupeKey);
+    return [
+      {
+        id: stableId(`${dedupeKey}:${observedAt}`),
+        platform: "whatsapp" as const,
+        accountKey,
+        entityKind: "contact" as const,
+        eventKind: "aliased",
+        externalEntityId: normalizedLid,
+        observedAt,
+        dedupeKey,
+        payload: {
+          aliasSourceEntityKey: whatsappSourceEntityKey(normalizedLid),
+          canonicalSourceEntityKey: whatsappSourceEntityKey(normalizedPn),
+        },
+        sourceVersion: "whatsapp-v1",
+      },
+    ];
+  });
+}
+
 export function buildWhatsAppRawEventsFromSnapshot(options: {
   accountKey: string;
   snapshot: WhatsAppSnapshot;
   observedBase?: number;
 }): SyncBundle["rawEvents"] {
   const observedBase = options.observedBase ?? Date.now();
-  const rawEvents: SyncBundle["rawEvents"] = [];
+  const rawEvents: SyncBundle["rawEvents"] = buildWhatsAppIdentityAliasEvents(
+    options.snapshot.identityAliases ?? [],
+    options.accountKey,
+    observedBase,
+  );
   const seenContacts = new Set<string>();
   const seenConversations = new Set<string>();
 

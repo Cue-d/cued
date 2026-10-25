@@ -194,6 +194,16 @@ describe("daemon socket errors", () => {
 });
 
 describe("whatsapp realtime event routing", () => {
+  it("preserves authenticated identity aliases for projection", () => {
+    const identityAliases = [{ lid: "123@lid", pn: "1555@s.whatsapp.net" }];
+    expect(
+      buildWhatsAppRealtimeSnapshotFromEvent({
+        event: "history_sync",
+        identityAliases,
+        data: { contacts: [{ jid: "123@lid" }] },
+      }),
+    ).toEqual({ identityAliases, contacts: [{ jid: "123@lid" }] });
+  });
   it("turns call_upsert events into ingestible realtime snapshots", () => {
     expect(
       buildWhatsAppRealtimeSnapshotFromEvent({

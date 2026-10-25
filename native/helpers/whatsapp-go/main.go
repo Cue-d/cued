@@ -151,8 +151,9 @@ type responseEnvelope struct {
 }
 
 type eventEnvelope struct {
-	Event string      `json:"event"`
-	Data  interface{} `json:"data"`
+	IdentityAliases []identityAlias `json:"identityAliases,omitempty"`
+	Event           string          `json:"event"`
+	Data            interface{}     `json:"data"`
 }
 
 type commandEnvelope struct {
@@ -199,13 +200,14 @@ type helperState struct {
 }
 
 type resyncPage struct {
-	Contacts    []contactSnapshot `json:"contacts,omitempty"`
-	Chats       []chatSnapshot    `json:"chats,omitempty"`
-	Messages    []messageSnapshot `json:"messages,omitempty"`
-	Calls       []callSnapshot    `json:"calls,omitempty"`
-	NextCursor  *string           `json:"nextCursor,omitempty"`
-	HasMore     bool              `json:"hasMore"`
-	CompletedAt int64             `json:"completedAt"`
+	IdentityAliases []identityAlias   `json:"identityAliases,omitempty"`
+	Contacts        []contactSnapshot `json:"contacts,omitempty"`
+	Chats           []chatSnapshot    `json:"chats,omitempty"`
+	Messages        []messageSnapshot `json:"messages,omitempty"`
+	Calls           []callSnapshot    `json:"calls,omitempty"`
+	NextCursor      *string           `json:"nextCursor,omitempty"`
+	HasMore         bool              `json:"hasMore"`
+	CompletedAt     int64             `json:"completedAt"`
 }
 
 type resyncCursor struct {
@@ -1134,7 +1136,7 @@ func upsertMessageTx(tx *sql.Tx, message messageSnapshot, updatedAt int64) error
 		   participant_jid = excluded.participant_jid,
 		   from_me = excluded.from_me,
 		   timestamp = excluded.timestamp,
-		   text = excluded.text,
+		   text = CASE WHEN messages.revoked = 1 THEN messages.text ELSE excluded.text END,
 		   push_name = excluded.push_name,
 		   status = excluded.status,
 		   delivered_at = COALESCE(excluded.delivered_at, messages.delivered_at),
@@ -1143,7 +1145,7 @@ func upsertMessageTx(tx *sql.Tx, message messageSnapshot, updatedAt int64) error
 		   reply_to_sender_jid = excluded.reply_to_sender_jid,
 		   is_forwarded = excluded.is_forwarded,
 		   forwarding_score = excluded.forwarding_score,
-		   revoked = excluded.revoked,
+		   revoked = MAX(messages.revoked, excluded.revoked),
 		   updated_at = excluded.updated_at`,
 		normalizeJID(message.ChatJID),
 		message.MessageID,
@@ -1259,8 +1261,9 @@ func (r *helperRuntime) emitEvent(name string, data interface{}) {
 	r.writerM.Lock()
 	defer r.writerM.Unlock()
 	_ = r.writer.Encode(eventEnvelope{
-		Event: name,
-		Data:  data,
+		Event:           name,
+		Data:            data,
+		IdentityAliases: r.identityAliases(data),
 	})
 }
 
@@ -1628,6 +1631,9 @@ func waitForConnectedAfterPair(ctx context.Context, done <-chan struct{}) error 
 }
 
 func waitForPairHistorySyncCapture(ctx context.Context, runtime *helperRuntime) error {
+	if err := waitForPairPreKeys(ctx, runtime); err != nil {
+		return err
+	}
 	if runtime == nil {
 		return nil
 	}
@@ -1738,6 +1744,13 @@ func (r *helperRuntime) readCommands(ctx context.Context, errs chan<- error) {
 			}, nil)
 		case "resync":
 			page, err := r.state.getResyncPage(command.SinceMS, command.Cursor, command.Limit)
+			if err == nil {
+				if command.Cursor == "" {
+					page.IdentityAliases, err = r.cachedIdentityAliases()
+				} else {
+					page.IdentityAliases = r.identityAliases(page)
+				}
+			}
 			r.writeResponse(command.ID, err == nil, page, err)
 		case "requestHistoryBackfill":
 			result, err := r.requestHistoryBackfill(ctx, command.Anchors, command.Limit, command.WaitMS)
@@ -1995,6 +2008,16 @@ func (r *helperRuntime) handleMessageEvent(event *events.Message) {
 		}
 	}
 	snapshot := messageFromEvent(event)
+	if !snapshot.Revoked {
+		revoked, err := r.isMessageRevoked(snapshot)
+		if err != nil {
+			r.emitEvent("error", map[string]string{"message": fmt.Sprintf("check message revocation: %v", err)})
+			return
+		}
+		if revoked {
+			return
+		}
+	}
 	r.state.setMessage(snapshot)
 	contact := contactFromMessage(snapshot)
 	r.state.setContact(contact)
@@ -2078,7 +2101,13 @@ func (r *helperRuntime) applyHistorySyncData(data *waHistorySync.HistorySync) er
 	if data == nil {
 		return nil
 	}
+	if err := r.storeHistoryIdentityAliases(data); err != nil {
+		return fmt.Errorf("persist history identities: %w", err)
+	}
 	snapshot := historySyncBatchFromEvent(r.client, &events.HistorySync{Data: data})
+	if err := r.filterRevokedResends(&snapshot); err != nil {
+		return fmt.Errorf("check history revocations: %w", err)
+	}
 	if err := r.state.applySnapshot(snapshot); err != nil {
 		return err
 	}
@@ -2159,7 +2188,10 @@ func historySyncBatchFromEvent(client *whatsmeow.Client, event *events.HistorySy
 			if !ok {
 				continue
 			}
-			messagesByKey[snapshot.ChatJID+"::"+snapshot.MessageID] = snapshot
+			messageKey := snapshot.ChatJID + "::" + snapshot.MessageID
+			if existing, ok := messagesByKey[messageKey]; !ok || !existing.Revoked {
+				messagesByKey[messageKey] = snapshot
+			}
 			mergeContactSnapshot(contactsByJID, contactFromMessage(snapshot))
 			mergeChatSnapshot(chatsByJID, chatFromMessage(snapshot))
 		}
@@ -2617,6 +2649,9 @@ func historyMessageSnapshot(
 	historyMsg *waHistorySync.HistorySyncMsg,
 ) (messageSnapshot, bool) {
 	if historyMsg == nil || historyMsg.GetMessage() == nil {
+		return messageSnapshot{}, false
+	}
+	if !validHistoryTimestamp(historyMsg.GetMessage().GetMessageTimestamp()) {
 		return messageSnapshot{}, false
 	}
 	if client != nil {

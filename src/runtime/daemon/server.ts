@@ -97,6 +97,7 @@ import {
 } from "../../platforms/whatsapp/realtime/session.js";
 import {
   buildWhatsAppCallDeleteEvent,
+  buildWhatsAppIdentityAliasEvents,
   buildWhatsAppRawEventsFromSnapshot,
 } from "../../platforms/whatsapp/sync/events.js";
 import {
@@ -129,6 +130,7 @@ import {
 import { collectInboundMessageHookPayloads } from "../message-hooks.js";
 import { resolveMacOSNativeBinary } from "../native-binary.js";
 import { buildOnboardingSnapshot } from "../onboarding.js";
+import { canonicalizeWhatsAppSourceKey } from "../projection/identity-alias.js";
 import { projectRealtimeRange } from "../projection/projector.js";
 import {
   buildProjectionMessageHookBatches,
@@ -813,15 +815,30 @@ export function buildWhatsAppRealtimeSnapshotFromEvent(
 ): WhatsAppSnapshot | null {
   switch (event.event) {
     case "contact_upsert":
-      return { contacts: [event.data as WhatsAppHelperEventEnvelope<"contact_upsert">["data"]] };
+      return {
+        identityAliases: event.identityAliases,
+        contacts: [event.data as WhatsAppHelperEventEnvelope<"contact_upsert">["data"]],
+      };
     case "chat_upsert":
-      return { chats: [event.data as WhatsAppHelperEventEnvelope<"chat_upsert">["data"]] };
+      return {
+        identityAliases: event.identityAliases,
+        chats: [event.data as WhatsAppHelperEventEnvelope<"chat_upsert">["data"]],
+      };
     case "message_upsert":
-      return { messages: [event.data as WhatsAppHelperEventEnvelope<"message_upsert">["data"]] };
+      return {
+        identityAliases: event.identityAliases,
+        messages: [event.data as WhatsAppHelperEventEnvelope<"message_upsert">["data"]],
+      };
     case "call_upsert":
-      return { calls: [event.data as WhatsAppHelperEventEnvelope<"call_upsert">["data"]] };
+      return {
+        identityAliases: event.identityAliases,
+        calls: [event.data as WhatsAppHelperEventEnvelope<"call_upsert">["data"]],
+      };
     case "history_sync":
-      return event.data as WhatsAppHelperEventEnvelope<"history_sync">["data"];
+      return {
+        ...(event.data as WhatsAppHelperEventEnvelope<"history_sync">["data"]),
+        identityAliases: event.identityAliases,
+      };
     default:
       return null;
   }
@@ -2755,12 +2772,20 @@ export async function runDaemon(): Promise<void> {
   const applyReceiptToRealtimeSnapshot = async (
     accountKey: string,
     receipt: WhatsAppReceiptSnapshot,
+    identityAliases: NonNullable<WhatsAppHelperEventEnvelope["identityAliases"]> = [],
   ): Promise<void> => {
-    const message = db.findMessageByPlatformKey(
-      "whatsapp",
-      accountKey,
-      `${receipt.chatJID.toLowerCase()}:${receipt.messageID}`,
-    );
+    const rawKey = `${receipt.chatJID.toLowerCase()}:${receipt.messageID}`;
+    const alias = identityAliases.find((entry) => entry.lid === receipt.chatJID.toLowerCase());
+    // Projection may be deferred; try both the persisted mapping and the explicit
+    // mapping in this envelope before the original provider key.
+    const candidates = new Set([
+      canonicalizeWhatsAppSourceKey(db.orm(), accountKey, rawKey),
+      ...(alias ? [`${alias.pn}:${receipt.messageID}`] : []),
+      rawKey,
+    ]);
+    const message = [...candidates]
+      .map((key) => db.findMessageByPlatformKey("whatsapp", accountKey, key))
+      .find(Boolean);
     if (!message) {
       return;
     }
@@ -2805,7 +2830,10 @@ export async function runDaemon(): Promise<void> {
       case "call_delete": {
         const callDelete = event.data as WhatsAppHelperEventEnvelope<"call_delete">["data"];
         const rawEvents = withRawEventAcquisitionMode(
-          [buildWhatsAppCallDeleteEvent(callDelete, accountKey, now())],
+          [
+            ...buildWhatsAppIdentityAliasEvents(event.identityAliases ?? [], accountKey, now()),
+            buildWhatsAppCallDeleteEvent(callDelete, accountKey, now()),
+          ],
           "realtime",
         );
         db.upsertSourceAccounts([
@@ -2841,9 +2869,17 @@ export async function runDaemon(): Promise<void> {
         return;
       }
       case "receipt_update":
+        if (event.identityAliases?.length) {
+          await ingestWhatsAppRealtimeSnapshot(
+            accountKey,
+            { identityAliases: event.identityAliases },
+            `whatsapp_identity:${accountKey}`,
+          );
+        }
         await applyReceiptToRealtimeSnapshot(
           accountKey,
           event.data as WhatsAppHelperEventEnvelope<"receipt_update">["data"],
+          event.identityAliases,
         );
         return;
       default:

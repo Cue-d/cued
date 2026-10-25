@@ -6,7 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"strings"
@@ -210,17 +212,74 @@ type messagesResult struct {
 }
 
 type cookieTransport struct {
-	base   http.RoundTripper
-	cookie string
+	base       http.RoundTripper
+	cookie     string
+	testOrigin *url.URL
 }
 
 func (t cookieTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	// Reject the entire request: tokens may also occur in form bodies or URLs.
+	if !t.allowed(req.URL) {
+		return nil, errors.New("refusing Slack request to an untrusted origin")
+	}
 	clone := req.Clone(req.Context())
 	clone.Header = req.Header.Clone()
 	if t.cookie != "" {
 		clone.Header.Set("Cookie", fmt.Sprintf("d=%s", t.cookie))
 	}
 	return t.base.RoundTrip(clone)
+}
+
+func (t cookieTransport) allowed(u *url.URL) bool {
+	if u == nil || u.User != nil || u.Opaque != "" {
+		return false
+	}
+	if t.testOrigin != nil && u.Scheme == t.testOrigin.Scheme && u.Host == t.testOrigin.Host {
+		return true
+	}
+	if u.Scheme != "https" || (u.Port() != "" && u.Port() != "443") {
+		return false
+	}
+	switch strings.ToLower(u.Hostname()) {
+	case "slack.com", "files.slack.com":
+		return true
+	default:
+		return false
+	}
+}
+
+// API overrides are for local test servers, not arbitrary credential recipients.
+func slackTestOrigin(apiURL string) (*url.URL, error) {
+	if apiURL == "" {
+		return nil, nil
+	}
+	u, err := url.Parse(apiURL)
+	if err != nil {
+		return nil, errors.New("invalid Slack API URL")
+	}
+	if u.User != nil || u.RawQuery != "" || u.Fragment != "" || u.Opaque != "" {
+		return nil, errors.New("invalid Slack API URL")
+	}
+	if (cookieTransport{}).allowed(u) {
+		return nil, nil
+	}
+	ip := net.ParseIP(u.Hostname())
+	if (u.Scheme != "http" && u.Scheme != "https") || ip == nil || !ip.IsLoopback() {
+		return nil, errors.New("Slack API override must use HTTPS Slack or a literal loopback address")
+	}
+	return u, nil
+}
+
+func checkSlackRedirect(req *http.Request, via []*http.Request) error {
+	if len(via) >= 10 {
+		return errors.New("too many Slack redirects")
+	}
+	// Even trusted-host changes must not replay API tokens in bodies or queries.
+	origin := via[0].URL
+	if req.URL.Scheme != origin.Scheme || req.URL.Host != origin.Host || req.URL.User != nil {
+		return errors.New("refusing cross-origin Slack redirect")
+	}
+	return nil
 }
 
 type runnerOptions struct {
@@ -240,6 +299,10 @@ func newSlackClient(credentials slackCredentials, apiURL string) (*slackapi.Clie
 		return nil, errors.New("Slack credentials must include token and cookie")
 	}
 
+	testOrigin, err := slackTestOrigin(apiURL)
+	if err != nil {
+		return nil, err
+	}
 	baseTransport := http.DefaultTransport.(*http.Transport).Clone()
 	baseTransport.TLSHandshakeTimeout = tlsHandshakeTimeout
 	baseTransport.ResponseHeaderTimeout = responseHeaderTimeout
@@ -248,10 +311,12 @@ func newSlackClient(credentials slackCredentials, apiURL string) (*slackapi.Clie
 	baseTransport.MaxConnsPerHost = 20
 
 	client := &http.Client{
-		Timeout: requestTimeout,
+		Timeout:       requestTimeout,
+		CheckRedirect: checkSlackRedirect,
 		Transport: cookieTransport{
-			base:   baseTransport,
-			cookie: credentials.Cookie,
+			base:       baseTransport,
+			cookie:     credentials.Cookie,
+			testOrigin: testOrigin,
 		},
 	}
 	options := []slackapi.Option{

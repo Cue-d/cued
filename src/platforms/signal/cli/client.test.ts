@@ -11,6 +11,7 @@ import {
   parseSignalCliVersion,
   readSignalLinkedAccount,
   resolveSignalCliPath,
+  SignalCliClient,
   toSignalMessage,
 } from "./client.js";
 
@@ -61,6 +62,81 @@ describe("signal cli helpers", () => {
     );
 
     expect(readSignalLinkedAccount(dir)).toBe("+14155550123");
+  });
+
+  it.each([
+    {
+      accounts: [
+        {
+          path: "123456",
+          environment: "LIVE",
+          number: null,
+          uuid: "A4C993E2-19B5-4CCB-9F43-AC26D5B9F1D4",
+        },
+      ],
+      expected: "a4c993e2-19b5-4ccb-9f43-ac26d5b9f1d4",
+    },
+    {
+      accounts: [{ number: " +14155550123 ", uuid: "a4c993e2-19b5-4ccb-9f43-ac26d5b9f1d4" }],
+      expected: "+14155550123",
+    },
+    {
+      accounts: [
+        { number: "+14155550123" },
+        { number: "", uuid: " a4c993e2-19b5-4ccb-9f43-ac26d5b9f1d4 " },
+      ],
+      expected: "a4c993e2-19b5-4ccb-9f43-ac26d5b9f1d4",
+    },
+    {
+      accounts: [
+        { number: "+14155550123" },
+        { environment: "STAGING", number: "+14155550999" },
+        null,
+        { path: "654321", number: null, uuid: null },
+      ],
+      expected: "+14155550123",
+    },
+    { accounts: [{ path: "123456", number: 123, uuid: false }], expected: null },
+    { accounts: [], expected: null },
+  ])("discovers the newest usable live account: $expected", ({ accounts, expected }) => {
+    const dir = createTempDir("cued-signal-accounts-");
+    mkdirSync(join(dir, "data"));
+    writeFileSync(join(dir, "data", "accounts.json"), JSON.stringify({ version: 2, accounts }));
+    expect(readSignalLinkedAccount(dir)).toBe(expected);
+  });
+
+  it.each([
+    "{",
+    "null",
+    "{}",
+    '{"accounts":{}}',
+  ])("ignores malformed account storage %s", (contents) => {
+    const dir = createTempDir("cued-signal-invalid-");
+    expect(readSignalLinkedAccount(dir)).toBeNull();
+    mkdirSync(join(dir, "data"));
+    writeFileSync(join(dir, "data", "accounts.json"), contents);
+    expect(readSignalLinkedAccount(dir)).toBeNull();
+  });
+
+  it("uses a discovered phone-numberless account for CLI reads and excludes self", async () => {
+    const dir = createTempDir("cued-signal-uuid-");
+    const uuid = "a4c993e2-19b5-4ccb-9f43-ac26d5b9f1d4";
+    mkdirSync(join(dir, "data"));
+    writeFileSync(join(dir, "data", "accounts.json"), JSON.stringify({ accounts: [{ uuid }] }));
+    const cliPath = join(dir, "signal-cli");
+    writeFileSync(
+      cliPath,
+      `#!/bin/sh
+[ "$4" = "${uuid}" ] || exit 1
+[ "$7" = "listContacts" ] || exit 1
+printf '%s\\n' '[{"uuid":"${uuid}"},{"number":"+14155550123"}]'
+`,
+    );
+    chmodSync(cliPath, 0o755);
+    const account = readSignalLinkedAccount(dir);
+    expect(account).toBe(uuid);
+    const client = new SignalCliClient({ account: account!, configDir: dir, cliPath });
+    expect(await client.listContacts()).toEqual([{ number: "+14155550123" }]);
   });
 
   it("prefers the packaged app helper over the repo-local helper", () => {

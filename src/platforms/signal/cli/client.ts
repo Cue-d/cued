@@ -256,11 +256,26 @@ export function readSignalLinkedAccount(configDir: string): string | null {
   }
 
   try {
-    const parsed = JSON.parse(readFileSync(accountsPath, "utf8")) as {
-      accounts?: Array<{ number?: string }>;
-    };
-    const account = parsed.accounts?.at(-1)?.number?.trim();
-    return account && account.length > 0 ? account : null;
+    const parsed: unknown = JSON.parse(readFileSync(accountsPath, "utf8"));
+    if (!parsed || typeof parsed !== "object" || !("accounts" in parsed)) return null;
+    if (!Array.isArray(parsed.accounts)) return null;
+
+    // signal-cli AccountsStorage stores an ACI in uuid for phone-numberless
+    // accounts. Its path is a storage filename, not an accepted -a identifier.
+    // Keep the existing newest-account and phone-number preference.
+    for (let index = parsed.accounts.length - 1; index >= 0; index--) {
+      const account: unknown = parsed.accounts[index];
+      if (!account || typeof account !== "object") continue;
+      if ("environment" in account && account.environment != null && account.environment !== "LIVE")
+        continue;
+      if ("number" in account && typeof account.number === "string" && account.number.trim()) {
+        return account.number.trim();
+      }
+      if ("uuid" in account && typeof account.uuid === "string" && account.uuid.trim()) {
+        return account.uuid.trim().toLowerCase();
+      }
+    }
+    return null;
   } catch {
     return null;
   }
