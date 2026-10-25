@@ -42,6 +42,7 @@
     ]
   },
   "dependencies": {
+    "better-sqlite3": "npm:better-sqlite3-multiple-ciphers@^12.9.0",
     "better-sqlite3-multiple-ciphers": "^12.4.1",
     "drizzle-orm": "^0.45.1",
     "playwright": "^1.57.0",

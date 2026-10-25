@@ -364,6 +364,31 @@ describe("IntegrationAuthService", () => {
     db.close();
   });
 
+  it("successful reauthentication resumes power-delayed history immediately", async () => {
+    const db = createDb();
+    upsertAuthenticatedSlack(db, "T_EXISTING", "Existing");
+    importSlackDesktopAuthMock.mockResolvedValue([]);
+    const runId = db.queueSyncRun({
+      platform: "slack",
+      accountKey: "T_EXISTING",
+      runType: "sync_resume",
+      trigger: "ingest_continue",
+      delayMs: 60_000,
+      details: { powerDeferred: true, originTrigger: "scheduler" },
+    });
+    const wakeIngest = vi.fn();
+    await new IntegrationAuthService(db).connectManaged("slack", "T_EXISTING", new Map(), {
+      wakeIngest,
+    });
+    const claimed = db.claimNextQueuedRun(["sync_resume"], "ingesting");
+    expect(claimed?.id).toBe(runId);
+    expect(JSON.parse(claimed?.details_json ?? "{}").originTrigger).toBe(
+      "integration_authenticated",
+    );
+    expect(wakeIngest).toHaveBeenCalledOnce();
+    db.close();
+  });
+
   it("does not queue a Slack sync when reusable auth is not helper-ready", async () => {
     const db = createDb();
     upsertAuthenticatedSlack(db, "T_EXISTING", "Existing");

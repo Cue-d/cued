@@ -27,6 +27,61 @@ describe("RunQueueService", () => {
     return db;
   }
 
+  it.each([
+    "sync",
+    "resume",
+    "all",
+  ])("%s expedites power-delayed history without duplicating or resetting its cursor", (command) => {
+    const db = createDb();
+    db.upsertIntegrationState({
+      platform: "slack",
+      accountKey: "T1",
+      authState: "authenticated",
+      enabled: true,
+      connectionKind: "browser-session",
+      syncCapable: true,
+    });
+    const runId = db.queueSyncRun({
+      platform: "slack",
+      accountKey: "T1",
+      runType: "sync_resume",
+      trigger: "ingest_continue",
+      delayMs: 60_000,
+      details: {
+        powerDeferred: true,
+        originTrigger: "scheduler",
+        continuation: { reason: "account_pagination" },
+      },
+    });
+    const queue = new RunQueueService(db);
+    if (command === "resume") queue.queueSyncResume([{ platform: "slack", accountKey: "T1" }]);
+    else queue.queueSyncRun(command === "all" ? undefined : "slack");
+    const claimed = db.claimNextQueuedRun(["sync_resume"], "ingesting");
+    expect(claimed?.id).toBe(runId);
+    expect(JSON.parse(claimed?.details_json ?? "{}")).toEqual({
+      powerDeferred: false,
+      originTrigger: "cli",
+      continuation: { reason: "account_pagination" },
+    });
+    expect(db.listRecentRuns().filter((run) => run.platform === "slack")).toHaveLength(1);
+    db.close();
+  });
+
+  it("manual resume cannot expedite a provider rate-limit delay", () => {
+    const db = createDb();
+    db.queueSyncRun({
+      platform: "slack",
+      accountKey: "T1",
+      runType: "sync_resume",
+      trigger: "ingest_continue",
+      delayMs: 60_000,
+      details: { powerDeferred: false, continuation: { reason: "rate_limit_backoff" } },
+    });
+    new RunQueueService(db).queueSyncResume([{ platform: "slack", accountKey: "T1" }]);
+    expect(db.claimNextQueuedRun(["sync_resume"], "ingesting")).toBeNull();
+    db.close();
+  });
+
   it("queues enabled Slack accounts instead of the default placeholder account", () => {
     const db = createDb();
     db.upsertIntegrationState({
