@@ -1524,6 +1524,7 @@ final class MenuBarAppController: NSObject, NSApplicationDelegate {
     self?.rebuildMenu()
   }
   private var timer: Timer?
+  private let powerStatePublisher = PowerStatePublisher(path: "\(configuredCuedHomePath())/power-state.json")
   private var shouldAutoStartDaemon = true
   private let statusItemImage = MenuBarAppController.loadStatusItemImage()
 
@@ -1556,6 +1557,7 @@ final class MenuBarAppController: NSObject, NSApplicationDelegate {
     daemonSupervisor.startIfNeeded()
     rebuildMenu()
     statusMonitor.start()
+    powerStatePublisher.start()
     timer = Timer.scheduledTimer(timeInterval: 5, target: self, selector: #selector(refreshStatus), userInfo: nil, repeats: true)
     if let timer {
       // Stay comfortably inside the 15-second lease expiry, allowing coalescing.
@@ -1563,7 +1565,7 @@ final class MenuBarAppController: NSObject, NSApplicationDelegate {
       RunLoop.main.add(timer, forMode: .common)
     }
     NSWorkspace.shared.notificationCenter.addObserver(
-      self, selector: #selector(refreshStatus), name: NSWorkspace.didWakeNotification, object: nil
+      self, selector: #selector(handlePowerWake), name: NSWorkspace.didWakeNotification, object: nil
     )
     DispatchQueue.main.asyncAfter(deadline: .now() + 0.75) { [weak self] in
       self?.openRootWindowIfNeeded()
@@ -1574,6 +1576,7 @@ final class MenuBarAppController: NSObject, NSApplicationDelegate {
     timer?.invalidate()
     NSWorkspace.shared.notificationCenter.removeObserver(self)
     statusMonitor.stop()
+    powerStatePublisher.stop()
     DistributedNotificationCenter.default().removeObserver(self)
     menuBarLease.release()
   }
@@ -1598,6 +1601,11 @@ final class MenuBarAppController: NSObject, NSApplicationDelegate {
       daemonSupervisor.startIfNeeded()
     }
     rebuildMenu()
+  }
+
+  @objc private func handlePowerWake() {
+    powerStatePublisher.publish()
+    refreshStatus()
   }
 
   @objc private func refreshStatus() {

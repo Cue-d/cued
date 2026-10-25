@@ -153,6 +153,7 @@ import {
   shouldBootstrapLocalIntegrations,
   shouldRunLocalWatcher as shouldRunLocalWatcherForState,
 } from "./local-watchers.js";
+import { continuationDelay, readHostPowerState } from "./power-pacing.js";
 
 const DAEMON_VERSION = getCurrentAppVersion();
 const DEFAULT_AUTOSYNC_INTERVAL_MS = 60_000;
@@ -4451,7 +4452,31 @@ export async function runDaemon(): Promise<void> {
         requestSignalRealtimeReconcile();
       }
       if (bundleHasMore && !db.hasQueuedOrRunningRun(currentRun.platform, accountKey)) {
-        const continuationDelayMs = getEffectiveSyncContinueDelayMs(currentRun.platform);
+        const baseDelayMs = getEffectiveSyncContinueDelayMs(currentRun.platform);
+        const originTrigger =
+          typeof runDetails?.originTrigger === "string"
+            ? runDetails.originTrigger
+            : currentRun.trigger;
+        // Slack history polling misses old-thread replies; Gmail history blocks live ingestion.
+        const liveCoverage = [
+          ...discordRealtime.getStatuses(),
+          ...linkedInRealtime.getStatuses(),
+          ...signalRealtime.getStatuses(),
+          ...whatsAppRealtime.getStatuses(),
+        ].some(
+          (status) =>
+            status.platform === platform &&
+            status.accountKey === accountKey &&
+            status.state === "connected",
+        );
+        const continuationDelayMs = continuationDelay({
+          baseMs: baseDelayMs,
+          originTrigger,
+          liveCoverage,
+          syncMode: bundleSyncMode,
+          continuation: bundleContinuation,
+          power: readHostPowerState(),
+        });
         db.queueSyncRun({
           platform: currentRun.platform,
           accountKey,
@@ -4462,6 +4487,8 @@ export async function runDaemon(): Promise<void> {
             source: currentRun.platform,
             accountKey,
             trigger: "ingest_continue",
+            originTrigger,
+            powerDeferred: continuationDelayMs > baseDelayMs,
             ...(bundleContinuation ? { continuation: bundleContinuation } : {}),
           },
         });

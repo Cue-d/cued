@@ -385,6 +385,14 @@ export class IntegrationAuthService {
           },
         });
         lifecycle.wakeIngest?.();
+      } else if (
+        this.db.expeditePowerDeferredSyncRun(
+          integration.platform,
+          integration.accountKey,
+          "integration_authenticated",
+        )
+      ) {
+        lifecycle.wakeIngest?.();
       }
     }
 

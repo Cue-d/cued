@@ -3836,6 +3836,33 @@ export class CuedDatabase {
     };
   }
 
+  /** Manual sync may bypass our power delay, never a provider retry/backoff. */
+  expeditePowerDeferredSyncRun(
+    platform: Platform,
+    accountKey: string,
+    originTrigger: "cli" | "integration_authenticated" = "cli",
+  ): string | null {
+    return this.db.transaction((tx) => {
+      const predicate = and(
+        eq(syncRuns.platform, platform),
+        eq(syncRuns.accountKey, accountKey),
+        eq(syncRuns.status, "queued"),
+        eq(syncRuns.runType, "sync_resume"),
+        sql`CASE WHEN json_valid(${syncRuns.detailsJson}) THEN json_extract(${syncRuns.detailsJson}, '$.powerDeferred') ELSE 0 END = 1`,
+      );
+      const run = tx.select({ id: syncRuns.id }).from(syncRuns).where(predicate).limit(1).get();
+      if (!run) return null;
+      tx.update(syncRuns)
+        .set({
+          scheduledAt: now(),
+          detailsJson: sql`json_set(${syncRuns.detailsJson}, '$.originTrigger', ${originTrigger}, '$.powerDeferred', json('false'))`,
+        })
+        .where(eq(syncRuns.id, run.id))
+        .run();
+      return run.id;
+    });
+  }
+
   hasQueuedOrRunningRun(platform: Platform, accountKey?: string | null): boolean {
     const accountPredicate = accountKey == null ? sql`1 = 1` : eq(syncRuns.accountKey, accountKey);
     return Boolean(
