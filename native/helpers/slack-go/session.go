@@ -368,6 +368,7 @@ func (r helperRunner) runSession(ctx context.Context, stdin io.Reader, stdout io
 	conversationLimit := sessionPositiveInt(input.ConversationLimit, defaultSessionPageLimit)
 	messageLimit := sessionPositiveInt(input.MessageLimit, defaultSessionPageLimit)
 	lastUserRefresh := time.Time{}
+	quietPolls := 0
 
 	if err := writeSessionEvent(stdout, "connected", connectedEventData{
 		TeamID:    auth.TeamID,
@@ -415,6 +416,7 @@ func (r helperRunner) runSession(ctx context.Context, stdin io.Reader, stdout io
 		default:
 		}
 
+		hadActivity := false
 		if err := refreshUsers(false); err != nil {
 			_ = writeSessionEvent(stdout, "disconnected", disconnectedEventData{Reason: err.Error()})
 			return err
@@ -445,6 +447,7 @@ func (r helperRunner) runSession(ctx context.Context, stdin io.Reader, stdout io
 				displayName := conversationDisplayName(conversation, usersByID)
 				version := conversationVersionKey(conversation, memberIDs, displayName)
 				if state.conversationVersions[conversation.ID] != version {
+					hadActivity = true
 					state.conversationVersions[conversation.ID] = version
 					if eventErr := writeSessionEvent(stdout, "conversation_upsert", conversationUpsertEventData{
 						TeamID:       auth.TeamID,
@@ -481,6 +484,7 @@ func (r helperRunner) runSession(ctx context.Context, stdin io.Reader, stdout io
 					if !slackTSAfter(message.TS, previousWatermark) {
 						continue
 					}
+					hadActivity = true
 					if eventErr := writeSessionEvent(stdout, "message_upsert", messageUpsertEventData{
 						TeamID:         auth.TeamID,
 						SelfUserID:     auth.UserID,
@@ -499,7 +503,12 @@ func (r helperRunner) runSession(ctx context.Context, stdin io.Reader, stdout io
 			}
 		}
 
-		timer := time.NewTimer(pollInterval)
+		if hadActivity {
+			quietPolls = 0
+		} else if quietPolls < 2 {
+			quietPolls++
+		}
+		timer := time.NewTimer(adaptiveSessionPollInterval(pollInterval, quietPolls))
 		select {
 		case <-ctx.Done():
 			timer.Stop()
@@ -507,4 +516,19 @@ func (r helperRunner) runSession(ctx context.Context, stdin io.Reader, stdout io
 		case <-timer.C:
 		}
 	}
+}
+
+// Keep the timer after the completed request cycle: slow APIs never overlap polls.
+// Explicit non-default intervals retain their configured freshness contract.
+func adaptiveSessionPollInterval(base time.Duration, quietPolls int) time.Duration {
+	if base != defaultSessionPollInterval {
+		return base
+	}
+	if quietPolls < 0 {
+		quietPolls = 0
+	}
+	if quietPolls > 2 {
+		quietPolls = 2
+	}
+	return base * time.Duration(1<<quietPolls)
 }
