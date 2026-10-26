@@ -36,13 +36,31 @@ for executable_path in \
   "$RESOURCES_PATH/scripts/request-macos-access.sh" \
   "$RESOURCES_PATH/helpers/cued-native-helper" \
   "$RESOURCES_PATH/helpers/cued-slack-helper" \
-  "$RESOURCES_PATH/helpers/cued-whatsapp-helper" \
-  "$RESOURCES_PATH/helpers/signal-cli/cued-signal-cli"; do
+  "$RESOURCES_PATH/helpers/cued-whatsapp-helper"; do
   if [[ ! -x "$executable_path" ]]; then
     echo "Bundled executable missing or not executable: $executable_path" >&2
     exit 1
   fi
 done
+
+# Signal is downloaded on demand; its installer and pinned manifest must ship.
+if [[ ! -f "$RESOURCES_PATH/scripts/fetch-signal-cli-macos.sh" ]]; then
+  echo "Bundled Signal runtime installer is missing" >&2
+  exit 1
+fi
+
+if ! cmp -s "$ROOT_DIR/scripts/packaging/signal-runtime.json" \
+  "$RESOURCES_PATH/scripts/packaging/signal-runtime.json"; then
+  echo "Bundled Signal runtime manifest is missing or differs from release pins" >&2
+  exit 1
+fi
+
+# Builds may still opt into a bundled Signal runtime.
+if [[ -d "$RESOURCES_PATH/helpers/signal-cli" && \
+  ! -x "$RESOURCES_PATH/helpers/signal-cli/cued-signal-cli" ]]; then
+  echo "Bundled Signal runtime is missing its executable launcher" >&2
+  exit 1
+fi
 
 for forbidden_path in \
   "$RUNTIME_PATH/scripts" \

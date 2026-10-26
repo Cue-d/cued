@@ -249,6 +249,14 @@ function connect(testCase: PlatformCase, accountKey: string): Json {
     `${testCase.platform} integration was not authenticated`,
   );
   assert(integration?.syncCapable === true, `${testCase.platform} was not sync-capable after auth`);
+  if (testCase.runtime === "chromium") {
+    const credentials = integration?.metadata as Json | undefined;
+    assert(
+      credentials?.keychainService === shadowKeychainService &&
+        credentials?.keychainAccount === testCase.finalAccount,
+      `${testCase.platform} reused non-test credentials; refusing destructive lifecycle checks`,
+    );
+  }
   const account = String(integration?.accountKey);
   assert(
     account === testCase.finalAccount,
