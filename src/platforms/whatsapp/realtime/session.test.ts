@@ -45,7 +45,7 @@ describe("whatsapp realtime", () => {
     vi.clearAllMocks();
   });
 
-  it("parses helper events and routes sends over the session", async () => {
+  it("parses helper events and routes resync over the session", async () => {
     const child = new MockChild();
     spawnMock.mockReturnValue(child);
     const onEvent = vi.fn();
@@ -91,12 +91,12 @@ describe("whatsapp realtime", () => {
       }),
     );
 
-    const sendPromise = session.sendText("12016824050@s.whatsapp.net", "ping");
+    const resyncPromise = session.resync({ sinceMs: 123, limit: 20 });
     expect(JSON.parse(child.stdinWrites[0]!.trim())).toEqual({
       id: 1,
-      command: "sendText",
-      target: "12016824050@s.whatsapp.net",
-      text: "ping",
+      command: "resync",
+      sinceMs: 123,
+      limit: 20,
     });
 
     child.stdout.write(
@@ -104,17 +104,21 @@ describe("whatsapp realtime", () => {
         id: 1,
         ok: true,
         result: {
-          messageID: "wamid-2",
-          chatJID: "12016824050@s.whatsapp.net",
-          timestamp: 123,
+          contacts: [],
+          chats: [],
+          messages: [],
+          hasMore: false,
+          completedAt: 123,
         },
       })}\n`,
     );
 
-    await expect(sendPromise).resolves.toEqual({
-      messageID: "wamid-2",
-      chatJID: "12016824050@s.whatsapp.net",
-      timestamp: 123,
+    await expect(resyncPromise).resolves.toEqual({
+      contacts: [],
+      chats: [],
+      messages: [],
+      hasMore: false,
+      completedAt: 123,
     });
     expect(parseWhatsAppHelperLine('{"event":"connected","data":{"accountJid":"x"}}')).toEqual({
       event: "connected",
@@ -142,7 +146,7 @@ describe("whatsapp realtime", () => {
     session.start();
     child.emit("spawn");
     expect(session.getStatus().state).toBe("connecting");
-    await expect(session.sendText("12016824050@s.whatsapp.net", "ping")).rejects.toThrowError(
+    await expect(session.resync()).rejects.toThrowError(
       "WhatsApp realtime session is not connected",
     );
 
@@ -403,13 +407,6 @@ describe("whatsapp realtime", () => {
         },
         isConnected() {
           return true;
-        },
-        async sendText() {
-          return {
-            messageID: "wamid-1",
-            chatJID: "12016824050@s.whatsapp.net",
-            timestamp: 1,
-          };
         },
         async downloadMedia() {
           return {

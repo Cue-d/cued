@@ -159,8 +159,6 @@ type eventEnvelope struct {
 type commandEnvelope struct {
 	ID              int                     `json:"id"`
 	Command         string                  `json:"command"`
-	Target          string                  `json:"target,omitempty"`
-	Text            string                  `json:"text,omitempty"`
 	Cursor          string                  `json:"cursor,omitempty"`
 	SinceMS         *int64                  `json:"sinceMs,omitempty"`
 	Limit           int                     `json:"limit,omitempty"`
@@ -1758,9 +1756,6 @@ func (r *helperRuntime) readCommands(ctx context.Context, errs chan<- error) {
 		case "downloadMedia":
 			result, err := r.downloadMedia(ctx, command.ChatJID, command.MessageID, command.AttachmentIndex)
 			r.writeResponse(command.ID, err == nil, result, err)
-		case "sendText":
-			result, err := r.sendText(ctx, command.Target, command.Text)
-			r.writeResponse(command.ID, err == nil, result, err)
 		default:
 			r.writeResponse(command.ID, false, nil, fmt.Errorf("unsupported command: %s", command.Command))
 		}
@@ -1859,42 +1854,6 @@ doneWaiting:
 		return result, errors.New("all history backfill requests failed")
 	}
 	return result, nil
-}
-
-func (r *helperRuntime) sendText(ctx context.Context, target string, text string) (map[string]interface{}, error) {
-	targetJID, err := types.ParseJID(target)
-	if err != nil {
-		return nil, err
-	}
-
-	message := &waProto.Message{
-		Conversation: proto.String(text),
-	}
-	resp, err := r.client.SendMessage(ctx, targetJID, message)
-	if err != nil {
-		return nil, err
-	}
-
-	chatJID := normalizeJID(targetJID.String())
-	messageID := resp.ID
-	timestamp := time.Now().UnixMilli()
-	snapshot := messageSnapshot{
-		MessageID:   messageID,
-		ChatJID:     chatJID,
-		SenderJID:   stringPtr(jidString(r.client.Store.ID)),
-		FromMe:      true,
-		Timestamp:   timestamp,
-		Text:        text,
-		Status:      stringPtr("sent"),
-		Attachments: []attachmentSnapshot{},
-	}
-	r.state.setMessage(snapshot)
-
-	return map[string]interface{}{
-		"messageID": messageID,
-		"chatJID":   chatJID,
-		"timestamp": timestamp,
-	}, nil
 }
 
 func (r *helperRuntime) downloadMedia(ctx context.Context, chatJID string, messageID string, attachmentIndex int) (map[string]interface{}, error) {

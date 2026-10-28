@@ -52,10 +52,6 @@ export class DiscordApiClient {
     return await this.request<DiscordChannel[]>("/users/@me/channels");
   }
 
-  async getChannel(channelId: string): Promise<DiscordChannel> {
-    return await this.request<DiscordChannel>(`/channels/${channelId}`);
-  }
-
   async listChannelMessages(
     channelId: string,
     options: { after?: string | null; before?: string | null; limit?: number } = {},
@@ -74,40 +70,13 @@ export class DiscordApiClient {
     return await this.request<DiscordMessage[]>(`/channels/${channelId}/messages${suffix}`);
   }
 
-  async sendMessage(
-    channelId: string,
-    content: string,
-    options: { replyToMessageId?: string | null } = {},
-  ): Promise<DiscordMessage> {
-    return await this.request<DiscordMessage>(`/channels/${channelId}/messages`, {
-      method: "POST",
-      body: {
-        content,
-        allowed_mentions: { parse: [] as string[] },
-        ...(options.replyToMessageId
-          ? {
-              message_reference: {
-                message_id: options.replyToMessageId,
-              },
-            }
-          : {}),
-      },
-    });
-  }
-
-  private async request<T>(
-    path: string,
-    options: {
-      method?: string;
-      body?: Record<string, unknown>;
-    } = {},
-  ): Promise<T> {
+  private async request<T>(path: string): Promise<T> {
     let attempt = 0;
     let lastError: unknown;
 
     while (attempt < DEFAULT_MAX_RETRIES) {
       try {
-        return await this.requestOnce<T>(path, options);
+        return await this.requestOnce<T>(path);
       } catch (error) {
         lastError = error;
         attempt += 1;
@@ -121,15 +90,9 @@ export class DiscordApiClient {
     throw lastError instanceof Error ? lastError : new Error(String(lastError));
   }
 
-  private async requestOnce<T>(
-    path: string,
-    options: {
-      method?: string;
-      body?: Record<string, unknown>;
-    },
-  ): Promise<T> {
+  private async requestOnce<T>(path: string): Promise<T> {
     const response = await this.fetchImpl(`${API_BASE_URL}${path}`, {
-      method: options.method ?? "GET",
+      method: "GET",
       headers: {
         Accept: "application/json",
         Authorization: this.credentials.token,
@@ -137,7 +100,6 @@ export class DiscordApiClient {
         "User-Agent":
           "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Cued/1.0",
       },
-      body: options.body ? JSON.stringify(options.body) : undefined,
     });
 
     if (response.status === 429) {
@@ -148,12 +110,7 @@ export class DiscordApiClient {
 
     if (!response.ok) {
       const body = await safeText(response);
-      throw new DiscordApiError(
-        options.method ?? "GET",
-        path,
-        response.status,
-        body || response.statusText,
-      );
+      throw new DiscordApiError("GET", path, response.status, body || response.statusText);
     }
 
     return (await response.json()) as T;
