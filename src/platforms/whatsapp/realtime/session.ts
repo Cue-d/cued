@@ -6,7 +6,6 @@ import type {
   WhatsAppHelperDownloadResult,
   WhatsAppHelperEventEnvelope,
   WhatsAppHelperResponseEnvelope,
-  WhatsAppHelperSendResult,
   WhatsAppHistoryBackfillAnchor,
   WhatsAppHistoryBackfillResult,
   WhatsAppResyncPage,
@@ -67,7 +66,6 @@ export interface WhatsAppRealtimeSessionLike {
   stop(): void;
   getStatus(): WhatsAppRealtimeStatus;
   isConnected(): boolean;
-  sendText(target: string, text: string): Promise<WhatsAppHelperSendResult>;
   downloadMedia(
     chatJID: string,
     messageID: string,
@@ -245,22 +243,6 @@ export class WhatsAppRealtimeSession implements WhatsAppRealtimeSessionLike {
 
   isConnected(): boolean {
     return this.status.state === "connected" && Boolean(this.child?.stdin?.writable);
-  }
-
-  async sendText(target: string, text: string): Promise<WhatsAppHelperSendResult> {
-    const trimmedTarget = target.trim();
-    const trimmedText = text.trim();
-    if (!trimmedTarget || !trimmedText) {
-      throw new Error("WhatsApp send requires a target and text");
-    }
-
-    const result = await this.request<WhatsAppHelperSendResult>({
-      id: this.nextRequestId++,
-      command: "sendText",
-      target: trimmedTarget,
-      text: trimmedText,
-    });
-    return result;
   }
 
   async resync(

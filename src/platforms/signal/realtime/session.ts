@@ -3,7 +3,6 @@ import { createInterface, type Interface as ReadLineInterface } from "node:readl
 import { createLogger } from "../../../core/logging.js";
 import { type SignalReceivedMessage, toSignalMessage } from "../cli/client.js";
 
-const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
 const DEFAULT_RECONNECT_BASE_MS = 1_000;
 const DEFAULT_RECONNECT_MAX_MS = 60_000;
 const signalLogger = createLogger("signal");
@@ -29,18 +28,9 @@ export interface SignalRealtimeStatus {
   lastSessionError: string | null;
 }
 
-interface PendingRequest {
-  method: string;
-  resolve: (value: unknown) => void;
-  reject: (reason: Error) => void;
-  timeout: NodeJS.Timeout;
-}
-
 interface SignalJsonRpcMessage {
   id?: number | string;
   method?: string;
-  result?: unknown;
-  error?: { code?: number; message?: string; data?: unknown };
   params?: unknown;
 }
 
@@ -49,7 +39,6 @@ interface SignalRealtimeSessionOptions {
   account: string;
   cliPath: string;
   configDir: string;
-  requestTimeoutMs?: number;
   reconnectBaseMs?: number;
   reconnectMaxMs?: number;
   spawnImpl?: typeof spawn;
@@ -64,11 +53,6 @@ export interface SignalRealtimeSessionLike {
   stop(): void;
   stopAndWait(): Promise<void>;
   getStatus(): SignalRealtimeStatus;
-  isConnected(): boolean;
-  sendMessage(
-    text: string,
-    target: { recipient?: string; groupId?: string },
-  ): Promise<{ timestamp: number }>;
 }
 
 export interface SignalRealtimeSupervisorSessionInput {
@@ -136,7 +120,6 @@ export class SignalRealtimeSession implements SignalRealtimeSessionLike {
   private readonly account: string;
   private readonly cliPath: string;
   private readonly configDir: string;
-  private readonly requestTimeoutMs: number;
   private readonly reconnectBaseMs: number;
   private readonly reconnectMaxMs: number;
   private readonly spawnImpl: typeof spawn;
@@ -147,9 +130,7 @@ export class SignalRealtimeSession implements SignalRealtimeSessionLike {
 
   private child: ChildProcess | null = null;
   private readLine: ReadLineInterface | null = null;
-  private nextRequestId = 1;
   private nextNotificationIndex = 0;
-  private pendingRequests = new Map<number, PendingRequest>();
   private reconnectTimer: NodeJS.Timeout | null = null;
   private shouldReconnect = false;
   private hasEverConnected = false;
@@ -161,7 +142,6 @@ export class SignalRealtimeSession implements SignalRealtimeSessionLike {
     this.account = options.account;
     this.cliPath = options.cliPath;
     this.configDir = options.configDir;
-    this.requestTimeoutMs = options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
     this.reconnectBaseMs = options.reconnectBaseMs ?? DEFAULT_RECONNECT_BASE_MS;
     this.reconnectMaxMs = options.reconnectMaxMs ?? DEFAULT_RECONNECT_MAX_MS;
     this.spawnImpl = options.spawnImpl ?? spawn;
@@ -196,7 +176,6 @@ export class SignalRealtimeSession implements SignalRealtimeSessionLike {
   async stopAndWait(): Promise<void> {
     this.shouldReconnect = false;
     this.clearReconnectTimer();
-    this.rejectPendingRequests("Signal realtime session stopped");
     const child = this.child;
     if (!child) {
       this.stopping = false;
@@ -214,73 +193,6 @@ export class SignalRealtimeSession implements SignalRealtimeSessionLike {
 
   getStatus(): SignalRealtimeStatus {
     return { ...this.status };
-  }
-
-  isConnected(): boolean {
-    return this.status.state === "connected" && Boolean(this.child?.stdin?.writable);
-  }
-
-  async sendMessage(
-    text: string,
-    target: { recipient?: string; groupId?: string },
-  ): Promise<{ timestamp: number }> {
-    const message = text.trim();
-    if (message.length === 0) {
-      throw new Error("Signal message text is required");
-    }
-
-    const params: Record<string, unknown> = { message };
-    if (target.groupId) {
-      params.groupId = target.groupId;
-    } else if (target.recipient) {
-      params.recipient = [target.recipient];
-    } else {
-      throw new Error("Signal message requires a recipient or groupId");
-    }
-
-    const result = await this.request<{ timestamp?: number }>("send", params);
-    return {
-      timestamp: typeof result?.timestamp === "number" ? result.timestamp : now(),
-    };
-  }
-
-  async request<T>(method: string, params: Record<string, unknown>): Promise<T> {
-    if (!this.child?.stdin?.writable || !this.isConnected()) {
-      throw new Error("Signal realtime session is not connected");
-    }
-
-    const id = this.nextRequestId++;
-    const payload =
-      JSON.stringify({
-        jsonrpc: "2.0",
-        id,
-        method,
-        params,
-      }) + "\n";
-
-    return await new Promise<T>((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        this.pendingRequests.delete(id);
-        reject(new Error(`Signal JSON-RPC request timed out: ${method}`));
-      }, this.requestTimeoutMs);
-
-      this.pendingRequests.set(id, {
-        method,
-        resolve: resolve as (value: unknown) => void,
-        reject,
-        timeout,
-      });
-
-      this.child!.stdin!.write(payload, (error) => {
-        if (!error) {
-          return;
-        }
-
-        clearTimeout(timeout);
-        this.pendingRequests.delete(id);
-        reject(new Error(`Failed to write Signal JSON-RPC request: ${error.message}`));
-      });
-    });
   }
 
   private spawnChild(): void {
@@ -350,23 +262,7 @@ export class SignalRealtimeSession implements SignalRealtimeSessionLike {
       return;
     }
 
-    if (message.id != null) {
-      const numericId = Number(message.id);
-      const pending = Number.isFinite(numericId) ? this.pendingRequests.get(numericId) : undefined;
-      if (!pending) {
-        return;
-      }
-      this.pendingRequests.delete(numericId);
-      clearTimeout(pending.timeout);
-      if (message.error?.message) {
-        pending.reject(new Error(message.error.message));
-        return;
-      }
-      pending.resolve(message.result);
-      return;
-    }
-
-    if (message.method !== "receive" || message.params == null) {
+    if (message.id != null || message.method !== "receive" || message.params == null) {
       return;
     }
 
@@ -381,7 +277,6 @@ export class SignalRealtimeSession implements SignalRealtimeSessionLike {
     const wasActive = this.status.state !== "stopped";
     const intentionalStop = this.stopping;
     this.stopping = false;
-    this.rejectPendingRequests(error.message);
     this.disposeChild();
     if (!wasActive) {
       return;
@@ -425,14 +320,6 @@ export class SignalRealtimeSession implements SignalRealtimeSessionLike {
       this.setStatus({ state: "reconnecting" });
       this.spawnChild();
     }, delayMs);
-  }
-
-  private rejectPendingRequests(reason: string): void {
-    for (const [id, pending] of this.pendingRequests) {
-      clearTimeout(pending.timeout);
-      pending.reject(new Error(reason));
-      this.pendingRequests.delete(id);
-    }
   }
 
   private disposeChild(): void {
@@ -502,11 +389,6 @@ export class SignalRealtimeSupervisor {
   private readonly onStatusChange?: SignalRealtimeSupervisorOptions["onStatusChange"];
   private readonly sessions = new Map<string, ManagedSignalSession>();
   private readonly degradedStatuses = new Map<string, SignalRealtimeStatus>();
-  private readonly waiters = new Map<
-    string,
-    Array<{ resolve: (session: SignalRealtimeSessionLike | null) => void; timer: NodeJS.Timeout }>
-  >();
-
   constructor(options: SignalRealtimeSupervisorOptions = {}) {
     this.onMessage = options.onMessage;
     this.onConnected = options.onConnected;
@@ -519,10 +401,6 @@ export class SignalRealtimeSupervisor {
           ...input,
           onMessage: (message) => this.onMessage?.(input.accountKey, message),
           onConnected: (status, reconnected) => {
-            this.resolveWaiters(
-              input.accountKey,
-              this.sessions.get(input.accountKey)?.session ?? null,
-            );
             this.onConnected?.(input.accountKey, status, reconnected);
           },
           onDisconnected: (status) => {
@@ -546,7 +424,6 @@ export class SignalRealtimeSupervisor {
       if (!desired || !this.sameDesiredSession(managed.desired, desired)) {
         managed.session.stop();
         this.sessions.delete(accountKey);
-        this.resolveWaiters(accountKey, null);
       }
     }
 
@@ -579,9 +456,8 @@ export class SignalRealtimeSupervisor {
   }
 
   stopAll(): void {
-    for (const [accountKey, managed] of this.sessions) {
+    for (const managed of this.sessions.values()) {
       managed.session.stop();
-      this.resolveWaiters(accountKey, null);
     }
     this.sessions.clear();
     this.degradedStatuses.clear();
@@ -605,48 +481,6 @@ export class SignalRealtimeSupervisor {
     }
 
     await session.stopAndWait();
-  }
-
-  async waitForConnected(
-    accountKey: string,
-    timeoutMs: number,
-  ): Promise<SignalRealtimeSessionLike | null> {
-    const existing = this.getSession(accountKey);
-    if (existing?.isConnected()) {
-      return existing;
-    }
-
-    return await new Promise((resolve) => {
-      const timer = setTimeout(() => {
-        const waiters = this.waiters.get(accountKey);
-        if (!waiters) {
-          resolve(null);
-          return;
-        }
-        this.waiters.set(
-          accountKey,
-          waiters.filter((waiter) => waiter.timer !== timer),
-        );
-        resolve(null);
-      }, timeoutMs);
-
-      const waiters = this.waiters.get(accountKey) ?? [];
-      waiters.push({ resolve, timer });
-      this.waiters.set(accountKey, waiters);
-    });
-  }
-
-  private resolveWaiters(accountKey: string, session: SignalRealtimeSessionLike | null): void {
-    const waiters = this.waiters.get(accountKey);
-    if (!waiters || waiters.length === 0) {
-      return;
-    }
-
-    this.waiters.delete(accountKey);
-    for (const waiter of waiters) {
-      clearTimeout(waiter.timer);
-      waiter.resolve(session?.isConnected() ? session : null);
-    }
   }
 
   private sameDesiredSession(

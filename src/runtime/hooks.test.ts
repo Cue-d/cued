@@ -44,10 +44,10 @@ describe("hooks service", () => {
     expect(doctor.hooks.length).toBeGreaterThan(0);
     expect(contents).toContain("sync.completed");
     expect(contents).toContain("sync.failed");
-    expect(contents).toContain("message.sent");
+    expect(contents).not.toContain("message.sent");
   });
 
-  it("runs enabled subprocess hooks with JSON stdin", async () => {
+  it("runs active hooks from legacy configs without invoking retired send hooks", async () => {
     const home = setTempHome();
     const { emitHookEvent } = await loadHooksService();
     const hooksDir = join(home, ".cued");
@@ -56,6 +56,11 @@ describe("hooks service", () => {
     writeFileSync(
       join(hooksDir, "hooks.toml"),
       `version = 1
+
+[[hooks]]
+event = "message.sent"
+enabled = true
+command = "/retired-send-hook-must-not-run"
 
 [[hooks]]
 event = "sync.completed"

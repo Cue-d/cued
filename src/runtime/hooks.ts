@@ -8,7 +8,6 @@ export const HOOK_EVENT_NAMES = [
   "integration.authenticated",
   "sync.completed",
   "sync.failed",
-  "message.sent",
   "message.received",
 ] as const;
 
@@ -25,7 +24,7 @@ export interface HookDefinition {
 
 interface HookConfigFile {
   version?: number;
-  hooks?: HookDefinition[];
+  hooks?: Record<string, unknown>[];
 }
 
 export interface HookExecutionResult {
@@ -117,7 +116,11 @@ export function loadHooksConfig(): { path: string; exists: boolean; hooks: HookD
 
   const raw = parse(readFileSync(CUED_HOOKS_PATH, "utf8")) as HookConfigFile;
   const hooks = Array.isArray(raw.hooks)
-    ? raw.hooks.map((hook) => normalizeHook(hook as unknown as Record<string, unknown>))
+    ? raw.hooks
+        // Older generated configs contain this retired event. Ignore it so
+        // existing auth/sync/receive hooks remain usable without a config rewrite.
+        .filter((hook) => hook.event !== "message.sent")
+        .map(normalizeHook)
     : [];
   return { path: CUED_HOOKS_PATH, exists: true, hooks };
 }
@@ -143,12 +146,6 @@ function buildSampleHooks(openClaw: { detected: boolean; path: string | null }):
         enabled: false,
         command: "/bin/sh",
         args: ["-lc", "cat >/tmp/cued-hook-sync-failed.json"],
-      },
-      {
-        event: "message.sent",
-        enabled: false,
-        command: "/bin/sh",
-        args: ["-lc", "cat >/tmp/cued-hook-message-sent.json"],
       },
       {
         event: "message.received",

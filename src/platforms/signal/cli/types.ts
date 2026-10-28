@@ -4,5 +4,4 @@ export type {
   SignalGroup,
   SignalLinkHandle,
   SignalReceivedMessage,
-  SignalSendResult,
 } from "./client.js";

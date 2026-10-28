@@ -147,12 +147,6 @@ export interface WhatsAppHelperEventEnvelope<
 export type WhatsAppHelperCommand =
   | {
       id: number;
-      command: "sendText";
-      target: string;
-      text: string;
-    }
-  | {
-      id: number;
       command: "resync";
       cursor?: string;
       sinceMs?: number | null;
@@ -189,12 +183,6 @@ export interface WhatsAppHelperStatusResult {
   queuedHistorySyncCount?: number | null;
   lastHistorySyncError?: string | null;
   lastHistoryNotificationAt?: number | null;
-}
-
-export interface WhatsAppHelperSendResult {
-  messageID: string;
-  chatJID: string;
-  timestamp: number;
 }
 
 export interface WhatsAppHelperDownloadResult {

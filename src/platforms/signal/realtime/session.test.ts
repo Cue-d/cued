@@ -1,5 +1,5 @@
 import { EventEmitter } from "node:events";
-import { PassThrough, Writable } from "node:stream";
+import { PassThrough } from "node:stream";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const { spawnMock } = vi.hoisted(() => ({
@@ -24,13 +24,7 @@ import {
 class MockChild extends EventEmitter {
   readonly stdout = new PassThrough();
   readonly stderr = new PassThrough();
-  readonly stdinWrites: string[] = [];
-  readonly stdin = new Writable({
-    write: (chunk, _encoding, callback) => {
-      this.stdinWrites.push(chunk.toString());
-      callback(null);
-    },
-  });
+  readonly stdin = new PassThrough();
   killed = false;
 
   kill = vi.fn((_signal?: string) => {
@@ -45,7 +39,7 @@ describe("signal realtime", () => {
     vi.clearAllMocks();
   });
 
-  it("parses JSON-RPC notifications and routes sends over the session", async () => {
+  it("parses JSON-RPC receive notifications", () => {
     const child = new MockChild();
     spawnMock.mockReturnValue(child);
     const onMessage = vi.fn();
@@ -87,27 +81,6 @@ describe("signal realtime", () => {
       }),
     );
 
-    const sendPromise = session.sendMessage("Ping", { recipient: "+14155550123" });
-    expect(child.stdinWrites).toHaveLength(1);
-    expect(JSON.parse(child.stdinWrites[0]!.trim())).toEqual({
-      jsonrpc: "2.0",
-      id: 1,
-      method: "send",
-      params: {
-        message: "Ping",
-        recipient: ["+14155550123"],
-      },
-    });
-
-    child.stdout.write(
-      `${JSON.stringify({
-        jsonrpc: "2.0",
-        id: 1,
-        result: { timestamp: 123 },
-      })}\n`,
-    );
-
-    await expect(sendPromise).resolves.toEqual({ timestamp: 123 });
     expect(parseSignalJsonRpcLine('{"jsonrpc":"2.0","method":"receive"}')).toEqual({
       jsonrpc: "2.0",
       method: "receive",
@@ -244,12 +217,6 @@ describe("signal realtime", () => {
             lastSessionError: null,
           };
         },
-        isConnected() {
-          return true;
-        },
-        async sendMessage() {
-          return { timestamp: 1 };
-        },
       }),
     });
 
@@ -269,8 +236,8 @@ describe("signal realtime", () => {
       }),
     ]);
 
-    const session = await supervisor.waitForConnected("default", 10);
-    expect(session?.isConnected()).toBe(true);
+    const session = supervisor.getSession("default");
+    expect(session?.getStatus().state).toBe("connected");
 
     supervisor.reconcile([]);
     expect(stopped).toEqual(["default"]);
