@@ -21,6 +21,8 @@ function openTempDb() {
 }
 
 afterEach(() => {
+  vi.unstubAllEnvs();
+  vi.useRealTimers();
   for (const dir of tempDirs.splice(0)) {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -96,7 +98,13 @@ describe("telemetry client", () => {
     const safe = sanitizeTelemetryProperties(base);
 
     expect(buildTelemetryFingerprint("sync_failed", safe)).toBe(
-      buildTelemetryFingerprint("sync_failed", safe),
+      buildTelemetryFingerprint("sync_failed", {
+        error_code: "PERMISSION_DENIED",
+        subsystem: "SYNC",
+        platform: "IMESSAGE",
+        run_id: "44444444-4444-4444-8444-444444444444",
+        duration_bucket: "lt_5s",
+      }),
     );
     expect(buildTelemetryFingerprint("sync_failed", safe)).not.toBe(
       buildTelemetryFingerprint("sync_failed", { ...safe, error_code: "timeout" }),
@@ -147,6 +155,8 @@ describe("telemetry client", () => {
   });
 
   it("skips sends when telemetry is disabled", async () => {
+    // Enable telemetry's test transport so this exercises the persisted opt-out.
+    vi.stubEnv("CUED_TELEMETRY_ENDPOINT", "https://example.invalid/telemetry");
     const db = openTempDb();
     try {
       setTelemetryEnabled(db, false);
@@ -167,6 +177,7 @@ describe("telemetry client", () => {
   });
 
   it("skips sends under Vitest unless an endpoint is explicitly configured", async () => {
+    vi.stubEnv("CUED_TELEMETRY_ENDPOINT", undefined);
     const db = openTempDb();
     try {
       const result = await sendTelemetryEvent(
@@ -186,10 +197,11 @@ describe("telemetry client", () => {
   });
 
   it("aborts telemetry sends that exceed the timeout", async () => {
+    vi.useFakeTimers();
     vi.stubEnv("CUED_TELEMETRY_ENDPOINT", "https://example.invalid/telemetry");
     const db = openTempDb();
     try {
-      await expect(
+      const aborted = expect(
         sendTelemetryEvent(
           db,
           "app_launched",
@@ -209,8 +221,9 @@ describe("telemetry client", () => {
           },
         ),
       ).rejects.toThrow(/aborted/i);
+      await vi.runAllTimersAsync();
+      await aborted;
     } finally {
-      vi.unstubAllEnvs();
       db.close();
     }
   });

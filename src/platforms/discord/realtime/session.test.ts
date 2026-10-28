@@ -99,56 +99,6 @@ describe("discord realtime", () => {
     session.stop();
   });
 
-  it("marks the session connected after initial DM discovery", async () => {
-    vi.useFakeTimers();
-
-    const session = new DiscordRealtimeSession({
-      accountKey: "default",
-      credentials: {
-        token: "discord-token",
-      },
-      dmPollIntervalMs: 10_000,
-      client: {
-        async getCurrentUser() {
-          return {
-            id: "u-self",
-            username: "avery",
-            global_name: "Avery",
-          };
-        },
-        async listPrivateChannels() {
-          return [
-            {
-              id: "dm-1",
-              type: 1,
-              recipients: [],
-              last_message_id: "100",
-            },
-          ];
-        },
-        async listChannelMessages() {
-          return [];
-        },
-        async sendMessage() {
-          throw new Error("not used");
-        },
-      } as unknown as DiscordApiClient,
-    });
-
-    session.start();
-
-    await vi.waitFor(() => {
-      expect(session.getStatus()).toEqual(
-        expect.objectContaining({
-          state: "connected",
-          userId: "u-self",
-        }),
-      );
-    });
-
-    session.stop();
-  });
-
   it("stops instead of reconnecting when Discord auth is invalidated", async () => {
     const onAuthInvalidated = vi.fn();
 

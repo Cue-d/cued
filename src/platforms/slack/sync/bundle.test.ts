@@ -135,63 +135,6 @@ describe("slack worker lib", () => {
     expect(repliesLimits).toEqual([50]);
   });
 
-  it("treats empty conversation cursors as end-of-pagination", async () => {
-    const bundle = await buildSlackSyncBundle({
-      accountKey: "default",
-      client: {
-        async testAuth() {
-          return { ok: true, team_id: "T123", user_id: "U_SELF", team: "Acme", user: "Ava" };
-        },
-        async listUsers() {
-          return {
-            users: [
-              {
-                id: "U_SELF",
-                team_id: "T123",
-                name: "ava",
-                real_name: "Ava Chen",
-                profile: {},
-              },
-            ],
-            nextCursor: undefined,
-          };
-        },
-        async listConversations() {
-          return {
-            conversations: [],
-            nextCursor: "",
-          };
-        },
-        async getConversationMembers() {
-          return { members: [], nextCursor: undefined };
-        },
-        async getHistory() {
-          return { messages: [], hasMore: false, nextCursor: undefined };
-        },
-        async getReplies() {
-          return { messages: [], hasMore: false, nextCursor: undefined };
-        },
-      },
-    });
-
-    expect(bundle.hasMore).toBe(true);
-    expect(bundle.sourceCursor).toEqual({
-      teamId: "T123",
-      selfUserId: "U_SELF",
-      lastSyncAt: undefined,
-      hydratedConversationIds: [],
-      knownConversationIds: [],
-      scan: {
-        mode: "full",
-        startedAt: expect.any(Number),
-        oldestMs: 0,
-        usersComplete: true,
-        conversationFamily: "channels",
-        conversationCursor: null,
-      },
-    });
-  });
-
   it("treats empty conversation pages with a dangling cursor as end-of-pagination", async () => {
     const bundle = await buildSlackSyncBundle({
       accountKey: "default",

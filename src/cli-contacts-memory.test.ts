@@ -49,7 +49,7 @@ describe("contacts memory CLI", () => {
   function runCli(home: string, args: string[]): string {
     return execFileSync(process.execPath, ["--import", "tsx", "src/cli.ts", ...args], {
       cwd: process.cwd(),
-      env: { ...process.env, CUED_HOME: home },
+      env: { ...process.env, CUED_HOME: home, CUED_DB_PATH: join(home, "local.db") },
       encoding: "utf8",
       stdio: ["ignore", "pipe", "pipe"],
     });

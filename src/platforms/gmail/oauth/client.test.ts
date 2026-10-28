@@ -4,7 +4,6 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   buildOAuthUrl,
-  GMAIL_READONLY_SCOPE,
   inspectGoogleOAuthClientConfig,
   readGoogleOAuthClientConfig,
   resolveGoogleOAuthClientFile,
@@ -102,7 +101,7 @@ describe("Gmail OAuth client config", () => {
       }),
     );
 
-    expect(url.searchParams.get("scope")).toBe(GMAIL_READONLY_SCOPE);
+    expect(url.searchParams.get("scope")).toBe("https://www.googleapis.com/auth/gmail.readonly");
     expect(url.searchParams.get("code_challenge_method")).toBe("S256");
   });
 

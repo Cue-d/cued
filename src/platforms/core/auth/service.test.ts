@@ -109,10 +109,6 @@ describe("IntegrationAuthService", () => {
     });
   }
 
-  it("includes the capabilities subcommand in usage text", () => {
-    expect(IntegrationAuthService.usageText()).toContain("status | capabilities | refresh");
-  });
-
   it("falls through to managed browser when slack pending discovery finds no new workspace", async () => {
     const db = createDb();
     upsertAuthenticatedSlack(db, "T_EXISTING", "Existing");

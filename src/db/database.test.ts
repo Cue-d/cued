@@ -408,9 +408,8 @@ describe("CuedDatabase", () => {
       `,
       )
       .run(timestamp, timestamp);
-    sqlite(db)
-      .prepare(
-        `
+    const insertMessage = sqlite(db).prepare(
+      `
         INSERT INTO messages (
           id, platform, account_key, platform_message_id, conversation_id,
           sender_contact_id, sender_source_key, sender_name, conversation_name, sent_at,
@@ -418,22 +417,27 @@ describe("CuedDatabase", () => {
           deleted_at, reply_to_message_id, is_deleted, is_edited, attachment_count,
           reaction_count, created_at, updated_at
         ) VALUES (
-          'message-a', 'slack', 'team-a', 'ts-a', 'conversation-a',
+          ?, 'slack', 'team-a', ?, 'conversation-a',
           NULL, NULL, 'Soham', 'Launch', ?, NULL, NULL, 0,
           'queued index content', NULL, NULL, NULL, NULL, NULL, 0, 0, 0, 0, ?, ?
         )
       `,
-      )
-      .run(timestamp, timestamp, timestamp);
+    );
+    insertMessage.run("message-a", "ts-a", timestamp, timestamp, timestamp);
+    insertMessage.run("message-b", "ts-b", timestamp, timestamp, timestamp);
     sqlite(db).prepare("DELETE FROM messages_fts").run();
 
-    expect(db.enqueueMessageFtsIndex(["message-a"], "projection")).toBe(1);
+    expect(db.enqueueMessageFtsIndex(["message-a", "message-b"], "projection")).toBe(2);
     expect(db.drainMessageFtsIndexQueue(1)).toEqual({ claimed: 1, indexed: 1, failed: 0 });
     expect(
       sqlite(db)
         .prepare("SELECT message_id, content FROM messages_fts WHERE messages_fts MATCH ?")
         .all("queued"),
     ).toEqual([{ message_id: "message-a", content: "queued index content" }]);
+    expect(
+      sqlite(db).prepare("SELECT COUNT(*) AS count FROM message_fts_index_queue").get(),
+    ).toEqual({ count: 1 });
+    expect(db.drainMessageFtsIndexQueue(1)).toEqual({ claimed: 1, indexed: 1, failed: 0 });
     expect(
       sqlite(db).prepare("SELECT COUNT(*) AS count FROM message_fts_index_queue").get(),
     ).toEqual({ count: 0 });
