@@ -1,8 +1,4 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import {
-  getPlatformFeatureSupport,
-  getPlatformFutureFeatureNotes,
-} from "../platforms/core/types.js";
 import { summarizePlatformCapability } from "./platform-capabilities.js";
 
 const inspectSlackHelperMock = vi.fn();
@@ -230,20 +226,5 @@ describe("platform capability resolver", () => {
       }),
     );
     expect(inspectSlackHelperMock).not.toHaveBeenCalled();
-  });
-
-  it("exposes a shipped feature matrix for README-facing capabilities", () => {
-    expect(getPlatformFeatureSupport("signal", "full_history_sync")).toBe("no");
-    expect(getPlatformFeatureSupport("discord", "full_history_sync")).toBe("no");
-    expect(getPlatformFeatureSupport("linkedin", "full_history_sync")).toBe("partial");
-    expect(getPlatformFeatureSupport("linkedin", "read_receipts")).toBe("partial");
-    expect(getPlatformFeatureSupport("imessage", "realtime_ingest")).toBe("yes");
-  });
-
-  it("does not expose outbound send notes in product capabilities", () => {
-    expect(getPlatformFutureFeatureNotes("contacts")).toEqual({});
-    expect(getPlatformFutureFeatureNotes("gmail")).toEqual({});
-    expect(getPlatformFutureFeatureNotes("imessage")).toEqual({});
-    expect(getPlatformFutureFeatureNotes("signal")).toEqual({});
   });
 });

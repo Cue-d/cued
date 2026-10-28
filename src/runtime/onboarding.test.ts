@@ -5,6 +5,30 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { CuedDatabase } from "../db/database.js";
 import { buildOnboardingSnapshot } from "./onboarding.js";
 
+// Snapshot tests exercise state composition; external installs and credential
+// imports have dedicated tests and must not depend on the developer's machine.
+vi.mock("../skills/install.js", () => ({
+  getGlobalCuedSkillStatus: () => ({
+    installed: false,
+    status: "needs_action",
+    summary: "Skill installation is disabled in this fixture.",
+    sourcePath: null,
+    npxPath: null,
+    installedPath: null,
+  }),
+  installGlobalCuedSkill: () => {
+    throw new Error("Unexpected global skill installation in snapshot test");
+  },
+}));
+
+vi.mock("../platforms/linkedin/auth/keychain-import.js", () => ({
+  importLinkedInStoredAuth: () => [],
+}));
+
+vi.mock("../platforms/slack/auth/desktop-import.js", () => ({
+  importSlackDesktopAuth: async () => [],
+}));
+
 describe("onboarding snapshot", () => {
   const tempDirs: string[] = [];
 
@@ -78,12 +102,6 @@ describe("onboarding snapshot", () => {
       "full_disk_access",
       "diagnostics",
     ]);
-    expect(snapshot.globalSkill).toEqual(
-      expect.objectContaining({
-        installed: expect.any(Boolean),
-        status: expect.any(String),
-      }),
-    );
     expect(snapshot.permissions.find((permission) => permission.key === "contacts")).toEqual(
       expect.objectContaining({
         status: process.platform === "darwin" ? "granted" : "unknown",

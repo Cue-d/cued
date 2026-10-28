@@ -1,12 +1,4 @@
-import {
-  closeSync,
-  mkdtempSync,
-  openSync,
-  readFileSync,
-  rmSync,
-  writeFileSync,
-  writeSync,
-} from "node:fs";
+import { closeSync, mkdtempSync, openSync, rmSync, writeFileSync, writeSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -208,12 +200,11 @@ describe("singleton lock", () => {
     lease.heartbeat();
     expect(readSingletonLock(path)?.updatedAt).toBe(timestamp);
 
-    const raw = readFileSync(path);
-    const slotBytes = raw.length / 2;
     const fd = openSync(path, "r+");
     try {
       const invalid = Buffer.from("not-json", "utf8");
-      writeSync(fd, invalid, 0, invalid.length, slotBytes);
+      // The first heartbeat updates slot zero; slot one retains the acquisition time.
+      writeSync(fd, invalid, 0, invalid.length, 0);
     } finally {
       closeSync(fd);
     }
@@ -222,7 +213,7 @@ describe("singleton lock", () => {
       kind: "daemon",
       pid: 41,
       startedAt: 1_700_000_000_000,
-      updatedAt: timestamp,
+      updatedAt: 1_700_000_000_000,
       version: null,
     });
 

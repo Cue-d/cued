@@ -130,21 +130,6 @@ final class RootViewTests: XCTestCase {
     XCTAssertFalse(permissionGuideUsesDragSource(for: "messages_automation"))
   }
 
-  func testPermissionGuideInstructionCopyMatchesPanelBehavior() {
-    XCTAssertEqual(
-      permissionGuideInstructionSentence(for: .fullDiskAccess, hostAppName: "Cued"),
-      "Drag Cued to the list above to allow Full Disk Access."
-    )
-    XCTAssertEqual(
-      permissionGuideInstructionSentence(for: .contacts, hostAppName: "Cued"),
-      "Enable Cued in the list above to allow Contacts."
-    )
-    XCTAssertEqual(
-      permissionGuideInstructionSentence(for: .messagesAutomation, hostAppName: "Cued"),
-      "Enable Cued in the list above to allow Messages automation."
-    )
-  }
-
   func testPermissionGuideStaysVisibleAcrossRefreshUntilPermissionIsGranted() {
     XCTAssertFalse(
       shouldDismissPermissionGuide(

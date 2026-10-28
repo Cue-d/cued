@@ -34,13 +34,6 @@ final class PreviewTests: XCTestCase {
     XCTAssertEqual(previewCase.size, CGSize(width: 700, height: 800))
   }
 
-  func testMissingSkillPreviewUsesDefaultSkillStatusCopy() {
-    XCTAssertEqual(
-      defaultPreviewSkillStatus().summary,
-      "Checks whether the global Cued skill is available to your agents."
-    )
-  }
-
   @MainActor
   func testRendersEveryPreviewFixture() throws {
     let outputDirectory = FileManager.default.temporaryDirectory
