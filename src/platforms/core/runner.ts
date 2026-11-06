@@ -1,5 +1,10 @@
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
+import {
+  SleepInterruptionDetector,
+  SyncInterruptedBySleep,
+  shouldDeferSyncForSleep,
+} from "../../core/system-sleep.js";
 import type { AdapterPlatform } from "../../core/types/provider.js";
 import { getAdapterDefinition } from "./registry.js";
 import type { AdapterWorkerErrorCode, AdapterWorkerOutput, SyncBundle } from "./sync.js";
@@ -26,6 +31,7 @@ export async function runAdapter(
   accountKey?: string,
   envOverrides?: Record<string, string>,
 ): Promise<SyncBundle> {
+  if (shouldDeferSyncForSleep()) throw new SyncInterruptedBySleep();
   const definition = getAdapterDefinition(platform);
   if (!definition) {
     throw new Error(`No adapter registered for platform '${platform}'`);
@@ -47,18 +53,34 @@ export async function runAdapter(
     let stdout = "";
     let stderr = "";
     let settled = false;
-    const timeout = setTimeout(() => {
-      if (settled) {
+    const sleepDetector = new SleepInterruptionDetector();
+    let generation = 0;
+    let deadline = Date.now() + definition.workerTimeoutMs;
+    // Signal receive acknowledges messages before returning its bundle. Never kill
+    // a worker merely because the host sleeps: let it finish and persist its output.
+    const checkDeadline = () => {
+      if (settled) return;
+      const interrupted = sleepDetector.check();
+      if (sleepDetector.sleeping || sleepDetector.generation !== generation) {
+        generation = sleepDetector.generation;
+        deadline = Date.now() + definition.workerTimeoutMs;
+      }
+      const remaining = deadline - Date.now();
+      if (remaining > 0 || sleepDetector.sleeping) {
+        timeout = setTimeout(checkDeadline, Math.max(1, Math.min(1_000, remaining)));
         return;
       }
       settled = true;
       killAdapterProcessTree(child.pid, () => child.kill("SIGKILL"));
       reject(
-        new Error(
-          `Adapter worker timed out after ${definition.workerTimeoutMs}ms for platform '${platform}'${accountKey ? ` account '${accountKey}'` : ""}`,
-        ),
+        interrupted
+          ? new SyncInterruptedBySleep()
+          : new Error(
+              `Adapter worker timed out after ${definition.workerTimeoutMs}ms for platform '${platform}'${accountKey ? ` account '${accountKey}'` : ""}`,
+            ),
       );
-    }, definition.workerTimeoutMs);
+    };
+    let timeout = setTimeout(checkDeadline, Math.min(1_000, definition.workerTimeoutMs));
 
     child.stdout.on("data", (chunk) => {
       stdout += chunk.toString("utf8");
@@ -84,6 +106,10 @@ export async function runAdapter(
       clearTimeout(timeout);
 
       if (code !== 0) {
+        if (sleepDetector.check()) {
+          reject(new SyncInterruptedBySleep());
+          return;
+        }
         const parsedFailure = parseWorkerFailure(stdout);
         const workerError = parsedFailure?.message ?? stderr.trim();
         reject(

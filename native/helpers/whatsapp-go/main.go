@@ -372,7 +372,7 @@ func (s *helperState) close() error {
 
 func openSyncCache(storeDir string) (*syncCache, error) {
 	dbPath := filepath.Join(storeDir, "history.db")
-	db, err := sql.Open("sqlite", fmt.Sprintf("file:%s", dbPath))
+	db, err := openHelperDatabase(dbPath)
 	if err != nil {
 		return nil, err
 	}
@@ -2978,15 +2978,10 @@ func initClient(storeDir string) (*helperState, *whatsmeow.Client, func(), error
 
 func openStore(storeDir string) (*store.Device, *sqlstore.Container, error) {
 	dbPath := filepath.Join(storeDir, "whatsmeow.db")
-	db, err := sql.Open("sqlite", fmt.Sprintf("file:%s", dbPath))
+	db, err := openHelperDatabase(dbPath)
 	if err != nil {
 		return nil, nil, err
 	}
-	if _, err := db.Exec("PRAGMA foreign_keys = ON"); err != nil {
-		_ = db.Close()
-		return nil, nil, err
-	}
-
 	container := sqlstore.NewWithDB(db, "sqlite3", nil)
 	if err := container.Upgrade(context.Background()); err != nil {
 		_ = db.Close()

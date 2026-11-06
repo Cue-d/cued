@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { existsSync, rmSync } from "node:fs";
 import type Database from "better-sqlite3-multiple-ciphers";
-import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, notInArray, sql } from "drizzle-orm";
 import { type BetterSQLite3Database, drizzle } from "drizzle-orm/better-sqlite3";
 import type { SQLiteTable } from "drizzle-orm/sqlite-core";
 import { getCurrentAppVersion, getCurrentReleaseChannel } from "../core/app-metadata.js";
@@ -3045,7 +3045,7 @@ export class CuedDatabase {
   claimNextQueuedRun(
     runTypes?: SyncRunType[],
     nextStatus: SyncRunStatus = "ingesting",
-    options: { ownerId?: string; leaseMs?: number } = {},
+    options: { ownerId?: string; leaseMs?: number; excludedRunIds?: string[] } = {},
   ): QueuedSyncRun | null {
     const timestamp = now();
     return this.db.transaction((tx) => {
@@ -3054,6 +3054,9 @@ export class CuedDatabase {
       const activeStatus = nextStatus === "projecting" ? "projecting" : "ingesting";
       const claimablePredicate = and(
         typePredicate,
+        options.excludedRunIds?.length
+          ? notInArray(syncRuns.id, options.excludedRunIds)
+          : undefined,
         sql`(
           (${syncRuns.status} = 'queued' AND ${syncRuns.scheduledAt} <= ${timestamp})
           OR (
@@ -3155,6 +3158,7 @@ export class CuedDatabase {
   getNextClaimableRunAt(
     runTypes?: SyncRunType[],
     activeStatus: SyncRunStatus = "ingesting",
+    excludedRunIds: string[] = [],
   ): number | null {
     const typePredicate =
       runTypes && runTypes.length > 0 ? inArray(syncRuns.runType, runTypes) : sql`1 = 1`;
@@ -3171,6 +3175,7 @@ export class CuedDatabase {
       .where(
         and(
           typePredicate,
+          excludedRunIds.length ? notInArray(syncRuns.id, excludedRunIds) : undefined,
           sql`(
             ${syncRuns.status} = 'queued'
             OR (${syncRuns.status} = ${activeStatus} AND ${syncRuns.leaseExpiresAt} IS NOT NULL)
@@ -3299,6 +3304,25 @@ export class CuedDatabase {
           }
         | undefined) ?? null
     );
+  }
+
+  /** Release an interrupted claim without recording a provider failure or losing its cursor/details. */
+  deferRun(runId: string, scheduledAt: number, claim: SyncRunClaim): boolean {
+    const result = this.db
+      .update(syncRuns)
+      .set({
+        status: "queued",
+        scheduledAt,
+        startedAt: null,
+        finishedAt: null,
+        ownerId: null,
+        leaseExpiresAt: null,
+        lastProgressAt: now(),
+        errorCode: null,
+      })
+      .where(and(this.syncRunClaimPredicate(runId, claim), eq(syncRuns.status, "ingesting")))
+      .run();
+    return Number(result.changes) > 0;
   }
 
   failRun(
