@@ -1095,6 +1095,58 @@ describe("CuedDatabase", () => {
     db.close();
   });
 
+  it("defers an interrupted run without losing details or accepting stale owners", () => {
+    const db = createDb();
+    const runId = db.queueSyncRun({
+      platform: "signal",
+      accountKey: "default",
+      runType: "sync",
+      trigger: "manual",
+      details: { cursor: "saved" },
+    });
+    const claim = { ownerId: "daemon-a", attempt: 1 };
+    db.claimNextQueuedRun(["sync"], "ingesting", { ownerId: claim.ownerId, leaseMs: 60_000 });
+    expect(db.deferRun(runId, Date.now() + 60_000, { ...claim, attempt: 0 })).toBe(false);
+    expect(db.deferRun(runId, Date.now() + 60_000, claim)).toBe(true);
+    expect(db.claimNextQueuedRun(["sync"])).toBeNull();
+    expect(db.getLatestFinishedSyncRun("signal", "default")).toBeNull();
+    sqlite(db).prepare("UPDATE sync_runs SET scheduled_at = 1 WHERE id = ?").run(runId);
+    expect(db.claimNextQueuedRun(["sync"], "ingesting", { ownerId: "daemon-b" })).toEqual(
+      expect.objectContaining({
+        id: runId,
+        attempt: 2,
+        details_json: JSON.stringify({ cursor: "saved" }),
+      }),
+    );
+    expect(db.deferRun(runId, Date.now(), claim)).toBe(false);
+    db.close();
+  });
+
+  it("does not reclaim a suspended worker still active in this daemon", () => {
+    const db = createDb();
+    const activeId = db.queueSyncRun({
+      platform: "slack",
+      accountKey: "T1",
+      runType: "sync",
+      trigger: "scheduler",
+    });
+    db.claimNextQueuedRun(["sync"], "ingesting", { ownerId: "daemon", leaseMs: 60_000 });
+    sqlite(db).prepare("UPDATE sync_runs SET lease_expires_at = 1 WHERE id = ?").run(activeId);
+    const queuedId = db.queueSyncRun({
+      platform: "signal",
+      accountKey: "default",
+      runType: "sync",
+      trigger: "scheduler",
+    });
+    expect(db.claimNextQueuedRun(["sync"], "ingesting", { excludedRunIds: [activeId] })?.id).toBe(
+      queuedId,
+    );
+    expect(db.getNextClaimableRunAt(["sync"], "ingesting", [activeId])).toBeNull();
+    expect(db.claimNextQueuedRun(["sync"], "ingesting", { excludedRunIds: [activeId] })).toBeNull();
+    expect(db.claimNextQueuedRun(["sync"], "ingesting")?.id).toBe(activeId);
+    db.close();
+  });
+
   it("reclaims expired sync run leases automatically", () => {
     const db = createDb();
     const runId = db.queueSyncRun({

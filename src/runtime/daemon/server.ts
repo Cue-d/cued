@@ -14,6 +14,11 @@ import {
   type SingletonLockMetadata,
 } from "../../core/singleton-lock.js";
 import {
+  SleepInterruptionDetector,
+  SyncInterruptedBySleep,
+  shouldDeferSyncForSleep,
+} from "../../core/system-sleep.js";
+import {
   type AdapterPlatform,
   getDefaultAccountKeyForPlatform,
   type HostOS,
@@ -2671,6 +2676,10 @@ export async function runDaemon(): Promise<void> {
   const drainIngestQueue = () => {
     ingestDrainScheduled = false;
     ingestDrainDueAt = null;
+    if (shouldDeferSyncForSleep()) {
+      scheduleIngestDrain(10_000);
+      return;
+    }
     if (isUpdateShutdownRequested) {
       return;
     }
@@ -2691,9 +2700,12 @@ export async function runDaemon(): Promise<void> {
       const currentRun = db.claimNextQueuedRun(["sync", "sync_resume"], "ingesting", {
         ownerId: runOwnerId,
         leaseMs: INGEST_RUN_LEASE_MS,
+        excludedRunIds: [...activeIngestRuns.keys()],
       });
       if (!currentRun) {
-        const nextClaimableAt = db.getNextClaimableRunAt(["sync", "sync_resume"], "ingesting");
+        const nextClaimableAt = db.getNextClaimableRunAt(["sync", "sync_resume"], "ingesting", [
+          ...activeIngestRuns.keys(),
+        ]);
         if (nextClaimableAt != null) {
           scheduleIngestDrain(Math.max(QUEUE_DRAIN_RETRY_DELAY_MS, nextClaimableAt - now()));
         }
@@ -3580,6 +3592,8 @@ export async function runDaemon(): Promise<void> {
   async function processIngestRun(
     currentRun: NonNullable<ReturnType<typeof db.claimNextQueuedRun>>,
   ) {
+    const sleepDetector = new SleepInterruptionDetector();
+    const sleepWatch = setInterval(() => sleepDetector.check(), 1_000);
     const ingestStartedAt = now();
     const runClaim = { ownerId: currentRun.owner_id, attempt: currentRun.attempt };
     daemonLogger.info("ingest run started", {
@@ -4085,6 +4099,16 @@ export async function runDaemon(): Promise<void> {
         ...(runDiagnostics ? { diagnostics: runDiagnostics } : {}),
       });
     } catch (error) {
+      if (error instanceof SyncInterruptedBySleep || sleepDetector.check()) {
+        db.deferRun(currentRun.id, now() + 10_000, runClaim);
+        daemonLogger.info("ingest run deferred after sleep", {
+          runId: currentRun.id,
+          platform: currentRun.platform,
+        });
+        schedulers.wakeIngest(10_000);
+        requestMenuBarStatusWrite("ingest_deferred");
+        return;
+      }
       autoSyncPacing.reset(
         `${currentRun.platform}:${currentRun.account_key ?? getDefaultAccountKeyForPlatform(currentRun.platform as Platform)}`,
       );
@@ -4152,6 +4176,8 @@ export async function runDaemon(): Promise<void> {
         stage: "ingest",
         error: errorMessage,
       });
+    } finally {
+      clearInterval(sleepWatch);
     }
   }
 

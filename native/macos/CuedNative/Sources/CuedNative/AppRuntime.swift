@@ -1512,7 +1512,10 @@ final class MenuBarAppController: NSObject, NSApplicationDelegate, NSMenuDelegat
     )
   }
 
+  private let powerStatePublisher = PowerStatePublisher(path: "\(configuredCuedHomePath())/power-state.json")
+
   func applicationDidFinishLaunching(_ notification: Notification) {
+    powerStatePublisher.start()
     NSApp.setActivationPolicy(.accessory)
     menuBarLease.heartbeat()
     daemonSupervisor.startIfNeeded()
@@ -1533,6 +1536,7 @@ final class MenuBarAppController: NSObject, NSApplicationDelegate, NSMenuDelegat
   }
 
   func applicationWillTerminate(_ notification: Notification) {
+    powerStatePublisher.stop()
     timer?.invalidate()
     NSWorkspace.shared.notificationCenter.removeObserver(self)
     statusMonitor.stop()

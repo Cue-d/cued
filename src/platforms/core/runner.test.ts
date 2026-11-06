@@ -14,6 +14,17 @@ const { getAdapterDefinitionMock, spawnMock } = vi.hoisted(() => ({
   spawnMock: vi.fn(),
 }));
 
+vi.mock("node:fs", async (importOriginal) => {
+  const fs = await importOriginal<typeof import("node:fs")>();
+  return {
+    ...fs,
+    readFileSync: (...args: Parameters<typeof fs.readFileSync>) => {
+      if (String(args[0]).endsWith("/power-state.json")) throw new Error("No host in runner tests");
+      return fs.readFileSync(...args);
+    },
+  };
+});
+
 vi.mock("node:child_process", () => ({
   spawn: spawnMock,
 }));
@@ -22,6 +33,7 @@ vi.mock("./registry.js", () => ({
   getAdapterDefinition: getAdapterDefinitionMock,
 }));
 
+import { SyncInterruptedBySleep } from "../../core/system-sleep.js";
 import { AdapterWorkerError, runAdapter } from "./runner.js";
 
 class MockChild extends EventEmitter {
@@ -116,6 +128,44 @@ describe("adapter runner", () => {
         detached: true,
       }),
     );
+  });
+
+  it("requeues suspension instead of reporting a worker timeout", async () => {
+    vi.useFakeTimers();
+    const child = new MockChild();
+    spawnMock.mockReturnValue(child);
+    const promise = runAdapter("slack", "workspace-a");
+    const assertion = expect(promise).rejects.toBeInstanceOf(SyncInterruptedBySleep);
+    // Time passes while neither the watchdog nor the worker gets CPU time.
+    vi.setSystemTime(Date.now() + 60_000);
+    await vi.advanceTimersByTimeAsync(50);
+    expect(child.kill).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(50);
+    await assertion;
+    expect(child.kill).toHaveBeenCalledWith("SIGKILL");
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("preserves a successful bundle arriving after suspension", async () => {
+    vi.useFakeTimers();
+    const child = new MockChild();
+    spawnMock.mockReturnValue(child);
+    const promise = runAdapter("signal", "default");
+    vi.setSystemTime(Date.now() + 60_000);
+    await vi.advanceTimersByTimeAsync(50);
+    child.stdout.emit(
+      "data",
+      Buffer.from(
+        JSON.stringify({
+          ok: true,
+          bundle: { sourceAccounts: [], rawEvents: [{ id: "received-message" }] },
+        }),
+      ),
+    );
+    child.emit("close", 0);
+    await expect(promise).resolves.toMatchObject({ rawEvents: [{ id: "received-message" }] });
+    expect(child.kill).not.toHaveBeenCalled();
+    expect(vi.getTimerCount()).toBe(0);
   });
 
   it("falls back to a TypeScript worker entrypoint when running from source", async () => {
