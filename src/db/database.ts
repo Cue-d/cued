@@ -76,6 +76,7 @@ const APP_SETTING_KEYS = {
   cliSymlinkInstalled: "cli_symlink_installed",
   installedAppVersion: "installed_app_version",
   lastReleaseCheckAt: "last_release_check_at",
+  onboardingStartedVersion: "onboarding_started_version",
   onboardingCompletedVersion: "onboarding_completed_version",
   releaseChannel: "release_channel",
   updateLastError: "update_last_error_json",
@@ -737,8 +738,49 @@ export class CuedDatabase {
     }
   }
 
-  markOnboardingCompleted(version: string): void {
-    this.setAppSetting(APP_SETTING_KEYS.onboardingCompletedVersion, version);
+  getOrCreateAppSetting(key: string, createValue: () => string): string {
+    const existing = this.getAppSetting(key)?.value;
+    if (existing) {
+      return existing;
+    }
+    return this.sqlite
+      .transaction(() => {
+        const current = this.getAppSetting(key)?.value;
+        if (current) {
+          return current;
+        }
+        const value = createValue();
+        this.setAppSetting(key, value);
+        return value;
+      })
+      .immediate();
+  }
+
+  markOnboardingStarted(version: string): boolean {
+    return this.sqlite
+      .transaction(() => {
+        if (
+          this.getAppSetting(APP_SETTING_KEYS.onboardingCompletedVersion)?.value === version ||
+          this.getAppSetting(APP_SETTING_KEYS.onboardingStartedVersion)?.value === version
+        ) {
+          return false;
+        }
+        this.setAppSetting(APP_SETTING_KEYS.onboardingStartedVersion, version);
+        return true;
+      })
+      .immediate();
+  }
+
+  markOnboardingCompleted(version: string): boolean {
+    return this.sqlite
+      .transaction(() => {
+        if (this.getAppSetting(APP_SETTING_KEYS.onboardingCompletedVersion)?.value === version) {
+          return false;
+        }
+        this.setAppSetting(APP_SETTING_KEYS.onboardingCompletedVersion, version);
+        return true;
+      })
+      .immediate();
   }
 
   markReleaseCheck(at = now()): void {

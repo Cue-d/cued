@@ -74,16 +74,6 @@ export function normalizeOsVersion(input: OsVersionInput = {}): string {
   return normalizeVersionString(input.kernelRelease ?? release()) ?? "0";
 }
 
-function getOrCreateSetting(db: CuedDatabase, key: string, createValue: () => string): string {
-  const existing = db.getAppSetting(key)?.value;
-  if (existing) {
-    return existing;
-  }
-  const value = createValue();
-  db.setAppSetting(key, value);
-  return value;
-}
-
 export function isTelemetryEnabled(db: CuedDatabase): boolean {
   if (process.env.VITEST_WORKER_ID && !process.env.CUED_TELEMETRY_ENDPOINT) {
     return false;
@@ -102,13 +92,13 @@ export function getTelemetryStatus(db: CuedDatabase): {
 } {
   return {
     enabled: isTelemetryEnabled(db),
-    installId: getOrCreateSetting(db, TELEMETRY_SETTING_KEYS.installId, randomUUID),
+    installId: db.getOrCreateAppSetting(TELEMETRY_SETTING_KEYS.installId, randomUUID),
     endpoint: TELEMETRY_ENDPOINT,
   };
 }
 
 export function getTelemetrySalt(db: CuedDatabase): string {
-  return getOrCreateSetting(db, TELEMETRY_SETTING_KEYS.salt, () =>
+  return db.getOrCreateAppSetting(TELEMETRY_SETTING_KEYS.salt, () =>
     randomBytes(32).toString("base64url"),
   );
 }
@@ -130,7 +120,7 @@ export function buildTelemetryEnvelope(
     event_id: randomUUID(),
     event_name: eventName,
     occurred_at: new Date().toISOString(),
-    install_id: getOrCreateSetting(db, TELEMETRY_SETTING_KEYS.installId, randomUUID),
+    install_id: db.getOrCreateAppSetting(TELEMETRY_SETTING_KEYS.installId, randomUUID),
     session_id: getSessionId(),
     source: "cued-desktop",
     app_version: getCurrentAppVersion(),

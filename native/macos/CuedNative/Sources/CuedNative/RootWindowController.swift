@@ -41,6 +41,8 @@ final class RootWindowController: NSWindowController {
   private var pendingForceActivePermissionRefreshAfterCurrent = false
   private var pendingTelemetryEnabled: Bool?
   private var isApplyingTelemetryToggle = false
+  private var finishAfterTelemetryToggle = false
+  private var onboardingStartTask: Task<Void, Never>?
 
   init(
     daemonSupervisor: DaemonSupervisor,
@@ -97,7 +99,6 @@ final class RootWindowController: NSWindowController {
       )
     )
     window.contentViewController = hosting
-    reportAppLaunch()
   }
 
   @available(*, unavailable)
@@ -137,11 +138,27 @@ final class RootWindowController: NSWindowController {
     refresh(forceActivePermissionRefresh: forceActivePermissionRefresh)
   }
 
-  private func reportAppLaunch() {
-    let daemonSupervisor = self.daemonSupervisor
-    Task.detached(priority: .utility) { [daemonSupervisor] in
-      _ = daemonSupervisor.runCLI(arguments: ["telemetry", "app-launched"])
+  func showOnboarding(
+    forceActivePermissionRefresh: Bool,
+    initialPage: Int,
+    after appLaunchTelemetryTask: Task<Void, Never>?
+  ) {
+    if onboardingStartTask == nil {
+      let daemonSupervisor = self.daemonSupervisor
+      onboardingStartTask = Task { [weak self, daemonSupervisor] in
+        await appLaunchTelemetryTask?.value
+        let result = await Task.detached(priority: .utility) {
+          daemonSupervisor.runCLI(arguments: ["onboarding", "start"])
+        }.value
+        if result?.status != 0 {
+          self?.onboardingStartTask = nil
+        }
+      }
     }
+    showAndRefresh(
+      forceActivePermissionRefresh: forceActivePermissionRefresh,
+      initialPage: initialPage
+    )
   }
 
   func refresh(forceActivePermissionRefresh: Bool = false) {
@@ -362,6 +379,10 @@ final class RootWindowController: NSWindowController {
   private func applyPendingTelemetryToggle() {
     guard let enabled = pendingTelemetryEnabled else {
       isApplyingTelemetryToggle = false
+      if finishAfterTelemetryToggle {
+        finishSetup()
+        return
+      }
       onRefresh()
       refresh()
       return
@@ -370,8 +391,11 @@ final class RootWindowController: NSWindowController {
 
     let daemonSupervisor = self.daemonSupervisor
     Task.detached(priority: .userInitiated) { [daemonSupervisor, enabled] in
-      _ = daemonSupervisor.runCLI(arguments: ["telemetry", enabled ? "enable" : "disable"])
+      let result = daemonSupervisor.runCLI(arguments: ["telemetry", enabled ? "enable" : "disable"])
       await MainActor.run {
+        if result?.status != 0 && self.pendingTelemetryEnabled == nil {
+          self.finishAfterTelemetryToggle = false
+        }
         self.applyPendingTelemetryToggle()
       }
     }
@@ -551,15 +575,22 @@ final class RootWindowController: NSWindowController {
   }
 
   private func finishSetup() {
+    if isApplyingTelemetryToggle {
+      finishAfterTelemetryToggle = true
+      return
+    }
     let daemonSupervisor = self.daemonSupervisor
+    let onboardingStartTask = self.onboardingStartTask
     close()
     onRefresh()
-    Task.detached(priority: .utility) { [daemonSupervisor] in
+    Task.detached(priority: .utility) {
+      await onboardingStartTask?.value
       _ = daemonSupervisor.runCLI(arguments: ["onboarding", "complete"])
     }
   }
 
   override func close() {
+    finishAfterTelemetryToggle = false
     pendingRefreshAfterCurrent = false
     pendingForceActivePermissionRefreshAfterCurrent = false
     pendingAuthLaunchRefreshTask?.cancel()

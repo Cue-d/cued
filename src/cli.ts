@@ -5,7 +5,11 @@ import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
-import { DaemonRequestTimeoutError, sendDaemonRequest } from "./client.js";
+import {
+  DaemonRequestTimeoutError,
+  isDaemonConnectionUnavailable,
+  sendDaemonRequest,
+} from "./client.js";
 import { getCurrentAppVersion, getCurrentReleaseChannel } from "./core/app-metadata.js";
 import { CUED_DB_PATH, CUED_SOCKET_PATH, ensureCuedDirs } from "./core/config.js";
 import { resolveHostOS } from "./core/platform-capabilities.js";
@@ -56,7 +60,7 @@ import {
   readRecentLogLines,
 } from "./runtime/logs.js";
 import { readMenuBarStatusCache } from "./runtime/menu-bar-status-cache.js";
-import { buildOnboardingSnapshot } from "./runtime/onboarding.js";
+import { buildOnboardingSnapshot, transitionOnboarding } from "./runtime/onboarding.js";
 import { runProjectionWorkerFromEnv } from "./runtime/projection/worker.js";
 import { hydrateIntegrationProjectionCounts } from "./runtime/status.js";
 import {
@@ -137,7 +141,7 @@ Usage:
   cued update install
   cued cli install|status
   cued login-item enable|disable|status
-  cued onboarding complete|snapshot|status [--refresh-managed] [--refresh-permissions]
+  cued onboarding start|complete|snapshot|status [--refresh-managed] [--refresh-permissions]
   cued telemetry status|enable|disable|smoke
   cued skill install-global|status
   cued permissions doctor|status|request [--all|--contacts|--full-disk-access]
@@ -693,8 +697,13 @@ async function main(): Promise<void> {
       let daemonResponse: Awaited<ReturnType<typeof sendDaemonRequest>> | null = null;
       try {
         switch (subcommand) {
+          case "start":
           case "complete":
-            daemonResponse = await sendDaemonRequest({ command: "onboarding-complete" });
+            daemonResponse = await sendDaemonRequest({
+              command: "onboarding-transition",
+              transition: subcommand,
+              appVersion: getCurrentAppVersion(),
+            });
             break;
           case "snapshot":
             daemonResponse = await sendDaemonRequest({
@@ -724,21 +733,11 @@ async function main(): Promise<void> {
           : openCuedDatabase();
       try {
         switch (subcommand) {
+          case "start":
           case "complete":
-            db.markOnboardingCompleted(getCurrentAppVersion());
-            await sendTelemetryEventSafe(db, "onboarding_completed", {
-              component: "onboarding",
-              operation: "complete",
-              stage: "complete",
-            });
-            printJson(db.getAppMetadata());
+            printJson(await transitionOnboarding(db, subcommand));
             return;
           case "snapshot":
-            await sendTelemetryEventSafe(db, "onboarding_started", {
-              component: "onboarding",
-              operation: "snapshot",
-              stage: refreshPermissions ? "permissions" : refreshManaged ? "managed" : "status",
-            });
             printJson(
               await buildOnboardingSnapshot(db, {
                 refreshManagedIntegrations: refreshManaged,
@@ -751,7 +750,7 @@ async function main(): Promise<void> {
             return;
           default:
             throw new Error(
-              "Usage: cued onboarding complete | snapshot [--refresh-managed] [--refresh-permissions] | status",
+              "Usage: cued onboarding start | complete | snapshot [--refresh-managed] [--refresh-permissions] | status",
             );
         }
       } finally {
@@ -770,6 +769,25 @@ async function main(): Promise<void> {
           throw new Error("Usage: cued skill install-global | status");
       }
     case "telemetry": {
+      if (subcommand === "app-launched") {
+        const response = await sendDaemonRequest({
+          command: "telemetry-app-launched",
+          appVersion: getCurrentAppVersion(),
+        }).catch((error) => {
+          // A timed-out daemon may already have recorded the event.
+          if (!isDaemonConnectionUnavailable(error)) {
+            throw error;
+          }
+          return null;
+        });
+        if (response && !isUnsupportedDaemonCommand(response)) {
+          if (!response.ok) {
+            throw new Error(response.error ?? "Daemon launch telemetry request failed");
+          }
+          printJson(response.result);
+          return;
+        }
+      }
       const db = openCuedDatabase();
       try {
         switch (subcommand) {

@@ -129,7 +129,7 @@ import {
 } from "../menu-bar-status-cache.js";
 import { collectInboundMessageHookPayloads } from "../message-hooks.js";
 import { resolveMacOSNativeBinary } from "../native-binary.js";
-import { buildOnboardingSnapshot } from "../onboarding.js";
+import { buildOnboardingSnapshot, transitionOnboarding } from "../onboarding.js";
 import { canonicalizeWhatsAppSourceKey } from "../projection/identity-alias.js";
 import { projectRealtimeRange } from "../projection/projector.js";
 import {
@@ -4348,6 +4348,7 @@ export async function runDaemon(): Promise<void> {
     handleSocket(
       socket,
       db,
+      telemetry,
       activeAuthSessions,
       schedulers,
       discordRealtime,
@@ -4579,6 +4580,7 @@ function writeResponse(socket: Socket, response: DaemonResponse): void {
 function handleSocket(
   socket: Socket,
   db: ReturnType<typeof openCuedDatabase>,
+  telemetry: DaemonTelemetryQueue,
   activeAuthSessions: Map<string, { child: ChildProcess; platform: Platform; accountKey: string }>,
   schedulers: QueueSchedulers,
   discordRealtime: DiscordRealtimeSupervisor,
@@ -4640,6 +4642,7 @@ function handleSocket(
         void dispatchRequest(
           db,
           request,
+          telemetry,
           activeAuthSessions,
           schedulers,
           discordRealtime,
@@ -4702,6 +4705,7 @@ function stopActiveAuthSessionsForIntegration(
 async function dispatchRequest(
   db: ReturnType<typeof openCuedDatabase>,
   request: DaemonRequest,
+  telemetry: DaemonTelemetryQueue,
   activeAuthSessions: Map<string, { child: ChildProcess; platform: Platform; accountKey: string }>,
   schedulers: QueueSchedulers,
   discordRealtime: DiscordRealtimeSupervisor,
@@ -4955,14 +4959,39 @@ async function dispatchRequest(
           ok: true,
           result: db.getAppMetadata(),
         };
+      case "telemetry-app-launched":
+        if (request.appVersion !== getCurrentAppVersion()) {
+          return { id: request.id, ok: false, error: "Unsupported command" };
+        }
+        telemetry.enqueue("app_launched", {
+          component: "native_app",
+          operation: "launch",
+        });
+        return { id: request.id, ok: true, result: { ok: true } };
       case "onboarding-complete":
-        db.markOnboardingCompleted(getCurrentAppVersion());
-        refreshStatusCacheNow("onboarding_complete");
+      case "onboarding-transition": {
+        // An older process must let the current CLI persist and report for its own version.
+        if (
+          request.command === "onboarding-transition" &&
+          (request.appVersion !== getCurrentAppVersion() ||
+            (request.transition !== "start" && request.transition !== "complete"))
+        ) {
+          return { id: request.id, ok: false, error: "Unsupported command" };
+        }
+        const transition =
+          request.command === "onboarding-transition" ? request.transition : "complete";
+        const result = await transitionOnboarding(db, transition, (event, properties) =>
+          telemetry.enqueue(event, properties),
+        );
+        if (transition === "complete") {
+          refreshStatusCacheNow("onboarding_complete");
+        }
         return {
           id: request.id,
           ok: true,
-          result: db.getAppMetadata(),
+          result,
         };
+      }
       case "onboarding-snapshot":
         return {
           id: request.id,

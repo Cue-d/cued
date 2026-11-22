@@ -1,12 +1,38 @@
+import { getCurrentAppVersion } from "../core/app-metadata.js";
 import type { CuedDatabase, IntegrationProjectionCount } from "../db/database.js";
 import { refreshManagedIntegrationStates } from "../platforms/core/state/refresh.js";
 import { buildIntegrationStatus } from "../platforms/core/state/status.js";
 import { isPlatform } from "../platforms/core/types.js";
 import { getGlobalCuedSkillStatus, installGlobalCuedSkill } from "../skills/install.js";
 import { isTelemetryEnabled } from "../telemetry/client.js";
+import { sendTelemetryEventSafe } from "../telemetry/context.js";
+import type { TelemetryProperties } from "../telemetry/events.js";
 import { buildPermissionStatus } from "./doctor.js";
 import { type MenuBarStatusCacheEntry, readMenuBarStatusCache } from "./menu-bar-status-cache.js";
 import { hydrateIntegrationProjectionCounts } from "./status.js";
+
+export async function transitionOnboarding(
+  db: CuedDatabase,
+  transition: "start" | "complete",
+  emit: (
+    event: "onboarding_started" | "onboarding_completed",
+    properties: TelemetryProperties,
+  ) => void | Promise<void> = (event, properties) => sendTelemetryEventSafe(db, event, properties),
+) {
+  const version = getCurrentAppVersion();
+  const starting = transition === "start";
+  const changed = starting
+    ? db.markOnboardingStarted(version)
+    : db.markOnboardingCompleted(version);
+  if (changed) {
+    await emit(starting ? "onboarding_started" : "onboarding_completed", {
+      component: "onboarding",
+      operation: transition,
+      stage: transition,
+    });
+  }
+  return db.getAppMetadata();
+}
 
 export interface OnboardingSnapshot {
   permissions: Awaited<ReturnType<typeof buildPermissionStatus>>["permissions"];

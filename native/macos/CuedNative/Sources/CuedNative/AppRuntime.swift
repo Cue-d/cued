@@ -1486,6 +1486,7 @@ final class MenuBarAppController: NSObject, NSApplicationDelegate, NSMenuDelegat
     self?.rebuildMenu()
   }
   private var timer: Timer?
+  private var appLaunchTelemetryTask: Task<Void, Never>?
   private var shouldAutoStartDaemon = true
   private var renderedDaemonPID: Int?
   private let statusItemImage = MenuBarAppController.loadStatusItemImage()
@@ -1519,6 +1520,10 @@ final class MenuBarAppController: NSObject, NSApplicationDelegate, NSMenuDelegat
     NSApp.setActivationPolicy(.accessory)
     menuBarLease.heartbeat()
     daemonSupervisor.startIfNeeded()
+    let daemonSupervisor = self.daemonSupervisor
+    appLaunchTelemetryTask = Task.detached(priority: .utility) { [daemonSupervisor] in
+      _ = daemonSupervisor.runCLI(arguments: ["telemetry", "app-launched"])
+    }
     rebuildMenu()
     statusMonitor.start()
     timer = Timer.scheduledTimer(timeInterval: 5, target: self, selector: #selector(maintainRuntime), userInfo: nil, repeats: true)
@@ -1550,7 +1555,7 @@ final class MenuBarAppController: NSObject, NSApplicationDelegate, NSMenuDelegat
   }
 
   @objc private func openRootWindow() {
-    rootWindowController.showAndRefresh()
+    presentCuedOpen(defaultToLastPageWhenComplete: false)
   }
 
   @objc private func toggleDaemon() {
@@ -1626,7 +1631,8 @@ final class MenuBarAppController: NSObject, NSApplicationDelegate, NSMenuDelegat
 
   private func presentCuedOpen(
     showWhenComplete: Bool = true,
-    forceActivePermissionRefreshWhenComplete: Bool = false
+    forceActivePermissionRefreshWhenComplete: Bool = false,
+    defaultToLastPageWhenComplete: Bool = true
   ) {
     let snapshot = statusStore.readSnapshot()
     let currentVersion = (Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String)
@@ -1641,9 +1647,10 @@ final class MenuBarAppController: NSObject, NSApplicationDelegate, NSMenuDelegat
 
     switch presentation {
     case let .onboarding(forceActivePermissionRefresh, initialPage):
-      rootWindowController.showAndRefresh(
+      rootWindowController.showOnboarding(
         forceActivePermissionRefresh: forceActivePermissionRefresh,
-        initialPage: initialPage
+        initialPage: initialPage,
+        after: appLaunchTelemetryTask
       )
     case .none:
       guard showWhenComplete else {
@@ -1651,7 +1658,7 @@ final class MenuBarAppController: NSObject, NSApplicationDelegate, NSMenuDelegat
       }
       rootWindowController.showAndRefresh(
         forceActivePermissionRefresh: forceActivePermissionRefreshWhenComplete,
-        defaultToLastPage: true
+        defaultToLastPage: defaultToLastPageWhenComplete
       )
     }
   }
