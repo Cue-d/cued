@@ -28,7 +28,7 @@ export async function sendDaemonRequest(request: DaemonRequestInput): Promise<Da
     try {
       return await sendSingleDaemonRequest(withId);
     } catch (error) {
-      if (!isRetriableDaemonConnectionError(error)) {
+      if (!isDaemonConnectionUnavailable(error)) {
         throw error;
       }
       lastError = error instanceof Error ? error : new Error(String(error));
@@ -103,7 +103,7 @@ function getDaemonRequestTimeoutMs(): number {
     : DEFAULT_DAEMON_REQUEST_TIMEOUT_MS;
 }
 
-function isRetriableDaemonConnectionError(error: unknown): boolean {
+export function isDaemonConnectionUnavailable(error: unknown): boolean {
   if (!error || typeof error !== "object") {
     return false;
   }

@@ -2,8 +2,15 @@ export type DaemonRequest =
   | { id: string; command: "ping" }
   | { id: string; command: "status" }
   | { id: string; command: "doctor" }
+  | { id: string; command: "telemetry-app-launched"; appVersion: string }
   | { id: string; command: "onboarding-status" }
   | { id: string; command: "onboarding-complete" }
+  | {
+      id: string;
+      command: "onboarding-transition";
+      transition: "start" | "complete";
+      appVersion: string;
+    }
   | {
       id: string;
       command: "onboarding-snapshot";

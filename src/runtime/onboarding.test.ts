@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CuedDatabase } from "../db/database.js";
-import { buildOnboardingSnapshot } from "./onboarding.js";
+import { buildOnboardingSnapshot, transitionOnboarding } from "./onboarding.js";
 
 // Snapshot tests exercise state composition; external installs and credential
 // imports have dedicated tests and must not depend on the developer's machine.
@@ -33,6 +33,7 @@ describe("onboarding snapshot", () => {
   const tempDirs: string[] = [];
 
   afterEach(() => {
+    vi.unstubAllEnvs();
     delete process.env.CUED_CONTACTS_NATIVE_BINARY;
     delete process.env.CUED_IMESSAGE_DB_PATH;
     delete process.env.CUED_SLACK_APP_BINARY;
@@ -59,6 +60,38 @@ describe("onboarding snapshot", () => {
     db.migrate();
     return db;
   }
+
+  it("reports only the first start and completion for an onboarding version", async () => {
+    const db = createDb();
+    const otherConnection = new CuedDatabase(db.dbPath);
+    const emit = vi.fn();
+    try {
+      vi.stubEnv("CUED_APP_VERSION", "0.1.45");
+      db.markOnboardingCompleted("0.1.45");
+      await transitionOnboarding(db, "start", emit);
+      await transitionOnboarding(otherConnection, "complete", emit);
+      expect(emit).not.toHaveBeenCalled();
+
+      vi.stubEnv("CUED_APP_VERSION", "0.1.46");
+      await transitionOnboarding(db, "start", emit);
+      await transitionOnboarding(otherConnection, "start", emit);
+      const metadata = await transitionOnboarding(otherConnection, "complete", emit);
+      await transitionOnboarding(db, "complete", emit);
+      await transitionOnboarding(db, "start", emit);
+
+      expect(metadata.onboardingCompletedVersion).toBe("0.1.46");
+      expect(emit.mock.calls).toEqual([
+        ["onboarding_started", { component: "onboarding", operation: "start", stage: "start" }],
+        [
+          "onboarding_completed",
+          { component: "onboarding", operation: "complete", stage: "complete" },
+        ],
+      ]);
+    } finally {
+      otherConnection.close();
+      db.close();
+    }
+  });
 
   function createPackagedSignalHelper(version = "0.12.9"): string {
     const appPath = join(createTempDir("cued-app-"), "Cued.app");
