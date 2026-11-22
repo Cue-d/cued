@@ -23,8 +23,8 @@ const pinnedSources = [
     name: "signal-cli",
     repo: "AsamK/signal-cli",
     kind: "release",
-    file: "scripts/fetch-signal-cli-macos.sh",
-    versionPattern: /SIGNAL_VERSION="([^"]+)"/,
+    file: "scripts/packaging/signal-runtime.json",
+    versionKey: "signalVersion",
     tagPrefix: "v",
     contract: "scripts/fetch-signal-cli-macos.sh bundled helper, Signal auth/send/receive",
   },
@@ -93,17 +93,19 @@ async function localVersion(source) {
   const content = await readRepoFile(source.file);
   if (source.kind === "go-module") {
     const escaped = source.module.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    const match = new RegExp(`^\\s*${escaped}\\s+(\\S+)`, "m").exec(content);
+    const match = new RegExp(`^[ \\t]*(?:require[ \\t]+)?${escaped}[ \\t]+(\\S+)`, "m").exec(
+      content,
+    );
     if (!match) {
       throw new Error(`Could not find ${source.module} in ${source.file}`);
     }
     return match[1];
   }
-  const match = source.versionPattern.exec(content);
-  if (!match) {
-    throw new Error(`Could not find version in ${source.file}`);
+  const version = JSON.parse(content)[source.versionKey];
+  if (typeof version !== "string" || !version) {
+    throw new Error(`Could not find ${source.versionKey} in ${source.file}`);
   }
-  return `${source.tagPrefix ?? ""}${match[1]}`;
+  return `${source.tagPrefix ?? ""}${version}`;
 }
 
 function tagSemver(tag) {
