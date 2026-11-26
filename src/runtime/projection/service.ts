@@ -130,6 +130,7 @@ export class ProjectionMessageHookBarrier {
     // wherever its limit falls, and the next continues from there. Coverage therefore
     // accumulates across runs, and a batch is released once every one of its rows has been
     // covered, not only when a single run happens to span it.
+    const released: PendingMessageHookBatch[] = [];
     const remaining: PendingMessageHookBatch[] = [];
     for (const batch of this.pending) {
       const nextUncoveredRowId = batch.nextUncoveredRowId ?? batch.startRowId;
@@ -137,15 +138,33 @@ export class ProjectionMessageHookBarrier {
         batch.nextUncoveredRowId = range.endRowId + 1;
       }
       if ((batch.nextUncoveredRowId ?? batch.startRowId) > batch.endRowId) {
-        for (const payload of batch.payloads) {
-          await emit(payload);
-        }
-        continue;
+        released.push(batch);
+      } else {
+        remaining.push(batch);
       }
-      remaining.push(batch);
     }
+    // Take the released batches out of the queue before the first hook runs. Emitting awaits,
+    // and while it does another release or enqueue can arrive: it must neither see these
+    // batches again nor have its own additions overwritten when this call finishes.
     this.pending.length = 0;
     this.pending.push(...remaining);
+    for (const batch of released) {
+      for (const payload of batch.payloads) {
+        await emit(payload);
+      }
+    }
+  }
+
+  /** Drops queued payloads that match, such as those of a source whose rows were deleted. */
+  discard(matches: (payload: Record<string, unknown>) => boolean): void {
+    const kept = this.pending
+      .map((batch) => ({
+        ...batch,
+        payloads: batch.payloads.filter((payload) => !matches(payload)),
+      }))
+      .filter((batch) => batch.payloads.length > 0);
+    this.pending.length = 0;
+    this.pending.push(...kept);
   }
 
   async releaseAll(emit: (payload: Record<string, unknown>) => Promise<void>): Promise<void> {

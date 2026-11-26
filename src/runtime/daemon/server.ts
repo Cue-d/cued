@@ -3872,13 +3872,18 @@ export async function runDaemon(): Promise<void> {
         let hasMore = false;
         let lastCompletedAt = now();
         do {
-          db.updateRunProgress(currentRun.id, { leaseMs: INGEST_RUN_LEASE_MS, claim: runClaim });
+          // Checked on both sides of the fetch: before, so a reset or reclaimed run stops asking
+          // for pages; after, because the helper can take a while and everything below (rows,
+          // proof, cursor) would otherwise be written back over what the reset just deleted.
+          // Each check also renews the lease.
+          assertRunStillOwned();
           const pageFetchStartedAt = now();
           const page = await session.resync({
             cursor,
             sinceMs,
             limit: 1000,
           });
+          assertRunStillOwned();
           adapterFetchMs += now() - pageFetchStartedAt;
           pageCount += 1;
           const pageCoverage = summarizeWhatsAppMessageCoverage(page.messages ?? []);
@@ -3906,7 +3911,7 @@ export async function runDaemon(): Promise<void> {
           const pageInsertStartedAt = now();
           const pageInsertResult = await insertRawEventsYielding(db, rawEvents, ingestInsertHooks);
           rawEventInsertMs += now() - pageInsertStartedAt;
-          db.updateRunProgress(currentRun.id, { leaseMs: INGEST_RUN_LEASE_MS, claim: runClaim });
+          assertRunStillOwned();
           insertResult = mergeRawEventInsertResults(insertResult, pageInsertResult);
         } while (hasMore && pageCount < pageBudget);
 
@@ -4515,6 +4520,11 @@ export async function runDaemon(): Promise<void> {
     noteForegroundRequest: () => {
       lastForegroundRequestAt = now();
     },
+    discardMessageHooksForPlatform: (platform) => {
+      projectionMessageHooks.discard(
+        (payload) => (payload.message as { platform?: unknown } | undefined)?.platform === platform,
+      );
+    },
   };
   const server = createServer((socket) => {
     handleSocket(socket, requestContext);
@@ -4753,6 +4763,8 @@ type DaemonRequestContext = {
   refreshManagedIntegrationsInBackground: (reason: string) => void;
   stallMonitor: StallMonitor;
   noteForegroundRequest: () => void;
+  /** Drops message hooks still waiting on projection for a platform whose rows are gone. */
+  discardMessageHooksForPlatform: (platform: string) => void;
 };
 
 function handleSocket(socket: Socket, context: DaemonRequestContext): void {
@@ -5320,12 +5332,13 @@ async function dispatchRequest(
           ok: true,
           result: runQueueService.queueRebuild(),
         };
-      case "reset":
-        return {
-          id: request.id,
-          ok: true,
-          result: runQueueService.resetSource(request.source),
-        };
+      case "reset": {
+        const result = runQueueService.resetSource(request.source);
+        // The reset deleted the rows these hooks were waiting on. Left queued, the next full
+        // rebuild would announce messages that are no longer in the database.
+        context.discardMessageHooksForPlatform(result.source);
+        return { id: request.id, ok: true, result };
+      }
       case "subscribe":
         // handleSocket answers this itself: a subscription belongs to the connection.
         return { id: request.id, ok: false, error: "subscribe is handled per connection" };
