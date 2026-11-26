@@ -1783,6 +1783,7 @@ export async function runDaemon(): Promise<void> {
   const activeIngestRuns = new Map<string, Promise<void>>();
   let isProcessingProjection = false;
   let isProcessingSearchIndex = false;
+  let searchIndexWakePending = false;
   let ingestDrainScheduled = false;
   let projectionDrainScheduled = false;
   let searchIndexDrainScheduled = false;
@@ -2790,6 +2791,10 @@ export async function runDaemon(): Promise<void> {
       return;
     }
     if (isProcessingSearchIndex) {
+      // The pass running on the worker may already have looked at the queues and be about to
+      // report them empty. Remember this wake-up, or what was queued meanwhile would wait for
+      // the next unrelated one.
+      searchIndexWakePending = true;
       return;
     }
     if (isProcessingProjection) {
@@ -2856,6 +2861,10 @@ export async function runDaemon(): Promise<void> {
       })
       .finally(() => {
         isProcessingSearchIndex = false;
+        if (searchIndexWakePending) {
+          searchIndexWakePending = false;
+          scheduleSearchIndexDrain(FTS_INDEX_SLICE_GAP_MS);
+        }
       });
   };
 
