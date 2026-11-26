@@ -23,6 +23,7 @@ vi.mock("../skills/install.js", () => ({
 
 vi.mock("../platforms/linkedin/auth/keychain-import.js", () => ({
   importLinkedInStoredAuth: () => [],
+  importLinkedInStoredAuthAsync: async () => [],
 }));
 
 vi.mock("../platforms/slack/auth/desktop-import.js", () => ({

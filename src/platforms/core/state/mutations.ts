@@ -473,6 +473,13 @@ export function removeIntegration(
   db: CuedDatabase,
   platform: string,
   accountKey?: string,
+  options: {
+    /**
+     * Leave the account's finished sync-run history for the caller to purge in slices with
+     * `deleteSyncRunHistoryBatch`. The daemon sets this so a long history cannot block it.
+     */
+    deferSyncRunHistory?: boolean;
+  } = {},
 ): { platform: Platform; accountKey: string; removed: true } {
   const integration = getIntegrationSummary(db, platform, accountKey);
   const latestAuthSession = db.getLatestAuthSession(integration.platform, integration.accountKey);
@@ -518,7 +525,9 @@ export function removeIntegration(
   }
 
   const removedAt = now();
-  db.clearIntegrationRuntimeState(integration.platform, integration.accountKey);
+  db.clearIntegrationRuntimeState(integration.platform, integration.accountKey, {
+    deferSyncRunHistory: options.deferSyncRunHistory,
+  });
   db.upsertIntegrationState({
     platform: integration.platform,
     accountKey: integration.accountKey,

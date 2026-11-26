@@ -3,8 +3,9 @@ import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-const { execFileSyncMock } = vi.hoisted(() => ({
+const { execFileSyncMock, execFileAsyncMock } = vi.hoisted(() => ({
   execFileSyncMock: vi.fn(),
+  execFileAsyncMock: vi.fn(),
 }));
 
 vi.mock("node:child_process", async (importOriginal) => {
@@ -12,10 +13,15 @@ vi.mock("node:child_process", async (importOriginal) => {
   return {
     ...actual,
     execFileSync: execFileSyncMock,
+    // The non-blocking path uses promisify(execFile); give it the promise form directly.
+    execFile: Object.assign(() => undefined, {
+      [Symbol.for("nodejs.util.promisify.custom")]: execFileAsyncMock,
+    }),
   };
 });
 
 import {
+  GlobalCuedSkillMonitor,
   getGlobalCuedSkillStatus,
   installGlobalCuedSkill,
   resolveCuedSkillSourcePath,
@@ -190,5 +196,106 @@ describe("cued skill installer", () => {
     expect(resolveNvmNpxPath()).toBe(
       join(homeDir, ".nvm", "versions", "node", "v20.11.0", "bin", "npx"),
     );
+  });
+});
+
+describe("global skill monitor", () => {
+  const tempDirs: string[] = [];
+
+  afterEach(() => {
+    vi.clearAllMocks();
+    for (const dir of tempDirs.splice(0)) {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  function createHome(options: { installed: boolean }): string {
+    const home = mkdtempSync(join(tmpdir(), "cued-skill-monitor-"));
+    tempDirs.push(home);
+    if (options.installed) {
+      const skillDir = join(home, ".agents", "skills", "cued");
+      mkdirSync(skillDir, { recursive: true });
+      writeFileSync(join(skillDir, "SKILL.md"), "# cued\n");
+    }
+    return home;
+  }
+
+  /**
+   * Makes `npx` resolvable no matter what the host has installed: the login shell reports a
+   * real (empty) executable, and running it answers through `skills`.
+   */
+  function stubNpx(skills: (args: string[]) => string): void {
+    const binDir = mkdtempSync(join(tmpdir(), "cued-skill-monitor-npx-"));
+    tempDirs.push(binDir);
+    const npxPath = join(binDir, "npx");
+    writeFileSync(npxPath, "#!/bin/sh\nexit 0\n");
+    chmodSync(npxPath, 0o755);
+    execFileAsyncMock.mockImplementation(async (file: string, args: string[]) => ({
+      stdout: file === "/bin/zsh" ? `${npxPath}\n` : skills(args),
+      stderr: "",
+    }));
+  }
+
+  const LISTED = "Global Skills\n\ncued ~/.agents/skills/cued\n";
+  const NOT_LISTED = "Global Skills\n";
+
+  it("answers from the filesystem without launching anything when the skill is installed", () => {
+    const monitor = new GlobalCuedSkillMonitor({ home: createHome({ installed: true }) });
+
+    expect(monitor.status({ ensureInstalled: true })).toEqual(
+      expect.objectContaining({ installed: true, status: "installed" }),
+    );
+    expect(execFileSyncMock).not.toHaveBeenCalled();
+    expect(execFileAsyncMock).not.toHaveBeenCalled();
+  });
+
+  it("answers immediately when the skill is missing and verifies in the background", async () => {
+    stubNpx(() => LISTED);
+    const changes: Array<{ installed: boolean }> = [];
+    const monitor = new GlobalCuedSkillMonitor({
+      home: createHome({ installed: false }),
+      onChange: (status) => changes.push(status),
+    });
+
+    const immediate = monitor.status();
+    expect(immediate).toEqual(expect.objectContaining({ installed: false, status: "unknown" }));
+    expect(execFileSyncMock).not.toHaveBeenCalled();
+
+    await monitor.settled();
+    expect(changes).toEqual([expect.objectContaining({ installed: true })]);
+    // Installed somewhere the filesystem probe does not look: the verified answer stands.
+    expect(monitor.status()).toEqual(expect.objectContaining({ installed: true }));
+  });
+
+  it("installs in the background when asked to and the skill is not listed", async () => {
+    let installed = false;
+    stubNpx((args) => {
+      if (args.includes("add")) {
+        installed = true;
+        return "";
+      }
+      return installed ? LISTED : NOT_LISTED;
+    });
+    const monitor = new GlobalCuedSkillMonitor({ home: createHome({ installed: false }) });
+
+    monitor.status({ ensureInstalled: true });
+    await monitor.settled();
+    expect(
+      execFileAsyncMock.mock.calls.some(([, args]) => (args as string[]).includes("add")),
+    ).toBe(true);
+    expect(monitor.status()).toEqual(expect.objectContaining({ installed: true }));
+  });
+
+  it("does not launch a second verification while the last one is recent", async () => {
+    stubNpx(() => NOT_LISTED);
+    const monitor = new GlobalCuedSkillMonitor({ home: createHome({ installed: false }) });
+
+    monitor.status();
+    await monitor.settled();
+    const callsAfterFirst = execFileAsyncMock.mock.calls.length;
+    monitor.status();
+    monitor.status();
+    await monitor.settled();
+    expect(execFileAsyncMock.mock.calls.length).toBe(callsAfterFirst);
   });
 });

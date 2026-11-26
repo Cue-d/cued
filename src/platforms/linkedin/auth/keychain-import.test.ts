@@ -6,6 +6,7 @@ vi.mock("../../core/secrets/keychain.js", () => ({
   authKeychainService: (platform: string) => `so.cued.desktop.auth.${platform}`,
   legacyAuthKeychainService: (platform: string) => `so.cued.auth.${platform}`,
   loadKeychainSecret: loadKeychainSecretMock,
+  loadKeychainSecretAsync: async (...args: unknown[]) => loadKeychainSecretMock(...args),
   storeKeychainSecret: vi.fn(),
 }));
 

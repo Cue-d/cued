@@ -1,6 +1,6 @@
 import { safeParseJsonRecord } from "../../../db/codecs.js";
 import type { CuedDatabase, IntegrationStateRow } from "../../../db/database.js";
-import { importLinkedInStoredAuth } from "../../linkedin/auth/keychain-import.js";
+import { importLinkedInStoredAuthAsync } from "../../linkedin/auth/keychain-import.js";
 import {
   getSignalConfigDir,
   inspectSignalCli,
@@ -188,7 +188,7 @@ export async function refreshDesktopImportedIntegrations(db: CuedDatabase): Prom
   integrations: IntegrationStateSummary[];
 }> {
   const importedDesktop = await importSlackDesktopAuth(db);
-  const importedLinkedIn = importLinkedInStoredAuth(db);
+  const importedLinkedIn = await importLinkedInStoredAuthAsync(db);
   return {
     refreshed:
       importedDesktop.filter((entry) => entry.imported).length +
@@ -234,11 +234,14 @@ export async function refreshManagedHelperIntegrationStates(db: CuedDatabase): P
   };
 }
 
-export async function refreshManagedIntegrationStates(db: CuedDatabase): Promise<{
+export async function refreshManagedIntegrationStates(
+  db: CuedDatabase,
+  options: { localIntegrationStates?: ManagedIntegrationState[] } = {},
+): Promise<{
   refreshed: number;
   integrations: IntegrationStateSummary[];
 }> {
-  const local = refreshLocalIntegrationStates(db);
+  const local = refreshLocalIntegrationStates(db, options.localIntegrationStates);
   const desktopImported = await refreshDesktopImportedIntegrations(db);
   const helpers = await refreshManagedHelperIntegrationStates(db);
   return {

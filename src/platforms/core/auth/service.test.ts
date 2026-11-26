@@ -36,6 +36,8 @@ vi.mock("../../slack/helper/binary.js", () => ({
 
 vi.mock("../../linkedin/auth/keychain-import.js", () => ({
   importLinkedInStoredAuth: importLinkedInStoredAuthMock,
+  importLinkedInStoredAuthAsync: async (...args: unknown[]) =>
+    importLinkedInStoredAuthMock(...args),
   validateLinkedInStoredAuth: validateLinkedInStoredAuthMock,
 }));
 
