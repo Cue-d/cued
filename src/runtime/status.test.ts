@@ -54,15 +54,9 @@ describe("menu bar status snapshot", () => {
         0, 0, 0, 0, 0, 1, 1
       );
     `);
-    const realtime = { getStatuses: () => [] };
-
     const snapshot = buildMenuBarDaemonStatusSnapshot(db, {
       app: {},
-      discordRealtime: realtime as never,
-      slackRealtime: realtime as never,
-      linkedInRealtime: realtime as never,
-      signalRealtime: realtime as never,
-      whatsAppRealtime: realtime as never,
+      realtime: { discord: [], slack: [], linkedin: [], signal: [], whatsapp: [] },
       socketPath: join(dir, "daemon.sock"),
       bootstrap: {
         state: "ready",

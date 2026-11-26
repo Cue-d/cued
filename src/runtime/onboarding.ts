@@ -1,9 +1,14 @@
 import { getCurrentAppVersion } from "../core/app-metadata.js";
 import type { CuedDatabase, IntegrationProjectionCount } from "../db/database.js";
+import type { LocalAccess, StatusAggregates } from "../db/db-worker-jobs.js";
 import { refreshManagedIntegrationStates } from "../platforms/core/state/refresh.js";
 import { buildIntegrationStatus } from "../platforms/core/state/status.js";
 import { isPlatform } from "../platforms/core/types.js";
-import { getGlobalCuedSkillStatus, installGlobalCuedSkill } from "../skills/install.js";
+import {
+  type GlobalCuedSkillMonitor,
+  getGlobalCuedSkillStatus,
+  installGlobalCuedSkill,
+} from "../skills/install.js";
 import { isTelemetryEnabled } from "../telemetry/client.js";
 import { sendTelemetryEventSafe } from "../telemetry/context.js";
 import type { TelemetryProperties } from "../telemetry/events.js";
@@ -58,6 +63,18 @@ export async function buildOnboardingSnapshot(
     refreshManagedIntegrations?: boolean;
     refreshPermissions?: boolean;
     installGlobalSkill?: boolean;
+    /**
+     * Long-lived callers pass a monitor so the skill check never blocks: it answers from the
+     * filesystem and verifies or installs in the background. Without one the check shells out
+     * to `npx` synchronously, which is only acceptable in a short-lived CLI process.
+     */
+    globalSkillMonitor?: GlobalCuedSkillMonitor;
+    /**
+     * Values the daemon keeps warm off-thread. Supplying them makes the snapshot a handful of
+     * small reads; omitting them probes access and counts rows inline.
+     */
+    localAccess?: LocalAccess;
+    aggregates?: StatusAggregates;
   } = {},
 ): Promise<OnboardingSnapshot> {
   if (options.refreshManagedIntegrations) {
@@ -69,10 +86,12 @@ export async function buildOnboardingSnapshot(
     }
   }
 
-  const permissions = await buildPermissionStatus({
-    mode: options.refreshPermissions ? "active" : "passive",
-    db,
-  });
+  const permissions = options.localAccess
+    ? { permissions: [...options.localAccess.permissions] }
+    : await buildPermissionStatus({
+        mode: options.refreshPermissions ? "active" : "passive",
+        db,
+      });
   permissions.permissions.push({
     key: "diagnostics",
     status: isTelemetryEnabled(db) ? "granted" : "disabled",
@@ -81,9 +100,18 @@ export async function buildOnboardingSnapshot(
       : "Redacted diagnostic reporting is disabled",
     requestFlags: ["--telemetry-enable"],
   });
-  let globalSkill = getGlobalCuedSkillStatus();
-  if (options.installGlobalSkill ?? true) {
-    if (!globalSkill.installed && globalSkill.status === "needs_action" && globalSkill.sourcePath) {
+  const installGlobalSkill = options.installGlobalSkill ?? true;
+  let globalSkill: ReturnType<typeof getGlobalCuedSkillStatus>;
+  if (options.globalSkillMonitor) {
+    globalSkill = options.globalSkillMonitor.status({ ensureInstalled: installGlobalSkill });
+  } else {
+    globalSkill = getGlobalCuedSkillStatus();
+    if (
+      installGlobalSkill &&
+      !globalSkill.installed &&
+      globalSkill.status === "needs_action" &&
+      globalSkill.sourcePath
+    ) {
       const install = installGlobalCuedSkill();
       globalSkill = install.ok
         ? getGlobalCuedSkillStatus()
@@ -93,13 +121,22 @@ export async function buildOnboardingSnapshot(
           };
     }
   }
-  const cachedStatus = readMenuBarStatusCache({ dbPath: db.dbPath });
-  const cachedRelationship = cachedStatus ? readCachedRelationshipSummary(cachedStatus) : null;
-  const cachedProjectionCounts = cachedStatus ? readCachedProjectionCounts(cachedStatus) : null;
+  const cachedStatus = options.aggregates ? null : readMenuBarStatusCache({ dbPath: db.dbPath });
+  const cachedRelationship = options.aggregates
+    ? aggregatesRelationshipSummary(db, options.aggregates)
+    : cachedStatus
+      ? readCachedRelationshipSummary(cachedStatus)
+      : null;
+  const cachedProjectionCounts =
+    options.aggregates?.overview.integrationBreakdown ??
+    (cachedStatus ? readCachedProjectionCounts(cachedStatus) : null);
   const fallbackOverview =
     cachedRelationship && cachedProjectionCounts ? null : db.getMenuBarOverview();
   const projectionCounts = cachedProjectionCounts ?? fallbackOverview?.integrationBreakdown ?? [];
-  const integrationStatus = buildIntegrationStatus(db, { includeDiagnostics: false });
+  const integrationStatus = buildIntegrationStatus(db, {
+    includeDiagnostics: false,
+    localIntegrationStates: options.localAccess?.localIntegrationStates,
+  });
   const integrations = hydrateIntegrationProjectionCounts(
     integrationStatus.integrations,
     projectionCounts,
@@ -117,6 +154,21 @@ export async function buildOnboardingSnapshot(
     setupIntegrations,
     relationshipSummary:
       cachedRelationship ?? buildDatabaseRelationshipSummary(db, fallbackOverview),
+  };
+}
+
+function aggregatesRelationshipSummary(
+  db: CuedDatabase,
+  aggregates: StatusAggregates,
+): RelationshipSummary {
+  return {
+    messages: aggregates.overview.messages,
+    contacts: aggregates.overview.contacts,
+    phoneCalls: aggregates.phoneCalls,
+    pendingProjectionEvents: db.getProjectionBacklog({ initializeProjectionState: false })
+      .pending_raw_events,
+    lastUpdatedAt: null,
+    source: "database",
   };
 }
 
