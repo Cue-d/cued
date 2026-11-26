@@ -37,6 +37,19 @@ import type {
 } from "../runtime/updater/types.js";
 import { safeParseJson, safeStringifyJson } from "./codecs.js";
 import { MIGRATIONS } from "./migrations.js";
+import {
+  checkpointWal,
+  countObservedPhoneCalls,
+  deleteSyncRunHistoryBatch,
+  executeReadOnlySql,
+  type IntegrationProjectionCount,
+  type MenuBarOverview,
+  type MessageFtsIndexBacklog,
+  pruneSyncRunHistory,
+  readMenuBarOverview,
+  readMessageFtsIndexBacklog,
+  readProjectionCountsByIntegration,
+} from "./raw-queries.js";
 import * as schema from "./schema.js";
 import { openSqliteDatabase } from "./sqlite.js";
 import { StatusReadCache } from "./status-read-cache.js";
@@ -366,12 +379,7 @@ export interface AttachmentContentRow {
   updated_at: number;
 }
 
-export interface IntegrationProjectionCount {
-  platform: Platform;
-  accountKey: string;
-  contacts: number;
-  messages: number;
-}
+export type { IntegrationProjectionCount } from "./raw-queries.js";
 
 export type LocalDrizzleDatabase = BetterSQLite3Database<typeof schema>;
 const WRITE_BATCH_SIZE = 250;
@@ -437,6 +445,8 @@ function buildRawEventValues(event: RawEventInput) {
   };
 }
 
+type DrizzleTransaction = Parameters<Parameters<LocalDrizzleDatabase["transaction"]>[0]>[0];
+
 export class CuedDatabase {
   private readonly sqlite: Database.Database;
   private readonly db: LocalDrizzleDatabase;
@@ -458,6 +468,19 @@ export class CuedDatabase {
       this.sqlite.exec("PRAGMA synchronous = NORMAL");
     }
     this.db = drizzle(this.sqlite, { schema });
+  }
+
+  /**
+   * Runs a write transaction that takes SQLite's write lock up front.
+   *
+   * A default (deferred) transaction starts as a reader and upgrades on its first write, and
+   * SQLite refuses that upgrade outright, "database is locked" with no busy wait, if another
+   * connection committed in between. The daemon is not the only writer (its worker thread,
+   * the projection worker and the CLI all write), so every write transaction asks for the
+   * lock first and waits its turn instead.
+   */
+  private writeTransaction<T>(run: (tx: DrizzleTransaction) => T): T {
+    return this.db.transaction(run, { behavior: "immediate" });
   }
 
   migrate(): void {
@@ -504,18 +527,7 @@ export class CuedDatabase {
   }
 
   executeReadOnlySql(query: string): unknown[] {
-    const trimmed = query.trim();
-    if (trimmed.length === 0) {
-      throw new Error("SQL query must not be empty");
-    }
-    if (!/^(select|with|pragma|explain)\b/i.test(trimmed)) {
-      throw new Error("Only read-only SELECT/PRAGMA/EXPLAIN queries are supported");
-    }
-    const statement = this.sqlite.prepare(trimmed) as Database.Statement & { reader?: boolean };
-    if (statement.reader === false) {
-      throw new Error("Only read-only queries are supported");
-    }
-    return statement.all();
+    return executeReadOnlySql(this.sqlite, query);
   }
 
   listContactMergeDecisions(): ContactMergeDecisionRow[] {
@@ -638,29 +650,31 @@ export class CuedDatabase {
   ): PlannedContactMergeDecision[] {
     const planned = this.planContactMergeDecisions(input);
     const timestamp = now();
-    return this.sqlite.transaction(() => {
-      for (const decision of planned) {
-        this.db
-          .insert(contactMergeDecisions)
-          .values({
-            id: decision.decisionId,
-            decisionType: "merge",
-            primaryContactId: decision.primaryContactId,
-            secondaryContactId: decision.secondaryContactId,
-            canonicalContactId: decision.canonicalContactId,
-            reason: decision.reason,
-            createdBy: options.createdBy ?? "cli",
-            createdAt: timestamp,
-          })
-          .run();
-        this.db
-          .update(contactMemories)
-          .set({ contactId: decision.canonicalContactId, updatedAt: timestamp })
-          .where(eq(contactMemories.contactId, decision.secondaryContactId))
-          .run();
-      }
-      return planned;
-    })();
+    return this.sqlite
+      .transaction(() => {
+        for (const decision of planned) {
+          this.db
+            .insert(contactMergeDecisions)
+            .values({
+              id: decision.decisionId,
+              decisionType: "merge",
+              primaryContactId: decision.primaryContactId,
+              secondaryContactId: decision.secondaryContactId,
+              canonicalContactId: decision.canonicalContactId,
+              reason: decision.reason,
+              createdBy: options.createdBy ?? "cli",
+              createdAt: timestamp,
+            })
+            .run();
+          this.db
+            .update(contactMemories)
+            .set({ contactId: decision.canonicalContactId, updatedAt: timestamp })
+            .where(eq(contactMemories.contactId, decision.secondaryContactId))
+            .run();
+        }
+        return planned;
+      })
+      .immediate();
   }
 
   private assertContactExists(contactId: string, label: "Primary" | "Secondary"): void {
@@ -917,7 +931,7 @@ export class CuedDatabase {
     version?: string | null;
     details?: unknown;
   }): void {
-    this.statusReadCache.preserveAcrossDaemonHeartbeat(() => {
+    this.statusReadCache.preserveAcrossUncountedWrite(() => {
       this.db
         .insert(daemonState)
         .values({
@@ -1006,7 +1020,7 @@ export class CuedDatabase {
   }
 
   resetSource(platform: Platform): number {
-    const removed = this.db.transaction((tx) => {
+    const removed = this.writeTransaction((tx) => {
       const removedSourceAccounts = tx
         .delete(sourceAccounts)
         .where(eq(sourceAccounts.platform, platform))
@@ -1310,89 +1324,16 @@ export class CuedDatabase {
     });
   }
 
-  getMenuBarOverview(): {
-    contacts: number;
-    conversations: number;
-    messages: number;
-    rawEvents: number;
-    sourceAccounts: number;
-    integrations: number;
-    authSessions: number;
-    messageBreakdown: Array<{
-      platform: Platform;
-      messages: number;
-    }>;
-    integrationBreakdown: IntegrationProjectionCount[];
-  } {
-    return this.statusReadCache.read("menu-overview", () => {
-      const integrationBreakdown = this.listProjectionCountsByIntegration();
-      const messagesByPlatform = new Map<Platform, number>();
-      for (const row of integrationBreakdown) {
-        messagesByPlatform.set(
-          row.platform,
-          (messagesByPlatform.get(row.platform) ?? 0) + row.messages,
-        );
-      }
-      const messageBreakdown = [...messagesByPlatform]
-        .map(([platform, messages]) => ({ platform, messages }))
-        .sort(
-          (left, right) =>
-            right.messages - left.messages || left.platform.localeCompare(right.platform),
-        );
-      return {
-        contacts: this.countRows(contacts),
-        conversations: this.countRows(conversations),
-        messages: messageBreakdown.reduce((total, row) => total + row.messages, 0),
-        rawEvents: this.countRows(rawEvents),
-        sourceAccounts: this.countRows(sourceAccounts),
-        integrations: this.countRows(integrationStates),
-        authSessions: this.countRows(authSessions),
-        messageBreakdown,
-        integrationBreakdown,
-      };
-    });
+  getMenuBarOverview(): MenuBarOverview {
+    return this.statusReadCache.read("menu-overview", () =>
+      readMenuBarOverview(this.sqlite, this.listProjectionCountsByIntegration()),
+    );
   }
 
   listProjectionCountsByIntegration(): IntegrationProjectionCount[] {
-    return this.statusReadCache.read("integration-counts", () => {
-      const byIntegration = new Map<string, IntegrationProjectionCount>();
-      const getOrCreate = (platform: Platform, accountKey: string) => {
-        const key = `${platform}\u0000${accountKey}`;
-        const existing = byIntegration.get(key);
-        if (existing) {
-          return existing;
-        }
-        const created = { platform, accountKey, contacts: 0, messages: 0 };
-        byIntegration.set(key, created);
-        return created;
-      };
-      const contactCounts = this.sqlite
-        .prepare(
-          `
-        SELECT platform, account_key, COUNT(*) AS count
-        FROM contact_sources
-        GROUP BY platform, account_key
-      `,
-        )
-        .all() as Array<{ platform: Platform; account_key: string; count: number | null }>;
-      for (const row of contactCounts) {
-        getOrCreate(row.platform, row.account_key).contacts = Number(row.count ?? 0);
-      }
-      const messageCounts = this.sqlite
-        .prepare(
-          `
-        SELECT platform, account_key, COUNT(*) AS count
-        FROM messages
-        GROUP BY platform, account_key
-      `,
-        )
-        .all() as Array<{ platform: Platform; account_key: string; count: number | null }>;
-      for (const row of messageCounts) {
-        getOrCreate(row.platform, row.account_key).messages = Number(row.count ?? 0);
-      }
-      const rows = [...byIntegration.values()];
-      return rows;
-    });
+    return this.statusReadCache.read("integration-counts", () =>
+      readProjectionCountsByIntegration(this.sqlite),
+    );
   }
 
   listMessageCountsByPlatform(): Array<{
@@ -1417,20 +1358,7 @@ export class CuedDatabase {
   }
 
   countObservedPhoneCalls(): number {
-    return this.statusReadCache.read("phone-calls", () => {
-      const row = this.sqlite
-        .prepare(
-          `
-        SELECT COUNT(*) AS calls
-        FROM raw_events
-        WHERE platform = 'imessage'
-          AND account_key = 'local'
-          AND COALESCE(normalized_schema, entity_kind || '.' || event_kind || '@1') = 'call.observed@1'
-      `,
-        )
-        .get() as { calls: number | null };
-      return Number(row.calls ?? 0);
-    });
+    return this.statusReadCache.read("phone-calls", () => countObservedPhoneCalls(this.sqlite));
   }
 
   getProjectionState(options: { initialize?: boolean } = {}): ProjectionStateRow {
@@ -1742,43 +1670,45 @@ export class CuedDatabase {
       updatedAt: timestamp,
     };
 
-    this.sqlite.transaction(() => {
-      const existing = this.getIntegrationState(input.platform, input.accountKey);
-      this.sqlite.exec("PRAGMA defer_foreign_keys = ON");
-      this.db
-        .insert(integrationStates)
-        .values(values)
-        .onConflictDoUpdate({
-          target: [integrationStates.platform, integrationStates.accountKey],
-          set: {
-            id: values.id,
-            displayName: values.displayName,
-            authState: values.authState,
-            enabled: values.enabled,
-            connectionKind: values.connectionKind,
-            syncCapable: values.syncCapable,
-            launchStrategy: values.launchStrategy,
-            launchTarget: values.launchTarget,
-            importedFrom: values.importedFrom,
-            artifactPathsJson: values.artifactPathsJson,
-            metadataJson: values.metadataJson,
-            lastSeenAt: values.lastSeenAt,
-            updatedAt: values.updatedAt,
-          },
-        })
-        .run();
-
-      if (existing && existing.id !== values.id) {
+    this.sqlite
+      .transaction(() => {
+        const existing = this.getIntegrationState(input.platform, input.accountKey);
+        this.sqlite.exec("PRAGMA defer_foreign_keys = ON");
         this.db
-          .update(authSessions)
-          .set({
-            integrationStateId: values.id,
-            updatedAt: timestamp,
+          .insert(integrationStates)
+          .values(values)
+          .onConflictDoUpdate({
+            target: [integrationStates.platform, integrationStates.accountKey],
+            set: {
+              id: values.id,
+              displayName: values.displayName,
+              authState: values.authState,
+              enabled: values.enabled,
+              connectionKind: values.connectionKind,
+              syncCapable: values.syncCapable,
+              launchStrategy: values.launchStrategy,
+              launchTarget: values.launchTarget,
+              importedFrom: values.importedFrom,
+              artifactPathsJson: values.artifactPathsJson,
+              metadataJson: values.metadataJson,
+              lastSeenAt: values.lastSeenAt,
+              updatedAt: values.updatedAt,
+            },
           })
-          .where(eq(authSessions.integrationStateId, existing.id))
           .run();
-      }
-    })();
+
+        if (existing && existing.id !== values.id) {
+          this.db
+            .update(authSessions)
+            .set({
+              integrationStateId: values.id,
+              updatedAt: timestamp,
+            })
+            .where(eq(authSessions.integrationStateId, existing.id))
+            .run();
+        }
+      })
+      .immediate();
   }
 
   setIntegrationEnabled(platform: Platform, accountKey: string, enabled: boolean): void {
@@ -1980,8 +1910,59 @@ export class CuedDatabase {
       .run();
   }
 
-  clearIntegrationRuntimeState(platform: Platform, accountKey: string): number {
-    return this.db.transaction((tx) => {
+  /** See `pruneSyncRunHistory` in raw-queries. */
+  pruneSyncRunHistory(options: Parameters<typeof pruneSyncRunHistory>[1]): number {
+    return pruneSyncRunHistory(this.sqlite, { nowMs: now(), ...options });
+  }
+
+  /** See `deleteSyncRunHistoryBatch` in raw-queries. */
+  deleteSyncRunHistoryBatch(input: Parameters<typeof deleteSyncRunHistoryBatch>[1]): number {
+    return deleteSyncRunHistoryBatch(this.sqlite, input);
+  }
+
+  /** See `StatusReadCache.contentVersion`. */
+  statusContentVersion(): number {
+    return this.statusReadCache.contentVersion();
+  }
+
+  /** Rows changed by this connection since it opened; cheap enough to poll. */
+  totalChanges(): number {
+    return (this.sqlite.prepare("SELECT total_changes() AS changes").get() as { changes: number })
+      .changes;
+  }
+
+  /** See `checkpointWal` in raw-queries. */
+  checkpointWal(): ReturnType<typeof checkpointWal> {
+    return checkpointWal(this.sqlite);
+  }
+
+  /**
+   * Sets how large the WAL may grow before a commit on this connection checkpoints inline.
+   * A checkpoint copies megabytes and fsyncs, tens of milliseconds, inside whichever commit
+   * crosses the line. A connection that must stay responsive raises this and has
+   * `checkpointWal` run elsewhere, keeping the inline checkpoint only as a backstop.
+   */
+  setWalAutoCheckpointPages(pages: number): void {
+    this.sqlite.pragma(`wal_autocheckpoint = ${Math.max(0, Math.trunc(pages))}`);
+  }
+
+  /** The underlying handle, for the drizzle-free queries in raw-queries. */
+  sqliteHandle(): Database.Database {
+    return this.sqlite;
+  }
+
+  /**
+   * Clears an account's sync bookkeeping. With `deferSyncRunHistory`, finished sync runs (and
+   * the errors that cascade from them) are left for `deleteSyncRunHistoryBatch` so a caller
+   * with an event loop to protect can purge a long history in small slices.
+   */
+  clearIntegrationRuntimeState(
+    platform: Platform,
+    accountKey: string,
+    options: { deferSyncRunHistory?: boolean } = {},
+  ): number {
+    const deferSyncRunHistory = options.deferSyncRunHistory ?? false;
+    return this.writeTransaction((tx) => {
       const removedSourceAccounts = tx
         .delete(sourceAccounts)
         .where(
@@ -2002,13 +1983,26 @@ export class CuedDatabase {
         .delete(syncScopes)
         .where(and(eq(syncScopes.platform, platform), eq(syncScopes.accountKey, accountKey)))
         .run().changes;
-      const removedRunErrors = tx
-        .delete(syncRunErrors)
-        .where(and(eq(syncRunErrors.platform, platform), eq(syncRunErrors.accountKey, accountKey)))
-        .run().changes;
+      const removedRunErrors = deferSyncRunHistory
+        ? 0
+        : tx
+            .delete(syncRunErrors)
+            .where(
+              and(eq(syncRunErrors.platform, platform), eq(syncRunErrors.accountKey, accountKey)),
+            )
+            .run().changes;
       const removedRuns = tx
         .delete(syncRuns)
-        .where(and(eq(syncRuns.platform, platform), eq(syncRuns.accountKey, accountKey)))
+        .where(
+          and(
+            eq(syncRuns.platform, platform),
+            eq(syncRuns.accountKey, accountKey),
+            // Named statuses, not NOT IN: only an equality list can seek the status index.
+            deferSyncRunHistory
+              ? inArray(syncRuns.status, ["queued", "ingesting", "projecting"])
+              : undefined,
+          ),
+        )
         .run().changes;
       const removedSlackBackfillProofs =
         platform === "slack"
@@ -2066,7 +2060,7 @@ export class CuedDatabase {
     }
 
     const id = randomUUID();
-    this.db.transaction((tx) => {
+    this.writeTransaction((tx) => {
       if (input.supersedesMemoryId) {
         const superseded = this.sqlite
           .prepare("SELECT contact_id FROM contact_memories WHERE id = ? LIMIT 1")
@@ -2508,7 +2502,7 @@ export class CuedDatabase {
   }): void {
     const timestamp = now();
     const existing = this.getAttachmentContent(input.attachmentId);
-    this.db.transaction((tx) => {
+    this.writeTransaction((tx) => {
       tx.insert(attachmentContent)
         .values({
           attachmentId: input.attachmentId,
@@ -2623,7 +2617,7 @@ export class CuedDatabase {
   }
 
   failInProgressRuns(errorMessage: string): number {
-    return this.db.transaction((tx) => {
+    return this.writeTransaction((tx) => {
       const stuckRuns = tx
         .select({
           id: syncRuns.id,
@@ -2735,7 +2729,7 @@ export class CuedDatabase {
 
     const queuedAt = now();
     const runIds: string[] = [];
-    this.db.transaction((tx) => {
+    this.writeTransaction((tx) => {
       for (const chunk of chunkArray(inputs, WRITE_BATCH_SIZE)) {
         const rows = chunk.map((input) => {
           const id = randomUUID();
@@ -2779,7 +2773,7 @@ export class CuedDatabase {
     }
     const timestamp = now();
     let changed = 0;
-    this.db.transaction((tx) => {
+    this.writeTransaction((tx) => {
       for (const chunk of chunkArray(uniqueMessageIds, WRITE_BATCH_SIZE)) {
         for (const messageId of chunk) {
           changed += tx
@@ -2812,48 +2806,52 @@ export class CuedDatabase {
   claimMessageFtsIndexBatch(limit: number): MessageFtsIndexQueueRow[] {
     const normalizedLimit = Math.max(1, Math.trunc(limit));
     const timestamp = now();
-    return this.sqlite.transaction(() => {
-      const rows = this.db
-        .select({
-          message_id: messageFtsIndexQueue.messageId,
-          reason: messageFtsIndexQueue.reason,
-          status: messageFtsIndexQueue.status,
-          attempt: messageFtsIndexQueue.attempt,
-          queued_at: messageFtsIndexQueue.queuedAt,
-          updated_at: messageFtsIndexQueue.updatedAt,
-          last_error: messageFtsIndexQueue.lastError,
-        })
-        .from(messageFtsIndexQueue)
-        .where(eq(messageFtsIndexQueue.status, "queued"))
-        .orderBy(asc(messageFtsIndexQueue.queuedAt))
-        .limit(normalizedLimit)
-        .all() as MessageFtsIndexQueueRow[];
-      if (rows.length === 0) {
-        return rows;
-      }
-      this.db
-        .update(messageFtsIndexQueue)
-        .set({
-          status: "indexing",
-          attempt: sql`${messageFtsIndexQueue.attempt} + 1`,
-          updatedAt: timestamp,
-          lastError: null,
-        })
-        .where(
-          inArray(
-            messageFtsIndexQueue.messageId,
-            rows.map((row) => row.message_id),
-          ),
-        )
-        .run();
-      return rows.map((row) => ({
-        ...row,
-        status: "indexing" as const,
-        attempt: row.attempt + 1,
-        updated_at: timestamp,
-        last_error: null,
-      }));
-    })();
+    return this.sqlite
+      .transaction(() => {
+        const rows = this.db
+          .select({
+            message_id: messageFtsIndexQueue.messageId,
+            reason: messageFtsIndexQueue.reason,
+            status: messageFtsIndexQueue.status,
+            attempt: messageFtsIndexQueue.attempt,
+            queued_at: messageFtsIndexQueue.queuedAt,
+            updated_at: messageFtsIndexQueue.updatedAt,
+            last_error: messageFtsIndexQueue.lastError,
+          })
+          .from(messageFtsIndexQueue)
+          .where(eq(messageFtsIndexQueue.status, "queued"))
+          .orderBy(asc(messageFtsIndexQueue.queuedAt))
+          .limit(normalizedLimit)
+          .all() as MessageFtsIndexQueueRow[];
+        if (rows.length === 0) {
+          return rows;
+        }
+        this.db
+          .update(messageFtsIndexQueue)
+          .set({
+            status: "indexing",
+            attempt: sql`${messageFtsIndexQueue.attempt} + 1`,
+            updatedAt: timestamp,
+            lastError: null,
+          })
+          .where(
+            inArray(
+              messageFtsIndexQueue.messageId,
+              rows.map((row) => row.message_id),
+            ),
+          )
+          .run();
+        return rows.map((row) => ({
+          ...row,
+          status: "indexing" as const,
+          attempt: row.attempt + 1,
+          updated_at: timestamp,
+          last_error: null,
+        }));
+        // Reads before it writes: take the write lock up front so a commit from another
+        // connection in between cannot fail the upgrade.
+      })
+      .immediate();
   }
 
   requeueStaleMessageFtsIndexing(staleBefore: number): number {
@@ -2906,7 +2904,7 @@ export class CuedDatabase {
       return 0;
     }
     let indexed = 0;
-    this.db.transaction((tx) => {
+    this.writeTransaction((tx) => {
       for (const chunk of chunkArray(ids, WRITE_BATCH_SIZE)) {
         tx.run(sql`
           DELETE FROM messages_fts
@@ -2962,33 +2960,8 @@ export class CuedDatabase {
     }
   }
 
-  getMessageFtsIndexBacklog(): {
-    queued: number;
-    indexing: number;
-    failed: number;
-    pending: number;
-  } {
-    return this.statusReadCache.read("fts-backlog", () => {
-      const rows = this.sqlite
-        .prepare(
-          `
-        SELECT status, COUNT(*) AS count
-        FROM message_fts_index_queue
-        GROUP BY status
-      `,
-        )
-        .all() as Array<{ status: string; count: number }>;
-      const counts = { queued: 0, indexing: 0, failed: 0 };
-      for (const row of rows) {
-        if (row.status === "queued" || row.status === "indexing" || row.status === "failed") {
-          counts[row.status] = Number(row.count ?? 0);
-        }
-      }
-      return {
-        ...counts,
-        pending: counts.queued + counts.indexing,
-      };
-    });
+  getMessageFtsIndexBacklog(): MessageFtsIndexBacklog {
+    return this.statusReadCache.read("fts-backlog", () => readMessageFtsIndexBacklog(this.sqlite));
   }
 
   hasQueuedOrRunningRun(platform: Platform, accountKey?: string | null): boolean {
@@ -3090,7 +3063,7 @@ export class CuedDatabase {
     options: { ownerId?: string; leaseMs?: number; excludedRunIds?: string[] } = {},
   ): QueuedSyncRun | null {
     const timestamp = now();
-    return this.db.transaction((tx) => {
+    return this.writeTransaction((tx) => {
       const typePredicate =
         runTypes && runTypes.length > 0 ? inArray(syncRuns.runType, runTypes) : sql`1 = 1`;
       const activeStatus = nextStatus === "projecting" ? "projecting" : "ingesting";
@@ -3375,7 +3348,7 @@ export class CuedDatabase {
     claim?: SyncRunClaim,
   ): boolean {
     let updated = false;
-    this.db.transaction((tx) => {
+    this.writeTransaction((tx) => {
       const run = tx
         .select({
           platform: syncRuns.platform,
@@ -3518,7 +3491,7 @@ export class CuedDatabase {
     }
 
     const timestamp = now();
-    this.db.transaction((tx) => {
+    this.writeTransaction((tx) => {
       for (const chunk of chunkArray(inputs, WRITE_BATCH_SIZE)) {
         tx.insert(sourceAccounts)
           .values(
@@ -3635,7 +3608,7 @@ export class CuedDatabase {
 
     const uniqueEvents = [...new Map(events.map((event) => [event.id, event])).values()];
     const existingIds = new Set<string>();
-    this.db.transaction((tx) => {
+    this.writeTransaction((tx) => {
       for (const chunk of chunkArray(uniqueEvents, WRITE_BATCH_SIZE)) {
         const rows = tx
           .select({ id: rawEvents.id })
@@ -4159,7 +4132,7 @@ export class CuedDatabase {
       }
     }
 
-    this.db.transaction((tx) => {
+    this.writeTransaction((tx) => {
       tx.run(sql.raw("DELETE FROM provider_identity_aliases"));
       tx.run(sql.raw("DELETE FROM messages_fts"));
       tx.run(sql.raw("DELETE FROM message_fts_index_queue"));

@@ -82,13 +82,13 @@ describe("status read cache", () => {
     const heartbeat = () => db.exec("INSERT INTO daemon_state VALUES(1)");
     try {
       expect(count()).toBe(0);
-      cache.preserveAcrossDaemonHeartbeat(heartbeat);
+      cache.preserveAcrossUncountedWrite(heartbeat);
       expect(count()).toBe(0);
       expect(reads()).toBe(1);
       db.exec("INSERT INTO items VALUES(1)");
-      cache.preserveAcrossDaemonHeartbeat(heartbeat);
+      cache.preserveAcrossUncountedWrite(heartbeat);
       expect(count()).toBe(1);
-      cache.preserveAcrossDaemonHeartbeat(() => {
+      cache.preserveAcrossUncountedWrite(() => {
         other.exec("INSERT INTO items VALUES(2)");
         heartbeat();
       });
