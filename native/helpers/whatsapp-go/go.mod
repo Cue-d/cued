@@ -1,6 +1,6 @@
 module cued-whatsapp-helper
 
-go 1.26.0
+go 1.26.11
 
 require (
 	go.mau.fi/whatsmeow v0.0.0-20261016130820-0b0a1cdac3e2
