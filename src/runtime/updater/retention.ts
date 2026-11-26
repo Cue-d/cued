@@ -1,4 +1,4 @@
-import { lstat, readdir, rm, rmdir } from "node:fs/promises";
+import { lstat, readdir, realpath, rm, rmdir } from "node:fs/promises";
 import { join, resolve, sep } from "node:path";
 import { compareVersions } from "./service.js";
 import type { PendingRollbackState } from "./types.js";
@@ -16,14 +16,16 @@ import type { PendingRollbackState } from "./types.js";
  *
  * Retention keeps two stamps: the newest one whose target is the running version (the update
  * that installed what is running now), and the newest one overall (normally the same; when it is
- * not, it is a later attempt that failed or was rolled back). Every other stamp's backup and
- * rollback directory is removed, as are scratch preflight copies and downloads of versions no
- * newer than the running one. Nothing runs while an update is pending, and whatever a pending
- * rollback names is always kept.
+ * not, it is a later attempt that failed or was rolled back). Both are chosen among stamps that
+ * still have a database backup, because that is the part that cannot be downloaded again: an
+ * attempt that died before writing one must not push out an older, usable backup. Every other
+ * stamp's backup and rollback directory is removed, as are scratch preflight copies and
+ * downloads of versions no newer than the running one. Nothing runs while an update is pending,
+ * and whatever a pending rollback names is always kept.
  *
  * Only entries matching Cued's own naming are touched. Anything else in these directories, such
  * as a manual backup, is left alone, as are symlinks, anything younger than `minAgeMs`, and the
- * live database with its sidecar files.
+ * live database with its sidecar files, wherever a symlink may make it actually live.
  */
 
 const STAMP_PATTERN = /^(\d{10,})-preupdate-([0-9A-Za-z.+-]+?)-to-([0-9A-Za-z.+-]+)$/;
@@ -83,6 +85,15 @@ async function lstatOrNull(path: string) {
   }
 }
 
+/** The path with every symlink in it resolved, or as given if it does not exist. */
+async function canonicalPath(path: string): Promise<string> {
+  try {
+    return await realpath(path);
+  } catch {
+    return resolve(path);
+  }
+}
+
 async function listEntries(dir: string): Promise<string[]> {
   // The directory itself must be a real directory: never follow a symlink somewhere else.
   const stats = await lstatOrNull(dir);
@@ -111,19 +122,35 @@ export async function pruneUpdateArtifacts(
     return result;
   }
 
-  const protectedPaths = SQLITE_SIDECARS.map((suffix) => resolve(`${options.dbPath}${suffix}`));
+  // Guarded both as configured and with symlinks resolved: the live database may be a link to
+  // a file that sits in one of these directories under a name retention would otherwise remove.
+  const guardedInputs = SQLITE_SIDECARS.map((suffix) => `${options.dbPath}${suffix}`);
   if (pending) {
-    protectedPaths.push(resolve(pending.dbBackupPath), resolve(pending.appBackupPath));
+    guardedInputs.push(pending.dbBackupPath, pending.appBackupPath);
   }
-  const isProtected = (path: string) => {
-    const target = resolve(path);
-    return protectedPaths.some(
-      (guarded) => guarded === target || guarded.startsWith(`${target}${sep}`),
-    );
+  const protectedPaths = new Set<string>();
+  for (const path of guardedInputs) {
+    protectedPaths.add(resolve(path));
+    protectedPaths.add(await canonicalPath(path));
+  }
+  // The database's sidecars sit beside the real file, not beside a link to it.
+  const liveDbPath = await canonicalPath(options.dbPath);
+  for (const suffix of SQLITE_SIDECARS) {
+    protectedPaths.add(`${liveDbPath}${suffix}`);
+  }
+  const isProtected = async (path: string) => {
+    for (const target of new Set([resolve(path), await canonicalPath(path)])) {
+      for (const guarded of protectedPaths) {
+        if (guarded === target || guarded.startsWith(`${target}${sep}`)) {
+          return true;
+        }
+      }
+    }
+    return false;
   };
 
   const remove = async (path: string, kind: "file" | "dir") => {
-    if (isProtected(path)) {
+    if (await isProtected(path)) {
       return;
     }
     const stats = await lstatOrNull(path);
@@ -147,7 +174,7 @@ export async function pruneUpdateArtifacts(
 
   // Removes the entries Cued puts in a directory, then the directory only if that left it empty.
   const removeOwnedDir = async (dir: string, ownedEntries: Set<string>) => {
-    if (isProtected(dir)) {
+    if (await isProtected(dir)) {
       return;
     }
     const stats = await lstatOrNull(dir);
@@ -177,19 +204,21 @@ export async function pruneUpdateArtifacts(
     }
   };
 
+  // Only a real file or a real directory counts. A symlink or an entry of the wrong type that
+  // merely carries one of Cued's names is neither removed nor allowed to claim a slot.
   const backups: Stamp[] = [];
   for (const entry of await listEntries(options.backupsDir)) {
     const stamp = entry.endsWith(BACKUP_SUFFIX)
       ? parseUpdateStamp(entry.slice(0, -BACKUP_SUFFIX.length))
       : null;
-    if (stamp) {
+    if (stamp && (await lstatOrNull(join(options.backupsDir, entry)))?.isFile()) {
       backups.push(stamp);
     }
   }
   const rollbacks: Stamp[] = [];
   for (const entry of await listEntries(options.rollbackDir)) {
     const stamp = parseUpdateStamp(entry);
-    if (stamp) {
+    if (stamp && (await lstatOrNull(join(options.rollbackDir, entry)))?.isDirectory()) {
       rollbacks.push(stamp);
     }
   }
@@ -200,9 +229,13 @@ export async function pruneUpdateArtifacts(
       (best, stamp) => (!best || stamp.at > best.at ? stamp : best),
       null,
     );
-  const all = [...backups, ...rollbacks];
-  const newestOverall = newest(all);
-  const newestForCurrent = newest(all.filter((stamp) => stamp.to === options.currentVersion));
+  // Slots go to stamps that still have their database backup. Only when none has one do the
+  // app copies get to fill them, so that something is always kept.
+  const candidates = backups.length > 0 ? backups : rollbacks;
+  const newestOverall = newest(candidates);
+  const newestForCurrent = newest(
+    candidates.filter((stamp) => stamp.to === options.currentVersion),
+  );
   for (const stamp of [newestOverall, newestForCurrent]) {
     if (stamp) {
       kept.add(stamp.name);

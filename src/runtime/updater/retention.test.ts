@@ -228,6 +228,66 @@ describe("update artifact retention", () => {
     expect(existsSync(join(dirs.backupsDir, `${linkedStamp}.db`))).toBe(true);
   });
 
+  it("leaves a symlinked rollback directory's target alone even when that update is kept", async () => {
+    const dirs = setup();
+    const outside = mkdtempSync(join(tmpdir(), "cued-retention-outside-"));
+    tempDirs.push(outside);
+    writeFileSync(join(outside, "preflight.db"), "outside");
+    const keptStamp = `${NOW - 10 * 24 * HOUR}-preupdate-0.1.46-to-0.1.47`;
+    writeFileSync(join(dirs.backupsDir, `${keptStamp}.db`), "backup");
+    symlinkSync(outside, join(dirs.rollbackDir, keptStamp));
+
+    const result = await prune(dirs);
+
+    expect(result.failed).toEqual([]);
+    expect(existsSync(join(outside, "preflight.db"))).toBe(true);
+    expect(existsSync(join(dirs.backupsDir, `${keptStamp}.db`))).toBe(true);
+  });
+
+  it("keeps a backup the live database is a symlink to", async () => {
+    const dirs = setup();
+    const restored = addUpdate(dirs, NOW - 30 * 24 * HOUR, "0.1.45", "0.1.46");
+    addUpdate(dirs, NOW - 10 * 24 * HOUR, "0.1.46", "0.1.47");
+    // Someone restored the old snapshot in place by pointing the database path at it.
+    rmSync(dirs.dbPath);
+    symlinkSync(join(dirs.backupsDir, `${restored}.db`), dirs.dbPath);
+
+    const result = await prune(dirs);
+
+    expect(result.failed).toEqual([]);
+    expect(existsSync(join(dirs.backupsDir, `${restored}.db`))).toBe(true);
+    // The rest of that old update is still cleaned up.
+    expect(existsSync(join(dirs.rollbackDir, restored))).toBe(false);
+  });
+
+  it("does not let an attempt without a database backup push out a usable one", async () => {
+    const dirs = setup();
+    // Neither attempt targets the running version: 0.1.47 was installed by hand.
+    const rolledBack = addUpdate(dirs, NOW - 10 * 24 * HOUR, "0.1.47", "0.1.48");
+    const diedEarly = `${NOW - 2 * 24 * HOUR}-preupdate-0.1.47-to-0.1.48`;
+    mkdirSync(join(dirs.rollbackDir, diedEarly, "Cued.app"), { recursive: true });
+
+    const result = await prune(dirs);
+
+    expect(result.failed).toEqual([]);
+    expect(existsSync(join(dirs.backupsDir, `${rolledBack}.db`))).toBe(true);
+    expect(existsSync(join(dirs.rollbackDir, rolledBack, "Cued.app"))).toBe(true);
+    expect(existsSync(join(dirs.rollbackDir, diedEarly))).toBe(false);
+  });
+
+  it("keeps the newest app copy when no database backup exists at all", async () => {
+    const dirs = setup();
+    const older = `${NOW - 20 * 24 * HOUR}-preupdate-0.1.45-to-0.1.46`;
+    const newer = `${NOW - 10 * 24 * HOUR}-preupdate-0.1.46-to-0.1.47`;
+    mkdirSync(join(dirs.rollbackDir, older, "Cued.app"), { recursive: true });
+    mkdirSync(join(dirs.rollbackDir, newer, "Cued.app"), { recursive: true });
+
+    await prune(dirs);
+
+    expect(existsSync(join(dirs.rollbackDir, older))).toBe(false);
+    expect(existsSync(join(dirs.rollbackDir, newer, "Cued.app"))).toBe(true);
+  });
+
   it("removes nothing while an update is pending", async () => {
     const dirs = setup();
     const older = addUpdate(dirs, NOW - 30 * 24 * HOUR, "0.1.44", "0.1.45");
