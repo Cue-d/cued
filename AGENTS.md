@@ -82,7 +82,28 @@ swift build --package-path native/macos/CuedNative -c release
 ```bash
 pnpm test
 swift build --package-path native/macos/CuedNative -c release
+swift test --package-path native/macos/CuedNative
 ```
+
+## Responsiveness
+
+The daemon is single-threaded and its SQLite calls are synchronous, so anything slow on its
+thread stalls every request, and the app with it. `pnpm test:perf:responsiveness` starts an
+isolated daemon on a real-scale database and fails (with `--assert`) if the event loop stalls
+for more than 50 ms or a UI request takes more than 20 ms at p95.
+
+```bash
+pnpm build && pnpm test:perf:responsiveness --assert
+# Against a private, temporary copy of a real database (deleted afterwards):
+CUED_PERF_DB_KEY=... pnpm test:perf:responsiveness --db ~/.cued/local.db \
+  --remove <platform:account> --toggle <platform:account>
+```
+
+Keep slow work off the daemon thread: bulk reads and background deletes go through the
+database worker (`src/db/db-worker-jobs.ts`), anything that spawns a process is awaited rather
+than run synchronously, and unavoidable work on the thread is done in slices of a few
+milliseconds. When the loop does stall, the daemon logs `event loop stalled` with what it was
+running.
 
 ## Common Issues
 
