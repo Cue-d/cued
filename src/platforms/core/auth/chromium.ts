@@ -88,6 +88,41 @@ function buildWorkerArgs(
   ];
 }
 
+/** The worker reports Chromium download progress on stderr while no browser is available. */
+export function parseBrowserDownloadProgress(line: string): Record<string, unknown> | null {
+  if (!line.startsWith('{"browserDownload"')) return null;
+  try {
+    const parsed = JSON.parse(line) as { browserDownload?: unknown };
+    return parsed.browserDownload && typeof parsed.browserDownload === "object"
+      ? (parsed.browserDownload as Record<string, unknown>)
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+export function recordBrowserDownloadProgress(
+  db: CuedDatabase,
+  session: AuthSessionSummary,
+  progress: Record<string, unknown>,
+): void {
+  try {
+    if (db.getAuthSession(session.id)?.state !== "in_progress") return;
+    db.updateAuthSessionState({
+      id: session.id,
+      state: "in_progress",
+      resultSummary: {
+        provider: session.platform,
+        runtime: "chromium",
+        stage: "browser_download",
+        browserDownload: progress,
+      },
+    });
+  } catch {
+    // Progress is informational; the sign-in continues without it.
+  }
+}
+
 function parseChromiumAuthOutput(stdout: string): ChromiumAuthResult {
   return JSON.parse(stdout) as ChromiumAuthResult;
 }
@@ -105,6 +140,11 @@ export function startChromiumAuthSession(
   const stdoutChunks: Buffer[] = [];
   child.stdout.on("data", (chunk) => stdoutChunks.push(Buffer.from(chunk)));
   createInterface({ input: child.stderr }).on("line", (line: string) => {
+    const download = parseBrowserDownloadProgress(line);
+    if (download) {
+      recordBrowserDownloadProgress(db, session, download);
+      return;
+    }
     const event = parseSlackCaptureDiagnostic(line);
     if (event && session.platform === "slack") {
       process.stderr.write(

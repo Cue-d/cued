@@ -14,7 +14,6 @@ Local build, packaging, and macOS permission helpers for the packaged Cued runti
 | `install-cued-release.sh` | Install the latest GitHub release from the terminal. |
 | `request-macos-access.sh` | Trigger or open the relevant macOS privacy prompts and panes. |
 | `fetch-node-runtime-macos.sh` | Fetch the Node runtime bundled into the app. |
-| `fetch-playwright-chromium-macos.sh` | Fetch the Chromium payload bundled into the app. |
 | `fetch-signal-cli-macos.sh` | Fetch the Signal helper payload bundled into the app. |
 
 ## App bundle build
@@ -28,7 +27,7 @@ This script builds the packaged development app at `native/macos/dist/Cued.app`.
 - rebuilds the root TypeScript runtime
 - rebuilds the native Swift host
 - stages production Node dependencies
-- bundles the Node runtime and Chromium payload
+- bundles the Node runtime (no browser: see [Sign-in browser](#sign-in-browser))
 - bundles helper binaries such as the native macOS helper, Signal helper, and WhatsApp helper
 - signs the app bundle for local execution
 
@@ -36,6 +35,28 @@ Set `CUED_BUNDLED_GOOGLE_OAUTH_CLIENT_FILE=/path/to/google-oauth-client.json` to
 OAuth credentials into `Cued.app/Contents/Resources/oauth/google-oauth-client.json`. The stable
 GitHub release workflow materializes this file from the `CUED_GOOGLE_OAUTH_CLIENT_JSON` secret and
 fails the release if the secret is missing or malformed.
+
+## Sign-in browser
+
+Chromium is not bundled. Browser-based sign-ins (Slack, LinkedIn, Discord) open in a
+Chromium-family browser that is already installed, tried in this order from `/Applications`
+and then `~/Applications`: Google Chrome, Chromium, Microsoft Edge, Brave Browser. If one fails
+to launch, the next is tried. Each browser gets its own Cued profile under
+`~/.cued/browser/<platform>/<account>/<browser>`, separate from the person's own browser
+profile, so their running browser is not touched.
+
+When no installed browser works, Cued downloads the Chromium build pinned in
+`packaging/chromium-runtime.json` (the build Playwright installs, from Playwright's CDN) into
+`~/.cued/browsers/`, verifies its SHA-256, and uses it. The download reports progress in the
+sign-in's auth session (`resultSummary.browserDownload`). `cued browser status` shows which
+browser will be used; `cued browser install` downloads the fallback ahead of time;
+`cued doctor` reports it as the `auth_browser` check. `CUED_CHROMIUM_EXECUTABLE_PATH` overrides
+all of this with a single browser and never downloads.
+
+When Playwright is upgraded, update the pin: take `revision` and `browserVersion` for
+`chromium` from `playwright-core/browsers.json`, and the SHA-256 of both archives
+(`chromium-mac-arm64.zip`, `chromium-mac.zip`). A unit test fails until the pin matches.
+`validate-cued-release-artifact.sh` fails if a browser is bundled again.
 
 ## macOS Permissions
 

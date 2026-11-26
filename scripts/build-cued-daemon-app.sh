@@ -17,13 +17,10 @@ RESOURCES_DIR="$CONTENTS_DIR/Resources"
 RUNTIME_DIR="$RESOURCES_DIR/cued-runtime"
 RUNTIME_NODE_ROOT="$RESOURCES_DIR/runtime/node"
 RUNTIME_NODE_BIN_DIR="$RUNTIME_NODE_ROOT/bin"
-PLAYWRIGHT_CHROMIUM_ROOT="$RESOURCES_DIR/runtime/chromium"
-PLAYWRIGHT_CHROMIUM_PAYLOAD_DIR="$PLAYWRIGHT_CHROMIUM_ROOT/chrome"
 HELPERS_DIR="$RESOURCES_DIR/helpers"
 HELPER_NAME="cued-native-helper"
 SIGNAL_FETCH_SCRIPT="$ROOT_DIR/scripts/fetch-signal-cli-macos.sh"
 NODE_RUNTIME_FETCH_SCRIPT="$ROOT_DIR/scripts/fetch-node-runtime-macos.sh"
-PLAYWRIGHT_CHROMIUM_FETCH_SCRIPT="$ROOT_DIR/scripts/fetch-playwright-chromium-macos.sh"
 JIT_RUNTIME_ENTITLEMENTS="$ROOT_DIR/scripts/packaging/jit-runtime.entitlements.plist"
 APP_PERMISSIONS_ENTITLEMENTS="$ROOT_DIR/scripts/packaging/app-permissions.entitlements.plist"
 SIGNAL_HELPER_SOURCE_DIR="$ROOT_DIR/native/helpers/signal-cli/.build/cued-signal-cli"
@@ -127,17 +124,7 @@ runtime_entitlements_for_binary() {
     "$HELPERS_DIR/$HELPER_NAME")
       printf '%s\n' "$APP_PERMISSIONS_ENTITLEMENTS"
       ;;
-    "$RUNTIME_NODE_BIN_DIR/node"|"$HELPERS_DIR"/signal-cli/jre/Contents/Home/bin/java|"$PLAYWRIGHT_CHROMIUM_ROOT"/*)
-      printf '%s\n' "$JIT_RUNTIME_ENTITLEMENTS"
-      ;;
-  esac
-}
-
-runtime_entitlements_for_bundle() {
-  local target="$1"
-
-  case "$target" in
-    "$PLAYWRIGHT_CHROMIUM_ROOT"/*)
+    "$RUNTIME_NODE_BIN_DIR/node"|"$HELPERS_DIR"/signal-cli/jre/Contents/Home/bin/java)
       printf '%s\n' "$JIT_RUNTIME_ENTITLEMENTS"
       ;;
   esac
@@ -197,12 +184,10 @@ sign_embedded_archives() {
 sign_nested_code_containers() {
   while IFS= read -r -d '' info_plist; do
     local bundle_root
-    local entitlements
 
     bundle_root="$(dirname "$(dirname "$info_plist")")"
     if [[ "$bundle_root" != "$APP_BUNDLE" ]]; then
-      entitlements="$(runtime_entitlements_for_bundle "$bundle_root")"
-      sign_macos_binary "$bundle_root" "$entitlements"
+      sign_macos_binary "$bundle_root"
     fi
   done < <(find "$APP_BUNDLE/Contents" -type f -path '*/Contents/Info.plist' -print0 | sort -rz)
 }
@@ -234,7 +219,6 @@ pnpm --dir "$ROOT_DIR" build >/dev/null
 swift build --package-path "$SWIFT_PACKAGE_DIR" -c release >/dev/null
 SWIFT_RESOURCE_BUNDLES=("$SWIFT_PACKAGE_DIR"/.build/*/release/*.bundle)
 NODE_RUNTIME_SOURCE_DIR="$(bash "$NODE_RUNTIME_FETCH_SCRIPT" "$NODE_VERSION" "$NODE_ARCH")"
-PLAYWRIGHT_CHROMIUM_SOURCE_DIR="$(bash "$PLAYWRIGHT_CHROMIUM_FETCH_SCRIPT")"
 if [[ "${CUED_BUNDLE_SIGNAL:-0}" == "1" ]]; then
   bash "$SIGNAL_FETCH_SCRIPT" >/dev/null
 fi
@@ -251,7 +235,6 @@ mkdir -p \
   "$RESOURCES_DIR" \
   "$RUNTIME_DIR" \
   "$RUNTIME_NODE_BIN_DIR" \
-  "$PLAYWRIGHT_CHROMIUM_ROOT" \
   "$HELPERS_DIR"
 
 ditto --noextattr --norsrc "$SWIFT_BINARY" "$MACOS_DIR/$APP_EXECUTABLE_NAME"
@@ -266,7 +249,6 @@ cp "$NODE_RUNTIME_SOURCE_DIR/bin/node" "$RUNTIME_NODE_BIN_DIR/node"
 cp "$NODE_RUNTIME_SOURCE_DIR/LICENSE" "$RUNTIME_NODE_ROOT/LICENSE"
 # Node embeds its standard library; npm/Corepack are build tools, not runtime dependencies.
 chmod +x "$RUNTIME_NODE_BIN_DIR/node"
-ditto --noextattr --norsrc "$PLAYWRIGHT_CHROMIUM_SOURCE_DIR" "$PLAYWRIGHT_CHROMIUM_PAYLOAD_DIR"
 cp -R "$DEPLOY_STAGING_DIR/." "$RUNTIME_DIR/"
 if [[ "${CUED_BUNDLE_SIGNAL:-0}" == "1" ]]; then
   cp -R "$SIGNAL_HELPER_SOURCE_DIR" "$HELPERS_DIR/signal-cli"
@@ -334,6 +316,8 @@ mkdir -p "$RESOURCES_DIR/scripts"
 cp "$SIGNAL_FETCH_SCRIPT" "$RESOURCES_DIR/scripts/fetch-signal-cli-macos.sh"
 mkdir -p "$RESOURCES_DIR/scripts/packaging"
 cp "$ROOT_DIR/scripts/packaging/signal-runtime.json" "$RESOURCES_DIR/scripts/packaging/signal-runtime.json"
+# Sign-in windows use an installed browser; this pins the Chromium downloaded when none works.
+cp "$ROOT_DIR/scripts/packaging/chromium-runtime.json" "$RESOURCES_DIR/scripts/packaging/chromium-runtime.json"
 cp "$PERMISSIONS_SCRIPT_SOURCE" "$RESOURCES_DIR/scripts/request-macos-access.sh"
 chmod +x "$RESOURCES_DIR/scripts/request-macos-access.sh"
 if [[ -n "$GOOGLE_OAUTH_CLIENT_SOURCE" ]]; then
@@ -420,7 +404,6 @@ export CUED_NATIVE_BINARY="\${CUED_NATIVE_BINARY:-\$HELPER_BINARY}"
 export CUED_IMESSAGE_NATIVE_BINARY="\${CUED_IMESSAGE_NATIVE_BINARY:-\$HELPER_BINARY}"
 export CUED_CONTACTS_NATIVE_BINARY="\${CUED_CONTACTS_NATIVE_BINARY:-\$HELPER_BINARY}"
 export CUED_AUTH_NATIVE_BINARY="\${CUED_AUTH_NATIVE_BINARY:-\$APP_EXEC}"
-export CUED_CHROMIUM_EXECUTABLE_PATH="\${CUED_CHROMIUM_EXECUTABLE_PATH:-\$SCRIPT_DIR/runtime/chromium/chrome/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing}"
 if [[ -f "\$SCRIPT_DIR/oauth/google-oauth-client.json" ]]; then
   export CUED_BUNDLED_GOOGLE_OAUTH_CLIENT_FILE="\${CUED_BUNDLED_GOOGLE_OAUTH_CLIENT_FILE:-\$SCRIPT_DIR/oauth/google-oauth-client.json}"
 fi

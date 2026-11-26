@@ -62,6 +62,25 @@ if [[ -d "$RESOURCES_PATH/helpers/signal-cli" && \
   exit 1
 fi
 
+# Sign-in windows use an installed browser, or a Chromium downloaded on demand from this pin.
+if ! cmp -s "$ROOT_DIR/scripts/packaging/chromium-runtime.json" \
+  "$RESOURCES_PATH/scripts/packaging/chromium-runtime.json"; then
+  echo "Bundled Chromium download manifest is missing or differs from release pins" >&2
+  exit 1
+fi
+
+if [[ -e "$RESOURCES_PATH/runtime/chromium" ]]; then
+  echo "Chromium must not be bundled: found $RESOURCES_PATH/runtime/chromium" >&2
+  exit 1
+fi
+
+bundled_browser="$(find "$APP_BUNDLE/Contents" \( -name 'Google Chrome for Testing*.app' \
+  -o -name 'Chromium*.app' -o -name 'chrome-mac*' -o -name 'ms-playwright' \) -print -quit)"
+if [[ -n "$bundled_browser" ]]; then
+  echo "Chromium must not be bundled: found $bundled_browser" >&2
+  exit 1
+fi
+
 for forbidden_path in \
   "$RUNTIME_PATH/scripts" \
   "$RUNTIME_PATH/src" \

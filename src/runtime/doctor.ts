@@ -2,6 +2,11 @@ import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { CuedDatabase } from "../db/database.js";
+import {
+  type AuthBrowserStatus,
+  getAuthBrowserStatus,
+  NO_BROWSER_REMEDIATION,
+} from "../platforms/core/auth/browser-resolver.js";
 import { listAdapterPlatforms } from "../platforms/core/registry.js";
 import { buildIntegrationStatus, listIntegrationStates } from "../platforms/core/state/status.js";
 import { resolveGoogleOAuthClientFile } from "../platforms/gmail/oauth/client.js";
@@ -365,6 +370,46 @@ function getSignalLinkCheck(): DoctorCheck {
   };
 }
 
+export function getAuthBrowserCheck(
+  status: AuthBrowserStatus = getAuthBrowserStatus(),
+  exists: (path: string) => boolean = existsSync,
+): DoctorCheck {
+  const selected = status.selected;
+  if (selected?.source === "configured" && !exists(selected.executablePath)) {
+    return {
+      name: "auth_browser",
+      status: "error",
+      summary: "CUED_CHROMIUM_EXECUTABLE_PATH does not point to a browser",
+      details: status,
+      remediation: "Fix or unset CUED_CHROMIUM_EXECUTABLE_PATH.",
+    };
+  }
+  if (selected) {
+    return {
+      name: "auth_browser",
+      status: "ok",
+      summary: `Sign-in windows open in ${[selected.name, selected.version].filter(Boolean).join(" ")}`,
+      details: status,
+    };
+  }
+  if (status.fallback.available) {
+    return {
+      name: "auth_browser",
+      status: "warning",
+      summary: `No supported browser is installed; Cued will download Chromium ${status.fallback.version} (about 170 MB) the first time a sign-in window is needed`,
+      details: status,
+      remediation: NO_BROWSER_REMEDIATION,
+    };
+  }
+  return {
+    name: "auth_browser",
+    status: "error",
+    summary: "No browser is available for sign-in windows",
+    details: status,
+    remediation: NO_BROWSER_REMEDIATION,
+  };
+}
+
 function getSlackHelperCheck(): DoctorCheck {
   const inspected = inspectSlackHelper();
   if (!inspected.helperPath) {
@@ -648,6 +693,9 @@ export async function buildDoctorReport(
     checks.push(getContactsPermissionCheck());
     checks.push(tryReadMessagesDatabase());
     checks.push(getMessagesNativeHelperCheck());
+  }
+  if (process.platform === "darwin") {
+    checks.push(getAuthBrowserCheck());
   }
   checks.push(getSignalCliCheck());
   checks.push(getSignalLinkCheck());
