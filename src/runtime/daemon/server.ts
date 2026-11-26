@@ -1767,7 +1767,6 @@ export async function runDaemon(): Promise<void> {
     slowSectionMs: positiveEnvNumber("CUED_STALL_SECTION_MS"),
     reportIntervalMs: positiveEnvNumber("CUED_STALL_REPORT_INTERVAL_MS"),
   });
-  stallMonitor.start();
   const telemetry = new DaemonTelemetryQueue(db);
   const startedAt = now();
   const runOwnerId = `daemon:${process.pid}:${startedAt}`;
@@ -4528,6 +4527,9 @@ export async function runDaemon(): Promise<void> {
       resolve();
     });
   });
+  // Watch for stalls from the moment requests can arrive. Opening the database and running
+  // migrations before this point is synchronous by design, and nobody is waiting on it.
+  stallMonitor.start();
   scheduleIngestDrain();
   scheduleProjectionDrain();
   scheduleSearchIndexDrain();
