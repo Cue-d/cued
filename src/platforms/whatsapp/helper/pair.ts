@@ -1,10 +1,11 @@
-import { type ChildProcess, execFile, execFileSync, spawn } from "node:child_process";
+import { type ChildProcess, execFile, spawn } from "node:child_process";
 import { existsSync, mkdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { ensureCuedDirs } from "../../../core/config.js";
 import { validateIntegrationAccountKey } from "../../core/account-keys.js";
+import { readHelperVersionOutput, warmHelperVersionOutput } from "../../core/helper-version.js";
 import { getWhatsAppStoreRoot } from "../../core/runtime-paths.js";
 import type { WhatsAppHelperEventEnvelope } from "../types.js";
 
@@ -72,10 +73,10 @@ export function inspectWhatsAppHelper(): WhatsAppHelperInspection {
   }
 
   try {
-    const stdout = execFileSync(helperPath, ["version"], {
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "pipe"],
-    });
+    const stdout = readHelperVersionOutput(helperPath);
+    if (stdout == null) {
+      throw new Error("WhatsApp helper did not report a version");
+    }
     const parsed = JSON.parse(stdout) as { version?: unknown };
     return {
       helperPath,
@@ -87,6 +88,11 @@ export function inspectWhatsAppHelper(): WhatsAppHelperInspection {
       version: null,
     };
   }
+}
+
+/** Has the answer `inspectWhatsAppHelper` needs ready before anything asks synchronously. */
+export function warmWhatsAppHelperInspection(): Promise<void> {
+  return warmHelperVersionOutput(resolveWhatsAppHelperBinary());
 }
 
 export async function readWhatsAppHelperStatus(storeDir: string): Promise<WhatsAppHelperStatus> {

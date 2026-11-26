@@ -84,7 +84,10 @@ import {
   SignalRealtimeSupervisor,
 } from "../../platforms/signal/realtime/session.js";
 import { buildSignalRawEventsFromMessages } from "../../platforms/signal/sync/events.js";
-import { inspectSlackHelper } from "../../platforms/slack/helper/binary.js";
+import {
+  inspectSlackHelper,
+  warmSlackHelperInspection,
+} from "../../platforms/slack/helper/binary.js";
 import {
   type SlackRealtimeEventEnvelope,
   type SlackRealtimeStatus,
@@ -99,6 +102,7 @@ import {
   getWhatsAppStoreDir,
   inspectWhatsAppHelper,
 } from "../../platforms/whatsapp/helper/binary.js";
+import { warmWhatsAppHelperInspection } from "../../platforms/whatsapp/helper/pair.js";
 import { readWhatsAppHelperStatus } from "../../platforms/whatsapp/helper/status.js";
 import {
   type WhatsAppRealtimeStatus,
@@ -3632,6 +3636,9 @@ export async function runDaemon(): Promise<void> {
   };
   const runBootstrap = async () => {
     try {
+      // Status and capability checks read each helper's version synchronously. Look them up
+      // here, without blocking, so those reads never have to spawn anything.
+      await Promise.all([warmSlackHelperInspection(), warmWhatsAppHelperInspection()]);
       const { localIntegrationStates } = await readModel.refreshLocalAccess({ maxAgeMs: 0 });
       try {
         await refreshManagedIntegrationStates(db, { localIntegrationStates });
