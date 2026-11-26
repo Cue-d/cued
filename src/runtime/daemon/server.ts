@@ -3661,6 +3661,14 @@ export async function runDaemon(): Promise<void> {
       }
       scheduleUpdateCheck(false);
       completeBootstrap("ready");
+      // Build one snapshot now, so the first one a client asks for is not the one that pays
+      // for cold code paths and first-time file reads.
+      void buildOnboardingSnapshot(db, {
+        installGlobalSkill: false,
+        globalSkillMonitor: readModel.skill,
+        localAccess: readModel.localAccess ?? undefined,
+        aggregates: readModel.aggregates ?? undefined,
+      }).catch(() => undefined);
     } catch (error) {
       daemonLogger.warn("daemon bootstrap failed", error);
       completeBootstrap("failed", error);
