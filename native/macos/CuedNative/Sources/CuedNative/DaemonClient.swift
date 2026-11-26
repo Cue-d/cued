@@ -2,8 +2,13 @@ import Foundation
 import Network
 
 enum DaemonClientError: Error, Equatable {
-  /// The daemon is not listening, or the connection dropped before it answered.
+  /// The request never reached the daemon: nothing is listening, or the connection failed
+  /// before the request was written. Safe to retry or send another way.
   case unavailable(String)
+  /// The request was written and the connection dropped before the reply. The daemon may be
+  /// carrying it out; sending it again could do the work twice.
+  case connectionLost(String)
+  /// No reply in time. The daemon may still be carrying the request out.
   case timedOut(command: String)
   /// The daemon answered and said no.
   case rejected(String)
@@ -24,19 +29,22 @@ final class DaemonClient: @unchecked Sendable {
   private struct Pending {
     let command: String
     let continuation: CheckedContinuation<Data, Error>
+    /// Whether the request has been handed to the socket.
+    var written = false
   }
 
   private let socketPath: String
   private let queue = DispatchQueue(label: "so.cued.desktop.daemon-client")
   private let onEvent: @Sendable ([String]) -> Void
   private let reconnectDelay: TimeInterval
+  private let subscribeTimeout: TimeInterval
 
   // Everything below is confined to `queue`.
   private var connection: NWConnection?
   private var isReady = false
   private var buffer = Data()
   private var pending: [String: Pending] = [:]
-  private var queuedLines: [Data] = []
+  private var queuedLines: [(id: String, line: Data)] = []
   private var wantsSubscription = false
   private var subscribed = false
   private var reconnectScheduled = false
@@ -48,10 +56,12 @@ final class DaemonClient: @unchecked Sendable {
   init(
     socketPath: String,
     reconnectDelay: TimeInterval = 1,
+    subscribeTimeout: TimeInterval = 5,
     onEvent: @escaping @Sendable ([String]) -> Void = { _ in }
   ) {
     self.socketPath = socketPath
     self.reconnectDelay = reconnectDelay
+    self.subscribeTimeout = subscribeTimeout
     self.onEvent = onEvent
   }
 
@@ -77,12 +87,7 @@ final class DaemonClient: @unchecked Sendable {
           continuation.resume(throwing: DaemonClientError.unavailable("client closed"))
           return
         }
-        self.pending[id] = Pending(command: command, continuation: continuation)
-        self.send(requestLine)
-        self.queue.asyncAfter(deadline: .now() + timeout) {
-          guard let waiter = self.pending.removeValue(forKey: id) else { return }
-          waiter.continuation.resume(throwing: DaemonClientError.timedOut(command: command))
-        }
+        self.enqueue(id: id, command: command, line: requestLine, timeout: timeout, continuation)
       }
     }
   }
@@ -121,12 +126,28 @@ final class DaemonClient: @unchecked Sendable {
 
   // MARK: - Connection (queue-confined)
 
-  private func send(_ line: Data) {
+  private func enqueue(
+    id: String,
+    command: String,
+    line: Data,
+    timeout: TimeInterval,
+    _ continuation: CheckedContinuation<Data, Error>
+  ) {
+    pending[id] = Pending(command: command, continuation: continuation)
+    send(line, id: id)
+    queue.asyncAfter(deadline: .now() + timeout) {
+      guard let waiter = self.pending.removeValue(forKey: id) else { return }
+      waiter.continuation.resume(throwing: DaemonClientError.timedOut(command: command))
+    }
+  }
+
+  private func send(_ line: Data, id: String) {
     guard let connection = ensureConnection() else { return }
     if isReady {
+      pending[id]?.written = true
       connection.send(content: line, completion: .contentProcessed { _ in })
     } else {
-      queuedLines.append(line)
+      queuedLines.append((id: id, line: line))
     }
   }
 
@@ -145,7 +166,8 @@ final class DaemonClient: @unchecked Sendable {
         self.isReady = true
         let lines = self.queuedLines
         self.queuedLines.removeAll()
-        for line in lines {
+        for (id, line) in lines {
+          self.pending[id]?.written = true
           connection.send(content: line, completion: .contentProcessed { _ in })
         }
         self.receive(on: connection)
@@ -193,7 +215,9 @@ final class DaemonClient: @unchecked Sendable {
         onEvent(message["topics"] as? [String] ?? [])
         continue
       }
-      guard let id = message["id"] as? String, let waiter = pending.removeValue(forKey: id) else {
+      // A daemon that does not know a command used to echo the whole request back as the id.
+      let id = message["id"] as? String ?? (message["id"] as? [String: Any])?["id"] as? String
+      guard let id, let waiter = pending.removeValue(forKey: id) else {
         continue
       }
       if message["ok"] as? Bool == true {
@@ -226,7 +250,11 @@ final class DaemonClient: @unchecked Sendable {
     let waiters = Array(pending.values)
     pending.removeAll()
     for waiter in waiters {
-      waiter.continuation.resume(throwing: DaemonClientError.unavailable(reason))
+      waiter.continuation.resume(
+        throwing: waiter.written
+          ? DaemonClientError.connectionLost(reason)
+          : DaemonClientError.unavailable(reason)
+      )
     }
     scheduleResubscribe()
   }
@@ -275,8 +303,14 @@ final class DaemonClient: @unchecked Sendable {
           continuation.resume(throwing: DaemonClientError.unavailable("client closed"))
           return
         }
-        self.pending[id] = Pending(command: command, continuation: continuation)
-        self.send(line)
+        // Bounded: a daemon that never answers must not leave the subscription in limbo.
+        self.enqueue(
+          id: id,
+          command: command,
+          line: line,
+          timeout: self.subscribeTimeout,
+          continuation
+        )
       }
     }
   }

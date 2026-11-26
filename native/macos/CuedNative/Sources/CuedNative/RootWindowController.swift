@@ -357,18 +357,23 @@ final class RootWindowController: NSWindowController {
     do {
       _ = try await daemonClient.request(
         "integrations-\(action)",
-        fields: ["platform": platform, "accountKey": accountKey]
+        fields: ["platform": platform, "accountKey": accountKey],
+        // Connect answers once sign-in is launched, and looking for reusable desktop auth
+        // first can take a while.
+        timeout: action == "connect" ? 60 : 10
       )
       return true
-    } catch DaemonClientError.rejected {
-      // The daemon handled it and refused; replaying through the CLI would only repeat that.
-      return false
-    } catch {
+    } catch DaemonClientError.unavailable {
+      // The request never reached the daemon, so sending it through the CLI cannot repeat
+      // it. Any other failure (refused, timed out, connection lost after sending) means the
+      // daemon may be carrying it out: replaying a connect would launch a second sign-in.
       let arguments = ["integrations", action, platform, accountKey]
       if action == "connect" {
         return daemonSupervisor.launchCLI(arguments: arguments)
       }
       return daemonSupervisor.runCLI(arguments: arguments)?.status == 0
+    } catch {
+      return false
     }
   }
 

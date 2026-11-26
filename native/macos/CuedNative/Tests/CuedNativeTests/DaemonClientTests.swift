@@ -69,7 +69,22 @@ private final class FakeDaemon: @unchecked Sendable {
           lock.withLock { subscriberFDs.append(client) }
         }
         var response = lock.withLock { respond }(command, request)
-        response["id"] = id
+        if response["__silent"] != nil {
+          // Take the request and never answer it.
+          continue
+        }
+        if response.removeValue(forKey: "__hangUp") != nil {
+          // Take the request, then drop the connection without answering.
+          shutdown(client, SHUT_RDWR)
+          close(client)
+          return
+        }
+        if response.removeValue(forKey: "__requestAsId") != nil {
+          // What daemons before 0.1.47 sent for a command they did not know.
+          response["id"] = request
+        } else {
+          response["id"] = id
+        }
         write(client, object: response)
       }
     }
@@ -217,6 +232,55 @@ final class DaemonClientTests: XCTestCase {
     let resubscribed = await waitUntil { log.all.contains(["reconnected"]) }
     XCTAssertTrue(resubscribed)
     XCTAssertTrue(client.isSubscribed)
+  }
+
+  func testARequestTheDaemonReceivedIsNotReportedAsUndelivered() async throws {
+    let daemon = try FakeDaemon { _, _ in ["__hangUp": true] }
+    defer { daemon.stop() }
+    let client = DaemonClient(socketPath: daemon.path)
+    defer { client.close() }
+
+    do {
+      _ = try await client.request("integrations-connect", fields: ["platform": "slack"])
+      XCTFail("expected the request to fail")
+    } catch {
+      // The daemon may be acting on it, so the caller must not send it again.
+      guard case .connectionLost = error as? DaemonClientError else {
+        return XCTFail("expected .connectionLost, got \(error)")
+      }
+    }
+  }
+
+  func testUnsupportedReplyFromAnOlderDaemonIsMatchedToItsRequest() async throws {
+    let daemon = try FakeDaemon { _, _ in
+      ["ok": false, "error": "Unsupported command", "__requestAsId": true]
+    }
+    defer { daemon.stop() }
+    let client = DaemonClient(socketPath: daemon.path)
+    defer { client.close() }
+
+    do {
+      _ = try await client.request("subscribe", timeout: 2)
+      XCTFail("expected the request to be rejected")
+    } catch {
+      XCTAssertEqual(error as? DaemonClientError, .rejected("Unsupported command"))
+    }
+  }
+
+  func testASubscriptionTheDaemonNeverAnswersDoesNotHang() async throws {
+    let daemon = try FakeDaemon { command, _ in
+      command == "subscribe" ? ["__silent": true] : ["ok": true, "result": ["pong": true]]
+    }
+    defer { daemon.stop() }
+    let client = DaemonClient(socketPath: daemon.path, reconnectDelay: 0.05, subscribeTimeout: 0.1)
+    defer { client.close() }
+
+    client.subscribe()
+    try await Task.sleep(for: .milliseconds(400))
+    XCTAssertFalse(client.isSubscribed)
+    // The handshake timed out and was retried rather than left pending forever.
+    XCTAssertGreaterThan(daemon.subscriberCount, 1)
+    _ = try await client.request("ping")
   }
 
   func testAnOlderDaemonThatRejectsSubscribeIsNotRetried() async throws {
