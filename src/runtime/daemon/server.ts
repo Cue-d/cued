@@ -4,7 +4,14 @@ import { createConnection, createServer, type Socket } from "node:net";
 import { basename, dirname } from "node:path";
 import process from "node:process";
 import { getCurrentAppVersion, getCurrentReleaseChannel } from "../../core/app-metadata.js";
-import { CUED_DAEMON_LOCK_PATH, CUED_SOCKET_PATH } from "../../core/config.js";
+import {
+  CUED_BACKUPS_DIR,
+  CUED_DAEMON_LOCK_PATH,
+  CUED_DB_PATH,
+  CUED_SOCKET_PATH,
+  CUED_UPDATE_DOWNLOADS_DIR,
+  CUED_UPDATE_ROLLBACK_DIR,
+} from "../../core/config.js";
 import { createLogger } from "../../core/logging.js";
 import {
   acquireSingletonLock,
@@ -159,6 +166,7 @@ import {
   type RealtimeSessionStatuses,
   realtimeSessionFields,
 } from "../status.js";
+import { pruneUpdateArtifacts, scheduleUpdateArtifactRetention } from "../updater/retention.js";
 import { checkForUpdates } from "../updater/service.js";
 import {
   shouldBootstrapLocalIntegrations,
@@ -227,6 +235,9 @@ const MENU_BAR_STATUS_EVENT_MIN_INTERVAL_MS = 5_000;
 const DAEMON_STATUS_CACHE_MAX_AGE_MS = 30_000;
 const UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
 const UPDATE_SHUTDOWN_GRACE_MS = 30_000;
+// Well after startup, and after an update's helper has finished its health check.
+const UPDATE_ARTIFACT_RETENTION_START_DELAY_MS = 10 * 60_000;
+const UPDATE_ARTIFACT_RETENTION_INTERVAL_MS = 6 * 60 * 60 * 1000;
 const QUEUE_DRAIN_RETRY_DELAY_MS = 1_000;
 const INGEST_RUN_LEASE_MS = 15 * 60_000;
 const PROJECTION_WORKER_TIMEOUT_MS = 30 * 60_000;
@@ -4439,6 +4450,34 @@ export async function runDaemon(): Promise<void> {
     scheduleUpdateCheck(false);
   }, UPDATE_CHECK_INTERVAL_MS);
 
+  // Old pre-update backups, rollback copies and downloads add up to many gigabytes. Removing them
+  // uses asynchronous filesystem calls only, and a failure is retried on the next pass.
+  const updateArtifactRetention = scheduleUpdateArtifactRetention({
+    startDelayMs: UPDATE_ARTIFACT_RETENTION_START_DELAY_MS,
+    intervalMs: UPDATE_ARTIFACT_RETENTION_INTERVAL_MS,
+    run: async () => {
+      try {
+        const result = await pruneUpdateArtifacts({
+          backupsDir: CUED_BACKUPS_DIR,
+          rollbackDir: CUED_UPDATE_ROLLBACK_DIR,
+          downloadsDir: CUED_UPDATE_DOWNLOADS_DIR,
+          dbPath: CUED_DB_PATH,
+          currentVersion: DAEMON_VERSION,
+          pendingRollback: db.getPendingRollbackState(),
+        });
+        if (result.removed.length > 0 || result.failed.length > 0) {
+          daemonLogger.info("removed old update copies", {
+            removed: result.removed.length,
+            removedFileBytes: result.removedBytes,
+            failed: result.failed,
+          });
+        }
+      } catch (error) {
+        daemonLogger.warn("update copy retention failed", error);
+      }
+    },
+  });
+
   let lastForegroundRequestAt = 0;
   const syncRunMaintenance = new SyncRunMaintenance(dbWorker, {
     // History cleanup can always wait. It never contends with a sync or projection for the
@@ -4557,6 +4596,7 @@ export async function runDaemon(): Promise<void> {
     clearInterval(menuBarStatusLoop);
     clearInterval(schedulerLoop);
     clearInterval(updateLoop);
+    updateArtifactRetention.stop();
     syncRunMaintenance.stop();
     stallMonitor.stop();
     clearInterval(walCheckpointLoop);
