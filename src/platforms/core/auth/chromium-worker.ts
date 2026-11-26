@@ -1,5 +1,6 @@
-import { execFileSync } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
 import { mkdirSync } from "node:fs";
+import { promisify } from "node:util";
 import { type BrowserContext, type Cookie, chromium, type Page, type Request } from "playwright";
 import { cuedAuthKeychainService } from "../../../core/identity.js";
 import { captureLinkedInSessionData } from "../../linkedin/auth/realtime-capture.js";
@@ -14,10 +15,15 @@ import {
   SLACK_PENDING_ACCOUNT_KEY_PREFIX,
   selectSlackWorkspaceCredentials,
 } from "../../slack/auth/workspace-selection.js";
+import { BrowserUnavailableError, launchFirstAvailableBrowser } from "./browser-launch.js";
+import { type AuthBrowser, authBrowserProfileDir, listAuthBrowsers } from "./browser-resolver.js";
 import {
   type ChromiumAuthFailureCode,
   classifyChromiumAuthWaitFailure,
 } from "./chromium-failure.js";
+import { type BrowserDownloadProgress, installManagedChromium } from "./managed-browser.js";
+
+const execFileAsync = promisify(execFile);
 
 declare const localStorage: {
   getItem(key: string): string | null;
@@ -88,12 +94,14 @@ function buildChromiumFailureResult(input: {
   errorCode: ChromiumAuthFailureCode;
   stage: string;
   pageSummary?: Record<string, unknown>;
+  errorSummary?: string;
 }): WorkerResult {
   const errorSummaryByCode: Record<ChromiumAuthFailureCode, string> = {
     auth_window_closed: `${input.args.platform} login window closed before authentication completed`,
     auth_timeout: `${input.args.platform} authentication timed out`,
     auth_extraction_failed: `${input.args.platform} authentication data could not be extracted`,
     browser_runtime_failed: `${input.args.platform} browser auth runtime failed`,
+    browser_unavailable: `No browser could be opened for the ${input.args.platform} sign-in window`,
   };
   return {
     sessionId: input.args.sessionId,
@@ -109,7 +117,7 @@ function buildChromiumFailureResult(input: {
       stage: input.stage,
       ...input.pageSummary,
     },
-    errorSummary: errorSummaryByCode[input.errorCode],
+    errorSummary: input.errorSummary ?? errorSummaryByCode[input.errorCode],
   };
 }
 
@@ -151,22 +159,71 @@ function getTimeoutMs(): number {
   return Number.isFinite(configured) && configured > 0 ? configured : 15 * 60_000;
 }
 
-function getExecutablePath(): string | undefined {
-  return process.env.CUED_CHROMIUM_EXECUTABLE_PATH || undefined;
-}
-
-function bringAuthBrowserToFront(): void {
+/**
+ * Brings the sign-in window forward by process id. The person's own copy of the same browser
+ * shares its bundle id, so activating by bundle id could raise their window instead.
+ */
+async function bringAuthBrowserToFront(profileDir: string): Promise<void> {
   try {
-    execFileSync(
-      "osascript",
-      ["-e", 'tell application id "com.google.chrome.for.testing" to activate'],
-      {
-        stdio: ["ignore", "ignore", "ignore"],
-      },
-    );
+    const { stdout } = await execFileAsync("/bin/ps", ["-axo", "pid=,args="]);
+    const line = stdout
+      .split("\n")
+      .find(
+        (entry) => entry.includes(`--user-data-dir=${profileDir}`) && !entry.includes("--type="),
+      );
+    const pid = Number(line?.trim().split(/\s+/)[0]);
+    if (!Number.isInteger(pid) || pid <= 0) return;
+    await execFileAsync("/usr/bin/osascript", [
+      "-l",
+      "JavaScript",
+      "-e",
+      `ObjC.import("AppKit"); $.NSRunningApplication.runningApplicationWithProcessIdentifier(${pid}).activateWithOptions($.NSApplicationActivateAllWindows)`,
+    ]);
   } catch {
     // Best-effort only: auth can still proceed if macOS refuses activation.
   }
+}
+
+function createDownloadReporter(): (progress: BrowserDownloadProgress) => void {
+  let lastStage = "";
+  let lastReportAt = 0;
+  return (progress) => {
+    const now = Date.now();
+    if (progress.stage === lastStage && now - lastReportAt < 1_000) return;
+    lastStage = progress.stage;
+    lastReportAt = now;
+    process.stderr.write(`${JSON.stringify({ browserDownload: progress })}\n`);
+  };
+}
+
+async function launchAuthContext(
+  baseProfileDir: string,
+): Promise<{ context: BrowserContext; browser: AuthBrowser; profileDir: string }> {
+  const configured = Boolean(process.env.CUED_CHROMIUM_EXECUTABLE_PATH?.trim());
+  const { result, browser } = await launchFirstAvailableBrowser({
+    candidates: listAuthBrowsers(),
+    installManaged: configured
+      ? null
+      : () => installManagedChromium({ onProgress: createDownloadReporter() }),
+    launch: async (candidate) => {
+      const profileDir = authBrowserProfileDir(baseProfileDir, candidate);
+      mkdirSync(profileDir, { recursive: true, mode: 0o700 });
+      const context = await chromium.launchPersistentContext(profileDir, {
+        headless: false,
+        executablePath: candidate.executablePath,
+        args: ["--disable-blink-features=AutomationControlled"],
+        viewport: { width: 1280, height: 900 },
+      });
+      return { context, profileDir };
+    },
+  });
+  return { ...result, browser };
+}
+
+function summarizeBrowser(browser: AuthBrowser | null): Record<string, unknown> {
+  return browser
+    ? { browser: { name: browser.name, version: browser.version, source: browser.source } }
+    : {};
 }
 
 function storeInKeychain(service: string, account: string, secret: Record<string, unknown>): void {
@@ -509,8 +566,8 @@ async function run(): Promise<void> {
     return;
   }
 
-  mkdirSync(args.profileDir, { recursive: true });
   let context: BrowserContext | null = null;
+  let browser: AuthBrowser | null = null;
   const requestTokens = new SlackRequestTokenCapture();
   const reportCaptureDiagnostic = (event: string) => {
     process.stderr.write(`${JSON.stringify({ provider: "slack", captureDiagnostic: event })}\n`);
@@ -519,12 +576,24 @@ async function run(): Promise<void> {
   const confirmation = new SlackCaptureConfirmation(reportCaptureDiagnostic);
   let detachSlackCapture: (() => void) | null = null;
   try {
-    context = await chromium.launchPersistentContext(args.profileDir, {
-      headless: false,
-      executablePath: getExecutablePath(),
-      args: ["--disable-blink-features=AutomationControlled"],
-      viewport: { width: 1280, height: 900 },
-    });
+    let profileDir: string;
+    try {
+      ({ context, browser, profileDir } = await launchAuthContext(args.profileDir));
+    } catch (error) {
+      if (!(error instanceof BrowserUnavailableError)) throw error;
+      process.stdout.write(
+        JSON.stringify(
+          buildChromiumFailureResult({
+            args,
+            errorCode: "browser_unavailable",
+            stage: "browser_launch",
+            pageSummary: { browserAttempts: error.attempts },
+            errorSummary: error.message,
+          }),
+        ),
+      );
+      return;
+    }
 
     if (args.platform === "slack") {
       const onSlackRequest = (request: Request) => {
@@ -551,7 +620,7 @@ async function run(): Promise<void> {
       await page.goto(args.launchTarget, { waitUntil: "domcontentloaded" });
     }
     await page.bringToFront().catch(() => {});
-    bringAuthBrowserToFront();
+    await bringAuthBrowserToFront(profileDir);
 
     const deadline = Date.now() + getTimeoutMs();
     let lastObservedUrls: string[] = [];
@@ -569,6 +638,7 @@ async function run(): Promise<void> {
               state: "cancelled",
               errorCode: "auth_window_closed",
               stage: "browser_closed",
+              pageSummary: summarizeBrowser(browser),
             }),
           ),
         );
@@ -601,6 +671,7 @@ async function run(): Promise<void> {
             keychainAccount: extracted.keychainAccount,
             resultSummary: {
               ...extracted.resultSummary,
+              ...summarizeBrowser(browser),
             },
             errorSummary: null,
           };
@@ -616,6 +687,7 @@ async function run(): Promise<void> {
     }
 
     const pageSummary = {
+      ...summarizeBrowser(browser),
       ...summarizeOpenPages(args.platform, listOpenPages(context)),
       lastPageStates: [
         ...new Set(lastObservedUrls.map((url) => summarizeChromiumPageState(args.platform, url))),

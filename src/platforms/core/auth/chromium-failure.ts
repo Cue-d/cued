@@ -2,7 +2,8 @@ export type ChromiumAuthFailureCode =
   | "auth_window_closed"
   | "auth_timeout"
   | "auth_extraction_failed"
-  | "browser_runtime_failed";
+  | "browser_runtime_failed"
+  | "browser_unavailable";
 
 export function classifyChromiumAuthWaitFailure(lastExtractionError: string | null): {
   errorCode: ChromiumAuthFailureCode;

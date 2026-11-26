@@ -1,0 +1,15 @@
+{
+  "source": "playwright",
+  "playwrightRevision": "1200",
+  "browserVersion": "143.0.7499.4",
+  "arm64": {
+    "url": "https://cdn.playwright.dev/dbazure/download/playwright/builds/chromium/1200/chromium-mac-arm64.zip",
+    "sha256": "01046b12151b2846b6d34ff619336b6338ca254c47aacc903602dd96afc939b3",
+    "executable": "chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing"
+  },
+  "x64": {
+    "url": "https://cdn.playwright.dev/dbazure/download/playwright/builds/chromium/1200/chromium-mac.zip",
+    "sha256": "111dfb8bf8988e57c99d2bd1522d66d79a2b2767d18d14f44d42484b52b875c0",
+    "executable": "chrome-mac-x64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing"
+  }
+}

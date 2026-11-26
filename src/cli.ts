@@ -28,6 +28,8 @@ import {
   installMacOSApp,
   resolveInstalledAppPath,
 } from "./macos/install.js";
+import { getAuthBrowserStatus } from "./platforms/core/auth/browser-resolver.js";
+import { installManagedChromium } from "./platforms/core/auth/managed-browser.js";
 import { IntegrationAuthService } from "./platforms/core/auth/service.js";
 import {
   getIntegrationSummary,
@@ -134,6 +136,7 @@ Usage:
   cued daemon
   cued status
   cued doctor
+  cued browser status|install
   cued logs
   cued setup
   cued update status
@@ -459,6 +462,34 @@ async function main(): Promise<void> {
   if (command === "install") {
     printJson(installMacOSApp());
     return;
+  }
+
+  if (command === "browser") {
+    switch (subcommand) {
+      case "status":
+        printJson(getAuthBrowserStatus());
+        return;
+      case "install": {
+        let lastPercent = -1;
+        const browser = await installManagedChromium({
+          onProgress: (progress) => {
+            if (progress.stage !== "downloading" || !progress.totalBytes) {
+              process.stderr.write(`${progress.stage}\n`);
+              return;
+            }
+            const percent = Math.floor((progress.receivedBytes / progress.totalBytes) * 100);
+            if (percent >= lastPercent + 10) {
+              lastPercent = percent;
+              process.stderr.write(`downloading ${percent}%\n`);
+            }
+          },
+        });
+        printJson(browser);
+        return;
+      }
+      default:
+        throw new Error("Usage: cued browser status | install");
+    }
   }
 
   if (command === "update") {
