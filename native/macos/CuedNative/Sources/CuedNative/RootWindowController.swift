@@ -18,8 +18,6 @@ struct RootSnapshotResponse: Decodable {
 }
 
 private let liveRefreshPermissionKeys: Set<String> = ["contacts", "full_disk_access"]
-private let platformAuthInteractionTTLMS = 45_000
-private let platformAuthInteractionRenewalMS = 15_000
 
 @MainActor
 final class RootWindowController: NSWindowController {
@@ -27,12 +25,16 @@ final class RootWindowController: NSWindowController {
   private let statusStore: AppStatusStore
   private let onRefresh: () -> Void
   private let viewModel = RootViewModel()
+  // Assigned right after super.init: its event handler needs `self`.
+  private var daemonClient: DaemonClient!
   private var cachedAllIntegrations: [IntegrationStatus] = []
   private var isRefreshing = false
   private var didEnsurePrerequisites = false
-  private var pendingAuthLaunchRefreshTask: Task<Void, Never>?
-  private var platformAuthInteractionTask: Task<Void, Never>?
-  private var platformAuthInteractionSessionId: String?
+  // Bumped whenever an integration command is issued, so a snapshot that was read before the
+  // command cannot overwrite what the user just did.
+  private var integrationCommandGeneration = 0
+  private var integrationCommandsInFlight = 0
+  private var lastAgentTargetRefreshAt = Date.distantPast
   private var pendingStatusRefreshTask: Task<Void, Never>?
   private var pendingPermissionRefreshTask: Task<Void, Never>?
   private var pendingLivePermissionKeys = Set<String>()
@@ -72,10 +74,18 @@ final class RootWindowController: NSWindowController {
     window.backgroundColor = .windowBackgroundColor
     super.init(window: window)
 
+    // The daemon pushes an event whenever something this window shows has changed, so the
+    // window re-reads then, rather than on a timer.
+    daemonClient = DaemonClient(socketPath: configuredDaemonSocketPath()) { [weak self] _ in
+      Task { @MainActor [weak self] in
+        self?.refreshForDaemonChange()
+      }
+    }
+
     let hosting = NSHostingController(
       rootView: RootView(
         viewModel: viewModel,
-        onRefresh: { [weak self] in self?.refresh() },
+        onRefresh: { [weak self] in self?.refreshForUser() },
         onGuidePermission: { [weak self] key in self?.guidePermission(key: key) },
         onDismissPermissionGuide: { PermissionGuideAssistant.shared.dismiss() },
         onRequestPermission: { [weak self] flags in self?.requestPermission(flags: flags) },
@@ -88,9 +98,6 @@ final class RootWindowController: NSWindowController {
         },
         onConnectIntegration: { [weak self] platform, accountKey in
           self?.connectIntegration(platform: platform, accountKey: accountKey)
-        },
-        onPlatformPageActiveChanged: { [weak self] isActive in
-          self?.setPlatformAuthInteractionActive(isActive)
         },
         onLaunchAgentExample: { [weak self] exampleID, target in
           self?.launchAgentExample(exampleID: exampleID, target: target)
@@ -135,7 +142,23 @@ final class RootWindowController: NSWindowController {
       window.orderFrontRegardless()
       NSApp.activate(ignoringOtherApps: true)
     }
+    daemonClient.subscribe()
     refresh(forceActivePermissionRefresh: forceActivePermissionRefresh)
+  }
+
+  private func refreshForDaemonChange() {
+    // While a command is in flight its completion refreshes anyway, with the result.
+    guard window?.isVisible == true, integrationCommandsInFlight == 0 else {
+      return
+    }
+    refresh()
+  }
+
+  /// A refresh the person caused (opening the window, coming back to the app), as opposed to
+  /// one triggered by a daemon change. Only these re-check which agents are installed.
+  private func refreshForUser() {
+    refreshAgentTargets(force: true)
+    refresh()
   }
 
   func showOnboarding(
@@ -174,8 +197,14 @@ final class RootWindowController: NSWindowController {
     viewModel.beginRefresh()
 
     let daemonSupervisor = self.daemonSupervisor
+    let daemonClient: DaemonClient = self.daemonClient
     let statusStore = self.statusStore
     let shouldEnsurePrerequisites = consumePrerequisiteSetupIntent()
+    let commandGeneration = integrationCommandGeneration
+    // The cached status file only matters before the first real snapshot: it paints the window
+    // immediately on open. After that the daemon answers in about a millisecond, and painting
+    // the cache first would just render everything twice.
+    let shouldPaintFromCache = !viewModel.hasLoadedSnapshot
     let shouldRefreshPermissions = forceActivePermissionRefresh || shouldRefreshLivePermissions()
     let fastPermissionKeys = shouldRefreshPermissions
       ? (pendingLivePermissionKeys.isEmpty ? liveRefreshPermissionKeys : pendingLivePermissionKeys)
@@ -185,29 +214,34 @@ final class RootWindowController: NSWindowController {
       applyFastPermissionStatuses(for: fastPermissionKeys)
     }
 
-    Task.detached(priority: .userInitiated) { [daemonSupervisor, statusStore] in
+    Task.detached(priority: .userInitiated) { [daemonSupervisor, daemonClient, statusStore] in
       if shouldEnsurePrerequisites {
         Self.ensurePrerequisites(daemonSupervisor: daemonSupervisor)
       }
 
-      let fastSnapshot = Self.fastRootSnapshot(from: statusStore.readSnapshot())
-      if fastSnapshot.hasLocalData {
-        await MainActor.run {
-          self.viewModel.apply(
-            permissions: self.viewModel.permissionStatuses,
-            globalSkill: self.viewModel.globalSkillStatus,
-            relationshipSummary: fastSnapshot.relationshipSummary,
-            allIntegrations: fastSnapshot.integrations,
-            integrations: fastSnapshot.integrations
-          )
-          self.viewModel.isRefreshing = true
+      if shouldPaintFromCache {
+        let fastSnapshot = Self.fastRootSnapshot(from: statusStore.readSnapshot())
+        if fastSnapshot.hasLocalData {
+          await MainActor.run {
+            guard !self.viewModel.hasLoadedSnapshot else {
+              return
+            }
+            self.viewModel.apply(
+              permissions: self.viewModel.permissionStatuses,
+              globalSkill: self.viewModel.globalSkillStatus,
+              relationshipSummary: fastSnapshot.relationshipSummary,
+              allIntegrations: fastSnapshot.integrations,
+              integrations: fastSnapshot.integrations
+            )
+            self.viewModel.isRefreshing = true
+          }
         }
       }
 
-      let snapshot = Self.decodeJSON(
+      let snapshot = await Self.loadSnapshot(
+        daemonClient: daemonClient,
         daemonSupervisor: daemonSupervisor,
-        RootSnapshotResponse.self,
-        arguments: onboardingSnapshotArguments(refreshPermissions: shouldRefreshPermissions)
+        refreshPermissions: shouldRefreshPermissions
       )
 
       guard let snapshot else {
@@ -225,6 +259,13 @@ final class RootWindowController: NSWindowController {
       }
 
       await MainActor.run {
+        guard self.integrationCommandGeneration == commandGeneration else {
+          // Read before a command the user has since issued. Applying it would show the old
+          // state and clear the pending indicator; the command's own refresh supersedes it.
+          self.isRefreshing = false
+          self.runPendingRefreshIfNeeded()
+          return
+        }
         self.cachedAllIntegrations = snapshot.integrations ?? []
         let permissions = self.overlayFastPermissionStatuses(
           on: snapshot.permissions,
@@ -278,6 +319,56 @@ final class RootWindowController: NSWindowController {
     )
     if cliStatus?.installed != true {
       _ = daemonSupervisor.runCLI(arguments: ["cli", "install"])
+    }
+  }
+
+  /// Reads the snapshot over the daemon socket. If the daemon is not reachable, falls back to
+  /// the CLI, which builds the same snapshot itself when no daemon answers.
+  private nonisolated static func loadSnapshot(
+    daemonClient: DaemonClient,
+    daemonSupervisor: DaemonSupervisor,
+    refreshPermissions: Bool
+  ) async -> RootSnapshotResponse? {
+    if let data = try? await daemonClient.request(
+      "onboarding-snapshot",
+      fields: [
+        "refreshManagedIntegrations": refreshPermissions,
+        "refreshPermissions": refreshPermissions,
+      ]
+    ), let snapshot = try? JSONDecoder().decode(RootSnapshotResponse.self, from: data) {
+      return snapshot
+    }
+    return decodeJSON(
+      daemonSupervisor: daemonSupervisor,
+      RootSnapshotResponse.self,
+      arguments: onboardingSnapshotArguments(refreshPermissions: refreshPermissions)
+    )
+  }
+
+  /// Sends an integration command over the daemon socket, or through the CLI if the daemon is
+  /// not reachable. Returns whether the command was delivered.
+  private nonisolated static func sendIntegrationCommand(
+    _ action: String,
+    platform: String,
+    accountKey: String,
+    daemonClient: DaemonClient,
+    daemonSupervisor: DaemonSupervisor
+  ) async -> Bool {
+    do {
+      _ = try await daemonClient.request(
+        "integrations-\(action)",
+        fields: ["platform": platform, "accountKey": accountKey]
+      )
+      return true
+    } catch DaemonClientError.rejected {
+      // The daemon handled it and refused; replaying through the CLI would only repeat that.
+      return false
+    } catch {
+      let arguments = ["integrations", action, platform, accountKey]
+      if action == "connect" {
+        return daemonSupervisor.launchCLI(arguments: arguments)
+      }
+      return daemonSupervisor.runCLI(arguments: arguments)?.status == 0
     }
   }
 
@@ -350,20 +441,6 @@ final class RootWindowController: NSWindowController {
       || !integrations.isEmpty
 
     return (relationshipSummary, integrations, hasLocalData)
-  }
-
-  private func runCLICommands(_ argumentsList: [[String]]) {
-    viewModel.beginRefresh()
-    let daemonSupervisor = self.daemonSupervisor
-    Task.detached(priority: .userInitiated) { [daemonSupervisor] in
-      for arguments in argumentsList {
-        _ = daemonSupervisor.runCLI(arguments: arguments)
-      }
-      await MainActor.run {
-        self.onRefresh()
-        self.refresh()
-      }
-    }
   }
 
   private func setTelemetryEnabledFromOnboarding(_ enabled: Bool) {
@@ -446,11 +523,37 @@ final class RootWindowController: NSWindowController {
   }
 
   private func enableIntegration(platform: String, accountKey: String) {
-    runCLICommands([["integrations", "enable", platform, accountKey]])
+    runIntegrationCommands([(action: "enable", platform: platform, accountKey: accountKey)])
   }
 
   private func removeIntegration(platform: String, accountKey: String) {
-    runCLICommands([["integrations", "remove", platform, accountKey]])
+    runIntegrationCommands([(action: "remove", platform: platform, accountKey: accountKey)])
+  }
+
+  private func runIntegrationCommands(
+    _ commands: [(action: String, platform: String, accountKey: String)]
+  ) {
+    viewModel.beginRefresh()
+    integrationCommandGeneration += 1
+    integrationCommandsInFlight += 1
+    let daemonSupervisor = self.daemonSupervisor
+    let daemonClient: DaemonClient = self.daemonClient
+    Task.detached(priority: .userInitiated) { [daemonSupervisor, daemonClient] in
+      for command in commands {
+        _ = await Self.sendIntegrationCommand(
+          command.action,
+          platform: command.platform,
+          accountKey: command.accountKey,
+          daemonClient: daemonClient,
+          daemonSupervisor: daemonSupervisor
+        )
+      }
+      await MainActor.run {
+        self.integrationCommandsInFlight -= 1
+        self.onRefresh()
+        self.refresh()
+      }
+    }
   }
 
   private func connectIntegration(platform: String, accountKey: String) {
@@ -467,12 +570,14 @@ final class RootWindowController: NSWindowController {
       return
     }
 
-    var actions = [[String]]()
+    var commands = [(action: String, platform: String, accountKey: String)]()
     if configuration.accounts.contains(where: { $0.accountKey == accountKey && !$0.enabled }) {
-      actions.append(["integrations", "enable", platform, accountKey])
+      commands.append((action: "enable", platform: platform, accountKey: accountKey))
     }
-    actions.append(["integrations", "connect", platform, accountKey])
-    runConnectCommands(actions)
+    // The daemon answers `connect` as soon as the sign-in process is launched, and announces
+    // each later step (signed in, failed, cancelled) itself.
+    commands.append((action: "connect", platform: platform, accountKey: accountKey))
+    runIntegrationCommands(commands)
   }
 
   private func installSkill() {
@@ -532,17 +637,24 @@ final class RootWindowController: NSWindowController {
             isError: true
           )
         )
-        refreshAgentTargets()
+        refreshAgentTargets(force: true)
         return
       }
 
       let feedback = AgentLaunchService.launch(exampleID: exampleID, target: target)
       viewModel.showAgentLaunchFeedback(feedback)
-      refreshAgentTargets()
+      refreshAgentTargets(force: true)
     }
   }
 
-  private func refreshAgentTargets() {
+  /// Finding out whether each agent is installed and signed in means launching `codex` and
+  /// `claude`. That is fine when the person opens or returns to the window, and far too heavy
+  /// to repeat on every data refresh, so unforced calls are rate limited.
+  private func refreshAgentTargets(force: Bool = false) {
+    guard force || Date().timeIntervalSince(lastAgentTargetRefreshAt) > 60 else {
+      return
+    }
+    lastAgentTargetRefreshAt = Date()
     Task.detached(priority: .utility) {
       let statuses = AgentLaunchService.targetStatuses()
       await MainActor.run {
@@ -593,16 +705,12 @@ final class RootWindowController: NSWindowController {
     finishAfterTelemetryToggle = false
     pendingRefreshAfterCurrent = false
     pendingForceActivePermissionRefreshAfterCurrent = false
-    pendingAuthLaunchRefreshTask?.cancel()
-    pendingAuthLaunchRefreshTask = nil
-    platformAuthInteractionTask?.cancel()
-    platformAuthInteractionTask = nil
+    daemonClient.unsubscribe()
     pendingStatusRefreshTask?.cancel()
     pendingStatusRefreshTask = nil
     pendingPermissionRefreshTask?.cancel()
     pendingPermissionRefreshTask = nil
     PermissionGuideAssistant.shared.dismiss()
-    platformAuthInteractionSessionId = nil
     super.close()
   }
 
@@ -616,75 +724,13 @@ final class RootWindowController: NSWindowController {
     refresh(forceActivePermissionRefresh: forceActivePermissionRefresh)
   }
 
-  private func runConnectCommands(_ argumentsList: [[String]]) {
-    guard let connectArguments = argumentsList.last else {
-      return
-    }
-
-    viewModel.beginRefresh()
-    let daemonSupervisor = self.daemonSupervisor
-    let setupArguments = Array(argumentsList.dropLast())
-    Task.detached(priority: .userInitiated) { [daemonSupervisor] in
-      for arguments in setupArguments {
-        _ = daemonSupervisor.runCLI(arguments: arguments)
-      }
-      let launched = daemonSupervisor.launchCLI(arguments: connectArguments)
-      await MainActor.run {
-        self.onRefresh()
-        if launched {
-          self.scheduleAuthLaunchRefresh()
-        } else {
-          self.refresh()
-        }
-      }
-    }
-  }
-
-  private func setPlatformAuthInteractionActive(_ isActive: Bool) {
-    if isActive {
-      startPlatformAuthInteraction()
-    } else {
-      platformAuthInteractionTask?.cancel()
-      platformAuthInteractionTask = nil
-      platformAuthInteractionSessionId = nil
-    }
-  }
-
-  private func startPlatformAuthInteraction() {
-    guard platformAuthInteractionTask == nil else {
-      return
-    }
-    let daemonSupervisor = self.daemonSupervisor
-    let sessionId = UUID().uuidString
-    platformAuthInteractionSessionId = sessionId
-    platformAuthInteractionTask = Task.detached(priority: .utility) { [daemonSupervisor, sessionId] in
-      defer {
-        _ = daemonSupervisor.runCLI(arguments: [
-          "integrations",
-          "interaction",
-          "end",
-          "--session-id",
-          sessionId,
-        ])
-      }
-      while !Task.isCancelled {
-        _ = daemonSupervisor.runCLI(arguments: [
-          "integrations",
-          "interaction",
-          "start",
-          "--session-id",
-          sessionId,
-          "--ttl-ms",
-          String(platformAuthInteractionTTLMS),
-        ])
-        try? await Task.sleep(for: .milliseconds(platformAuthInteractionRenewalMS))
-      }
-    }
-  }
-
+  /// Polls while a sign-in is pending, but only against a daemon too old to push changes.
   private func schedulePendingAuthRefreshIfNeeded() {
     pendingStatusRefreshTask?.cancel()
     pendingStatusRefreshTask = nil
+    guard !daemonClient.isSubscribed else {
+      return
+    }
 
     let hasPendingAuth = cachedAllIntegrations.contains {
       $0.authState == "requested" || $0.authState == "in_progress"
@@ -700,24 +746,6 @@ final class RootWindowController: NSWindowController {
       }
       await MainActor.run {
         self?.refresh()
-      }
-    }
-  }
-
-  private func scheduleAuthLaunchRefresh() {
-    pendingAuthLaunchRefreshTask?.cancel()
-    pendingAuthLaunchRefreshTask = Task { [weak self] in
-      for delay in [200, 700, 1_500, 3_000, 6_000, 10_000] {
-        try? await Task.sleep(for: .milliseconds(delay))
-        guard !Task.isCancelled else {
-          return
-        }
-        await MainActor.run {
-          self?.refresh()
-        }
-      }
-      await MainActor.run {
-        self?.pendingAuthLaunchRefreshTask = nil
       }
     }
   }

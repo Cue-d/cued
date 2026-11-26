@@ -29,6 +29,13 @@ func configuredCuedDBPath(
     ?? "\(configuredCuedHomePath(environment: environment, homeDirectory: homeDirectory))/local.db"
 }
 
+func configuredDaemonSocketPath(
+  environment: [String: String] = ProcessInfo.processInfo.environment,
+  homeDirectory: String = NSHomeDirectory()
+) -> String {
+  "\(configuredCuedHomePath(environment: environment, homeDirectory: homeDirectory))/cued.sock"
+}
+
 func configuredDaemonEnvironmentPath(
   environment: [String: String] = ProcessInfo.processInfo.environment,
   homeDirectory: String = NSHomeDirectory()

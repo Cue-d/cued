@@ -497,87 +497,35 @@ final class AppStatusStore: @unchecked Sendable {
     self.dbPath = dbPath
   }
 
+  /// The daemon publishes what the menu bar shows to a status file; this reads that file.
+  /// The database itself is encrypted and cannot be read from here, so before the daemon has
+  /// published anything the only things known are the local access states the app can check.
   func readSnapshot() -> AppStatusSnapshot {
     let daemonLockState = readSingletonLockState(path: configuredDaemonLockPath())
-    guard FileManager.default.fileExists(atPath: dbPath) else {
-      return AppStatusSnapshot(
-        daemonRunning: daemonLockState.running,
-        daemonPID: daemonLockState.pid,
-        contacts: 0,
-        conversations: 0,
-        messages: 0,
-        phoneCalls: 0,
-        capturedRawEvents: 0,
-        projectedMessages: 0,
-        pendingProjectionEvents: 0,
-        pendingSearchIndexMessages: 0,
-        messageBreakdown: [],
-        integrations: [],
-        setupCompletedVersion: nil,
-        installedAppVersion: nil,
-        updateSummary: nil
-      )
-    }
-    if let snapshot = readSnapshotFromCache(daemonLockState: daemonLockState) {
+    if FileManager.default.fileExists(atPath: dbPath),
+       let snapshot = readSnapshotFromCache(daemonLockState: daemonLockState) {
       return snapshot
     }
 
-    var db: OpaquePointer?
-    guard sqlite3_open_v2(dbPath, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK, let db else {
-      if let db {
-        sqlite3_close(db)
-      }
-      return AppStatusSnapshot(
-        daemonRunning: daemonLockState.running,
-        daemonPID: daemonLockState.pid,
-        contacts: 0,
-        conversations: 0,
-        messages: 0,
-        phoneCalls: 0,
-        capturedRawEvents: 0,
-        projectedMessages: 0,
-        pendingProjectionEvents: 0,
-        pendingSearchIndexMessages: 0,
-        messageBreakdown: [],
-        integrations: [],
-        setupCompletedVersion: nil,
-        installedAppVersion: nil,
-        updateSummary: nil
-      )
-    }
-    defer { sqlite3_close(db) }
-
-    let daemonRow = queryDaemonRow(db: db)
-    let daemonState = daemonRow.running ? daemonRow : daemonLockState
-    let counts = [
-      countRows(db: db, table: "contacts"),
-      countRows(db: db, table: "conversations"),
-      countRows(db: db, table: "messages"),
-      countRows(db: db, table: "raw_events"),
-    ]
-    let integrations = mergeLiveLocalIntegrations(queryIntegrations(db: db))
-    let messageBreakdown = mergeMessageBreakdown(
-      queryMessageCountsByPlatform(db: db),
-      integrations: integrations
-    )
-    let updateSummary = queryUpdateSummary(db: db)
-
+    let integrations = FileManager.default.fileExists(atPath: dbPath)
+      ? mergeLiveLocalIntegrations([])
+      : []
     return AppStatusSnapshot(
-      daemonRunning: daemonState.running,
-      daemonPID: daemonState.pid,
-      contacts: counts[0],
-      conversations: counts[1],
-      messages: counts[2],
-      phoneCalls: queryPhoneCalls(db: db),
-      capturedRawEvents: counts[3],
-      projectedMessages: counts[2],
+      daemonRunning: daemonLockState.running,
+      daemonPID: daemonLockState.pid,
+      contacts: 0,
+      conversations: 0,
+      messages: 0,
+      phoneCalls: 0,
+      capturedRawEvents: 0,
+      projectedMessages: 0,
       pendingProjectionEvents: 0,
       pendingSearchIndexMessages: 0,
-      messageBreakdown: messageBreakdown,
+      messageBreakdown: mergeMessageBreakdown([], integrations: integrations),
       integrations: integrations,
-      setupCompletedVersion: queryAppSetting(db: db, key: "onboarding_completed_version"),
-      installedAppVersion: queryAppSetting(db: db, key: "installed_app_version"),
-      updateSummary: updateSummary
+      setupCompletedVersion: nil,
+      installedAppVersion: nil,
+      updateSummary: nil
     )
   }
 
@@ -595,12 +543,7 @@ final class AppStatusStore: @unchecked Sendable {
     guard stringValue(payload["dbPath"]) == dbPath else {
       return nil
     }
-    var snapshot = parseStatusPayload(payload, daemonLockState: daemonLockState)
-    let relationshipSummary = payload["relationshipSummary"] as? [String: Any] ?? [:]
-    if relationshipSummary["phoneCalls"] == nil {
-      snapshot.phoneCalls = readPhoneCallsFromDatabase()
-    }
-    return snapshot
+    return parseStatusPayload(payload, daemonLockState: daemonLockState)
   }
 
   func parseStatusPayload(
@@ -766,158 +709,6 @@ final class AppStatusStore: @unchecked Sendable {
     }
   }
 
-  private func metadataMarksUserRemoved(_ metadataJSON: String?) -> Bool {
-    guard let metadataJSON,
-          let data = metadataJSON.data(using: .utf8),
-          let metadata = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-      return false
-    }
-    return boolValue(metadata["userRemoved"]) == true
-  }
-
-  private func queryDaemonRow(db: OpaquePointer) -> (running: Bool, pid: Int?, updatedAt: Int?) {
-    let sql = """
-      SELECT pid, updated_at
-      FROM daemon_state
-      WHERE singleton_key = 'daemon'
-      LIMIT 1
-    """
-
-    var statement: OpaquePointer?
-    guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK, let statement else {
-      return (false, nil, nil)
-    }
-    defer { sqlite3_finalize(statement) }
-
-    guard sqlite3_step(statement) == SQLITE_ROW else {
-      return (false, nil, nil)
-    }
-
-    let pid = sqlite3_column_type(statement, 0) == SQLITE_NULL ? nil : Int(sqlite3_column_int64(statement, 0))
-    let updatedAt = sqlite3_column_type(statement, 1) == SQLITE_NULL ? nil : Int(sqlite3_column_int64(statement, 1))
-    let fresh = (updatedAt ?? 0) > 0 && (Int(Date().timeIntervalSince1970 * 1000) - (updatedAt ?? 0)) < appDaemonHeartbeatGraceMs
-    let running = fresh && pid.map { isProcessRunning($0) } == true
-    return (running, pid, updatedAt)
-  }
-
-  private func countRows(db: OpaquePointer, table: String) -> Int {
-    let sql = "SELECT COUNT(*) FROM \(table)"
-    var statement: OpaquePointer?
-    guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK, let statement else {
-      return 0
-    }
-    defer { sqlite3_finalize(statement) }
-    guard sqlite3_step(statement) == SQLITE_ROW else {
-      return 0
-    }
-    return Int(sqlite3_column_int64(statement, 0))
-  }
-
-  private func queryPhoneCalls(db: OpaquePointer) -> Int {
-    let sql = """
-      SELECT COUNT(*)
-      FROM raw_events
-      WHERE platform = 'imessage'
-        AND account_key = 'local'
-        AND COALESCE(normalized_schema, entity_kind || '.' || event_kind || '@1') = 'call.observed@1'
-    """
-
-    var statement: OpaquePointer?
-    guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK, let statement else {
-      return 0
-    }
-    defer { sqlite3_finalize(statement) }
-    guard sqlite3_step(statement) == SQLITE_ROW else {
-      return 0
-    }
-    return Int(sqlite3_column_int64(statement, 0))
-  }
-
-  private func readPhoneCallsFromDatabase() -> Int {
-    var db: OpaquePointer?
-    guard sqlite3_open_v2(dbPath, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK, let db else {
-      if let db {
-        sqlite3_close(db)
-      }
-      return 0
-    }
-    defer { sqlite3_close(db) }
-    return queryPhoneCalls(db: db)
-  }
-
-  private func queryMessageCountsByPlatform(db: OpaquePointer) -> [AppPlatformMessageCount] {
-    let sql = """
-      SELECT platform, COUNT(*)
-      FROM messages
-      GROUP BY platform
-      ORDER BY platform
-    """
-
-    var statement: OpaquePointer?
-    guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK, let statement else {
-      return []
-    }
-    defer { sqlite3_finalize(statement) }
-
-    var results: [AppPlatformMessageCount] = []
-    while sqlite3_step(statement) == SQLITE_ROW {
-      results.append(
-        AppPlatformMessageCount(
-          platform: String(cString: sqlite3_column_text(statement, 0)),
-          messages: Int(sqlite3_column_int64(statement, 1))
-        )
-      )
-    }
-    return results
-  }
-
-  private func queryIntegrations(db: OpaquePointer) -> [AppIntegrationStatus] {
-    let sql = """
-      SELECT i.platform, i.account_key, i.auth_state, i.enabled
-      , CASE
-          WHEN i.platform = 'linkedin'
-            AND TRIM(COALESCE(i.display_name, '')) = 'LinkedIn'
-            AND TRIM(COALESCE(s.display_name, '')) NOT IN ('', 'LinkedIn')
-          THEN s.display_name
-          ELSE i.display_name
-        END AS display_name
-      , i.metadata_json
-      FROM integration_states i
-      LEFT JOIN source_accounts s
-        ON s.platform = i.platform
-       AND s.account_key = i.account_key
-      ORDER BY i.platform, i.account_key
-    """
-
-    var statement: OpaquePointer?
-    guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK, let statement else {
-      return []
-    }
-    defer { sqlite3_finalize(statement) }
-
-    var results: [AppIntegrationStatus] = []
-    while sqlite3_step(statement) == SQLITE_ROW {
-      let metadataJSON = sqlite3_column_type(statement, 5) == SQLITE_NULL
-        ? nil
-        : String(cString: sqlite3_column_text(statement, 5))
-      if metadataMarksUserRemoved(metadataJSON) {
-        continue
-      }
-      results.append(
-        AppIntegrationStatus(
-          platform: String(cString: sqlite3_column_text(statement, 0)),
-          accountKey: String(cString: sqlite3_column_text(statement, 1)),
-          displayName: sqlite3_column_type(statement, 4) == SQLITE_NULL ? nil : String(cString: sqlite3_column_text(statement, 4)),
-          authState: String(cString: sqlite3_column_text(statement, 2)),
-          enabled: sqlite3_column_int(statement, 3) == 1,
-          projectionStats: nil,
-          capability: nil
-        )
-      )
-    }
-    return results
-  }
-
   private func mergeLiveLocalIntegrations(_ existing: [AppIntegrationStatus]) -> [AppIntegrationStatus] {
     var byKey: [String: AppIntegrationStatus] = [:]
     for integration in existing {
@@ -1041,37 +832,6 @@ final class AppStatusStore: @unchecked Sendable {
       return "needs_full_disk_access"
     }
     return "blocked"
-  }
-
-  private func queryAppSetting(db: OpaquePointer, key: String) -> String? {
-    var statement: OpaquePointer?
-    guard sqlite3_prepare_v2(db, "SELECT value FROM app_settings WHERE key = ? LIMIT 1", -1, &statement, nil) == SQLITE_OK,
-          let statement else {
-      return nil
-    }
-    defer { sqlite3_finalize(statement) }
-    sqlite3_bind_text(statement, 1, key, -1, nil)
-    guard sqlite3_step(statement) == SQLITE_ROW,
-          sqlite3_column_type(statement, 0) != SQLITE_NULL,
-          let value = sqlite3_column_text(statement, 0) else {
-      return nil
-    }
-    return String(cString: value)
-  }
-
-  private func queryUpdateSummary(db: OpaquePointer) -> AppUpdateSummary? {
-    guard let raw = queryAppSetting(db: db, key: "update_release_state_json"),
-          let data = raw.data(using: .utf8),
-          let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-      return nil
-    }
-
-    let availableVersion = object["availableVersion"] as? String
-    let releaseURL = object["releaseUrl"] as? String
-    if availableVersion == nil && releaseURL == nil {
-      return nil
-    }
-    return AppUpdateSummary(availableVersion: availableVersion, releaseURL: releaseURL)
   }
 }
 
