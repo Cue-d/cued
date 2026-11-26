@@ -179,13 +179,13 @@ const DEFAULT_DISCORD_DM_POLL_MS = 45_000;
 const DEFAULT_SLACK_REALTIME_ENABLED = false;
 const DEFAULT_INGEST_CONCURRENCY = 4;
 const DEFAULT_PROJECTION_BATCH_SIZE = 100;
-const DEFAULT_MESSAGE_FTS_INDEX_BATCH_SIZE = 250;
 const DEFAULT_REALTIME_PROJECTION_ENABLED = true;
 // Inline projection runs on the daemon thread, so it is reserved for the handful of events a
 // realtime update or an incremental sync brings; anything larger goes to the worker process.
 const DEFAULT_INLINE_PROJECTION_MAX_RAW_EVENTS = 10;
-const FTS_INDEX_TRANSACTION_MESSAGES = 10;
-const FTS_INDEX_SLICE_BUDGET_MS = 8;
+// Search indexing runs on the database worker (see search-index-drain), a pass at a time; the
+// daemon hears back after each pass to report progress and schedule the next.
+const FTS_INDEX_PASS_BUDGET_MS = 250;
 const FTS_INDEX_SLICE_GAP_MS = 10;
 const INGEST_INSERT_SLICE_EVENTS = 50;
 const INGEST_INSERT_SLICE_BUDGET_MS = 10;
@@ -596,15 +596,6 @@ export function getAdaptiveProjectionBatchSize(pendingRawEvents: number): number
     (candidate) => pendingRawEvents >= candidate.minEvents,
   );
   return Math.max(baseBatchSize, tier?.batchSize ?? baseBatchSize);
-}
-
-function getMessageFtsIndexBatchSize(): number {
-  const configured = Number(
-    process.env.CUED_MESSAGE_FTS_INDEX_BATCH_SIZE ?? DEFAULT_MESSAGE_FTS_INDEX_BATCH_SIZE,
-  );
-  return Number.isFinite(configured) && configured > 0
-    ? configured
-    : DEFAULT_MESSAGE_FTS_INDEX_BATCH_SIZE;
 }
 
 function getRealtimeProjectionEnabled(): boolean {
@@ -1775,7 +1766,6 @@ export async function runDaemon(): Promise<void> {
     operation: "start",
   });
   const ingestConcurrency = getIngestConcurrency();
-  const messageFtsIndexBatchSize = getMessageFtsIndexBatchSize();
   const realtimeProjectionEnabled = getRealtimeProjectionEnabled();
   const realtimeProjectionBatchSize = getRealtimeProjectionBatchSize();
   const deferredProjectionCoalesceMs = getDeferredProjectionCoalesceMs();
@@ -2792,7 +2782,7 @@ export async function runDaemon(): Promise<void> {
     }, normalizedDelayMs);
   };
 
-  let searchIndexPass = { claimed: 0, indexed: 0, failed: 0 };
+  let searchIndexPass = { claimed: 0, indexed: 0, failed: 0, swept: 0 };
   const drainSearchIndexQueue = () => {
     searchIndexDrainScheduled = false;
     searchIndexDrainDueAt = null;
@@ -2828,56 +2818,45 @@ export async function runDaemon(): Promise<void> {
       return;
     }
     isProcessingSearchIndex = true;
-    try {
-      // Tokenizing a message for search takes a fraction of a millisecond, a few hundred of
-      // them tens. Index a handful per transaction until a few milliseconds are spent, then
-      // come back: a backlog of any size drains without the daemon ever pausing to do it.
-      const sliceStartedAt = performance.now();
-      let claimed = 0;
-      let indexed = 0;
-      let failed = 0;
-      let drained = false;
-      db.withBusyTimeoutSync(DAEMON_STATUS_BUSY_TIMEOUT_MS, () => {
-        db.requeueStaleMessageFtsIndexing(Date.now() - FTS_INDEXING_STALE_AFTER_MS);
-        do {
-          const batch = db.drainMessageFtsIndexQueue(FTS_INDEX_TRANSACTION_MESSAGES);
-          claimed += batch.claimed;
-          indexed += batch.indexed;
-          failed += batch.failed;
-          drained = batch.claimed < FTS_INDEX_TRANSACTION_MESSAGES;
-        } while (
-          !drained &&
-          claimed < messageFtsIndexBatchSize &&
-          performance.now() - sliceStartedAt < FTS_INDEX_SLICE_BUDGET_MS
-        );
+    void dbWorker
+      .run("indexMessageSearch", {
+        budgetMs: FTS_INDEX_PASS_BUDGET_MS,
+        staleBefore: Date.now() - FTS_INDEXING_STALE_AFTER_MS,
+      })
+      .then((pass) => {
+        searchIndexPass.claimed += pass.claimed;
+        searchIndexPass.indexed += pass.indexed;
+        searchIndexPass.failed += pass.failed;
+        searchIndexPass.swept += pass.swept;
+        if (pass.drained) {
+          if (searchIndexPass.claimed > 0 || searchIndexPass.swept > 0) {
+            daemonLogger.info("message FTS index backlog drained", { ...searchIndexPass });
+            requestMenuBarStatusWrite("message_fts_index_completed");
+          }
+          searchIndexPass = { claimed: 0, indexed: 0, failed: 0, swept: 0 };
+        } else {
+          if (pass.claimed > 0 || pass.swept > 0) {
+            requestMenuBarStatusWrite("message_fts_index_progress");
+          }
+          scheduleSearchIndexDrain(FTS_INDEX_SLICE_GAP_MS);
+        }
+      })
+      .catch((error: unknown) => {
+        if (isUpdateShutdownRequested || shutdownInitiated) {
+          return;
+        }
+        if (!isSqliteBusyError(error)) {
+          daemonLogger.error("message FTS index batch failed", {
+            error: error instanceof Error ? error.message : String(error),
+          });
+        } else {
+          daemonLogger.warn("message FTS index drain skipped because SQLite is busy");
+        }
+        scheduleSearchIndexDrain(QUEUE_DRAIN_RETRY_DELAY_MS);
+      })
+      .finally(() => {
+        isProcessingSearchIndex = false;
       });
-      searchIndexPass.claimed += claimed;
-      searchIndexPass.indexed += indexed;
-      searchIndexPass.failed += failed;
-      if (drained) {
-        if (searchIndexPass.claimed > 0) {
-          daemonLogger.info("message FTS index backlog drained", { ...searchIndexPass });
-          requestMenuBarStatusWrite("message_fts_index_completed");
-        }
-        searchIndexPass = { claimed: 0, indexed: 0, failed: 0 };
-      } else {
-        if (claimed > 0) {
-          requestMenuBarStatusWrite("message_fts_index_progress");
-        }
-        scheduleSearchIndexDrain(FTS_INDEX_SLICE_GAP_MS);
-      }
-    } catch (error) {
-      if (!isSqliteBusyError(error)) {
-        daemonLogger.error("message FTS index batch failed", {
-          error: error instanceof Error ? error.message : String(error),
-        });
-      } else {
-        daemonLogger.warn("message FTS index drain skipped because SQLite is busy");
-      }
-      scheduleSearchIndexDrain(QUEUE_DRAIN_RETRY_DELAY_MS);
-    } finally {
-      isProcessingSearchIndex = false;
-    }
   };
 
   const scheduleSearchIndexDrain = (delayMs = 0) => {

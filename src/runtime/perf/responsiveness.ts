@@ -32,8 +32,18 @@ import { tmpdir, userInfo } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { performance } from "node:perf_hooks";
 import { fileURLToPath } from "node:url";
+import {
+  FAKE_HELPER_IMESSAGE_LINES,
+  fillLargeConversation,
+  IMESSAGE_BATCH_ENV,
+  largeConversationDeliveryBatch,
+  largeConversationRenameBatch,
+  ProjectionWorkerMemorySampler,
+  SEARCH_REINDEX_COUNTER_SQL,
+  seedLargeConversation,
+} from "./large-conversation.js";
 
-const FIXTURE_VERSION = 2;
+const FIXTURE_VERSION = 3;
 const FIXTURE_DB_KEY = "cued-perf-fixture-key";
 const REAL_SCALE = {
   syncRuns: 1_800_000,
@@ -53,7 +63,7 @@ const FAKE_SECURITY_CLI = "#!/bin/sh\nexit 44\n";
 // daemon pays what it pays in the installed app for every Contacts/Messages access probe.
 const FAKE_NATIVE_HELPER = `#!/bin/sh
 sleep 0.02
-if [ "$1" = "contacts" ] && [ "$2" = "status" ]; then
+${FAKE_HELPER_IMESSAGE_LINES}if [ "$1" = "contacts" ] && [ "$2" = "status" ]; then
   echo '{"status":"authorized"}'
   exit 0
 fi
@@ -99,6 +109,8 @@ type Options = {
 
 type IntegrationTarget = { platform: string; accountKey: string };
 
+type ScenarioReport = { failed: boolean; notes: string[] };
+
 function parseIntegrationTarget(value: string): IntegrationTarget {
   const separator = value.indexOf(":");
   if (separator <= 0 || separator === value.length - 1) {
@@ -117,6 +129,9 @@ type ScenarioResult = {
   gated: boolean;
   /** False for requests no UI waits on (CLI diagnostics): only their stall is held to target. */
   roundTripGated: boolean;
+  /** Set when a scenario's own check failed (see the scenario's notes). */
+  checkFailed?: boolean;
+  notes?: string[];
 };
 
 type FixtureAccount = {
@@ -323,6 +338,18 @@ async function buildFixture(dbPath: string, scale: number): Promise<void> {
       },
     });
   }
+  db.upsertIntegrationState({
+    platform: "imessage",
+    accountKey: "local",
+    displayName: "Messages",
+    authState: "authorized",
+    enabled: true,
+    connectionKind: "native",
+    syncCapable: true,
+    launchStrategy: "system-settings",
+    metadata: { supportedByDaemon: true },
+  });
+  await seedLargeConversation({ db, workDir: home, scale });
   db.close();
 
   const sqlite = openSqliteDatabase(dbPath);
@@ -499,6 +526,7 @@ async function buildFixture(dbPath: string, scale: number): Promise<void> {
   for (let start = 0; start < messageCount; start += 50_000) {
     insertMessages(start, Math.min(messageCount, start + 50_000));
   }
+  const largeConversationMessages = fillLargeConversation(sqlite, scale);
   const payload = JSON.stringify({ text: "y".repeat(600) });
   const insertRawEvents = sqlite.transaction((start: number, end: number) => {
     for (let index = start; index < end; index += 1) {
@@ -531,6 +559,17 @@ async function buildFixture(dbPath: string, scale: number): Promise<void> {
     )
     .run(maxRawEventRowid, nowMs, nowMs);
 
+  // A real database has every message in its search index; the seed's are still queued.
+  sqlite.exec(`
+    DELETE FROM messages_fts;
+    INSERT INTO messages_fts (rowid, message_id, sender_name, conversation_name,
+      participant_names, attachment_text, content)
+    SELECT message_rowid, message_id, sender_name, conversation_name, participant_names,
+      attachment_text, content
+    FROM message_fts_source;
+    DELETE FROM message_fts_index_queue;
+  `);
+
   for (const indexName of REWOUND_INDEXES) {
     sqlite.exec(`DROP INDEX IF EXISTS ${indexName}`);
   }
@@ -541,7 +580,7 @@ async function buildFixture(dbPath: string, scale: number): Promise<void> {
   sqlite.pragma("wal_checkpoint(TRUNCATE)");
   sqlite.close();
   console.error(
-    `Built fixture in ${((performance.now() - startedAt) / 1000).toFixed(1)}s: ${totalRuns} sync runs, ${messageCount} messages, ${rawEventCount} raw events`,
+    `Built fixture in ${((performance.now() - startedAt) / 1000).toFixed(1)}s: ${totalRuns} sync runs, ${messageCount} messages (${largeConversationMessages} in one conversation), ${rawEventCount} raw events`,
   );
 }
 
@@ -842,7 +881,7 @@ function printResults(
       !result.roundTrip ||
       result.roundTrip.p95 <= TARGETS.roundTripP95Ms;
     const stallOk = !result.gated || result.stall.max <= TARGETS.stallMaxMs;
-    const ok = !result.timedOut && roundTripOk && stallOk;
+    const ok = !result.timedOut && roundTripOk && stallOk && !result.checkFailed;
     return {
       name: result.name,
       roundTripP50: result.roundTrip ? formatMs(result.roundTrip.p50) : "-",
@@ -872,6 +911,11 @@ function printResults(
   console.log(line(["scenario", "rtt p50", "rtt p95", "stall max", "verdict"]));
   for (const row of rows) {
     console.log(line([row.name, row.roundTripP50, row.roundTripP95, row.stallMax, row.verdict]));
+  }
+  for (const result of results) {
+    for (const note of result.notes ?? []) {
+      console.log(`  ${result.name}: ${note}`);
+    }
   }
   if (legacySpawn) {
     console.log(
@@ -923,6 +967,20 @@ async function main(): Promise<void> {
   writeFileSync(join(fakeBinDir, "security"), FAKE_SECURITY_CLI);
   chmodSync(join(fakeBinDir, "security"), 0o755);
   daemonEnv.PATH = `${fakeBinDir}:${process.env.PATH ?? ""}`;
+  const imessagePlaceholderPath = join(home, "imessage", "chat.db");
+  const imessageBatchPath = join(home, "imessage", "batch.json");
+  mkdirSync(dirname(imessagePlaceholderPath), { recursive: true });
+  writeFileSync(imessagePlaceholderPath, "");
+  process.env.CUED_DB_KEY = dbKey;
+  {
+    const { openSqliteDatabase } = await import("../../db/sqlite.js");
+    const sqlite = openSqliteDatabase(dbPath);
+    try {
+      sqlite.exec(SEARCH_REINDEX_COUNTER_SQL);
+    } finally {
+      sqlite.close();
+    }
+  }
   const nativeHelperPath = join(home, "fake-native-helper");
   writeFileSync(nativeHelperPath, FAKE_NATIVE_HELPER);
   chmodSync(nativeHelperPath, 0o755);
@@ -946,7 +1004,9 @@ async function main(): Promise<void> {
     CUED_CONTACTS_NATIVE_BINARY: nativeHelperPath,
     // Synthetic address book; the real one is never read.
     CUED_CONTACTS_JSON_PATH: contactsJsonPath,
-    CUED_IMESSAGE_DB_PATH: join(home, "disabled", "chat.db"),
+    // Only has to exist: the fake helper serves the iMessage batches (see large-conversation).
+    CUED_IMESSAGE_DB_PATH: imessagePlaceholderPath,
+    [IMESSAGE_BATCH_ENV]: imessageBatchPath,
     // An inherited CUED_SIGNAL_DIR would otherwise win over the benchmark home, and removing
     // a Signal account in --db mode would delete the real account directory.
     CUED_SIGNAL_DIR: join(home, "integrations", "signal"),
@@ -987,7 +1047,12 @@ async function main(): Promise<void> {
       run: (
         request: (command: string, fields?: Record<string, unknown>) => Promise<void>,
       ) => Promise<void>,
-      scenarioOptions: { gated?: boolean; roundTripGated?: boolean } = {},
+      scenarioOptions: {
+        gated?: boolean;
+        roundTripGated?: boolean;
+        /** Filled in by the scenario: its own pass/fail check and what to print about it. */
+        report?: ScenarioReport;
+      } = {},
     ) => {
       if (aborted) {
         return;
@@ -1031,6 +1096,8 @@ async function main(): Promise<void> {
         timedOut,
         gated: scenarioOptions.gated ?? true,
         roundTripGated: scenarioOptions.roundTripGated ?? true,
+        checkFailed: scenarioOptions.report?.failed,
+        notes: scenarioOptions.report?.notes,
       });
     };
 
@@ -1184,6 +1251,119 @@ async function main(): Promise<void> {
         },
         { roundTripGated: false },
       );
+
+    if (options.syncScenario && !options.dbPath) {
+      const sqlRow = async (query: string): Promise<Record<string, number> | null> => {
+        const response = await withTimeout(requestConnection.request("sql", { query }), 10_000);
+        if (response === "timeout" || !response.ok) {
+          return null;
+        }
+        return (response.result as Array<Record<string, number>> | undefined)?.[0] ?? null;
+      };
+      // Conversations queued for re-indexing as a whole; builds before that queue have none.
+      let conversationQueue = "(SELECT COUNT(*) FROM message_fts_conversation_queue)";
+      const quiet = async (sinceMs: number) => {
+        const query = (conversations: string) => `SELECT
+          (SELECT COUNT(*) FROM sync_runs WHERE status IN ('queued', 'ingesting', 'projecting')) AS active,
+          (SELECT COALESCE(MAX(rowid), 0) FROM raw_events)
+            - (SELECT projection_watermark FROM projection_state) AS pending,
+          (SELECT COUNT(*) FROM message_fts_index_queue WHERE status IN ('queued', 'indexing'))
+            + ${conversations} AS reindexing,
+          (SELECT COUNT(*) FROM sync_runs WHERE platform = 'imessage' AND queued_at >= ${sinceMs}
+             AND status NOT IN ('queued', 'ingesting', 'projecting')) AS finished`;
+        let row = await sqlRow(query(conversationQueue));
+        if (!row && conversationQueue !== "0") {
+          row = await sqlRow(query("0"));
+          if (row) {
+            conversationQueue = "0";
+          }
+        }
+        return row && row.active === 0 && row.pending <= 0 && row.reindexing === 0 ? row : null;
+      };
+      // Delivers one iMessage batch and waits for the daemon to project it and re-index search.
+      const largeConversationSync = async (
+        batch: object,
+        report: ScenarioReport,
+        maxQueuedPerEvent: number | null,
+      ) => {
+        const settleDeadline = performance.now() + 600_000;
+        while (!(await quiet(0)) && performance.now() < settleDeadline) {
+          await sleep(250);
+        }
+        const before =
+          (await sqlRow(`SELECT
+          (SELECT queued FROM perf_search_reindex_counter) AS queued,
+          (SELECT COALESCE(MAX(rowid), 0) FROM raw_events) AS rowid`)) ?? {};
+        const startedAt = Date.now();
+        writeFileSync(imessageBatchPath, JSON.stringify(batch));
+        const memory = new ProjectionWorkerMemorySampler(child.pid ?? -1);
+        memory.start();
+        try {
+          await requestConnection.request("sync-run", { source: "imessage" });
+          const deadline = performance.now() + 600_000;
+          let finished = false;
+          while (performance.now() < deadline) {
+            await sleep(250);
+            const row = await quiet(startedAt);
+            if (row && row.finished > 0) {
+              finished = true;
+              break;
+            }
+          }
+          if (!finished) {
+            throw new Error("iMessage sync did not finish within 600s");
+          }
+        } finally {
+          memory.stop();
+          rmSync(imessageBatchPath, { force: true });
+        }
+        const after =
+          (await sqlRow(`SELECT
+          (SELECT queued FROM perf_search_reindex_counter) AS queued,
+          (SELECT COUNT(*) FROM raw_events WHERE rowid > ${before.rowid ?? 0}) AS stored,
+          (SELECT COALESCE(SUM(json_extract(details_json, '$.timings.projectionMs')), 0)
+             FROM sync_runs WHERE run_type = 'project' AND queued_at >= ${startedAt}) AS projection_ms`)) ??
+          {};
+        const stored = after.stored ?? 0;
+        const queued = (after.queued ?? 0) - (before.queued ?? 0);
+        report.notes.push(
+          `${stored} raw events stored, ${queued} messages queued for search re-indexing, projection ${formatMs(after.projection_ms ?? 0)}, projection worker peak RSS ${(memory.peakRssBytes / 1024 / 1024).toFixed(0)} MB, ${formatMs(Date.now() - startedAt)} until search caught up`,
+        );
+        if (maxQueuedPerEvent != null && queued > maxQueuedPerEvent * Math.max(1, stored)) {
+          report.failed = true;
+          report.notes.push(
+            `MISS: re-indexed more than ${maxQueuedPerEvent} messages per event delivered`,
+          );
+        }
+      };
+      // A single message is few enough raw events that the daemon projects it on its own thread.
+      // The first such projection after startup also loads the projection cache, a one-time
+      // cost reported here but held to no target; the gated scenario below is the steady state.
+      const firstReport: ScenarioReport = { failed: false, notes: [] };
+      await measure(
+        "first inline projection after startup (loads cache)",
+        async () => largeConversationSync(largeConversationDeliveryBatch(1), firstReport, 3),
+        { gated: false, roundTripGated: false, report: firstReport },
+      );
+      const singleReport: ScenarioReport = { failed: false, notes: [] };
+      await measure(
+        "deliver 1 message into a 110k-message conversation",
+        async () => largeConversationSync(largeConversationDeliveryBatch(1), singleReport, 3),
+        { roundTripGated: false, report: singleReport },
+      );
+      const deliveryReport: ScenarioReport = { failed: false, notes: [] };
+      await measure(
+        "deliver 20 messages into a 110k-message conversation",
+        async () => largeConversationSync(largeConversationDeliveryBatch(20), deliveryReport, 3),
+        { roundTripGated: false, report: deliveryReport },
+      );
+      const renameReport: ScenarioReport = { failed: false, notes: [] };
+      await measure(
+        "rename the 110k-message conversation",
+        async () => largeConversationSync(largeConversationRenameBatch(), renameReport, null),
+        { roundTripGated: false, report: renameReport },
+      );
+    }
 
     await measure(
       `remove ${options.removeTarget.platform} account with long history`,

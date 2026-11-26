@@ -15,6 +15,11 @@ import type {
 import { normalizePhone, toE164 } from "../../core/utils/phone.js";
 import type { CuedDatabase, LocalDrizzleDatabase } from "../../db/database.js";
 import {
+  isHumanDisplayName,
+  nonEmpty,
+  refreshMessageNamesStatement,
+} from "../../db/message-names.js";
+import {
   contactHandles,
   contactSources,
   contacts,
@@ -57,9 +62,18 @@ type ProjectionMode = "realtime" | "deferred" | "rebuild";
 
 type ProjectionChangeSet = {
   dirtyContactIds: Set<string>;
+  /** Conversations whose names or participants an event may have changed. */
   dirtyConversationIds: Set<string>;
   dirtyConversationSummaryIds: Set<string>;
   dirtyMessageIds: Set<string>;
+  /**
+   * Each dirty conversation's name fingerprint (see conversationNameFingerprint) from before
+   * the first event in the batch touched it. A conversation that ends the batch with the same
+   * fingerprint changed nothing its messages carry, however many events observed it.
+   */
+  conversationNameSnapshots: Map<string, string | null>;
+  /** Conversations every message of which must have its names refreshed and be re-indexed. */
+  sweepConversationIds: Set<string>;
   touchedAttachments: boolean;
   touchedReactions: boolean;
 };
@@ -361,38 +375,6 @@ function mergeAliasedTextField(
     return normalizedExisting;
   }
   return normalizeText(incomingValue);
-}
-
-function nonEmptySql(value: SQL): SQL {
-  return sql`NULLIF(TRIM(${value}), '')`;
-}
-
-function isRawIdentifierDisplayNameSql(value: SQL): SQL {
-  return sql`(
-    ${nonEmptySql(value)} IS NOT NULL
-    AND (
-      (
-        (TRIM(${value}) GLOB '+[0-9]*' OR TRIM(${value}) GLOB '[0-9]*')
-        AND TRIM(${value}) NOT GLOB '*[A-Za-z]*'
-      )
-      OR LOWER(TRIM(${value})) LIKE '%@%'
-      OR LOWER(TRIM(${value})) LIKE 'contacts:%'
-      OR LOWER(TRIM(${value})) LIKE 'imessage:%'
-      OR LOWER(TRIM(${value})) LIKE 'signal:%'
-      OR LOWER(TRIM(${value})) LIKE 'whatsapp:%'
-      OR LOWER(TRIM(${value})) LIKE 'linkedin:%'
-      OR LOWER(TRIM(${value})) LIKE 'slack:%'
-      OR LOWER(TRIM(${value})) LIKE 'urn:li:%'
-      OR (
-        LENGTH(TRIM(${value})) = 36
-        AND TRIM(${value}) GLOB '[0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F]-[0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F]-[0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F]-[0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F]-[0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F]'
-      )
-    )
-  )`;
-}
-
-function isHumanDisplayNameSql(value: SQL): SQL {
-  return sql`(${nonEmptySql(value)} IS NOT NULL AND NOT ${isRawIdentifierDisplayNameSql(value)})`;
 }
 
 function normalizeInteger(value: unknown): number | null {
@@ -720,6 +702,8 @@ function createProjectionChangeSet(): ProjectionChangeSet {
     dirtyConversationIds: new Set<string>(),
     dirtyConversationSummaryIds: new Set<string>(),
     dirtyMessageIds: new Set<string>(),
+    conversationNameSnapshots: new Map<string, string | null>(),
+    sweepConversationIds: new Set<string>(),
     touchedAttachments: false,
     touchedReactions: false,
   };
@@ -737,6 +721,15 @@ function mergeProjectionChangeSet(target: ProjectionChangeSet, source: Projectio
   }
   for (const id of source.dirtyMessageIds) {
     target.dirtyMessageIds.add(id);
+  }
+  for (const [id, snapshot] of source.conversationNameSnapshots) {
+    // The first snapshot is the state before the batch; later ones are mid-batch.
+    if (!target.conversationNameSnapshots.has(id)) {
+      target.conversationNameSnapshots.set(id, snapshot);
+    }
+  }
+  for (const id of source.sweepConversationIds) {
+    target.sweepConversationIds.add(id);
   }
   target.touchedAttachments ||= source.touchedAttachments;
   target.touchedReactions ||= source.touchedReactions;
@@ -1044,6 +1037,7 @@ function clearProjectedState(conn: LocalDbExecutor): void {
   conn.run(sql.raw("DELETE FROM provider_identity_aliases"));
   conn.run(sql.raw("DELETE FROM messages_fts"));
   conn.run(sql.raw("DELETE FROM message_fts_index_queue"));
+  conn.run(sql.raw("DELETE FROM message_fts_conversation_queue"));
   conn.delete(timelineEvents).run();
   conn.delete(messageAttachments).run();
   conn.delete(messageReactions).run();
@@ -1270,6 +1264,7 @@ function projectConversationObservation(
     payload.sourceConversationKey,
     event.observed_at,
   );
+  snapshotConversationNames(conn, changes, conversationId);
 
   const conversationSet: {
     updatedAt: number;
@@ -1664,6 +1659,7 @@ function projectParticipantEvent(
     payload.sourceConversationKey,
     event.observed_at,
   );
+  snapshotConversationNames(conn, changes, conversationId);
   const contactId = resolveOrEnsureContact(
     conn,
     cache,
@@ -1810,7 +1806,7 @@ function projectTimelineEvent(
     })
     .run();
 
-  changes.dirtyConversationIds.add(conversationId);
+  // Timeline entries carry no names a message shows; only the conversation's summary moves.
   changes.dirtyConversationSummaryIds.add(conversationId);
 }
 
@@ -1916,7 +1912,7 @@ function projectCallEvent(
     })
     .run();
 
-  changes.dirtyConversationIds.add(conversationId);
+  // Timeline entries carry no names a message shows; only the conversation's summary moves.
   changes.dirtyConversationSummaryIds.add(conversationId);
 }
 
@@ -1949,7 +1945,6 @@ function projectCallDeleteEvent(
       ${direction ? sql`AND call_direction = ${direction}` : sql``}
   `);
 
-  changes.dirtyConversationIds.add(conversationId);
   changes.dirtyConversationSummaryIds.add(conversationId);
 }
 
@@ -2034,15 +2029,10 @@ function refreshConversationSummariesForIds(
   }
 }
 
+// Messages are not updated here: every conversation the contact appears in is swept instead
+// (see expandDirtyConversationIds), which re-derives the names its messages carry.
 function refreshContactFanoutForIds(conn: LocalDbExecutor, contactIds: Set<string>): void {
   for (const chunk of chunkArray([...contactIds], SQL_CHUNK_SIZE)) {
-    conn.run(sql`
-      UPDATE messages
-      SET sender_name = (
-        SELECT name FROM contacts WHERE id = messages.sender_contact_id
-      )
-      WHERE sender_contact_id IN (${sqlValueList(chunk)})
-    `);
     conn.run(sql`
       UPDATE conversation_participants
       SET participant_name = (
@@ -2072,14 +2062,132 @@ function expandDirtyConversationIds(conn: LocalDbExecutor, changes: ProjectionCh
     return;
   }
 
+  // A contact's name is on its participant rows and on the messages it sent, which can be in
+  // conversations it is no longer a participant of.
   for (const chunk of chunkArray([...changes.dirtyContactIds], SQL_CHUNK_SIZE)) {
     const rows = conn.all<{ conversation_id: string }>(sql`
-      SELECT DISTINCT conversation_id
+      SELECT conversation_id
       FROM conversation_participants
       WHERE contact_id IN (${sqlValueList(chunk)})
+      UNION
+      SELECT conversation_id
+      FROM messages
+      WHERE sender_contact_id IN (${sqlValueList(chunk)})
     `);
     for (const row of rows) {
       changes.dirtyConversationIds.add(row.conversation_id);
+      changes.sweepConversationIds.add(row.conversation_id);
+    }
+  }
+}
+
+/**
+ * Everything about a conversation that the names on its messages, and their search
+ * documents, are derived from: its name and type, its participants and their names, and the
+ * participant list search indexes. Null for a conversation that does not exist yet.
+ */
+function conversationNameFingerprint(conn: LocalDbExecutor, conversationId: string): string | null {
+  const row = conn.get<{ fingerprint: string | null }>(sql`
+    SELECT json_array(
+      c.name,
+      c.type,
+      c.participant_names,
+      (
+        SELECT json_group_array(json_array(
+          cp.contact_id, cp.source_participant_key, cp.participant_name, cp.is_self, cp.is_active
+        ))
+        FROM (
+          SELECT *
+          FROM conversation_participants
+          WHERE conversation_id = c.id
+          ORDER BY contact_id, source_participant_key
+        ) cp
+      )
+    ) AS fingerprint
+    FROM conversations c
+    WHERE c.id = ${conversationId}
+  `);
+  return row?.fingerprint ?? null;
+}
+
+const [REFRESH_NAMES_BEFORE_SCOPE, REFRESH_NAMES_AFTER_SCOPE] = refreshMessageNamesStatement(
+  "\u0000scope\u0000",
+).split("\u0000scope\u0000") as [string, string];
+
+/** See refreshMessageNamesStatement; `scope` selects the messages to refresh. */
+function refreshMessageNames(conn: LocalDbExecutor, scope: SQL): void {
+  conn.all(
+    sql`${sql.raw(REFRESH_NAMES_BEFORE_SCOPE)}${scope}${sql.raw(REFRESH_NAMES_AFTER_SCOPE)}`,
+  );
+}
+
+function snapshotConversationNames(
+  conn: LocalDbExecutor,
+  changes: ProjectionChangeSet,
+  conversationId: string,
+): void {
+  changes.dirtyConversationIds.add(conversationId);
+  if (!changes.conversationNameSnapshots.has(conversationId)) {
+    changes.conversationNameSnapshots.set(
+      conversationId,
+      conversationNameFingerprint(conn, conversationId),
+    );
+  }
+}
+
+/** Conversations up to this size are swept inside the projection transaction. */
+const INLINE_SWEEP_MAX_MESSAGES = 500;
+
+/**
+ * Refreshes the names on every message of the conversations to sweep and re-indexes them.
+ * A large conversation is handed to the search-index drain instead, which does the same work
+ * a slice at a time: rewriting a hundred thousand messages here would hold the write lock,
+ * and on an inline projection the daemon's thread, for seconds.
+ */
+function sweepConversations(conn: LocalDbExecutor, changes: ProjectionChangeSet): void {
+  const timestamp = Date.now();
+  for (const chunk of chunkArray([...changes.sweepConversationIds], SQL_CHUNK_SIZE)) {
+    // Counted only as far as the threshold: counting a huge conversation is itself slow.
+    const sizes = chunk.map((conversationId) => ({
+      conversation_id: conversationId,
+      messages:
+        conn.get<{ messages: number }>(sql`
+          SELECT COUNT(*) AS messages
+          FROM (
+            SELECT 1 FROM messages
+            WHERE conversation_id = ${conversationId}
+            LIMIT ${INLINE_SWEEP_MAX_MESSAGES + 1}
+          )
+        `)?.messages ?? 0,
+    }));
+    const inline = sizes
+      .filter((row) => row.messages <= INLINE_SWEEP_MAX_MESSAGES)
+      .map((row) => row.conversation_id);
+    for (const row of sizes) {
+      if (row.messages === 0) {
+        continue;
+      }
+      if (row.messages > INLINE_SWEEP_MAX_MESSAGES) {
+        conn.run(sql`
+          INSERT INTO message_fts_conversation_queue (
+            conversation_id, reason, after_sent_at, after_rowid, queued_at, updated_at
+          )
+          VALUES (${row.conversation_id}, 'projection', NULL, NULL, ${timestamp}, ${timestamp})
+          ON CONFLICT(conversation_id) DO UPDATE SET
+            after_sent_at = NULL,
+            after_rowid = NULL,
+            updated_at = excluded.updated_at
+        `);
+      }
+    }
+    for (const inlineChunk of chunkArray(inline, SQL_CHUNK_SIZE)) {
+      refreshMessageNames(conn, sql`conversation_id IN (${sqlValueList(inlineChunk)})`);
+      const rows = conn.all<{ id: string }>(sql`
+        SELECT id FROM messages WHERE conversation_id IN (${sqlValueList(inlineChunk)})
+      `);
+      for (const row of rows) {
+        changes.dirtyMessageIds.add(row.id);
+      }
     }
   }
 }
@@ -2091,7 +2199,7 @@ function refreshParticipantNamesForIds(conn: LocalDbExecutor, conversationIds: S
       SET participant_name = (
         WITH resolved AS (
           SELECT
-            ${nonEmptySql(sql`(SELECT name FROM contacts WHERE id = conversation_participants.contact_id)`)} AS contact_name,
+            ${sql.raw(nonEmpty("(SELECT name FROM contacts WHERE id = conversation_participants.contact_id)"))} AS contact_name,
             CASE
               WHEN conversation_participants.is_self = 0
                 AND (
@@ -2106,15 +2214,15 @@ function refreshParticipantNamesForIds(conn: LocalDbExecutor, conversationIds: S
                     AND cp2.is_active = 1
                     AND cp2.is_self = 0
                 ) = 1
-              THEN ${nonEmptySql(sql`(SELECT name FROM conversations WHERE id = conversation_participants.conversation_id)`)}
+              THEN ${sql.raw(nonEmpty("(SELECT name FROM conversations WHERE id = conversation_participants.conversation_id)"))}
               ELSE NULL
             END AS dm_name,
-            ${nonEmptySql(sql`conversation_participants.participant_name`)} AS current_name
+            ${sql.raw(nonEmpty("conversation_participants.participant_name"))} AS current_name
         )
         SELECT CASE
-          WHEN ${isHumanDisplayNameSql(sql`contact_name`)} THEN contact_name
-          WHEN ${isHumanDisplayNameSql(sql`dm_name`)} THEN dm_name
-          WHEN ${isHumanDisplayNameSql(sql`current_name`)} THEN current_name
+          WHEN ${sql.raw(isHumanDisplayName("contact_name"))} THEN contact_name
+          WHEN ${sql.raw(isHumanDisplayName("dm_name"))} THEN dm_name
+          WHEN ${sql.raw(isHumanDisplayName("current_name"))} THEN current_name
           ELSE COALESCE(contact_name, current_name)
         END
         FROM resolved
@@ -2132,61 +2240,6 @@ function refreshParticipantNamesForIds(conn: LocalDbExecutor, conversationIds: S
           AND cp.participant_name <> ''
       )
       WHERE id IN (${sqlValueList(chunk)})
-    `);
-  }
-}
-
-function refreshMessageSenderNamesForIds(
-  conn: LocalDbExecutor,
-  conversationIds: Set<string>,
-): void {
-  for (const chunk of chunkArray([...conversationIds], SQL_CHUNK_SIZE)) {
-    conn.run(sql`
-      UPDATE messages
-      SET sender_name = (
-        WITH resolved AS (
-          SELECT
-            ${nonEmptySql(sql`(SELECT name FROM contacts WHERE id = messages.sender_contact_id)`)} AS contact_name,
-            ${nonEmptySql(sql`
-              (
-                SELECT cp.participant_name
-                FROM conversation_participants cp
-                WHERE cp.conversation_id = messages.conversation_id
-                  AND cp.contact_id = messages.sender_contact_id
-                  AND cp.is_active = 1
-                ORDER BY cp.updated_at DESC
-                LIMIT 1
-              )
-            `)} AS participant_name,
-            CASE
-              WHEN messages.is_from_me = 0
-                AND (
-                  SELECT type
-                  FROM conversations
-                  WHERE id = messages.conversation_id
-                ) = 'dm'
-                AND (
-                  SELECT COUNT(*)
-                  FROM conversation_participants cp2
-                  WHERE cp2.conversation_id = messages.conversation_id
-                    AND cp2.is_active = 1
-                    AND cp2.is_self = 0
-                ) = 1
-              THEN ${nonEmptySql(sql`(SELECT name FROM conversations WHERE id = messages.conversation_id)`)}
-              ELSE NULL
-            END AS dm_name,
-            ${nonEmptySql(sql`messages.sender_name`)} AS current_name
-        )
-        SELECT CASE
-          WHEN ${isHumanDisplayNameSql(sql`contact_name`)} THEN contact_name
-          WHEN ${isHumanDisplayNameSql(sql`participant_name`)} THEN participant_name
-          WHEN ${isHumanDisplayNameSql(sql`dm_name`)} THEN dm_name
-          WHEN ${isHumanDisplayNameSql(sql`current_name`)} THEN current_name
-          ELSE COALESCE(contact_name, participant_name, current_name)
-        END
-        FROM resolved
-      )
-      WHERE conversation_id IN (${sqlValueList(chunk)})
     `);
   }
 }
@@ -2209,49 +2262,6 @@ function refreshConversationNamesForIds(conn: LocalDbExecutor, conversationIds: 
         AND participant_names IS NOT NULL
         AND participant_names <> ''
     `);
-  }
-}
-
-function refreshMessageConversationNamesForIds(
-  conn: LocalDbExecutor,
-  conversationIds: Set<string>,
-): void {
-  for (const chunk of chunkArray([...conversationIds], SQL_CHUNK_SIZE)) {
-    conn.run(sql`
-      UPDATE messages
-      SET conversation_name = (
-        SELECT name FROM conversations WHERE id = messages.conversation_id
-      )
-      WHERE conversation_id IN (${sqlValueList(chunk)})
-    `);
-  }
-}
-
-function expandDirtyMessageIds(conn: LocalDbExecutor, changes: ProjectionChangeSet): void {
-  if (changes.dirtyConversationIds.size > 0) {
-    for (const chunk of chunkArray([...changes.dirtyConversationIds], SQL_CHUNK_SIZE)) {
-      const rows = conn.all<{ id: string }>(sql`
-        SELECT id
-        FROM messages
-        WHERE conversation_id IN (${sqlValueList(chunk)})
-      `);
-      for (const row of rows) {
-        changes.dirtyMessageIds.add(row.id);
-      }
-    }
-  }
-
-  if (changes.dirtyContactIds.size > 0) {
-    for (const chunk of chunkArray([...changes.dirtyContactIds], SQL_CHUNK_SIZE)) {
-      const rows = conn.all<{ id: string }>(sql`
-        SELECT id
-        FROM messages
-        WHERE sender_contact_id IN (${sqlValueList(chunk)})
-      `);
-      for (const row of rows) {
-        changes.dirtyMessageIds.add(row.id);
-      }
-    }
   }
 }
 
@@ -2288,9 +2298,6 @@ function finalizeDeferredProjection(
   conn: LocalDbExecutor,
   cache: ProjectionCache,
   changes: ProjectionChangeSet,
-  options?: {
-    initialProjection?: boolean;
-  },
 ): void {
   if (changes.dirtyContactIds.size > 0) {
     refreshContactFanoutForIds(conn, changes.dirtyContactIds);
@@ -2302,20 +2309,31 @@ function finalizeDeferredProjection(
     refreshParticipantNamesForIds(conn, changes.dirtyConversationIds);
     refreshConversationNamesForIds(conn, changes.dirtyConversationIds);
     syncConversationNameCache(conn, cache, changes.dirtyConversationIds);
-    refreshMessageSenderNamesForIds(conn, changes.dirtyConversationIds);
-    refreshMessageConversationNamesForIds(conn, changes.dirtyConversationIds);
     for (const conversationId of changes.dirtyConversationIds) {
       changes.dirtyConversationSummaryIds.add(conversationId);
+      // Events re-observe conversations all the time; only a real change reaches messages.
+      if (
+        !changes.sweepConversationIds.has(conversationId) &&
+        changes.conversationNameSnapshots.get(conversationId) !==
+          conversationNameFingerprint(conn, conversationId)
+      ) {
+        changes.sweepConversationIds.add(conversationId);
+      }
     }
+  }
+
+  // Messages projected in this batch took their names from the cache as it was mid-batch.
+  for (const chunk of chunkArray([...changes.dirtyMessageIds], SQL_CHUNK_SIZE)) {
+    refreshMessageNames(conn, sql`id IN (${sqlValueList(chunk)})`);
+  }
+  if (changes.sweepConversationIds.size > 0) {
+    sweepConversations(conn, changes);
   }
 
   if (changes.dirtyConversationSummaryIds.size > 0) {
     refreshConversationSummariesForIds(conn, changes.dirtyConversationSummaryIds);
   }
 
-  if (!options?.initialProjection) {
-    expandDirtyMessageIds(conn, changes);
-  }
   if (changes.dirtyMessageIds.size > 0) {
     if (changes.touchedAttachments) {
       refreshAttachmentCountsForIds(conn, changes.dirtyMessageIds);
@@ -2356,7 +2374,6 @@ function projectEventBatch(
     rawEvents: RawEventRow[];
     projectionWatermark: number | null;
     lastRebuildAt?: number | null;
-    initialProjection?: boolean;
     resetCache?: boolean;
     clearState?: boolean;
   },
@@ -2468,9 +2485,7 @@ function projectEventBatch(
           }
         }
 
-        finalizeDeferredProjection(tx, cache, changes, {
-          initialProjection: input.initialProjection,
-        });
+        finalizeDeferredProjection(tx, cache, changes);
         if (input.projectionWatermark != null) {
           upsertProjectionState(tx, {
             projectionWatermark: input.projectionWatermark,
@@ -2549,8 +2564,6 @@ function projectRangeInternal(
     rawEvents,
     projectionWatermark: committedProjectionWatermark,
     lastRebuildAt: input.mode === "rebuild" ? Date.now() : undefined,
-    initialProjection:
-      input.mode !== "realtime" && currentProjectionState.projection_watermark === 0,
   });
 
   const projectionWatermark =
@@ -2712,7 +2725,6 @@ export function rebuildProjectedState(
       rawEvents,
       projectionWatermark,
       lastRebuildAt,
-      initialProjection: clearState,
       resetCache: clearState,
       clearState,
     });

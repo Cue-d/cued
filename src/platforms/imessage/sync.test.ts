@@ -379,6 +379,55 @@ describe("imessage worker loader resolution", () => {
     }
   });
 
+  it("re-observes only the chats that received new messages, not those the edit sweep re-reads", () => {
+    const path = createSyntheticChatDb(3);
+    const callHistoryPath = createSyntheticCallHistoryDb();
+    const repoRoot = createTempDir("cued-mutation-chats-");
+    const source = new DatabaseSync(path);
+    source.exec(
+      "ALTER TABLE message ADD COLUMN date_edited INTEGER; ALTER TABLE message ADD COLUMN date_retracted INTEGER",
+    );
+    const build = (sourceCursor?: unknown) =>
+      buildIMessageSyncBundle({
+        path,
+        callHistoryPath,
+        repoRoot,
+        env: {},
+        sourceCursor,
+        limit: 10,
+      });
+    const conversationKeys = (bundle: ReturnType<typeof build>) =>
+      bundle.rawEvents
+        .filter((event) => event.entityKind === "conversation")
+        .map((event) => (event.payload as { sourceConversationKey: string }).sourceConversationKey);
+    try {
+      const initial = build();
+      expect(conversationKeys(initial)).toEqual(["1"]);
+      source.prepare("UPDATE message SET text = 'edited', date_edited = 1 WHERE ROWID = 2").run();
+
+      // The edit is re-read on every sync from now on; its chat is not re-observed for it.
+      const edited = build(initial.sourceCursor);
+      expect(edited.rawEvents.some((event) => event.entityKind === "message")).toBe(true);
+      expect(conversationKeys(edited)).toEqual([]);
+
+      // A message arrives in another chat: only that chat is observed.
+      source
+        .prepare("INSERT INTO chat (chat_identifier, display_name) VALUES ('chat-2', NULL)")
+        .run();
+      source.prepare("INSERT INTO chat_handle_join (chat_id, handle_id) VALUES (2, 1)").run();
+      source
+        .prepare(
+          "INSERT INTO message (guid, handle_id, text, date, is_from_me) VALUES ('message-new', 1, 'hello', ?, 0)",
+        )
+        .run(9000000000n);
+      source.prepare("INSERT INTO chat_message_join (chat_id, message_id) VALUES (2, 4)").run();
+      const arrived = build(edited.sourceCursor);
+      expect(conversationKeys(arrived)).toEqual(["2"]);
+    } finally {
+      source.close();
+    }
+  });
+
   it("pages historical mutations independently and restarts the sweep", () => {
     const path = createSyntheticChatDb(4);
     const db = new DatabaseSync(path);

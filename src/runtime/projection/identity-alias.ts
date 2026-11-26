@@ -15,6 +15,7 @@ type Changes = {
   dirtyConversationIds: Set<string>;
   dirtyConversationSummaryIds: Set<string>;
   dirtyMessageIds: Set<string>;
+  sweepConversationIds: Set<string>;
   touchedAttachments: boolean;
   touchedReactions: boolean;
 };
@@ -308,6 +309,8 @@ export function projectWhatsAppIdentityAlias(
     cache.conversationMap.set(`${sourcePrefix}${alias}`, conversation.id);
     cache.conversationMap.set(`${sourcePrefix}${canonical}`, conversation.id);
     changes.dirtyConversationIds.add(conversation.id);
+    // Messages may have moved in from the alias conversation: re-derive and re-index them all.
+    changes.sweepConversationIds.add(conversation.id);
     changes.dirtyConversationSummaryIds.add(conversation.id);
   }
 

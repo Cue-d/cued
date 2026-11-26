@@ -51,6 +51,7 @@ import {
   readProjectionCountsByIntegration,
 } from "./raw-queries.js";
 import * as schema from "./schema.js";
+import { indexQueuedMessages, sweepQueuedConversation } from "./search-index-drain.js";
 import { openSqliteDatabase } from "./sqlite.js";
 import { StatusReadCache } from "./status-read-cache.js";
 
@@ -128,16 +129,6 @@ export interface QueuedSyncRun {
 export interface SyncRunClaim {
   ownerId: string | null;
   attempt: number;
-}
-
-export interface MessageFtsIndexQueueRow {
-  message_id: string;
-  reason: string;
-  status: "queued" | "indexing" | "completed" | "failed";
-  attempt: number;
-  queued_at: number;
-  updated_at: number;
-  last_error: string | null;
 }
 
 export interface ContactMemoryRow {
@@ -411,13 +402,6 @@ function chunkArray<T>(items: readonly T[], size: number): T[][] {
     chunks.push(items.slice(index, index + size));
   }
   return chunks;
-}
-
-function sqlValueList(values: readonly (string | number)[]) {
-  return sql.join(
-    values.map((value) => sql`${value}`),
-    sql`, `,
-  );
 }
 
 function buildRawEventValues(event: RawEventInput) {
@@ -2803,161 +2787,22 @@ export class CuedDatabase {
     return changed;
   }
 
-  claimMessageFtsIndexBatch(limit: number): MessageFtsIndexQueueRow[] {
-    const normalizedLimit = Math.max(1, Math.trunc(limit));
-    const timestamp = now();
-    return this.sqlite
-      .transaction(() => {
-        const rows = this.db
-          .select({
-            message_id: messageFtsIndexQueue.messageId,
-            reason: messageFtsIndexQueue.reason,
-            status: messageFtsIndexQueue.status,
-            attempt: messageFtsIndexQueue.attempt,
-            queued_at: messageFtsIndexQueue.queuedAt,
-            updated_at: messageFtsIndexQueue.updatedAt,
-            last_error: messageFtsIndexQueue.lastError,
-          })
-          .from(messageFtsIndexQueue)
-          .where(eq(messageFtsIndexQueue.status, "queued"))
-          .orderBy(asc(messageFtsIndexQueue.queuedAt))
-          .limit(normalizedLimit)
-          .all() as MessageFtsIndexQueueRow[];
-        if (rows.length === 0) {
-          return rows;
-        }
-        this.db
-          .update(messageFtsIndexQueue)
-          .set({
-            status: "indexing",
-            attempt: sql`${messageFtsIndexQueue.attempt} + 1`,
-            updatedAt: timestamp,
-            lastError: null,
-          })
-          .where(
-            inArray(
-              messageFtsIndexQueue.messageId,
-              rows.map((row) => row.message_id),
-            ),
-          )
-          .run();
-        return rows.map((row) => ({
-          ...row,
-          status: "indexing" as const,
-          attempt: row.attempt + 1,
-          updated_at: timestamp,
-          last_error: null,
-        }));
-        // Reads before it writes: take the write lock up front so a commit from another
-        // connection in between cannot fail the upgrade.
-      })
-      .immediate();
-  }
-
-  requeueStaleMessageFtsIndexing(staleBefore: number): number {
-    return this.db
-      .update(messageFtsIndexQueue)
-      .set({
-        status: "queued",
-        updatedAt: now(),
-        lastError: null,
-      })
-      .where(
-        and(
-          eq(messageFtsIndexQueue.status, "indexing"),
-          sql`${messageFtsIndexQueue.updatedAt} < ${staleBefore}`,
-        ),
-      )
-      .run().changes;
-  }
-
-  completeMessageFtsIndex(messageIds: Iterable<string>): number {
-    const ids = [...new Set([...messageIds])];
-    if (ids.length === 0) {
-      return 0;
-    }
-    return this.db
-      .delete(messageFtsIndexQueue)
-      .where(inArray(messageFtsIndexQueue.messageId, ids))
-      .run().changes;
-  }
-
-  failMessageFtsIndex(messageIds: Iterable<string>, error: unknown): number {
-    const ids = [...new Set([...messageIds])];
-    if (ids.length === 0) {
-      return 0;
-    }
-    return this.db
-      .update(messageFtsIndexQueue)
-      .set({
-        status: "failed",
-        updatedAt: now(),
-        lastError: error instanceof Error ? error.message : String(error),
-      })
-      .where(inArray(messageFtsIndexQueue.messageId, ids))
-      .run().changes;
-  }
-
-  replaceMessageFtsIndexForIds(messageIds: Iterable<string>): number {
-    const ids = [...new Set([...messageIds].filter((id) => id.length > 0))];
-    if (ids.length === 0) {
-      return 0;
-    }
-    let indexed = 0;
-    this.writeTransaction((tx) => {
-      for (const chunk of chunkArray(ids, WRITE_BATCH_SIZE)) {
-        tx.run(sql`
-          DELETE FROM messages_fts
-          WHERE rowid IN (
-            SELECT rowid
-            FROM messages
-            WHERE id IN (${sqlValueList(chunk)})
-          )
-        `);
-        indexed += tx.run(sql`
-          INSERT INTO messages_fts (
-            rowid,
-            message_id,
-            sender_name,
-            conversation_name,
-            participant_names,
-            attachment_text,
-            content
-          )
-          SELECT
-            message_rowid,
-            message_id,
-            sender_name,
-            conversation_name,
-            participant_names,
-            attachment_text,
-            content
-          FROM message_fts_source
-          WHERE message_id IN (${sqlValueList(chunk)})
-        `).changes;
-      }
-    });
-    return indexed;
-  }
-
+  /**
+   * One transaction of search indexing, on this connection: queued messages first, otherwise
+   * a slice of a queued conversation. The daemon runs `drainSearchIndex` on its database
+   * worker instead; this is for tools and tests that index synchronously.
+   */
   drainMessageFtsIndexQueue(limit: number): {
     claimed: number;
     indexed: number;
     failed: number;
   } {
-    const rows = this.claimMessageFtsIndexBatch(limit);
-    if (rows.length === 0) {
-      return { claimed: 0, indexed: 0, failed: 0 };
+    const batch = indexQueuedMessages(this.sqlite, limit);
+    if (batch.claimed > 0) {
+      return batch;
     }
-    const messageIds = rows.map((row) => row.message_id);
-    try {
-      const indexed = this.replaceMessageFtsIndexForIds(messageIds);
-      this.completeMessageFtsIndex(messageIds);
-      return { claimed: rows.length, indexed, failed: 0 };
-    } catch (error) {
-      this.failMessageFtsIndex(messageIds, error);
-      return { claimed: rows.length, indexed: 0, failed: rows.length };
-    }
+    const swept = sweepQueuedConversation(this.sqlite, limit) ?? 0;
+    return { claimed: swept, indexed: swept, failed: 0 };
   }
 
   getMessageFtsIndexBacklog(): MessageFtsIndexBacklog {
@@ -4136,6 +3981,7 @@ export class CuedDatabase {
       tx.run(sql.raw("DELETE FROM provider_identity_aliases"));
       tx.run(sql.raw("DELETE FROM messages_fts"));
       tx.run(sql.raw("DELETE FROM message_fts_index_queue"));
+      tx.run(sql.raw("DELETE FROM message_fts_conversation_queue"));
       tx.run(sql.raw("DELETE FROM attachment_content_fts"));
       tx.delete(attachmentContent).run();
       tx.delete(attachmentCache).run();
