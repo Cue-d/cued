@@ -57,6 +57,25 @@ async function runDeleteBatches(
   return { deleted, more: true };
 }
 
+/**
+ * A BLOB column comes back as a Buffer, which serializes as `{type: "Buffer", data: [...]}`.
+ * Crossing a thread boundary turns it into a plain typed array, which serializes as an object
+ * of numbered keys. Convert before it crosses so `cued sql` output keeps its shape.
+ */
+function withJsonSafeBlobs(row: unknown): unknown {
+  if (row == null || typeof row !== "object") {
+    return row;
+  }
+  let converted: Record<string, unknown> | null = null;
+  for (const [column, value] of Object.entries(row)) {
+    if (value instanceof Uint8Array) {
+      converted ??= { ...(row as Record<string, unknown>) };
+      converted[column] = { type: "Buffer", data: Array.from(value) };
+    }
+  }
+  return converted ?? row;
+}
+
 type Connection = "read" | "write";
 
 function handle<Args extends unknown[], Result>(
@@ -75,7 +94,9 @@ function database<Args extends unknown[], Result>(
 
 export const DB_WORKER_JOBS = {
   /** Arbitrary read-only SQL from `cued sql`; an agent's query can run for seconds. */
-  sql: handle("read", (sqlite, query: string) => executeReadOnlySql(sqlite, query)),
+  sql: handle("read", (sqlite, query: string) =>
+    executeReadOnlySql(sqlite, query).map(withJsonSafeBlobs),
+  ),
   /** The row counts status shows. Counting scans the largest tables. */
   statusAggregates: handle("read", (sqlite) => readStatusAggregates(sqlite)),
   /**

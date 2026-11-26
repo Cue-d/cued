@@ -63,6 +63,13 @@ function assertConnectPreflight(platform: string) {
   }
 }
 
+/**
+ * Managed connects that have been requested and not yet handed back, by account. A second
+ * request for the same account (a retry, or a client that timed out and asked again through
+ * another transport) joins the first instead of launching a second sign-in.
+ */
+const managedConnectsInFlight = new Map<string, Promise<unknown>>();
+
 export class IntegrationAuthService {
   constructor(
     private readonly db: CuedDatabase,
@@ -182,11 +189,38 @@ export class IntegrationAuthService {
     }
   }
 
-  async connectManaged(
+  connectManaged(
     platform: string,
     accountKey: string | undefined,
     activeAuthSessions: RuntimeAuthSessionMap,
     lifecycle: ConnectLifecycle = {},
+  ): Promise<{
+    integration: ReturnType<typeof getIntegrationSummary>;
+    authSession: ReturnType<typeof getAuthSessionSummary>;
+  }> {
+    type Started = Awaited<ReturnType<IntegrationAuthService["startManagedConnect"]>>;
+    const key = `${platform.trim().toLowerCase()}\u0000${accountKey ?? ""}`;
+    const inFlight = managedConnectsInFlight.get(key) as Promise<Started> | undefined;
+    if (inFlight) {
+      return inFlight;
+    }
+    const started = this.startManagedConnect(
+      platform,
+      accountKey,
+      activeAuthSessions,
+      lifecycle,
+    ).finally(() => {
+      managedConnectsInFlight.delete(key);
+    });
+    managedConnectsInFlight.set(key, started);
+    return started;
+  }
+
+  private async startManagedConnect(
+    platform: string,
+    accountKey: string | undefined,
+    activeAuthSessions: RuntimeAuthSessionMap,
+    lifecycle: ConnectLifecycle,
   ): Promise<{
     integration: ReturnType<typeof getIntegrationSummary>;
     authSession: ReturnType<typeof getAuthSessionSummary>;
@@ -203,6 +237,15 @@ export class IntegrationAuthService {
         integration: reusable.integration,
         authSession: reusable.authSession,
       };
+    }
+    // Looking for reusable auth can take seconds; a sign-in may have started meanwhile.
+    const startedMeanwhile = this.findActiveManagedAuthSession(
+      platform,
+      accountKey,
+      activeAuthSessions,
+    );
+    if (startedMeanwhile) {
+      return startedMeanwhile;
     }
 
     assertConnectPreflight(platform);

@@ -6,6 +6,7 @@ import {
   getAdaptiveProjectionBatchSize,
   getAdaptiveProjectionContinueDelayMs,
   getAutoSyncTargets,
+  IngestRunSupersededError,
   insertRawEventsYielding,
   isAdapterAuthInvalidation,
   isDisconnectedSocketError,
@@ -453,6 +454,48 @@ describe("yielding raw event insert", () => {
       }),
     );
     expect(result.insertedRows).toHaveLength(120);
+  });
+
+  it("reports each slice as it lands and stops when the run is no longer wanted", async () => {
+    let nextRowId = 1;
+    const db = {
+      insertRawEvents: (events: Array<{ id: string }>) => {
+        const until = performance.now() + 12;
+        while (performance.now() < until) {
+          // busy-wait so every slice spends the budget and yields
+        }
+        const insertedRows = events.map((event) => ({ rowId: nextRowId++, event }));
+        return {
+          insertedCount: events.length,
+          insertedEvents: events,
+          insertedRows,
+          firstInsertedRowId: insertedRows[0]?.rowId ?? null,
+          lastInsertedRowId: insertedRows[insertedRows.length - 1]?.rowId ?? null,
+        };
+      },
+    };
+    const events = Array.from({ length: 120 }, (_, index) => ({ id: `event-${index}` }));
+    const landed: Array<[number | null, number | null]> = [];
+    let yields = 0;
+
+    await expect(
+      insertRawEventsYielding(db as never, events as never, {
+        onInserted: (inserted) =>
+          landed.push([inserted.firstInsertedRowId, inserted.lastInsertedRowId]),
+        assertStillWanted: () => {
+          yields += 1;
+          if (yields === 2) {
+            throw new IngestRunSupersededError("run-1");
+          }
+        },
+      }),
+    ).rejects.toBeInstanceOf(IngestRunSupersededError);
+
+    // Two slices landed, each announced in the same turn as its insert; the third never ran.
+    expect(landed).toEqual([
+      [1, 50],
+      [51, 100],
+    ]);
   });
 
   it("does nothing for an empty bundle", async () => {

@@ -209,7 +209,11 @@ export function pruneSyncRunHistory(
                LIMIT 1
              ) AS id
              FROM (
+               -- A removed account keeps its integration row as a tombstone. Its history is
+               -- purged in the background, but that queue lives in memory; excluding it here
+               -- means retention finishes the job if the daemon restarts first.
                SELECT platform, account_key FROM integration_states
+               WHERE COALESCE(json_extract(metadata_json, '$.userRemoved'), 0) = 0
                UNION SELECT platform, account_key FROM sync_checkpoints
                UNION SELECT platform, account_key FROM source_accounts
              ) account`,

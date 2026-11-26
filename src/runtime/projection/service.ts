@@ -12,6 +12,8 @@ type PendingMessageHookBatch = {
   startRowId: number;
   endRowId: number;
   payloads: Array<Record<string, unknown>>;
+  /** First row of the batch not yet covered by a completed projection range. */
+  nextUncoveredRowId?: number;
 };
 
 export type ProjectionMessageHookPayload = {
@@ -124,9 +126,17 @@ export class ProjectionMessageHookBarrier {
       return;
     }
 
+    // Projection runs cover the log in order but do not stop on batch boundaries: a run ends
+    // wherever its limit falls, and the next continues from there. Coverage therefore
+    // accumulates across runs, and a batch is released once every one of its rows has been
+    // covered, not only when a single run happens to span it.
     const remaining: PendingMessageHookBatch[] = [];
     for (const batch of this.pending) {
-      if (batch.startRowId >= range.startRowId && batch.endRowId <= range.endRowId) {
+      const nextUncoveredRowId = batch.nextUncoveredRowId ?? batch.startRowId;
+      if (range.startRowId <= nextUncoveredRowId && range.endRowId >= nextUncoveredRowId) {
+        batch.nextUncoveredRowId = range.endRowId + 1;
+      }
+      if ((batch.nextUncoveredRowId ?? batch.startRowId) > batch.endRowId) {
         for (const payload of batch.payloads) {
           await emit(payload);
         }
