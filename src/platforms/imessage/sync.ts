@@ -248,7 +248,18 @@ export function buildIMessageSyncBundle(options?: {
     });
   }
 
+  // Messages at or below the cursor come from the sweep that re-reads every edited or unsent
+  // message on each sync. Their chats were observed when those messages arrived, and this
+  // event's dedupe key changes with the cursor, so re-observing them stored one conversation
+  // event per such chat whenever any message arrived, each of which the projector had to
+  // process. A rename or a membership change arrives as a new row of its own.
+  const chatsWithNewMessages = new Set(
+    batch.messages.filter((message) => message.id > cursor.rowId).map((message) => message.chatId),
+  );
   for (const chat of batch.chats) {
+    if (!chatsWithNewMessages.has(chat.id)) {
+      continue;
+    }
     observedConversationSourceKeys.add(String(chat.id));
     rawEvents.push({
       id: randomUUID(),

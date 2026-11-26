@@ -9,6 +9,7 @@ import {
   pruneSyncRunHistory,
   readStatusAggregates,
 } from "./raw-queries.js";
+import { drainSearchIndex } from "./search-index-drain.js";
 
 /**
  * Database work the daemon runs on its worker thread instead of its own event loop.
@@ -135,6 +136,16 @@ export const DB_WORKER_JOBS = {
           limit: input.batchSize,
         }),
       ),
+  ),
+  /**
+   * Brings the message search index up to date for up to `budgetMs`, in short transactions
+   * with a rest after each. Indexing makes FTS5 merge segments now and then, tens of
+   * milliseconds that cannot be split, so it must not run on the daemon's thread.
+   */
+  indexMessageSearch: handle(
+    "write",
+    (sqlite, options: { budgetMs: number; staleBefore: number }) =>
+      drainSearchIndex(sqlite, { ...options, restMs: WRITE_LOCK_REST_MS }),
   ),
   /** Contacts and Messages access, which can only be learned by spawning the native helper. */
   localAccess: handle("read", async () => {

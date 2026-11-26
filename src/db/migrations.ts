@@ -2307,4 +2307,18 @@ export const MIGRATIONS: Migration[] = [
       `);
     },
   },
+  {
+    // Conversations whose every message needs its names re-derived and its search document
+    // rebuilt (a rename, a participant change), worked through by the search-index drain a
+    // slice at a time. The cursor is the last (sent_at, rowid) done, NULL before the first.
+    id: "0027_message_fts_conversation_queue",
+    sql: `CREATE TABLE IF NOT EXISTS message_fts_conversation_queue (
+      conversation_id TEXT PRIMARY KEY,
+      reason TEXT NOT NULL,
+      after_sent_at INTEGER,
+      after_rowid INTEGER,
+      queued_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );`,
+  },
 ];

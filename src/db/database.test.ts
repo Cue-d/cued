@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { CuedDatabase, openExistingCuedDatabase } from "./database.js";
+import { drainSearchIndex } from "./search-index-drain.js";
 
 describe("CuedDatabase", () => {
   const tempDirs: string[] = [];
@@ -236,37 +237,19 @@ describe("CuedDatabase", () => {
     db.close();
   });
 
-  it("queues and claims message FTS indexing work independently", () => {
+  it("queues message FTS indexing work once per message", () => {
     const db = createDb();
 
     expect(db.enqueueMessageFtsIndex(["message-a", "message-b", "message-a"], "projection")).toBe(
       2,
     );
     expect(db.enqueueMessageFtsIndex(["message-a"], "conversation_renamed")).toBe(1);
-
-    const claimed = db.claimMessageFtsIndexBatch(10);
-    expect(claimed.map((row) => row.message_id).sort()).toEqual(["message-a", "message-b"]);
-    expect(claimed.every((row) => row.status === "indexing" && row.attempt === 1)).toBe(true);
     expect(db.getMessageFtsIndexBacklog()).toEqual({
-      queued: 0,
-      indexing: 2,
+      queued: 2,
+      indexing: 0,
       failed: 0,
       pending: 2,
     });
-
-    expect(db.completeMessageFtsIndex(["message-a"])).toBe(1);
-    expect(db.failMessageFtsIndex(["message-b"], new Error("fts busy"))).toBe(1);
-    expect(db.getMessageFtsIndexBacklog()).toEqual({
-      queued: 0,
-      indexing: 0,
-      failed: 1,
-      pending: 0,
-    });
-    expect(
-      sqlite(db)
-        .prepare("SELECT message_id, status, last_error FROM message_fts_index_queue")
-        .all(),
-    ).toEqual([{ message_id: "message-b", status: "failed", last_error: "fts busy" }]);
 
     db.close();
   });
@@ -326,25 +309,30 @@ describe("CuedDatabase", () => {
     db.close();
   });
 
-  it("requeues stale message FTS indexing work", () => {
+  it("requeues message FTS indexing work an older build left claimed", async () => {
     const db = createDb();
     const timestamp = Date.now();
 
     expect(db.enqueueMessageFtsIndex(["message-a", "message-b"], "projection")).toBe(2);
-    expect(db.claimMessageFtsIndexBatch(2)).toHaveLength(2);
     sqlite(db)
-      .prepare("UPDATE message_fts_index_queue SET updated_at = ? WHERE message_id = 'message-a'")
-      .run(timestamp - 10_000);
+      .prepare(
+        `UPDATE message_fts_index_queue
+         SET status = 'indexing', updated_at = CASE message_id WHEN 'message-a' THEN ? ELSE ? END`,
+      )
+      .run(timestamp - 10_000, timestamp);
 
-    expect(db.requeueStaleMessageFtsIndexing(timestamp - 5_000)).toBe(1);
+    // Neither message exists, so indexing finds nothing to index but still dequeues them.
+    const pass = await drainSearchIndex(db.sqliteHandle(), {
+      budgetMs: 1_000,
+      staleBefore: timestamp - 5_000,
+      restMs: 0,
+    });
+    expect(pass).toMatchObject({ claimed: 1, indexed: 0, failed: 0, drained: true });
     expect(
       sqlite(db)
         .prepare("SELECT message_id, status FROM message_fts_index_queue ORDER BY message_id")
         .all(),
-    ).toEqual([
-      { message_id: "message-a", status: "queued" },
-      { message_id: "message-b", status: "indexing" },
-    ]);
+    ).toEqual([{ message_id: "message-b", status: "indexing" }]);
 
     db.close();
   });
