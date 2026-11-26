@@ -833,8 +833,16 @@ export async function installAvailableUpdate(db: CuedDatabase): Promise<InstallR
       stdio: "ignore",
     });
     backupDatabaseSnapshot(CUED_DB_PATH, dbBackupPath);
-    backupDatabaseSnapshot(CUED_DB_PATH, preflightDbPath);
-    runPreflight(prepared.stagedAppPath, preflightDbPath);
+    try {
+      backupDatabaseSnapshot(CUED_DB_PATH, preflightDbPath);
+      runPreflight(prepared.stagedAppPath, preflightDbPath);
+    } finally {
+      // The preflight copy only proves the new version can migrate the database. Rollback
+      // restores dbBackupPath, so keeping this second full copy would only waste disk.
+      for (const suffix of ["", "-wal", "-shm", "-journal"]) {
+        rmSync(`${preflightDbPath}${suffix}`, { force: true });
+      }
+    }
 
     const pendingRollback: PendingRollbackState = {
       startedAt: now(),
