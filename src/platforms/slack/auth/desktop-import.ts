@@ -1,7 +1,7 @@
-import { type ChildProcess, execFileSync, spawn } from "node:child_process";
+import { type ChildProcess, execFile, execFileSync, spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { chromium } from "playwright";
 import type { CuedDatabase } from "../../../db/database.js";
 import { storeSlackSession } from "./session-store.js";
@@ -15,6 +15,10 @@ const DEFAULT_SLACK_APP_BINARY = "/Applications/Slack.app/Contents/MacOS/Slack";
 const DEFAULT_SLACK_USER_DATA_DIR = join(homedir(), "Library", "Application Support", "Slack");
 const DEFAULT_DEBUGGING_PORT = 9222;
 const DEFAULT_SLACK_DESKTOP_IMPORT_TIMEOUT_MS = 20_000;
+const DEBUGGER_PROBE_TIMEOUT_MS = 2_000;
+// A second Slack launch hands off to the running instance and exits. Give a freshly launched
+// one this long to expose its debugger after its launcher process is gone before giving up.
+const LAUNCH_EXIT_GRACE_MS = 1_500;
 
 interface SlackDesktopTeamConfig {
   id: string;
@@ -59,22 +63,39 @@ function isSlackInstalled(): boolean {
   return existsSync(getSlackAppBinary()) && existsSync(getSlackUserDataDir());
 }
 
-function canReachDebugger(port: number): boolean {
-  try {
-    execFileSync("curl", ["-sf", `http://127.0.0.1:${port}/json/version`], {
-      stdio: ["ignore", "ignore", "ignore"],
-    });
-    return true;
-  } catch {
-    return false;
-  }
+/** Runs a command without blocking the caller; resolves to whether it exited successfully. */
+function succeeds(file: string, args: string[]): Promise<boolean> {
+  return new Promise((resolve) => {
+    execFile(file, args, { timeout: DEBUGGER_PROBE_TIMEOUT_MS }, (error) => resolve(!error));
+  });
 }
 
-async function waitForDebugger(port: number, timeoutMs = 15_000): Promise<void> {
+function canReachDebugger(port: number): Promise<boolean> {
+  return succeeds("curl", ["-sf", `http://127.0.0.1:${port}/json/version`]);
+}
+
+function isSlackDesktopRunning(): Promise<boolean> {
+  return succeeds("pgrep", ["-x", basename(getSlackAppBinary())]);
+}
+
+async function waitForDebugger(
+  port: number,
+  timeoutMs = 15_000,
+  launched: ChildProcess | null = null,
+): Promise<void> {
   const startedAt = Date.now();
+  let launcherExitedAt: number | null = null;
   while (Date.now() - startedAt < timeoutMs) {
-    if (canReachDebugger(port)) {
+    if (await canReachDebugger(port)) {
       return;
+    }
+    if (launched && (launched.exitCode != null || launched.signalCode != null)) {
+      launcherExitedAt ??= Date.now();
+      if (Date.now() - launcherExitedAt >= LAUNCH_EXIT_GRACE_MS) {
+        throw new Error(
+          `Slack exited without exposing a remote debugger on port ${port}; it is probably already running`,
+        );
+      }
     }
     await new Promise((resolve) => setTimeout(resolve, 250));
   }
@@ -84,7 +105,7 @@ async function waitForDebugger(port: number, timeoutMs = 15_000): Promise<void> 
 async function waitForDebuggerShutdown(port: number, timeoutMs = 5_000): Promise<void> {
   const startedAt = Date.now();
   while (Date.now() - startedAt < timeoutMs) {
-    if (!canReachDebugger(port)) {
+    if (!(await canReachDebugger(port))) {
       return;
     }
     await new Promise((resolve) => setTimeout(resolve, 250));
@@ -160,11 +181,19 @@ export async function importSlackDesktopAuth(
 
   const port = getDebuggingPort();
   const timeoutMs = getDesktopImportTimeoutMs();
-  const debuggerAlreadyRunning = canReachDebugger(port);
+  const debuggerAlreadyRunning = await canReachDebugger(port);
+  if (!debuggerAlreadyRunning && (await isSlackDesktopRunning())) {
+    // Slack only exposes a debugger when it is launched with one. Launching again just focuses
+    // the running app, so the old behaviour was to wait out the full timeout here every time
+    // Slack was open: on daemon start, on status refresh, and before every Slack connect.
+    // Restarting someone's Slack to read its session is not ours to do unprompted; report
+    // nothing imported and let the caller fall through to browser sign-in immediately.
+    return [];
+  }
 
   const attemptImport = async (launched: ChildProcess | null) => {
     try {
-      await waitForDebugger(port, Math.min(timeoutMs, 15_000));
+      await waitForDebugger(port, Math.min(timeoutMs, 15_000), launched);
       const browser = await withTimeout(
         chromium.connectOverCDP(`http://127.0.0.1:${port}`),
         timeoutMs,

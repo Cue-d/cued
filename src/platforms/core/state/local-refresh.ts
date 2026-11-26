@@ -6,13 +6,18 @@ import {
   refreshPersistedRequestableIntegrationStates,
   upsertManagedIntegrationState,
 } from "./status.js";
+import type { ManagedIntegrationState } from "./types.js";
 
-export function refreshLocalIntegrationStates(db: CuedDatabase): {
+export function refreshLocalIntegrationStates(
+  db: CuedDatabase,
+  // Probing spawns the native helper; a caller that must not block probes off-thread first.
+  localIntegrationStates: ManagedIntegrationState[] = buildLocalIntegrationStates(),
+): {
   refreshed: number;
   integrations: ReturnType<typeof listIntegrationStates>;
 } {
   const refreshedPersistedRequestables = refreshPersistedRequestableIntegrationStates(db);
-  const managed = buildLocalIntegrationStates().map(addSupportedByDaemonMetadata);
+  const managed = localIntegrationStates.map(addSupportedByDaemonMetadata);
   for (const integration of managed) {
     upsertManagedIntegrationState(db, integration);
   }

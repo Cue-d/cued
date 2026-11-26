@@ -15,6 +15,24 @@ vi.mock("node:child_process", async (importOriginal) => {
   return {
     ...actual,
     execFileSync: execFileSyncMock,
+    // The import probes with non-blocking execFile; route it through the same mock so a test
+    // decides "debugger reachable" (returns) or "not reachable" (throws) in one place.
+    execFile: (
+      file: string,
+      args: string[],
+      optionsOrCallback: unknown,
+      maybeCallback?: (error: Error | null, stdout: string, stderr: string) => void,
+    ) => {
+      const callback = (
+        typeof optionsOrCallback === "function" ? optionsOrCallback : maybeCallback
+      ) as (error: Error | null, stdout: string, stderr: string) => void;
+      try {
+        execFileSyncMock(file, args);
+        callback(null, "", "");
+      } catch (error) {
+        callback(error as Error, "", "");
+      }
+    },
     spawn: spawnMock,
   };
 });
@@ -435,6 +453,27 @@ describe("slack desktop import removal tombstones", () => {
     expect(spawnMock).not.toHaveBeenCalled();
     expect(connectOverCDPMock).toHaveBeenCalledTimes(1);
 
+    db.close();
+  });
+
+  it("skips the import at once when Slack is already running without a debugger", async () => {
+    installFakeSlackDesktop();
+    // curl cannot reach a debugger; pgrep finds Slack running.
+    execFileSyncMock.mockImplementation((file: string) => {
+      if (file === "curl") {
+        throw new Error("connection refused");
+      }
+      return Buffer.from("");
+    });
+    const db = createDb();
+    const startedAt = Date.now();
+
+    expect(await importSlackDesktopAuth(db)).toEqual([]);
+
+    // Launching a second Slack would only focus the running one and then time out.
+    expect(spawnMock).not.toHaveBeenCalled();
+    expect(connectOverCDPMock).not.toHaveBeenCalled();
+    expect(Date.now() - startedAt).toBeLessThan(1_000);
     db.close();
   });
 });

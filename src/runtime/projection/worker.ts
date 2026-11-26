@@ -1,5 +1,6 @@
 import type { QueuedSyncRun } from "../../db/database.js";
 import { openCuedDatabase } from "../../db/database.js";
+import { WRITE_LOCK_REST_MS } from "../../db/db-worker-jobs.js";
 import {
   projectDeferredRange,
   projectPendingRawEvents,
@@ -25,8 +26,79 @@ export type ProjectionWorkerMessage =
   | { ok: true; result: ProjectionWorkerSuccess }
   | { ok: false; error: string };
 
+const TARGET_TRANSACTION_MS = 10;
+const INITIAL_TRANSACTION_EVENTS = 10;
+const MAX_TRANSACTION_EVENTS = 200;
+
 function now(): number {
   return Date.now();
+}
+
+const restSignal = new Int32Array(new SharedArrayBuffer(4));
+
+/** Blocks this (worker) process briefly; see WRITE_LOCK_REST_MS for why it must. */
+function restFromWriteLock(ms: number): void {
+  if (ms > 0) {
+    Atomics.wait(restSignal, 0, 0, ms);
+  }
+}
+
+/**
+ * Projects up to `limit` events of a range in a series of short transactions.
+ *
+ * Projecting the whole batch in one transaction holds SQLite's write lock for the entire
+ * batch, and the daemon's own writes are synchronous: a sign-in request or a status update
+ * arriving meanwhile blocks the daemon, and everything queued behind it, until the batch
+ * commits. So each transaction is sized to take about TARGET_TRANSACTION_MS, measured as it
+ * goes: how long an event takes to project varies by more than an order of magnitude with the
+ * size of the tables it touches, so a fixed event count is either too slow or far too long.
+ * With the lock released every few milliseconds, and a short rest after each release so a
+ * waiting writer actually gets it, the worker needs none of the batch-size and delay throttles
+ * that used to protect the daemon from it.
+ */
+export function projectRangeInChunks(
+  db: ReturnType<typeof openCuedDatabase>,
+  range: { startRowId: number; endRowId: number },
+  limit: number,
+  tuning: {
+    targetTransactionMs?: number;
+    initialTransactionEvents?: number;
+    maxTransactionEvents?: number;
+    restMs?: number;
+    clock?: () => number;
+  } = {},
+): ReturnType<typeof projectDeferredRange> {
+  const targetMs = tuning.targetTransactionMs ?? TARGET_TRANSACTION_MS;
+  const maxEvents = tuning.maxTransactionEvents ?? MAX_TRANSACTION_EVENTS;
+  const clock = tuning.clock ?? (() => performance.now());
+  let transactionEvents = Math.min(
+    maxEvents,
+    tuning.initialTransactionEvents ?? INITIAL_TRANSACTION_EVENTS,
+  );
+  let startRowId = range.startRowId;
+  let remaining = Math.max(1, Math.trunc(limit));
+  let appliedRawEvents = 0;
+  for (;;) {
+    const chunkLimit = Math.min(transactionEvents, remaining);
+    const startedAt = clock();
+    const chunk = projectDeferredRange(db, {
+      startRowId,
+      endRowId: range.endRowId,
+      limit: chunkLimit,
+      includeOverview: false,
+    });
+    const elapsedMs = clock() - startedAt;
+    appliedRawEvents += chunk.appliedRawEvents;
+    remaining -= chunkLimit;
+    if (chunk.nextStartRowId == null || remaining <= 0) {
+      return { ...chunk, appliedRawEvents, rangeStartRowId: range.startRowId };
+    }
+    startRowId = chunk.nextStartRowId;
+    restFromWriteLock(tuning.restMs ?? WRITE_LOCK_REST_MS);
+    // Steer toward the target, at most doubling per step so one fast chunk cannot overshoot.
+    const scaled = elapsedMs > 0 ? (chunkLimit * targetMs) / elapsedMs : chunkLimit * 2;
+    transactionEvents = Math.max(1, Math.min(maxEvents, chunkLimit * 2, Math.round(scaled)));
+  }
 }
 
 export async function runProjectionWorker(run: QueuedSyncRun): Promise<ProjectionWorkerSuccess> {
@@ -40,24 +112,21 @@ export async function runProjectionWorker(run: QueuedSyncRun): Promise<Projectio
       run.run_type === "rebuild"
         ? rebuildProjectedState(db, { limit: projectionBatchSize })
         : projectionDetails
-          ? projectDeferredRange(db, {
-              startRowId: projectionDetails.startRowId,
-              endRowId: projectionDetails.endRowId,
-              limit: projectionBatchSize,
-              includeOverview: false,
-            })
+          ? projectRangeInChunks(db, projectionDetails, projectionBatchSize)
           : (() => {
               const backlog = db.getProjectionBacklog();
               return backlog.pending_raw_events === 0
                 ? projectPendingRawEvents(db, {
                     limit: projectionBatchSize,
                   })
-                : projectDeferredRange(db, {
-                    startRowId: backlog.projection_watermark + 1,
-                    endRowId: backlog.max_raw_event_rowid,
-                    limit: projectionBatchSize,
-                    includeOverview: false,
-                  });
+                : projectRangeInChunks(
+                    db,
+                    {
+                      startRowId: backlog.projection_watermark + 1,
+                      endRowId: backlog.max_raw_event_rowid,
+                    },
+                    projectionBatchSize,
+                  );
             })();
     const projectionFinishedAt = now();
     const timings = {

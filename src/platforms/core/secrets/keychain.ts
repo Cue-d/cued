@@ -1,4 +1,4 @@
-import { execFileSync } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
 import { cuedAuthKeychainService, legacyCuedAuthKeychainService } from "../../../core/identity.js";
 import type { Platform } from "../../../core/types/provider.js";
 import { openCuedDatabaseReadOnly } from "../../../db/database.js";
@@ -32,6 +32,31 @@ export function loadKeychainSecret(
   } catch {
     return null;
   }
+}
+
+/** `loadKeychainSecret` without blocking: the `security` CLI takes tens of milliseconds. */
+export function loadKeychainSecretAsync(
+  service: string,
+  account: string,
+): Promise<Record<string, unknown> | null> {
+  return new Promise((resolve) => {
+    execFile(
+      "security",
+      ["find-generic-password", "-s", service, "-a", account, "-w"],
+      { encoding: "utf8" },
+      (error, stdout) => {
+        if (error) {
+          resolve(null);
+          return;
+        }
+        try {
+          resolve(JSON.parse(stdout) as Record<string, unknown>);
+        } catch {
+          resolve(null);
+        }
+      },
+    );
+  });
 }
 
 export function storeKeychainSecret(

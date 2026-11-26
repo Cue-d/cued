@@ -1,4 +1,5 @@
 import type { CuedDatabase, IntegrationProjectionCount } from "../db/database.js";
+import type { StatusAggregates } from "../db/db-worker-jobs.js";
 import {
   buildIntegrationStatus,
   listMenuBarIntegrationStates,
@@ -19,6 +20,41 @@ export interface DaemonBootstrapSnapshot {
   startedAt: number;
   finishedAt: number | null;
   error: string | null;
+}
+
+/** Realtime session statuses as plain data, so a snapshot can be built off the daemon thread. */
+export interface RealtimeSessionStatuses {
+  discord: ReturnType<DiscordRealtimeSupervisor["getStatuses"]>;
+  slack: ReturnType<SlackRealtimeSupervisor["getStatuses"]>;
+  linkedin: ReturnType<LinkedInRealtimeSupervisor["getStatuses"]>;
+  signal: ReturnType<SignalRealtimeSupervisor["getStatuses"]>;
+  whatsapp: ReturnType<WhatsAppRealtimeSupervisor["getStatuses"]>;
+}
+
+export function collectRealtimeSessionStatuses(supervisors: {
+  discordRealtime: DiscordRealtimeSupervisor;
+  slackRealtime: SlackRealtimeSupervisor;
+  linkedInRealtime: LinkedInRealtimeSupervisor;
+  signalRealtime: SignalRealtimeSupervisor;
+  whatsAppRealtime: WhatsAppRealtimeSupervisor;
+}): RealtimeSessionStatuses {
+  return {
+    discord: supervisors.discordRealtime.getStatuses(),
+    slack: supervisors.slackRealtime.getStatuses(),
+    linkedin: supervisors.linkedInRealtime.getStatuses(),
+    signal: supervisors.signalRealtime.getStatuses(),
+    whatsapp: supervisors.whatsAppRealtime.getStatuses(),
+  };
+}
+
+export function realtimeSessionFields(realtime: RealtimeSessionStatuses) {
+  return {
+    discordRealtimeSessions: realtime.discord,
+    slackRealtimeSessions: realtime.slack,
+    linkedinRealtimeSessions: realtime.linkedin,
+    signalRealtimeSessions: realtime.signal,
+    whatsappRealtimeSessions: realtime.whatsapp,
+  };
 }
 
 export async function buildDoctorSnapshot(
@@ -72,11 +108,7 @@ export function buildDaemonStatusSnapshot(
   db: CuedDatabase,
   options: {
     app: unknown;
-    discordRealtime: DiscordRealtimeSupervisor;
-    slackRealtime: SlackRealtimeSupervisor;
-    linkedInRealtime: LinkedInRealtimeSupervisor;
-    signalRealtime: SignalRealtimeSupervisor;
-    whatsAppRealtime: WhatsAppRealtimeSupervisor;
+    realtime: RealtimeSessionStatuses;
     socketPath: string;
     bootstrap: DaemonBootstrapSnapshot;
   },
@@ -101,12 +133,8 @@ export function buildDaemonStatusSnapshot(
     },
     checkpoints: db.listCheckpointSummary(),
     recentRuns: db.listRecentRuns(),
-    discordRealtimeSessions: options.discordRealtime.getStatuses(),
-    slackRealtimeSessions: options.slackRealtime.getStatuses(),
-    linkedinRealtimeSessions: options.linkedInRealtime.getStatuses(),
-    signalRealtimeSessions: options.signalRealtime.getStatuses(),
-    whatsappRealtimeSessions: options.whatsAppRealtime.getStatuses(),
-    whatsappDiagnostics: buildWhatsAppDiagnostics(db, options.whatsAppRealtime.getStatuses()),
+    ...realtimeSessionFields(options.realtime),
+    whatsappDiagnostics: buildWhatsAppDiagnostics(db, options.realtime.whatsapp),
     ...buildIntegrationStatus(db, {
       includeLiveLocalIntegrations: false,
     }),
@@ -120,19 +148,20 @@ export function buildMenuBarDaemonStatusSnapshot(
   db: CuedDatabase,
   options: {
     app: unknown;
-    discordRealtime: DiscordRealtimeSupervisor;
-    slackRealtime: SlackRealtimeSupervisor;
-    linkedInRealtime: LinkedInRealtimeSupervisor;
-    signalRealtime: SignalRealtimeSupervisor;
-    whatsAppRealtime: WhatsAppRealtimeSupervisor;
+    realtime: RealtimeSessionStatuses;
     socketPath: string;
     bootstrap: DaemonBootstrapSnapshot;
+    /**
+     * Row counts computed ahead of time. Counting scans large tables, so the daemon counts on
+     * its database worker and passes the result in; without it the counts run on this thread.
+     */
+    aggregates?: StatusAggregates;
   },
 ) {
-  const overview = db.getMenuBarOverview();
+  const overview = options.aggregates?.overview ?? db.getMenuBarOverview();
   const projection = db.getProjectionBacklog({ initializeProjectionState: false });
-  const searchIndex = db.getMessageFtsIndexBacklog();
-  const phoneCalls = db.countObservedPhoneCalls();
+  const searchIndex = options.aggregates?.searchIndex ?? db.getMessageFtsIndexBacklog();
+  const phoneCalls = options.aggregates?.phoneCalls ?? db.countObservedPhoneCalls();
   const integrations = hydrateIntegrationProjectionCounts(
     listMenuBarIntegrationStates(db),
     overview.integrationBreakdown,
@@ -161,11 +190,7 @@ export function buildMenuBarDaemonStatusSnapshot(
       source: "menu_bar_cache",
     },
     integrations,
-    discordRealtimeSessions: options.discordRealtime.getStatuses(),
-    slackRealtimeSessions: options.slackRealtime.getStatuses(),
-    linkedinRealtimeSessions: options.linkedInRealtime.getStatuses(),
-    signalRealtimeSessions: options.signalRealtime.getStatuses(),
-    whatsappRealtimeSessions: options.whatsAppRealtime.getStatuses(),
+    ...realtimeSessionFields(options.realtime),
     update: getUpdateStatus(db),
     socketPath: options.socketPath,
     dbPath: db.dbPath,

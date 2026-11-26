@@ -131,9 +131,14 @@ const AUTH_SESSION_STALE_AFTER_MS = 15 * 60 * 1000;
 const AUTH_SESSION_ABANDONED_ERROR = "Auth session ended before Cued received a completion event";
 const AUTH_SESSION_EXPIRED_ERROR = "Auth session expired before completion";
 
-interface IntegrationStatusOptions {
+export interface IntegrationStatusOptions {
   includeLiveLocalIntegrations?: boolean;
   includeDiagnostics?: boolean;
+  /**
+   * Live Contacts/Messages access states probed ahead of time. Probing shells out to the
+   * native helper, so a caller that must not block supplies states it probed off-thread.
+   */
+  localIntegrationStates?: ManagedIntegrationState[];
 }
 
 export function now(): number {
@@ -717,7 +722,7 @@ function buildSetupIntegrations(
   }
 
   if (options.includeLiveLocalIntegrations ?? true) {
-    for (const managed of buildLocalIntegrationStates()) {
+    for (const managed of options.localIntegrationStates ?? buildLocalIntegrationStates()) {
       const liveIntegration = summarizeManagedIntegrationState(
         db,
         addSupportedByDaemonMetadata(managed),

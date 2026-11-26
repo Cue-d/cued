@@ -30,16 +30,25 @@ import {
 import { safeParseJsonRecord, safeParseJsonStringArray } from "../../db/codecs.js";
 import { type CuedDatabase, openCuedDatabase } from "../../db/database.js";
 import {
+  type DbWorker,
+  InlineDbWorker,
+  ResilientDbWorker,
+  ThreadDbWorker,
+} from "../../db/db-worker.js";
+import type { StatusAggregates } from "../../db/db-worker-jobs.js";
+import {
   buildAdapterInvocationEnv,
   selectAdapterInvocationProofs,
 } from "../../platforms/core/invocation.js";
 import { isAdapterPlatform, listAutoSyncPlatforms } from "../../platforms/core/registry.js";
 import { isAdapterWorkerError, runAdapter } from "../../platforms/core/runner.js";
 import { loadIntegrationSecret } from "../../platforms/core/secrets/keychain.js";
-import { refreshLocalIntegrationStates } from "../../platforms/core/state/local-refresh.js";
 import { invalidateIntegrationAuth } from "../../platforms/core/state/mutations.js";
 import { refreshManagedIntegrationStates } from "../../platforms/core/state/refresh.js";
-import { getIntegrationSummary } from "../../platforms/core/state/status.js";
+import {
+  getIntegrationSummary,
+  reconcileAbandonedAuthSessions,
+} from "../../platforms/core/state/status.js";
 import type { SyncContinuation } from "../../platforms/core/sync.js";
 import { isDiscordAuthInvalidationError } from "../../platforms/discord/api/client.js";
 import {
@@ -121,12 +130,8 @@ import { DaemonTelemetryQueue } from "../../telemetry/queue.js";
 import { fetchAttachment, listAttachments, searchAttachments } from "../attachments.js";
 import { buildPermissionStatus } from "../doctor.js";
 import { emitHookEvent } from "../hooks.js";
-import type { DaemonRequest, DaemonResponse } from "../ipc.js";
-import {
-  readMenuBarStatusCache,
-  removeMenuBarStatusCache,
-  writeMenuBarStatusCache,
-} from "../menu-bar-status-cache.js";
+import type { DaemonEvent, DaemonEventTopic, DaemonRequest, DaemonResponse } from "../ipc.js";
+import { readMenuBarStatusCache, writeMenuBarStatusCache } from "../menu-bar-status-cache.js";
 import { collectInboundMessageHookPayloads } from "../message-hooks.js";
 import { resolveMacOSNativeBinary } from "../native-binary.js";
 import { buildOnboardingSnapshot, transitionOnboarding } from "../onboarding.js";
@@ -143,16 +148,21 @@ import {
 import type { ProjectionWorkerMessage, ProjectionWorkerSuccess } from "../projection/worker.js";
 import { RunQueueService } from "../run-queue.js";
 import {
-  buildDaemonStatusSnapshot,
   buildDoctorSnapshot,
   buildMenuBarDaemonStatusSnapshot,
+  collectRealtimeSessionStatuses,
   type DaemonBootstrapSnapshot,
+  type RealtimeSessionStatuses,
+  realtimeSessionFields,
 } from "../status.js";
 import { checkForUpdates } from "../updater/service.js";
 import {
   shouldBootstrapLocalIntegrations,
   shouldRunLocalWatcher as shouldRunLocalWatcherForState,
 } from "./local-watchers.js";
+import { SyncRunMaintenance } from "./maintenance.js";
+import { DaemonReadModel } from "./read-model.js";
+import { StallMonitor } from "./stall-monitor.js";
 import { AutoSyncPacing } from "./sync-pacing.js";
 
 const DAEMON_VERSION = getCurrentAppVersion();
@@ -167,25 +177,39 @@ const DEFAULT_INGEST_CONCURRENCY = 4;
 const DEFAULT_PROJECTION_BATCH_SIZE = 100;
 const DEFAULT_MESSAGE_FTS_INDEX_BATCH_SIZE = 250;
 const DEFAULT_REALTIME_PROJECTION_ENABLED = true;
-const DEFAULT_INLINE_PROJECTION_MAX_RAW_EVENTS = 250;
+// Inline projection runs on the daemon thread, so it is reserved for the handful of events a
+// realtime update or an incremental sync brings; anything larger goes to the worker process.
+const DEFAULT_INLINE_PROJECTION_MAX_RAW_EVENTS = 10;
+const FTS_INDEX_TRANSACTION_MESSAGES = 10;
+const FTS_INDEX_SLICE_BUDGET_MS = 8;
+const FTS_INDEX_SLICE_GAP_MS = 10;
+const INGEST_INSERT_SLICE_EVENTS = 50;
+const INGEST_INSERT_SLICE_BUDGET_MS = 10;
 const DEFAULT_DEFERRED_PROJECTION_COALESCE_MS = 250;
 const DEFAULT_AUTOSYNC_PROJECTION_BACKLOG_PAUSE_EVENTS = 5_000;
 const DEFAULT_PROJECTION_CONTINUE_DELAY_MS = 5_000;
+// How many events one projection worker invocation takes on, by backlog size. The worker
+// commits every few dozen events regardless (see projectRangeInChunks), so a larger batch only
+// means fewer process launches. Any backlog worth a worker continues immediately; the default
+// delay applies only to a trickle too small to justify launching one per event.
 const PROJECTION_BACKLOG_TIERS = [
   { minEvents: 100_000, batchSize: 2_000, continueDelayMs: 0 },
   { minEvents: 25_000, batchSize: 1_500, continueDelayMs: 0 },
   { minEvents: 5_000, batchSize: 1_000, continueDelayMs: 0 },
-  { minEvents: 1_000, batchSize: 500, continueDelayMs: null },
+  { minEvents: 100, batchSize: 500, continueDelayMs: 0 },
 ] as const;
 const FTS_PROJECTION_THROTTLE_BACKLOG_EVENTS = 0;
 const FTS_PROJECTION_THROTTLE_DELAY_MS = 5_000;
 const FTS_INDEXING_STALE_AFTER_MS = 5 * 60 * 1000;
-const PROJECTION_AUTH_RETRY_DELAY_MS = 250;
-const PROJECTION_AUTH_GRACE_MS = 2_000;
-const DEFAULT_INTERACTIVE_AUTH_TTL_MS = 45_000;
-const DEFAULT_INTERACTIVE_AUTH_PROJECTION_BATCH_SIZE = 25;
-const DEFAULT_INTERACTIVE_AUTH_PROJECTION_CONTINUE_DELAY_MS = 5_000;
-const DEFAULT_INTERACTIVE_AUTH_SYNC_CONTINUE_DELAY_MS = 30_000;
+const PROJECTION_RETRY_DELAY_MS = 5_000;
+// The daemon's connection only checkpoints inline if the WAL reaches this many pages (~80 MB),
+// which means the background checkpointer has stopped keeping up.
+const WAL_BACKSTOP_AUTOCHECKPOINT_PAGES = 20_000;
+const WAL_CHECKPOINT_POLL_MS = 1_000;
+const WAL_CHECKPOINT_MIN_CHANGED_ROWS = 200;
+const WAL_CHECKPOINT_MAX_INTERVAL_MS = 10 * 60_000;
+// Background cleanup waits this long after the last request before taking the write lock again.
+const FOREGROUND_QUIET_PERIOD_MS = 2_000;
 const DEFAULT_CONTINUATION_PROJECTION_INTERVAL_MS = 2_000;
 const DEFAULT_CONTINUATION_PROJECTION_BACKLOG_EVENTS = 500;
 const NATIVE_WATCH_DEBOUNCE_MS = 1_500;
@@ -246,23 +270,17 @@ function getFallbackAppStatusMetadata(): {
 function writeMenuBarStatusSnapshot(
   db: CuedDatabase,
   options: {
-    discordRealtime: DiscordRealtimeSupervisor;
-    slackRealtime: SlackRealtimeSupervisor;
-    linkedInRealtime: LinkedInRealtimeSupervisor;
-    signalRealtime: SignalRealtimeSupervisor;
-    whatsAppRealtime: WhatsAppRealtimeSupervisor;
+    realtime: RealtimeSessionStatuses;
     bootstrap: DaemonBootstrapSnapshot;
+    aggregates: StatusAggregates;
   },
 ): void {
   const snapshot = buildMenuBarDaemonStatusSnapshot(db, {
     app: getAppStatusMetadata(db),
-    discordRealtime: options.discordRealtime,
-    slackRealtime: options.slackRealtime,
-    linkedInRealtime: options.linkedInRealtime,
-    signalRealtime: options.signalRealtime,
-    whatsAppRealtime: options.whatsAppRealtime,
+    realtime: options.realtime,
     socketPath: CUED_SOCKET_PATH,
     bootstrap: options.bootstrap,
+    aggregates: options.aggregates,
   });
   writeMenuBarStatusCache(snapshot);
 }
@@ -561,34 +579,6 @@ function getIngestConcurrency(): number {
   return Number.isFinite(configured) && configured > 0 ? configured : DEFAULT_INGEST_CONCURRENCY;
 }
 
-function getInteractiveAuthTtlMs(): number {
-  const configured = Number(process.env.CUED_INTERACTIVE_AUTH_TTL_MS);
-  return Number.isFinite(configured) && configured > 0
-    ? Math.trunc(configured)
-    : DEFAULT_INTERACTIVE_AUTH_TTL_MS;
-}
-
-function getInteractiveAuthProjectionBatchSize(): number {
-  const configured = Number(process.env.CUED_INTERACTIVE_AUTH_PROJECTION_BATCH_SIZE);
-  return Number.isFinite(configured) && configured > 0
-    ? Math.trunc(configured)
-    : DEFAULT_INTERACTIVE_AUTH_PROJECTION_BATCH_SIZE;
-}
-
-function getInteractiveAuthSyncContinueDelayMs(): number {
-  const configured = Number(process.env.CUED_INTERACTIVE_AUTH_SYNC_CONTINUE_DELAY_MS);
-  return Number.isFinite(configured) && configured >= 0
-    ? Math.trunc(configured)
-    : DEFAULT_INTERACTIVE_AUTH_SYNC_CONTINUE_DELAY_MS;
-}
-
-function getInteractiveAuthProjectionContinueDelayMs(): number {
-  const configured = Number(process.env.CUED_INTERACTIVE_AUTH_PROJECTION_CONTINUE_DELAY_MS);
-  return Number.isFinite(configured) && configured >= 0
-    ? Math.trunc(configured)
-    : DEFAULT_INTERACTIVE_AUTH_PROJECTION_CONTINUE_DELAY_MS;
-}
-
 function getProjectionBatchSize(): number {
   const configured = Number(
     process.env.CUED_PROJECTION_BATCH_SIZE ?? DEFAULT_PROJECTION_BATCH_SIZE,
@@ -596,65 +586,12 @@ function getProjectionBatchSize(): number {
   return Number.isFinite(configured) && configured > 0 ? configured : DEFAULT_PROJECTION_BATCH_SIZE;
 }
 
-export function getAdaptiveProjectionBatchSize(
-  pendingRawEvents: number,
-  options?: { maxBatchSize?: number },
-): number {
+export function getAdaptiveProjectionBatchSize(pendingRawEvents: number): number {
   const baseBatchSize = getProjectionBatchSize();
   const tier = PROJECTION_BACKLOG_TIERS.find(
     (candidate) => pendingRawEvents >= candidate.minEvents,
   );
-  const adaptiveBatchSize = Math.max(baseBatchSize, tier?.batchSize ?? baseBatchSize);
-  return options?.maxBatchSize != null
-    ? Math.max(1, Math.min(adaptiveBatchSize, options.maxBatchSize))
-    : adaptiveBatchSize;
-}
-
-export class InteractiveAuthSessions {
-  private activeUntil = 0;
-  private readonly expirations = new Map<string, number>();
-
-  constructor(private readonly nowMs: () => number = () => Date.now()) {}
-
-  isActive(): boolean {
-    this.refresh();
-    return this.nowMs() < this.activeUntil;
-  }
-
-  expiresAt(): number | null {
-    this.refresh();
-    return this.isActive() ? this.activeUntil : null;
-  }
-
-  begin(sessionId: string, ttlMs: number): { active: boolean; expiresAt: number | null } {
-    this.expirations.set(sessionId, this.nowMs() + ttlMs);
-    this.refresh();
-    return this.status();
-  }
-
-  end(sessionId: string): { active: boolean; expiresAt: number | null } {
-    this.expirations.delete(sessionId);
-    this.refresh();
-    return this.status();
-  }
-
-  status(): { active: boolean; expiresAt: number | null } {
-    const active = this.isActive();
-    return {
-      active,
-      expiresAt: active ? this.activeUntil : null,
-    };
-  }
-
-  private refresh(): void {
-    const nowMs = this.nowMs();
-    for (const [sessionId, expiresAt] of this.expirations) {
-      if (expiresAt <= nowMs) {
-        this.expirations.delete(sessionId);
-      }
-    }
-    this.activeUntil = Math.max(0, ...this.expirations.values());
-  }
+  return Math.max(baseBatchSize, tier?.batchSize ?? baseBatchSize);
 }
 
 function getMessageFtsIndexBatchSize(): number {
@@ -821,6 +758,66 @@ export function buildWhatsAppRealtimeSnapshotFromEvent(
   }
 }
 
+type RawEventInsertResult = ReturnType<CuedDatabase["insertRawEvents"]>;
+
+const EMPTY_RAW_EVENT_INSERT_RESULT: RawEventInsertResult = {
+  insertedCount: 0,
+  insertedEvents: [],
+  insertedRows: [],
+  firstInsertedRowId: null,
+  lastInsertedRowId: null,
+};
+
+function mergeRawEventInsertResults(
+  left: RawEventInsertResult,
+  right: RawEventInsertResult,
+): RawEventInsertResult {
+  const rowIds = [
+    left.firstInsertedRowId,
+    left.lastInsertedRowId,
+    right.firstInsertedRowId,
+    right.lastInsertedRowId,
+  ].filter((rowId): rowId is number => rowId != null);
+  return {
+    insertedCount: left.insertedCount + right.insertedCount,
+    insertedEvents: [...left.insertedEvents, ...right.insertedEvents],
+    insertedRows: [...left.insertedRows, ...right.insertedRows],
+    firstInsertedRowId: rowIds.length > 0 ? Math.min(...rowIds) : null,
+    lastInsertedRowId: rowIds.length > 0 ? Math.max(...rowIds) : null,
+  };
+}
+
+/**
+ * Inserts a sync bundle's raw events a few milliseconds at a time, yielding in between.
+ *
+ * A bundle can be thousands of events, and inserting it in one synchronous transaction stalls
+ * every request for the duration. Inserts are idempotent (existing ids are skipped) and the
+ * sync checkpoint only advances after the whole bundle is in, so a crash between slices just
+ * means the next sync re-fetches and skips what already landed.
+ */
+export async function insertRawEventsYielding(
+  db: Pick<CuedDatabase, "insertRawEvents">,
+  events: ProviderRawEventInput[],
+): Promise<RawEventInsertResult> {
+  let result = EMPTY_RAW_EVENT_INSERT_RESULT;
+  let offset = 0;
+  while (offset < events.length) {
+    const sliceStartedAt = performance.now();
+    do {
+      const slice = events.slice(offset, offset + INGEST_INSERT_SLICE_EVENTS);
+      offset += slice.length;
+      result = mergeRawEventInsertResults(result, db.insertRawEvents(slice));
+    } while (
+      offset < events.length &&
+      performance.now() - sliceStartedAt < INGEST_INSERT_SLICE_BUDGET_MS
+    );
+    if (offset < events.length) {
+      await new Promise<void>((resolve) => setImmediate(resolve));
+    }
+  }
+  return result;
+}
+
 function resolveCliEntrypoint(): string {
   const entrypoint = process.argv[1];
   if (!entrypoint) {
@@ -909,11 +906,7 @@ function runProjectionWorkerProcess(
 }
 
 function buildDaemonBusyStatusSnapshot(options: {
-  discordRealtime: DiscordRealtimeSupervisor;
-  slackRealtime: SlackRealtimeSupervisor;
-  linkedInRealtime: LinkedInRealtimeSupervisor;
-  signalRealtime: SignalRealtimeSupervisor;
-  whatsAppRealtime: WhatsAppRealtimeSupervisor;
+  realtime: RealtimeSessionStatuses;
   socketPath: string;
   bootstrap: DaemonBootstrapSnapshot;
   dbPath: string;
@@ -937,11 +930,7 @@ function buildDaemonBusyStatusSnapshot(options: {
     projection: null,
     checkpoints: [],
     recentRuns: [],
-    discordRealtimeSessions: options.discordRealtime.getStatuses(),
-    slackRealtimeSessions: options.slackRealtime.getStatuses(),
-    linkedinRealtimeSessions: options.linkedInRealtime.getStatuses(),
-    signalRealtimeSessions: options.signalRealtime.getStatuses(),
-    whatsappRealtimeSessions: options.whatsAppRealtime.getStatuses(),
+    ...realtimeSessionFields(options.realtime),
     integrations: [],
     socketPath: options.socketPath,
     dbPath: options.dbPath,
@@ -1740,6 +1729,17 @@ export async function runDaemon(): Promise<void> {
     throw new Error("Failed to open Cued database");
   }
   const db = openedDb;
+  const positiveEnvNumber = (name: string) => {
+    const configured = Number(process.env[name]);
+    return Number.isFinite(configured) && configured > 0 ? configured : undefined;
+  };
+  const stallMonitor = new StallMonitor({
+    onStall: (report) => daemonLogger.warn("event loop stalled", report),
+    stallThresholdMs: positiveEnvNumber("CUED_STALL_THRESHOLD_MS"),
+    slowSectionMs: positiveEnvNumber("CUED_STALL_SECTION_MS"),
+    reportIntervalMs: positiveEnvNumber("CUED_STALL_REPORT_INTERVAL_MS"),
+  });
+  stallMonitor.start();
   const telemetry = new DaemonTelemetryQueue(db);
   const startedAt = now();
   const runOwnerId = `daemon:${process.pid}:${startedAt}`;
@@ -1766,7 +1766,6 @@ export async function runDaemon(): Promise<void> {
   const activeIngestRuns = new Map<string, Promise<void>>();
   let isProcessingProjection = false;
   let isProcessingSearchIndex = false;
-  let authProjectionPausedUntil = 0;
   let ingestDrainScheduled = false;
   let projectionDrainScheduled = false;
   let searchIndexDrainScheduled = false;
@@ -1800,7 +1799,6 @@ export async function runDaemon(): Promise<void> {
   let isUpdateShutdownRequested = false;
   let updateShutdownRequestedAt: number | null = null;
   let shutdownInitiated = false;
-  const interactiveAuthSessions = new InteractiveAuthSessions(now);
   const bootstrap: DaemonBootstrapSnapshot = {
     state: "starting",
     startedAt,
@@ -1819,73 +1817,11 @@ export async function runDaemon(): Promise<void> {
     const batches = buildProjectionMessageHookBatches(
       range,
       inboundMessages,
-      getEffectiveProjectionBatchSize(db.getProjectionBacklog().pending_raw_events),
+      getAdaptiveProjectionBatchSize(db.getProjectionBacklog().pending_raw_events),
     );
     for (const batch of batches) {
       projectionMessageHooks.enqueue(batch, batch.payloads);
     }
-  };
-
-  const isInteractiveAuthActive = () => interactiveAuthSessions.isActive();
-  const getEffectiveIngestConcurrency = () => (isInteractiveAuthActive() ? 1 : ingestConcurrency);
-  const getEffectiveProjectionBatchSize = (pendingRawEvents: number) =>
-    getAdaptiveProjectionBatchSize(
-      pendingRawEvents,
-      isInteractiveAuthActive()
-        ? { maxBatchSize: getInteractiveAuthProjectionBatchSize() }
-        : undefined,
-    );
-  const getEffectiveSyncContinueDelayMs = (platform: Platform) => {
-    const baseDelayMs = getSyncContinueDelayMsForPlatform(platform);
-    return isInteractiveAuthActive()
-      ? Math.max(baseDelayMs, getInteractiveAuthSyncContinueDelayMs())
-      : baseDelayMs;
-  };
-  const getEffectiveProjectionContinueDelayMs = (pendingRawEvents: number) => {
-    const baseDelayMs = getAdaptiveProjectionContinueDelayMs(pendingRawEvents);
-    return isInteractiveAuthActive()
-      ? Math.max(baseDelayMs, getInteractiveAuthProjectionContinueDelayMs())
-      : baseDelayMs;
-  };
-  const getInteractiveAuthStatus = () => ({
-    active: isInteractiveAuthActive(),
-    expiresAt: interactiveAuthSessions.expiresAt(),
-    projectionBatchSize: getInteractiveAuthProjectionBatchSize(),
-    ingestConcurrency: getEffectiveIngestConcurrency(),
-  });
-  const beginInteractiveAuth = (
-    sessionId = "managed-auth",
-    ttlMs?: number,
-    options: { wakeQueues?: boolean } = {},
-  ) => {
-    const normalizedTtlMs =
-      Number.isFinite(ttlMs) && ttlMs != null && ttlMs > 0
-        ? Math.trunc(ttlMs)
-        : getInteractiveAuthTtlMs();
-    const wasActive = isInteractiveAuthActive();
-    interactiveAuthSessions.begin(sessionId, normalizedTtlMs);
-    if (options.wakeQueues ?? false) {
-      schedulers.wakeProjection();
-      schedulers.wakeIngest(QUEUE_DRAIN_RETRY_DELAY_MS);
-    }
-    if (!wasActive) {
-      daemonLogger.info("interactive platform auth mode started", {
-        ttlMs: normalizedTtlMs,
-        projectionBatchSize: getInteractiveAuthProjectionBatchSize(),
-        ingestConcurrency: getEffectiveIngestConcurrency(),
-      });
-    }
-    return getInteractiveAuthStatus();
-  };
-  const endInteractiveAuth = (sessionId = "managed-auth") => {
-    const wasActive = isInteractiveAuthActive();
-    interactiveAuthSessions.end(sessionId);
-    if (wasActive && !isInteractiveAuthActive()) {
-      daemonLogger.info("interactive platform auth mode ended");
-      schedulers.wakeIngest();
-      schedulers.wakeProjection();
-    }
-    return getInteractiveAuthStatus();
   };
 
   const releaseMessageReceivedHooksForRange = async (range: {
@@ -2695,8 +2631,7 @@ export async function runDaemon(): Promise<void> {
         return;
       }
     }
-    const effectiveIngestConcurrency = getEffectiveIngestConcurrency();
-    while (activeIngestRuns.size < effectiveIngestConcurrency) {
+    while (activeIngestRuns.size < ingestConcurrency) {
       const currentRun = db.claimNextQueuedRun(["sync", "sync_resume"], "ingesting", {
         ownerId: runOwnerId,
         leaseMs: INGEST_RUN_LEASE_MS,
@@ -2744,7 +2679,7 @@ export async function runDaemon(): Promise<void> {
 
     ingestDrainTimer = setTimeout(() => {
       ingestDrainTimer = null;
-      drainIngestQueue();
+      stallMonitor.section("drain_ingest_queue", drainIngestQueue);
     }, normalizedDelayMs);
   };
 
@@ -2759,10 +2694,6 @@ export async function runDaemon(): Promise<void> {
     }
     if (bootstrap.state !== "ready") {
       scheduleProjectionDrain(QUEUE_DRAIN_RETRY_DELAY_MS);
-      return;
-    }
-    if (now() < authProjectionPausedUntil) {
-      scheduleProjectionDrain(PROJECTION_AUTH_RETRY_DELAY_MS);
       return;
     }
 
@@ -2830,10 +2761,11 @@ export async function runDaemon(): Promise<void> {
 
     projectionDrainTimer = setTimeout(() => {
       projectionDrainTimer = null;
-      drainProjectionQueue();
+      stallMonitor.section("drain_projection_queue", drainProjectionQueue);
     }, normalizedDelayMs);
   };
 
+  let searchIndexPass = { claimed: 0, indexed: 0, failed: 0 };
   const drainSearchIndexQueue = () => {
     searchIndexDrainScheduled = false;
     searchIndexDrainDueAt = null;
@@ -2870,24 +2802,42 @@ export async function runDaemon(): Promise<void> {
     }
     isProcessingSearchIndex = true;
     try {
-      const result = db.withBusyTimeoutSync(DAEMON_STATUS_BUSY_TIMEOUT_MS, () => {
+      // Tokenizing a message for search takes a fraction of a millisecond, a few hundred of
+      // them tens. Index a handful per transaction until a few milliseconds are spent, then
+      // come back: a backlog of any size drains without the daemon ever pausing to do it.
+      const sliceStartedAt = performance.now();
+      let claimed = 0;
+      let indexed = 0;
+      let failed = 0;
+      let drained = false;
+      db.withBusyTimeoutSync(DAEMON_STATUS_BUSY_TIMEOUT_MS, () => {
         db.requeueStaleMessageFtsIndexing(Date.now() - FTS_INDEXING_STALE_AFTER_MS);
-        return db.drainMessageFtsIndexQueue(messageFtsIndexBatchSize);
+        do {
+          const batch = db.drainMessageFtsIndexQueue(FTS_INDEX_TRANSACTION_MESSAGES);
+          claimed += batch.claimed;
+          indexed += batch.indexed;
+          failed += batch.failed;
+          drained = batch.claimed < FTS_INDEX_TRANSACTION_MESSAGES;
+        } while (
+          !drained &&
+          claimed < messageFtsIndexBatchSize &&
+          performance.now() - sliceStartedAt < FTS_INDEX_SLICE_BUDGET_MS
+        );
       });
-      const searchIndexBacklog = db.withBusyTimeoutSync(DAEMON_STATUS_BUSY_TIMEOUT_MS, () =>
-        db.getMessageFtsIndexBacklog(),
-      );
-      if (result.claimed > 0) {
-        daemonLogger.info("message FTS index batch completed", {
-          ...result,
-          queued: searchIndexBacklog.queued,
-          indexing: searchIndexBacklog.indexing,
-          failed: searchIndexBacklog.failed,
-        });
-        requestMenuBarStatusWrite("message_fts_index_completed");
-      }
-      if (searchIndexBacklog.queued > 0) {
-        scheduleSearchIndexDrain();
+      searchIndexPass.claimed += claimed;
+      searchIndexPass.indexed += indexed;
+      searchIndexPass.failed += failed;
+      if (drained) {
+        if (searchIndexPass.claimed > 0) {
+          daemonLogger.info("message FTS index backlog drained", { ...searchIndexPass });
+          requestMenuBarStatusWrite("message_fts_index_completed");
+        }
+        searchIndexPass = { claimed: 0, indexed: 0, failed: 0 };
+      } else {
+        if (claimed > 0) {
+          requestMenuBarStatusWrite("message_fts_index_progress");
+        }
+        scheduleSearchIndexDrain(FTS_INDEX_SLICE_GAP_MS);
       }
     } catch (error) {
       if (!isSqliteBusyError(error)) {
@@ -2924,7 +2874,7 @@ export async function runDaemon(): Promise<void> {
 
     searchIndexDrainTimer = setTimeout(() => {
       searchIndexDrainTimer = null;
-      drainSearchIndexQueue();
+      stallMonitor.section("drain_search_index_queue", drainSearchIndexQueue);
     }, normalizedDelayMs);
   };
 
@@ -3254,16 +3204,18 @@ export async function runDaemon(): Promise<void> {
   const heartbeat = setInterval(() => {
     try {
       daemonLease.heartbeat();
-      db.withBusyTimeoutSync(DAEMON_STATUS_BUSY_TIMEOUT_MS, () => {
-        db.upsertDaemonState({
-          pid: process.pid,
-          startedAt,
-          updatedAt: now(),
-          status: "running",
-          version: DAEMON_VERSION,
-          details: daemonIdentity,
-        });
-      });
+      stallMonitor.section("heartbeat", () =>
+        db.withBusyTimeoutSync(DAEMON_STATUS_BUSY_TIMEOUT_MS, () => {
+          db.upsertDaemonState({
+            pid: process.pid,
+            startedAt,
+            updatedAt: now(),
+            status: "running",
+            version: DAEMON_VERSION,
+            details: daemonIdentity,
+          });
+        }),
+      );
     } catch (error) {
       if (!isSqliteBusyError(error)) {
         throw error;
@@ -3272,6 +3224,96 @@ export async function runDaemon(): Promise<void> {
     }
   }, SINGLETON_LOCK_HEARTBEAT_MS);
 
+  const realtimeStatuses = () =>
+    collectRealtimeSessionStatuses({
+      discordRealtime,
+      slackRealtime,
+      linkedInRealtime,
+      signalRealtime,
+      whatsAppRealtime,
+    });
+
+  // Subscribed connections are told when UI-visible state changed, so the app re-reads on
+  // change instead of polling. Topics raised in the same tick go out as one event.
+  const subscribers = new Set<Socket>();
+  const pendingEventTopics = new Set<DaemonEventTopic>();
+  const notifySubscribers = (topic: DaemonEventTopic) => {
+    if (subscribers.size === 0) {
+      return;
+    }
+    const flushScheduled = pendingEventTopics.size > 0;
+    pendingEventTopics.add(topic);
+    if (flushScheduled) {
+      return;
+    }
+    setImmediate(() => {
+      const event: DaemonEvent = { event: "changed", topics: [...pendingEventTopics] };
+      pendingEventTopics.clear();
+      const line = `${JSON.stringify(event)}\n`;
+      for (const subscriber of subscribers) {
+        if (!subscriber.destroyed && subscriber.writable) {
+          subscriber.write(line);
+        }
+      }
+    });
+  };
+  const subscribe = (socket: Socket) => {
+    subscribers.add(socket);
+    socket.once("close", () => subscribers.delete(socket));
+  };
+
+  const dbWorker: DbWorker = new ResilientDbWorker(
+    new ThreadDbWorker(db.dbPath),
+    new InlineDbWorker(db),
+    (error) =>
+      daemonLogger.warn(
+        "database worker unavailable; its jobs now run on the daemon thread",
+        error,
+      ),
+  );
+  // Checkpoint the WAL from the worker thread instead of inside the daemon's own commits. An
+  // inline checkpoint is tens of milliseconds of copying and fsync in whichever commit happens
+  // to cross the threshold, and that commit is on the thread every request waits on.
+  db.setWalAutoCheckpointPages(WAL_BACKSTOP_AUTOCHECKPOINT_PAGES);
+  let checkpointedAtChanges = db.totalChanges();
+  let checkpointedAt = now();
+  let checkpointInFlight = false;
+  const walCheckpointLoop = setInterval(() => {
+    if (checkpointInFlight) {
+      return;
+    }
+    const changedRows = db.totalChanges() - checkpointedAtChanges;
+    const overdue = changedRows > 0 && now() - checkpointedAt >= WAL_CHECKPOINT_MAX_INTERVAL_MS;
+    if (changedRows < WAL_CHECKPOINT_MIN_CHANGED_ROWS && !overdue) {
+      return;
+    }
+    checkpointInFlight = true;
+    checkpointedAtChanges += changedRows;
+    checkpointedAt = now();
+    dbWorker
+      .run("checkpointWal")
+      .catch((error) => {
+        if (!shutdownInitiated) {
+          daemonLogger.warn("background WAL checkpoint failed", error);
+        }
+      })
+      .finally(() => {
+        checkpointInFlight = false;
+      });
+  }, WAL_CHECKPOINT_POLL_MS);
+  walCheckpointLoop.unref?.();
+
+  const readModel = new DaemonReadModel(db, dbWorker, {
+    onChange: (topic) => {
+      if (topic === "aggregates") {
+        writeMenuBarStatus("aggregates");
+      } else {
+        notifySubscribers(topic);
+      }
+    },
+    onError: (topic, error) => daemonLogger.warn("read model refresh failed", { topic, error }),
+  });
+
   let menuBarStatusWriteTimer: NodeJS.Timeout | null = null;
   let lastMenuBarStatusWrittenAt = 0;
   const writeMenuBarStatus = (reason = "interval") => {
@@ -3279,18 +3321,22 @@ export async function runDaemon(): Promise<void> {
       clearTimeout(menuBarStatusWriteTimer);
       menuBarStatusWriteTimer = null;
     }
+    // Row counts come from the database worker. This recount is a no-op unless something
+    // countable was written, and it calls back into this function when the counts move.
+    void readModel.refreshAggregates();
+    const aggregates = readModel.aggregates;
+    if (!aggregates) {
+      // First count is still running; keep the previous file until real numbers land.
+      return;
+    }
     try {
-      db.withBusyTimeoutSync(DAEMON_STATUS_BUSY_TIMEOUT_MS, () => {
-        writeMenuBarStatusSnapshot(db, {
-          discordRealtime,
-          slackRealtime,
-          linkedInRealtime,
-          signalRealtime,
-          whatsAppRealtime,
-          bootstrap,
-        });
-      });
+      stallMonitor.section("menu_bar_status_write", () =>
+        db.withBusyTimeoutSync(DAEMON_STATUS_BUSY_TIMEOUT_MS, () => {
+          writeMenuBarStatusSnapshot(db, { realtime: realtimeStatuses(), bootstrap, aggregates });
+        }),
+      );
       lastMenuBarStatusWrittenAt = now();
+      notifySubscribers("status");
     } catch (error) {
       if (!isSqliteBusyError(error)) {
         daemonLogger.warn("menu bar status cache write failed", { reason, error });
@@ -3300,11 +3346,6 @@ export async function runDaemon(): Promise<void> {
     }
   };
   const refreshMenuBarStatusNow = (reason: string) => {
-    try {
-      removeMenuBarStatusCache();
-    } catch (error) {
-      daemonLogger.warn("menu bar status cache invalidation failed", { reason, error });
-    }
     writeMenuBarStatus(reason);
   };
   const requestMenuBarStatusWrite = (reason: string) => {
@@ -3567,9 +3608,15 @@ export async function runDaemon(): Promise<void> {
   };
   const runBootstrap = async () => {
     try {
-      await refreshManagedIntegrationStates(db);
+      const { localIntegrationStates } = await readModel.refreshLocalAccess({ maxAgeMs: 0 });
+      try {
+        await refreshManagedIntegrationStates(db, { localIntegrationStates });
+      } catch (error) {
+        // One integration that cannot be refreshed (a helper missing, a desktop session that
+        // cannot be read) must not keep sync and realtime from starting for all the others.
+        daemonLogger.warn("managed integration refresh failed during bootstrap", error);
+      }
       if (shouldBootstrapLocalIntegrations(db.getAppMetadata())) {
-        refreshLocalIntegrationStates(db);
         reconcileLocalWatchers();
       }
       queueAutoSyncRuns("daemon_start");
@@ -3690,13 +3737,7 @@ export async function runDaemon(): Promise<void> {
         accountKey: string;
         displayName?: string | null;
       }> = [];
-      let insertResult: ReturnType<typeof db.insertRawEvents> = {
-        insertedCount: 0,
-        insertedEvents: [],
-        insertedRows: [],
-        firstInsertedRowId: null,
-        lastInsertedRowId: null,
-      };
+      let insertResult = EMPTY_RAW_EVENT_INSERT_RESULT;
       telemetry.enqueue("helper_started", {
         component: "sync",
         operation: "adapter",
@@ -3802,26 +3843,10 @@ export async function runDaemon(): Promise<void> {
           cursor = page.nextCursor ?? null;
 
           const pageInsertStartedAt = now();
-          const pageInsertResult = db.insertRawEvents(rawEvents);
+          const pageInsertResult = await insertRawEventsYielding(db, rawEvents);
           rawEventInsertMs += now() - pageInsertStartedAt;
           db.updateRunProgress(currentRun.id, { leaseMs: INGEST_RUN_LEASE_MS, claim: runClaim });
-          insertResult = {
-            insertedCount: insertResult.insertedCount + pageInsertResult.insertedCount,
-            insertedEvents: [...insertResult.insertedEvents, ...pageInsertResult.insertedEvents],
-            insertedRows: [...insertResult.insertedRows, ...pageInsertResult.insertedRows],
-            firstInsertedRowId:
-              insertResult.firstInsertedRowId == null
-                ? pageInsertResult.firstInsertedRowId
-                : pageInsertResult.firstInsertedRowId == null
-                  ? insertResult.firstInsertedRowId
-                  : Math.min(insertResult.firstInsertedRowId, pageInsertResult.firstInsertedRowId),
-            lastInsertedRowId:
-              insertResult.lastInsertedRowId == null
-                ? pageInsertResult.lastInsertedRowId
-                : pageInsertResult.lastInsertedRowId == null
-                  ? insertResult.lastInsertedRowId
-                  : Math.max(insertResult.lastInsertedRowId, pageInsertResult.lastInsertedRowId),
-          };
+          insertResult = mergeRawEventInsertResults(insertResult, pageInsertResult);
         } while (hasMore && pageCount < pageBudget);
 
         bundleHasMore = hasMore;
@@ -3895,7 +3920,10 @@ export async function runDaemon(): Promise<void> {
             : null;
         ingestedCount = bundle.rawEvents.length;
         const rawEventInsertStartedAt = now();
-        insertResult = db.insertRawEvents(withRawEventAcquisitionMode(bundle.rawEvents, "sync"));
+        insertResult = await insertRawEventsYielding(
+          db,
+          withRawEventAcquisitionMode(bundle.rawEvents, "sync"),
+        );
         rawEventInsertMs = now() - rawEventInsertStartedAt;
         const bundleProofs = Array.isArray(bundle.proofs) ? bundle.proofs : [];
         for (const proof of bundleProofs) {
@@ -4050,7 +4078,7 @@ export async function runDaemon(): Promise<void> {
       }
       autoSyncPacing.record(`${platform}:${accountKey}`, insertResult.insertedCount, bundleHasMore);
       if (bundleHasMore && !db.hasQueuedOrRunningRun(currentRun.platform, accountKey)) {
-        const continuationDelayMs = getEffectiveSyncContinueDelayMs(currentRun.platform);
+        const continuationDelayMs = getSyncContinueDelayMsForPlatform(currentRun.platform);
         db.queueSyncRun({
           platform: currentRun.platform,
           accountKey,
@@ -4189,7 +4217,7 @@ export async function runDaemon(): Promise<void> {
       const projectionBacklogBeforeRun = db.withBusyTimeoutSync(DAEMON_STATUS_BUSY_TIMEOUT_MS, () =>
         db.getProjectionBacklog(),
       );
-      const adaptiveProjectionBatchSize = getEffectiveProjectionBatchSize(
+      const adaptiveProjectionBatchSize = getAdaptiveProjectionBatchSize(
         projectionBacklogBeforeRun.pending_raw_events,
       );
       daemonLogger.info("projection run started", {
@@ -4198,7 +4226,6 @@ export async function runDaemon(): Promise<void> {
         runType: currentRun.run_type,
         pendingRawEvents: projectionBacklogBeforeRun.pending_raw_events,
         projectionBatchSize: adaptiveProjectionBatchSize,
-        interactiveAuthMode: isInteractiveAuthActive(),
       });
       db.updateRunProgress(currentRun.id, { leaseMs: PROJECTION_RUN_LEASE_MS, claim: runClaim });
       telemetry.enqueue("sync_started", {
@@ -4260,14 +4287,12 @@ export async function runDaemon(): Promise<void> {
               projectionDetails?.endRowId ??
               deferredProjected.projectionWatermark,
           },
-          { delayMs: getEffectiveProjectionContinueDelayMs(remainingProjectionEvents) },
+          { delayMs: getAdaptiveProjectionContinueDelayMs(remainingProjectionEvents) },
         );
       }
       const projectionBacklogAfterRun = db.getProjectionBacklog();
       queueProjectionRun(`projection:${currentRun.run_type}`, undefined, {
-        delayMs: getEffectiveProjectionContinueDelayMs(
-          projectionBacklogAfterRun.pending_raw_events,
-        ),
+        delayMs: getAdaptiveProjectionContinueDelayMs(projectionBacklogAfterRun.pending_raw_events),
       });
       await safeEmitHookEvent("sync.completed", {
         runId: currentRun.id,
@@ -4329,6 +4354,13 @@ export async function runDaemon(): Promise<void> {
         stage: "projection",
         error: error instanceof Error ? error.message : String(error),
       });
+      // A failed run used to leave its backlog stranded until some unrelated sync happened to
+      // queue another projection. Queue the retry ourselves (a no-op when nothing is pending).
+      if (currentRun.run_type === "project") {
+        queueProjectionRun(`projection_retry:${currentRun.id}`, undefined, {
+          delayMs: PROJECTION_RETRY_DELAY_MS,
+        });
+      }
     } finally {
       isProcessingProjection = false;
       schedulers.wakeProjection();
@@ -4337,54 +4369,97 @@ export async function runDaemon(): Promise<void> {
   };
 
   const schedulerLoop = setInterval(() => {
-    queueAutoSyncRuns("scheduler");
+    stallMonitor.section("auto_sync_scheduler", () => queueAutoSyncRuns("scheduler"));
   }, getAutoSyncSchedulerTickMs());
 
   const updateLoop = setInterval(() => {
     scheduleUpdateCheck(false);
   }, UPDATE_CHECK_INTERVAL_MS);
 
+  let lastForegroundRequestAt = 0;
+  const syncRunMaintenance = new SyncRunMaintenance(dbWorker, {
+    // History cleanup can always wait. It never contends with a sync or projection for the
+    // write lock, and it stays out of the way while someone is using the app or the CLI.
+    shouldDefer: () =>
+      isProcessingProjection ||
+      activeIngestRuns.size > 0 ||
+      now() - lastForegroundRequestAt < FOREGROUND_QUIET_PERIOD_MS,
+    onError: (error) => daemonLogger.warn("sync run maintenance failed", error),
+    onPruned: ({ deletedRuns, durationMs }) =>
+      daemonLogger.info("pruned sync run history", {
+        deletedRuns,
+        durationMs: Math.round(durationMs),
+      }),
+  });
+  syncRunMaintenance.start();
+
+  const requestAllRealtimeReconciles = () => {
+    requestDiscordRealtimeReconcile();
+    requestSlackRealtimeReconcile();
+    requestLinkedInRealtimeReconcile();
+    requestSignalRealtimeReconcile();
+    requestWhatsAppRealtimeReconcile();
+  };
+  let managedIntegrationRefresh: Promise<void> | null = null;
+  const refreshManagedIntegrationsInBackground = (reason: string) => {
+    if (managedIntegrationRefresh) {
+      return;
+    }
+    managedIntegrationRefresh = readModel
+      .refreshLocalAccess({ maxAgeMs: 0 })
+      .then((localAccess) =>
+        refreshManagedIntegrationStates(db, {
+          localIntegrationStates: localAccess.localIntegrationStates,
+        }),
+      )
+      .then(() => {
+        requestAllRealtimeReconciles();
+        reconcileLocalWatchers();
+        refreshMenuBarStatusNow(reason);
+      })
+      .catch((error) => {
+        daemonLogger.warn("managed integration refresh failed", { reason, error });
+      })
+      .finally(() => {
+        managedIntegrationRefresh = null;
+      });
+  };
+  const requestContext: DaemonRequestContext = {
+    db,
+    telemetry,
+    activeAuthSessions,
+    schedulers,
+    discordRealtime,
+    slackRealtime,
+    linkedInRealtime,
+    signalRealtime,
+    whatsAppRealtime,
+    bootstrap,
+    requestRealtimeReconcile: requestAllRealtimeReconciles,
+    reconcileLocalWatchers,
+    requestUpdateShutdown,
+    isBackgroundWorkActive: () => isProcessingProjection || activeIngestRuns.size > 0,
+    onAuthRuntimeStateChanged: () => {
+      requestAllRealtimeReconciles();
+      schedulers.wakeProjection();
+      refreshMenuBarStatusNow("auth_state_changed");
+    },
+    refreshStatusCacheNow: refreshMenuBarStatusNow,
+    shouldRunRealtimePlatform,
+    purgeAccountSyncRunHistory: (platform, accountKey, queuedBefore) =>
+      syncRunMaintenance.purgeAccountHistory(platform, accountKey, queuedBefore),
+    dbWorker,
+    readModel,
+    realtimeStatuses,
+    subscribe,
+    refreshManagedIntegrationsInBackground,
+    stallMonitor,
+    noteForegroundRequest: () => {
+      lastForegroundRequestAt = now();
+    },
+  };
   const server = createServer((socket) => {
-    handleSocket(
-      socket,
-      db,
-      telemetry,
-      activeAuthSessions,
-      schedulers,
-      discordRealtime,
-      slackRealtime,
-      linkedInRealtime,
-      signalRealtime,
-      whatsAppRealtime,
-      bootstrap,
-      () => {
-        requestDiscordRealtimeReconcile();
-        requestSlackRealtimeReconcile();
-        requestLinkedInRealtimeReconcile();
-        requestSignalRealtimeReconcile();
-        requestWhatsAppRealtimeReconcile();
-      },
-      reconcileLocalWatchers,
-      requestUpdateShutdown,
-      () => isProcessingProjection || activeIngestRuns.size > 0,
-      () => {
-        authProjectionPausedUntil = now() + PROJECTION_AUTH_GRACE_MS;
-        schedulers.wakeProjection(PROJECTION_AUTH_RETRY_DELAY_MS);
-      },
-      beginInteractiveAuth,
-      endInteractiveAuth,
-      () => {
-        requestDiscordRealtimeReconcile();
-        requestSlackRealtimeReconcile();
-        requestLinkedInRealtimeReconcile();
-        requestSignalRealtimeReconcile();
-        requestWhatsAppRealtimeReconcile();
-        schedulers.wakeProjection();
-        refreshMenuBarStatusNow("auth_state_changed");
-      },
-      refreshMenuBarStatusNow,
-      shouldRunRealtimePlatform,
-    );
+    handleSocket(socket, requestContext);
   });
 
   await new Promise<void>((resolve, reject) => {
@@ -4411,6 +4486,13 @@ export async function runDaemon(): Promise<void> {
     clearInterval(menuBarStatusLoop);
     clearInterval(schedulerLoop);
     clearInterval(updateLoop);
+    syncRunMaintenance.stop();
+    stallMonitor.stop();
+    clearInterval(walCheckpointLoop);
+    for (const subscriber of subscribers) {
+      subscriber.destroy();
+    }
+    subscribers.clear();
     if (menuBarStatusWriteTimer) {
       clearTimeout(menuBarStatusWriteTimer);
       menuBarStatusWriteTimer = null;
@@ -4443,6 +4525,8 @@ export async function runDaemon(): Promise<void> {
     });
     server.close();
     await telemetry.close();
+    readModel.close();
+    await dbWorker.close();
     db.close();
     daemonLease.release();
     if (existsSync(CUED_SOCKET_PATH)) {
@@ -4577,42 +4661,40 @@ function writeResponse(socket: Socket, response: DaemonResponse): void {
   });
 }
 
-function handleSocket(
-  socket: Socket,
-  db: ReturnType<typeof openCuedDatabase>,
-  telemetry: DaemonTelemetryQueue,
-  activeAuthSessions: Map<string, { child: ChildProcess; platform: Platform; accountKey: string }>,
-  schedulers: QueueSchedulers,
-  discordRealtime: DiscordRealtimeSupervisor,
-  slackRealtime: SlackRealtimeSupervisor,
-  linkedInRealtime: LinkedInRealtimeSupervisor,
-  signalRealtime: SignalRealtimeSupervisor,
-  whatsAppRealtime: WhatsAppRealtimeSupervisor,
-  bootstrap: DaemonBootstrapSnapshot,
-  requestRealtimeReconcile: () => void,
-  reconcileLocalWatchers: () => void,
-  requestUpdateShutdown: () => { shuttingDown: boolean; requestedAt: number | null },
-  isBackgroundWorkActive: () => boolean,
-  pauseProjectionForAuth: () => void,
-  beginInteractiveAuth: (
-    sessionId?: string,
-    ttlMs?: number,
-  ) => {
-    active: boolean;
-    expiresAt: number | null;
-    projectionBatchSize: number;
-    ingestConcurrency: number;
-  },
-  endInteractiveAuth: (sessionId?: string) => {
-    active: boolean;
-    expiresAt: number | null;
-    projectionBatchSize: number;
-    ingestConcurrency: number;
-  },
-  onAuthRuntimeStateChanged: () => void,
-  refreshStatusCacheNow: (reason: string) => void,
-  shouldRunRealtimePlatform: (platform: AdapterPlatform) => boolean,
-): void {
+/** Everything a daemon request handler can reach, owned by `runDaemon`. */
+type DaemonRequestContext = {
+  db: ReturnType<typeof openCuedDatabase>;
+  telemetry: DaemonTelemetryQueue;
+  activeAuthSessions: Map<string, { child: ChildProcess; platform: Platform; accountKey: string }>;
+  schedulers: QueueSchedulers;
+  discordRealtime: DiscordRealtimeSupervisor;
+  slackRealtime: SlackRealtimeSupervisor;
+  linkedInRealtime: LinkedInRealtimeSupervisor;
+  signalRealtime: SignalRealtimeSupervisor;
+  whatsAppRealtime: WhatsAppRealtimeSupervisor;
+  bootstrap: DaemonBootstrapSnapshot;
+  requestRealtimeReconcile: () => void;
+  reconcileLocalWatchers: () => void;
+  requestUpdateShutdown: () => { shuttingDown: boolean; requestedAt: number | null };
+  isBackgroundWorkActive: () => boolean;
+  onAuthRuntimeStateChanged: () => void;
+  refreshStatusCacheNow: (reason: string) => void;
+  shouldRunRealtimePlatform: (platform: AdapterPlatform) => boolean;
+  purgeAccountSyncRunHistory: (
+    platform: Platform,
+    accountKey: string,
+    queuedBefore: number,
+  ) => void;
+  dbWorker: DbWorker;
+  readModel: DaemonReadModel;
+  realtimeStatuses: () => RealtimeSessionStatuses;
+  subscribe: (socket: Socket) => void;
+  refreshManagedIntegrationsInBackground: (reason: string) => void;
+  stallMonitor: StallMonitor;
+  noteForegroundRequest: () => void;
+};
+
+function handleSocket(socket: Socket, context: DaemonRequestContext): void {
   let buffer = "";
 
   socket.on("error", handleSocketError);
@@ -4639,29 +4721,20 @@ function handleSocket(
           continue;
         }
 
-        void dispatchRequest(
-          db,
-          request,
-          telemetry,
-          activeAuthSessions,
-          schedulers,
-          discordRealtime,
-          slackRealtime,
-          linkedInRealtime,
-          signalRealtime,
-          whatsAppRealtime,
-          bootstrap,
-          requestRealtimeReconcile,
-          reconcileLocalWatchers,
-          requestUpdateShutdown,
-          isBackgroundWorkActive,
-          pauseProjectionForAuth,
-          beginInteractiveAuth,
-          endInteractiveAuth,
-          onAuthRuntimeStateChanged,
-          refreshStatusCacheNow,
-          shouldRunRealtimePlatform,
-        )
+        if (request.command === "subscribe") {
+          context.subscribe(socket);
+          writeResponse(socket, { id: request.id, ok: true, result: { subscribed: true } });
+          newlineIndex = buffer.indexOf("\n");
+          continue;
+        }
+
+        if (request.command !== "ping") {
+          context.noteForegroundRequest();
+        }
+        // Only the synchronous part of a handler can stall the loop; that is what gets timed.
+        const dispatched = request;
+        void context.stallMonitor
+          .section(`request:${dispatched.command}`, () => dispatchRequest(context, dispatched))
           .then((response) => writeResponse(socket, response))
           .catch((error) => {
             writeResponse(socket, {
@@ -4703,46 +4776,38 @@ function stopActiveAuthSessionsForIntegration(
 }
 
 async function dispatchRequest(
-  db: ReturnType<typeof openCuedDatabase>,
+  context: DaemonRequestContext,
   request: DaemonRequest,
-  telemetry: DaemonTelemetryQueue,
-  activeAuthSessions: Map<string, { child: ChildProcess; platform: Platform; accountKey: string }>,
-  schedulers: QueueSchedulers,
-  discordRealtime: DiscordRealtimeSupervisor,
-  slackRealtime: SlackRealtimeSupervisor,
-  linkedInRealtime: LinkedInRealtimeSupervisor,
-  signalRealtime: SignalRealtimeSupervisor,
-  whatsAppRealtime: WhatsAppRealtimeSupervisor,
-  bootstrap: DaemonBootstrapSnapshot,
-  requestRealtimeReconcile: () => void,
-  reconcileLocalWatchers: () => void,
-  requestUpdateShutdown: () => { shuttingDown: boolean; requestedAt: number | null },
-  isBackgroundWorkActive: () => boolean,
-  pauseProjectionForAuth: () => void,
-  beginInteractiveAuth: (
-    sessionId?: string,
-    ttlMs?: number,
-  ) => {
-    active: boolean;
-    expiresAt: number | null;
-    projectionBatchSize: number;
-    ingestConcurrency: number;
-  },
-  endInteractiveAuth: (sessionId?: string) => {
-    active: boolean;
-    expiresAt: number | null;
-    projectionBatchSize: number;
-    ingestConcurrency: number;
-  },
-  onAuthRuntimeStateChanged: () => void,
-  refreshStatusCacheNow: (reason: string) => void,
-  shouldRunRealtimePlatform: (platform: AdapterPlatform) => boolean,
 ): Promise<DaemonResponse> {
+  const {
+    db,
+    telemetry,
+    activeAuthSessions,
+    schedulers,
+    discordRealtime,
+    slackRealtime,
+    linkedInRealtime,
+    signalRealtime,
+    whatsAppRealtime,
+    bootstrap,
+    requestRealtimeReconcile,
+    reconcileLocalWatchers,
+    requestUpdateShutdown,
+    isBackgroundWorkActive,
+    onAuthRuntimeStateChanged,
+    refreshStatusCacheNow,
+    shouldRunRealtimePlatform,
+    purgeAccountSyncRunHistory,
+    dbWorker,
+    readModel,
+    realtimeStatuses,
+    refreshManagedIntegrationsInBackground,
+  } = context;
   try {
     const runQueueService = new RunQueueService(db, schedulers);
     const getIntegrationAuthService = async () => {
       const { IntegrationAuthService } = await import("../../platforms/core/auth/service.js");
-      return new IntegrationAuthService(db);
+      return new IntegrationAuthService(db, { awaitTelemetry: false });
     };
     switch (request.command) {
       case "ping":
@@ -4756,100 +4821,33 @@ async function dispatchRequest(
             ...getDaemonIdentity(),
           },
         };
-      case "status":
-        {
-          const cached = readCachedDaemonStatusSnapshot({
-            maxAgeMs: DAEMON_STATUS_CACHE_MAX_AGE_MS,
-          });
-          if (cached) {
-            return {
-              id: request.id,
-              ok: true,
-              result: {
-                ...cached,
-                statusCacheHit: true,
-              },
-            };
-          }
-        }
-        if (isBackgroundWorkActive()) {
-          const cached = readCachedDaemonStatusSnapshot();
-          if (cached) {
-            return {
-              id: request.id,
-              ok: true,
-              result: {
-                ...cached,
-                daemonDbBusy: true,
-                daemonDbBusyError: "Cued daemon is running background sync/projection work",
-              },
-            };
-          }
+      case "status": {
+        const cached = readCachedDaemonStatusSnapshot({
+          maxAgeMs: DAEMON_STATUS_CACHE_MAX_AGE_MS,
+        });
+        if (cached) {
           return {
             id: request.id,
             ok: true,
-            result: buildDaemonBusyStatusSnapshot({
-              discordRealtime,
-              slackRealtime,
-              linkedInRealtime,
-              signalRealtime,
-              whatsAppRealtime,
-              socketPath: CUED_SOCKET_PATH,
-              bootstrap,
-              dbPath: db.dbPath,
-              error: new Error("Cued daemon is running background sync/projection work"),
-            }),
+            result: {
+              ...cached,
+              statusCacheHit: true,
+            },
           };
         }
-        try {
-          return {
-            id: request.id,
-            ok: true,
-            result: await db.withBusyTimeout(DAEMON_STATUS_BUSY_TIMEOUT_MS, () =>
-              buildDaemonStatusSnapshot(db, {
-                app: getAppStatusMetadata(db),
-                discordRealtime,
-                slackRealtime,
-                linkedInRealtime,
-                signalRealtime,
-                whatsAppRealtime,
-                socketPath: CUED_SOCKET_PATH,
-                bootstrap,
-              }),
-            ),
-          };
-        } catch (error) {
-          if (!isSqliteBusyError(error)) {
-            throw error;
-          }
-          const cached = readCachedDaemonStatusSnapshot();
-          if (cached) {
-            return {
-              id: request.id,
-              ok: true,
-              result: {
-                ...cached,
-                daemonDbBusy: true,
-                daemonDbBusyError: error instanceof Error ? error.message : String(error),
-              },
-            };
-          }
-          return {
-            id: request.id,
-            ok: true,
-            result: buildDaemonBusyStatusSnapshot({
-              discordRealtime,
-              slackRealtime,
-              linkedInRealtime,
-              signalRealtime,
-              whatsAppRealtime,
-              socketPath: CUED_SOCKET_PATH,
-              bootstrap,
-              dbPath: db.dbPath,
-              error,
-            }),
-          };
-        }
+        // The full snapshot scans large tables; build it on the database worker so the daemon
+        // keeps answering other requests meanwhile.
+        return {
+          id: request.id,
+          ok: true,
+          result: await dbWorker.run("daemonStatus", {
+            app: getAppStatusMetadata(db),
+            realtime: realtimeStatuses(),
+            socketPath: CUED_SOCKET_PATH,
+            bootstrap,
+          }),
+        };
+      }
       case "doctor":
         if (isBackgroundWorkActive()) {
           return {
@@ -4857,11 +4855,7 @@ async function dispatchRequest(
             ok: true,
             result: {
               ...buildDaemonBusyStatusSnapshot({
-                discordRealtime,
-                slackRealtime,
-                linkedInRealtime,
-                signalRealtime,
-                whatsAppRealtime,
+                realtime: realtimeStatuses(),
                 socketPath: CUED_SOCKET_PATH,
                 bootstrap,
                 dbPath: db.dbPath,
@@ -4921,11 +4915,7 @@ async function dispatchRequest(
             ok: true,
             result: {
               ...buildDaemonBusyStatusSnapshot({
-                discordRealtime,
-                slackRealtime,
-                linkedInRealtime,
-                signalRealtime,
-                whatsAppRealtime,
+                realtime: realtimeStatuses(),
                 socketPath: CUED_SOCKET_PATH,
                 bootstrap,
                 dbPath: db.dbPath,
@@ -4992,33 +4982,42 @@ async function dispatchRequest(
           result,
         };
       }
-      case "onboarding-snapshot":
+      case "onboarding-snapshot": {
+        // Answer from what is already known and refresh behind the response: anything that
+        // turns out different is announced to subscribers, who then re-read. The refresh
+        // flags therefore mean "check again now", not "make me wait for the check".
+        if (request.refreshManagedIntegrations) {
+          refreshManagedIntegrationsInBackground("onboarding_snapshot");
+        }
+        const localAccess = readModel.localAccess ?? (await readModel.refreshLocalAccess());
+        void readModel
+          .refreshLocalAccess(request.refreshPermissions ? { maxAgeMs: 0 } : {})
+          .catch(() => undefined);
+        void readModel.refreshAggregates();
         return {
           id: request.id,
           ok: true,
-          result: await db.withBusyTimeout(DAEMON_STATUS_BUSY_TIMEOUT_MS, () =>
-            buildOnboardingSnapshot(db, {
-              refreshManagedIntegrations: request.refreshManagedIntegrations,
-              refreshPermissions: request.refreshPermissions,
-            }),
-          ),
-        };
-      case "sql":
-        return {
-          id: request.id,
-          ok: true,
-          result: await db.withBusyTimeout(DAEMON_STATUS_BUSY_TIMEOUT_MS, () =>
-            db.executeReadOnlySql(request.query),
-          ),
-        };
-      case "integrations-list": {
-        const integrationAuthService = await getIntegrationAuthService();
-        return {
-          id: request.id,
-          ok: true,
-          result: integrationAuthService.listStatus(),
+          result: await buildOnboardingSnapshot(db, {
+            globalSkillMonitor: readModel.skill,
+            localAccess,
+            aggregates: readModel.aggregates ?? undefined,
+          }),
         };
       }
+      case "sql":
+        // Arbitrary agent queries can run for seconds; they must not hold the daemon thread.
+        return {
+          id: request.id,
+          ok: true,
+          result: await dbWorker.run("sql", request.query),
+        };
+      case "integrations-list":
+        reconcileAbandonedAuthSessions(db);
+        return {
+          id: request.id,
+          ok: true,
+          result: await dbWorker.run("integrationStatus", {}),
+        };
       case "integrations-refresh": {
         const integrationAuthService = await getIntegrationAuthService();
         await integrationAuthService.refresh();
@@ -5032,47 +5031,37 @@ async function dispatchRequest(
         };
       }
       case "integrations-interaction-start":
-        return {
-          id: request.id,
-          ok: true,
-          result: beginInteractiveAuth(request.sessionId, request.ttlMs),
-        };
       case "integrations-interaction-end":
+        // Older app builds announce that a sign-in screen is open so the daemon would throttle
+        // sync and projection around it. Nothing is throttled any more: background work no
+        // longer competes with requests. Acknowledged so those builds keep working.
         return {
           id: request.id,
           ok: true,
-          result: endInteractiveAuth(request.sessionId),
+          result: { active: false, expiresAt: null },
         };
       case "integrations-connect": {
         const integrationAuthService = await getIntegrationAuthService();
-        const interactiveAuthSessionId = `connect:${request.platform}:${request.accountKey ?? "default"}`;
-        pauseProjectionForAuth();
-        beginInteractiveAuth(interactiveAuthSessionId);
-        try {
-          const started = await integrationAuthService.connectManaged(
-            request.platform,
-            request.accountKey,
-            activeAuthSessions,
-            {
-              wakeIngest: schedulers.wakeIngest,
-              onRuntimeStateChanged: onAuthRuntimeStateChanged,
-              shouldQueueAuthenticatedSync: (platform) =>
-                platform !== "whatsapp" || shouldRunRealtimePlatform("whatsapp"),
-              emitAuthenticatedHook: async (platform, accountKey) => {
-                await emitAuthenticatedHook(db, platform, accountKey);
-              },
+        const started = await integrationAuthService.connectManaged(
+          request.platform,
+          request.accountKey,
+          activeAuthSessions,
+          {
+            wakeIngest: schedulers.wakeIngest,
+            onRuntimeStateChanged: onAuthRuntimeStateChanged,
+            shouldQueueAuthenticatedSync: (platform) =>
+              platform !== "whatsapp" || shouldRunRealtimePlatform("whatsapp"),
+            emitAuthenticatedHook: async (platform, accountKey) => {
+              await emitAuthenticatedHook(db, platform, accountKey);
             },
-          );
-          refreshStatusCacheNow("integrations_connect");
-          return {
-            id: request.id,
-            ok: true,
-            result: started,
-          };
-        } catch (error) {
-          endInteractiveAuth(interactiveAuthSessionId);
-          throw error;
-        }
+          },
+        );
+        refreshStatusCacheNow("integrations_connect");
+        return {
+          id: request.id,
+          ok: true,
+          result: started,
+        };
       }
       case "integrations-disconnect": {
         const integrationAuthService = await getIntegrationAuthService();
@@ -5088,7 +5077,14 @@ async function dispatchRequest(
       }
       case "integrations-remove": {
         const integrationAuthService = await getIntegrationAuthService();
-        const result = integrationAuthService.remove(request.platform, request.accountKey);
+        // Finished sync runs are purged in background slices: an account can carry hundreds
+        // of thousands of them, and deleting those inline would block every other request.
+        const result = integrationAuthService.remove(request.platform, request.accountKey, {
+          deferSyncRunHistory: true,
+        });
+        // Bounded to runs that existed at removal, so re-adding the account right away does
+        // not lose the history it starts building.
+        purgeAccountSyncRunHistory(result.platform, result.accountKey, now() + 1);
         stopActiveAuthSessionsForIntegration(
           activeAuthSessions,
           result.platform,
@@ -5269,6 +5265,9 @@ async function dispatchRequest(
           ok: true,
           result: runQueueService.resetSource(request.source),
         };
+      case "subscribe":
+        // handleSocket answers this itself: a subscription belongs to the connection.
+        return { id: request.id, ok: false, error: "subscribe is handled per connection" };
       default:
         return {
           id: request satisfies never,

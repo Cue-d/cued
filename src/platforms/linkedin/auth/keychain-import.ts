@@ -5,6 +5,7 @@ import {
   authKeychainService,
   legacyAuthKeychainService,
   loadKeychainSecret,
+  loadKeychainSecretAsync,
   storeKeychainSecret,
 } from "../../core/secrets/keychain.js";
 import { completeAuthSession } from "../../core/state/mutations.js";
@@ -45,6 +46,20 @@ function readLinkedInKeychainSecret(accountKey: string): Record<string, unknown>
   return legacy;
 }
 
+async function readLinkedInKeychainSecretAsync(
+  accountKey: string,
+): Promise<Record<string, unknown> | null> {
+  const current = await loadKeychainSecretAsync(LINKEDIN_KEYCHAIN_SERVICE, accountKey);
+  if (current) {
+    return current;
+  }
+  const legacy = await loadKeychainSecretAsync(LEGACY_LINKEDIN_KEYCHAIN_SERVICE, accountKey);
+  if (legacy) {
+    storeKeychainSecret(LINKEDIN_KEYCHAIN_SERVICE, accountKey, legacy);
+  }
+  return legacy;
+}
+
 function getCookieNames(session: LinkedInSessionSecret): string[] {
   return session.cookies
     .map((cookie) => (typeof cookie?.name === "string" ? cookie.name : null))
@@ -67,7 +82,7 @@ function getLinkedInAuthValidationTimeoutMs(): number {
 export async function validateLinkedInStoredAuth(
   accountKey: string,
 ): Promise<LinkedInStoredAuthValidation> {
-  const secret = readLinkedInKeychainSecret(accountKey);
+  const secret = await readLinkedInKeychainSecretAsync(accountKey);
   if (!secret) {
     return { status: "invalid" };
   }
@@ -97,12 +112,28 @@ export async function validateLinkedInStoredAuth(
   }
 }
 
-export function importLinkedInStoredAuth(
+/** `importLinkedInStoredAuth` that reads the keychain without blocking the caller's thread. */
+export async function importLinkedInStoredAuthAsync(
   db: CuedDatabase,
   options: { reviveUserRemoved?: boolean } = {},
+): Promise<ImportedLinkedInSessionResult[]> {
+  return importLinkedInStoredAuth(db, {
+    ...options,
+    secret: await readLinkedInKeychainSecretAsync(LINKEDIN_DEFAULT_ACCOUNT_KEY),
+  });
+}
+
+export function importLinkedInStoredAuth(
+  db: CuedDatabase,
+  options: {
+    reviveUserRemoved?: boolean;
+    /** The stored session, when the caller already read it (null: there is none). */
+    secret?: Record<string, unknown> | null;
+  } = {},
 ): ImportedLinkedInSessionResult[] {
   const accountKey = LINKEDIN_DEFAULT_ACCOUNT_KEY;
-  const secret = readLinkedInKeychainSecret(accountKey);
+  const secret =
+    options.secret === undefined ? readLinkedInKeychainSecret(accountKey) : options.secret;
   if (!secret) {
     return [];
   }

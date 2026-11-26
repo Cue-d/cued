@@ -2291,4 +2291,20 @@ export const MIGRATIONS: Migration[] = [
       PRIMARY KEY (platform, account_key, alias_source_key)
     );`,
   },
+  {
+    id: "0026_sync_run_errors_run_index",
+    apply: (db) => {
+      if (!tableExists(db, "sync_run_errors")) return;
+      // sync_run_errors.sync_run_id cascades from sync_runs. Without an index on the child
+      // column every deleted run scans the whole errors table, which turned removing one
+      // account with a long sync history into hours of blocked daemon.
+      db.exec(`
+        CREATE INDEX IF NOT EXISTS idx_sync_run_errors_sync_run_id
+        ON sync_run_errors(sync_run_id);
+
+        CREATE INDEX IF NOT EXISTS idx_sync_run_errors_platform_account_created
+        ON sync_run_errors(platform, account_key, created_at DESC);
+      `);
+    },
+  },
 ];

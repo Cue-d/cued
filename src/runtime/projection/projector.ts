@@ -2412,68 +2412,75 @@ function projectEventBatch(
   const projectionFailures: Array<{ event: RawEventRow; error: unknown }> = [];
 
   try {
-    db.orm().transaction((tx) => {
-      const projectedAt = Date.now();
-      if (input.clearState) {
-        clearProjectedState(tx);
-      }
-
-      for (const shapedEvent of shapedEvents) {
-        const eventOverlay = createProjectionCacheOverlay(cache);
-        const eventCache = eventOverlay.cache;
-        const eventChanges = createProjectionChangeSet();
-        tx.run(sql.raw(`SAVEPOINT projection_event_${shapedEvent.rawEvent.rowid}`));
-        try {
-          if (shapedEvent.entity_kind === "contact" && shapedEvent.event_kind === "aliased") {
-            projectWhatsAppIdentityAlias(tx, eventCache, eventChanges, shapedEvent);
-          } else {
-            shapedEvent.payload_json = canonicalizeWhatsAppPayload(
-              tx,
-              shapedEvent.platform,
-              shapedEvent.account_key,
-              shapedEvent.payload_json,
-            );
-            if (shapedEvent.entity_kind === "contact") {
-              projectContactObservation(tx, eventCache, eventChanges, shapedEvent);
-            } else if (shapedEvent.entity_kind === "conversation") {
-              projectConversationObservation(tx, eventCache, eventChanges, shapedEvent);
-            } else if (shapedEvent.entity_kind === "call") {
-              if (shapedEvent.event_kind === "deleted") {
-                projectCallDeleteEvent(tx, eventCache, eventChanges, shapedEvent);
-              } else {
-                projectCallEvent(tx, eventCache, eventChanges, shapedEvent);
-              }
-            } else if (shapedEvent.entity_kind === "message") {
-              projectMessageEvent(tx, eventCache, eventChanges, shapedEvent);
-            } else if (shapedEvent.entity_kind === "reaction") {
-              projectReactionEvent(tx, eventCache, eventChanges, shapedEvent);
-            } else if (shapedEvent.entity_kind === "participant") {
-              projectParticipantEvent(tx, eventCache, eventChanges, shapedEvent);
-            } else if (shapedEvent.entity_kind === "timeline_event") {
-              projectTimelineEvent(tx, eventCache, eventChanges, shapedEvent);
-            }
-          }
-          tx.run(sql.raw(`RELEASE projection_event_${shapedEvent.rawEvent.rowid}`));
-          eventOverlay.commit();
-          mergeProjectionChangeSet(changes, eventChanges);
-        } catch (error) {
-          tx.run(sql.raw(`ROLLBACK TO projection_event_${shapedEvent.rawEvent.rowid}`));
-          tx.run(sql.raw(`RELEASE projection_event_${shapedEvent.rawEvent.rowid}`));
-          projectionFailures.push({ event: shapedEvent.rawEvent, error });
+    // Take the write lock up front. A deferred transaction reads first and upgrades on its
+    // first write, and SQLite refuses that upgrade outright ("database is locked", no busy
+    // wait) if any other connection committed in between, which failed whole projection runs
+    // whenever the daemon wrote a heartbeat or a sync checkpoint at the wrong moment.
+    db.orm().transaction(
+      (tx) => {
+        const projectedAt = Date.now();
+        if (input.clearState) {
+          clearProjectedState(tx);
         }
-      }
 
-      finalizeDeferredProjection(tx, cache, changes, {
-        initialProjection: input.initialProjection,
-      });
-      if (input.projectionWatermark != null) {
-        upsertProjectionState(tx, {
-          projectionWatermark: input.projectionWatermark,
-          lastProjectedAt: projectedAt,
-          lastRebuildAt: input.lastRebuildAt,
+        for (const shapedEvent of shapedEvents) {
+          const eventOverlay = createProjectionCacheOverlay(cache);
+          const eventCache = eventOverlay.cache;
+          const eventChanges = createProjectionChangeSet();
+          tx.run(sql.raw(`SAVEPOINT projection_event_${shapedEvent.rawEvent.rowid}`));
+          try {
+            if (shapedEvent.entity_kind === "contact" && shapedEvent.event_kind === "aliased") {
+              projectWhatsAppIdentityAlias(tx, eventCache, eventChanges, shapedEvent);
+            } else {
+              shapedEvent.payload_json = canonicalizeWhatsAppPayload(
+                tx,
+                shapedEvent.platform,
+                shapedEvent.account_key,
+                shapedEvent.payload_json,
+              );
+              if (shapedEvent.entity_kind === "contact") {
+                projectContactObservation(tx, eventCache, eventChanges, shapedEvent);
+              } else if (shapedEvent.entity_kind === "conversation") {
+                projectConversationObservation(tx, eventCache, eventChanges, shapedEvent);
+              } else if (shapedEvent.entity_kind === "call") {
+                if (shapedEvent.event_kind === "deleted") {
+                  projectCallDeleteEvent(tx, eventCache, eventChanges, shapedEvent);
+                } else {
+                  projectCallEvent(tx, eventCache, eventChanges, shapedEvent);
+                }
+              } else if (shapedEvent.entity_kind === "message") {
+                projectMessageEvent(tx, eventCache, eventChanges, shapedEvent);
+              } else if (shapedEvent.entity_kind === "reaction") {
+                projectReactionEvent(tx, eventCache, eventChanges, shapedEvent);
+              } else if (shapedEvent.entity_kind === "participant") {
+                projectParticipantEvent(tx, eventCache, eventChanges, shapedEvent);
+              } else if (shapedEvent.entity_kind === "timeline_event") {
+                projectTimelineEvent(tx, eventCache, eventChanges, shapedEvent);
+              }
+            }
+            tx.run(sql.raw(`RELEASE projection_event_${shapedEvent.rawEvent.rowid}`));
+            eventOverlay.commit();
+            mergeProjectionChangeSet(changes, eventChanges);
+          } catch (error) {
+            tx.run(sql.raw(`ROLLBACK TO projection_event_${shapedEvent.rawEvent.rowid}`));
+            tx.run(sql.raw(`RELEASE projection_event_${shapedEvent.rawEvent.rowid}`));
+            projectionFailures.push({ event: shapedEvent.rawEvent, error });
+          }
+        }
+
+        finalizeDeferredProjection(tx, cache, changes, {
+          initialProjection: input.initialProjection,
         });
-      }
-    });
+        if (input.projectionWatermark != null) {
+          upsertProjectionState(tx, {
+            projectionWatermark: input.projectionWatermark,
+            lastProjectedAt: projectedAt,
+            lastRebuildAt: input.lastRebuildAt,
+          });
+        }
+      },
+      { behavior: "immediate" },
+    );
   } catch (error) {
     projectionCaches.delete(db);
     throw error;

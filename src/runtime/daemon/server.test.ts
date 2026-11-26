@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { AdapterWorkerError } from "../../platforms/core/runner.js";
 import {
   buildSyncResumeTargets,
@@ -6,7 +6,7 @@ import {
   getAdaptiveProjectionBatchSize,
   getAdaptiveProjectionContinueDelayMs,
   getAutoSyncTargets,
-  InteractiveAuthSessions,
+  insertRawEventsYielding,
   isAdapterAuthInvalidation,
   isDisconnectedSocketError,
   requestWhatsAppHistoryBackfillOnce,
@@ -259,63 +259,13 @@ describe("adaptive projection scheduling", () => {
     expect(getAdaptiveProjectionBatchSize(100_000)).toBe(2_000);
   });
 
-  it("caps adaptive batches during interactive auth", () => {
-    expect(getAdaptiveProjectionBatchSize(100_000, { maxBatchSize: 25 })).toBe(25);
-    expect(getAdaptiveProjectionBatchSize(1_000, { maxBatchSize: 25 })).toBe(25);
-    expect(getAdaptiveProjectionBatchSize(0, { maxBatchSize: 25 })).toBe(25);
-  });
-
-  it("removes continuation delay only while backlog is large", () => {
-    expect(getAdaptiveProjectionContinueDelayMs(999)).toBe(5_000);
+  it("delays continuation only for a trickle too small to justify a worker", () => {
+    expect(getAdaptiveProjectionContinueDelayMs(99)).toBe(5_000);
+    expect(getAdaptiveProjectionContinueDelayMs(100)).toBe(0);
+    expect(getAdaptiveProjectionContinueDelayMs(999)).toBe(0);
     expect(getAdaptiveProjectionContinueDelayMs(5_000)).toBe(0);
     expect(getAdaptiveProjectionContinueDelayMs(25_000)).toBe(0);
     expect(getAdaptiveProjectionContinueDelayMs(100_000)).toBe(0);
-  });
-});
-
-describe("interactive auth sessions", () => {
-  it("keeps interaction mode active when an unrelated session ends", () => {
-    const nowMs = 1_000;
-    const sessions = new InteractiveAuthSessions(() => nowMs);
-
-    expect(sessions.begin("screen-a", 30_000)).toEqual({
-      active: true,
-      expiresAt: 31_000,
-    });
-    expect(sessions.end("wrong")).toEqual({
-      active: true,
-      expiresAt: 31_000,
-    });
-    expect(sessions.end("screen-a")).toEqual({
-      active: false,
-      expiresAt: null,
-    });
-  });
-
-  it("expires interaction sessions by ttl", () => {
-    let nowMs = 1_000;
-    const sessions = new InteractiveAuthSessions(() => nowMs);
-
-    sessions.begin("screen-a", 30_000);
-    nowMs = 31_000;
-
-    expect(sessions.status()).toEqual({
-      active: false,
-      expiresAt: null,
-    });
-  });
-
-  it("tracks the latest expiry across overlapping sessions", () => {
-    const nowMs = 1_000;
-    const sessions = new InteractiveAuthSessions(() => nowMs);
-
-    sessions.begin("screen-a", 30_000);
-    sessions.begin("connect:slack:default", 45_000);
-
-    expect(sessions.end("screen-a")).toEqual({
-      active: true,
-      expiresAt: 46_000,
-    });
   });
 });
 
@@ -459,5 +409,62 @@ describe("WhatsApp history backfill", () => {
         error: "helper timed out",
       },
     });
+  });
+});
+
+describe("yielding raw event insert", () => {
+  it("inserts a bundle in slices, lets other work run between them, and merges the results", async () => {
+    const slices: number[] = [];
+    let nextRowId = 1;
+    let otherWorkRan = 0;
+    const db = {
+      insertRawEvents: (events: Array<{ id: string }>) => {
+        slices.push(events.length);
+        // Hold the thread long enough that the slice budget is spent after every call.
+        const until = performance.now() + 12;
+        while (performance.now() < until) {
+          // busy-wait
+        }
+        const insertedRows = events.map((event) => ({ rowId: nextRowId++, event }));
+        return {
+          insertedCount: events.length,
+          insertedEvents: events,
+          insertedRows,
+          firstInsertedRowId: insertedRows[0]?.rowId ?? null,
+          lastInsertedRowId: insertedRows[insertedRows.length - 1]?.rowId ?? null,
+        };
+      },
+    };
+    const events = Array.from({ length: 120 }, (_, index) => ({ id: `event-${index}` }));
+    const ticker = setInterval(() => {
+      otherWorkRan += 1;
+    }, 1);
+
+    const result = await insertRawEventsYielding(db as never, events as never);
+    clearInterval(ticker);
+
+    expect(slices).toEqual([50, 50, 20]);
+    expect(otherWorkRan).toBeGreaterThan(0);
+    expect(result).toEqual(
+      expect.objectContaining({
+        insertedCount: 120,
+        firstInsertedRowId: 1,
+        lastInsertedRowId: 120,
+      }),
+    );
+    expect(result.insertedRows).toHaveLength(120);
+  });
+
+  it("does nothing for an empty bundle", async () => {
+    const db = { insertRawEvents: vi.fn() };
+    const result = await insertRawEventsYielding(db as never, []);
+    expect(db.insertRawEvents).not.toHaveBeenCalled();
+    expect(result).toEqual(
+      expect.objectContaining({
+        insertedCount: 0,
+        firstInsertedRowId: null,
+        lastInsertedRowId: null,
+      }),
+    );
   });
 });

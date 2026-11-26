@@ -1,5 +1,8 @@
 export type DaemonRequest =
   | { id: string; command: "ping" }
+  // Keeps the connection open; the daemon then writes a DaemonEvent line whenever state the
+  // UI shows has changed, so clients re-read instead of polling.
+  | { id: string; command: "subscribe" }
   | { id: string; command: "status" }
   | { id: string; command: "doctor" }
   | { id: string; command: "telemetry-app-launched"; appVersion: string }
@@ -77,6 +80,14 @@ export type DaemonRequest =
     }
   | { id: string; command: "rebuild" }
   | { id: string; command: "reset"; source: string };
+
+export type DaemonEventTopic = "status" | "local-access" | "skill";
+
+/** Pushed, unrequested, on a subscribed connection. Distinguished from responses by `event`. */
+export type DaemonEvent = {
+  event: "changed";
+  topics: DaemonEventTopic[];
+};
 
 export type DaemonResponse = {
   id: string;

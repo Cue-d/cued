@@ -8,7 +8,7 @@ import {
 } from "../../../telemetry/context.js";
 import { inspectGoogleOAuthClientConfig } from "../../gmail/oauth/client.js";
 import {
-  importLinkedInStoredAuth,
+  importLinkedInStoredAuthAsync,
   validateLinkedInStoredAuth,
 } from "../../linkedin/auth/keychain-import.js";
 import { importSlackDesktopAuth } from "../../slack/auth/desktop-import.js";
@@ -64,7 +64,28 @@ function assertConnectPreflight(platform: string) {
 }
 
 export class IntegrationAuthService {
-  constructor(private readonly db: CuedDatabase) {}
+  constructor(
+    private readonly db: CuedDatabase,
+    private readonly options: {
+      /**
+       * A short-lived CLI process waits for telemetry so the event is not lost at exit. The
+       * daemon must not: awaiting a network round trip here delayed opening the sign-in
+       * window, and the first sync after sign-in, by however long the request took.
+       */
+      awaitTelemetry?: boolean;
+    } = {},
+  ) {}
+
+  private async telemetry(
+    ...args: Parameters<typeof sendTelemetryEventSafe> extends [CuedDatabase, ...infer Rest]
+      ? Rest
+      : never
+  ): Promise<void> {
+    const sent = sendTelemetryEventSafe(this.db, ...args);
+    if (this.options.awaitTelemetry ?? true) {
+      await sent;
+    }
+  }
 
   static usageText(): string {
     return `Usage: cued integrations list | status | capabilities | refresh | interaction start [--session-id <id>] [--ttl-ms <ms>] | interaction end [--session-id <id>] | connect <platform> [account] | disconnect <platform> [account] | remove <platform> [account] | enable <platform> [account] | disable <platform> [account]\nRequestable platforms: ${listRequestableIntegrationPlatforms().join(", ")}`;
@@ -96,8 +117,8 @@ export class IntegrationAuthService {
     return disconnectIntegration(this.db, platform, accountKey);
   }
 
-  remove(platform: string, accountKey?: string) {
-    return removeIntegration(this.db, platform, accountKey);
+  remove(platform: string, accountKey?: string, options?: { deferSyncRunHistory?: boolean }) {
+    return removeIntegration(this.db, platform, accountKey, options);
   }
 
   async connectLocally(
@@ -116,7 +137,7 @@ export class IntegrationAuthService {
 
     assertConnectPreflight(platform);
     const requested = connectIntegration(this.db, platform, accountKey);
-    await sendTelemetryEventSafe(this.db, "integration_setup_started", {
+    await this.telemetry("integration_setup_started", {
       component: "integration_auth",
       operation: "connect_local",
       stage: "start",
@@ -143,7 +164,7 @@ export class IntegrationAuthService {
         lifecycle,
       );
     } catch (error) {
-      await sendTelemetryEventSafe(this.db, "integration_setup_failed", {
+      await this.telemetry("integration_setup_failed", {
         component: "integration_auth",
         operation: "connect_local",
         stage: "runtime",
@@ -186,7 +207,7 @@ export class IntegrationAuthService {
 
     assertConnectPreflight(platform);
     const requested = connectIntegration(this.db, platform, accountKey);
-    await sendTelemetryEventSafe(this.db, "integration_setup_started", {
+    await this.telemetry("integration_setup_started", {
       component: "integration_auth",
       operation: "connect_managed",
       stage: "start",
@@ -226,7 +247,7 @@ export class IntegrationAuthService {
         lifecycle.onRuntimeStateChanged?.();
       })
       .catch(async (error) => {
-        await sendTelemetryEventSafe(this.db, "integration_setup_failed", {
+        await this.telemetry("integration_setup_failed", {
           component: "integration_auth",
           operation: "connect_managed",
           stage: "runtime",
@@ -339,7 +360,7 @@ export class IntegrationAuthService {
     const completed = completeAuthSession(this.db, sessionId, input);
     let integration = completed.integration;
     if (integration?.authState === "authenticated") {
-      await sendTelemetryEventSafe(this.db, "integration_setup_completed", {
+      await this.telemetry("integration_setup_completed", {
         component: "integration_auth",
         operation: "complete",
         stage: "authenticated",
@@ -351,7 +372,7 @@ export class IntegrationAuthService {
       completed.authSession?.state === "failed" ||
       completed.authSession?.state === "cancelled"
     ) {
-      await sendTelemetryEventSafe(this.db, "integration_setup_failed", {
+      await this.telemetry("integration_setup_failed", {
         component: "integration_auth",
         operation: "complete",
         stage: completed.authSession.state,
@@ -429,7 +450,7 @@ export class IntegrationAuthService {
         reconnectInvalidated: true,
       }).catch(() => []);
     } else {
-      importLinkedInStoredAuth(this.db, { reviveUserRemoved: true });
+      await importLinkedInStoredAuthAsync(this.db, { reviveUserRemoved: true });
     }
 
     const reusableAccountKey = slackPendingDiscoveryRequest ? undefined : accountKey;
