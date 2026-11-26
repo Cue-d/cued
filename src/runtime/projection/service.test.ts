@@ -77,6 +77,87 @@ describe("ProjectionMessageHookBarrier", () => {
     expect(emitted).toEqual(["first-a", "first-b", "second"]);
   });
 
+  it("releases a batch that two consecutive projection runs cover between them", async () => {
+    const barrier = new ProjectionMessageHookBarrier();
+    const emitted: string[] = [];
+    const emit = async (payload: Record<string, unknown>) => {
+      emitted.push(String(payload.id));
+    };
+
+    barrier.enqueue({ startRowId: 101, endRowId: 150 }, [{ id: "straddles" }]);
+    barrier.enqueue({ startRowId: 151, endRowId: 200 }, [{ id: "after" }]);
+
+    // The first run's limit falls in the middle of the batch.
+    await barrier.releaseCompletedRange({ startRowId: 1, endRowId: 120 }, emit);
+    expect(emitted).toEqual([]);
+    await barrier.releaseCompletedRange({ startRowId: 121, endRowId: 160 }, emit);
+    expect(emitted).toEqual(["straddles"]);
+    await barrier.releaseCompletedRange({ startRowId: 161, endRowId: 200 }, emit);
+    expect(emitted).toEqual(["straddles", "after"]);
+  });
+
+  it("does not release a batch when a run skips rows it has not covered", async () => {
+    const barrier = new ProjectionMessageHookBarrier();
+    const emitted: string[] = [];
+
+    barrier.enqueue({ startRowId: 101, endRowId: 150 }, [{ id: "gap" }]);
+    await barrier.releaseCompletedRange({ startRowId: 130, endRowId: 200 }, async (payload) => {
+      emitted.push(String(payload.id));
+    });
+    expect(emitted).toEqual([]);
+  });
+
+  it("emits each batch once when a second release arrives while a hook is running", async () => {
+    const barrier = new ProjectionMessageHookBarrier();
+    const emitted: string[] = [];
+    let finishFirstHook: () => void = () => undefined;
+    const firstHookRunning = new Promise<void>((resolve) => {
+      finishFirstHook = resolve;
+    });
+
+    barrier.enqueue({ startRowId: 101, endRowId: 101 }, [{ id: "first" }]);
+    const firstRelease = barrier.releaseCompletedRange(
+      { startRowId: 101, endRowId: 101 },
+      async (payload) => {
+        emitted.push(String(payload.id));
+        await firstHookRunning;
+      },
+    );
+
+    // A second message lands, and is released, while the first hook command is still running.
+    barrier.enqueue({ startRowId: 102, endRowId: 102 }, [{ id: "second" }]);
+    await barrier.releaseCompletedRange({ startRowId: 102, endRowId: 102 }, async (payload) => {
+      emitted.push(String(payload.id));
+    });
+    barrier.enqueue({ startRowId: 103, endRowId: 103 }, [{ id: "queued-meanwhile" }]);
+    finishFirstHook();
+    await firstRelease;
+
+    expect(emitted).toEqual(["first", "second"]);
+    // What was queued while the first release was emitting is still there to be released.
+    await barrier.releaseCompletedRange({ startRowId: 103, endRowId: 103 }, async (payload) => {
+      emitted.push(String(payload.id));
+    });
+    expect(emitted).toEqual(["first", "second", "queued-meanwhile"]);
+  });
+
+  it("discards queued payloads that match and keeps the rest", async () => {
+    const barrier = new ProjectionMessageHookBarrier();
+    const emitted: string[] = [];
+
+    barrier.enqueue({ startRowId: 1, endRowId: 2 }, [
+      { id: "slack-a", platform: "slack" },
+      { id: "gmail-a", platform: "gmail" },
+    ]);
+    barrier.enqueue({ startRowId: 3, endRowId: 3 }, [{ id: "slack-b", platform: "slack" }]);
+    barrier.discard((payload) => payload.platform === "slack");
+
+    await barrier.releaseAll(async (payload) => {
+      emitted.push(String(payload.id));
+    });
+    expect(emitted).toEqual(["gmail-a"]);
+  });
+
   it("flushes all pending batches in row order", async () => {
     const barrier = new ProjectionMessageHookBarrier();
     const emitted: string[] = [];

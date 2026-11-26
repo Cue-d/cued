@@ -84,7 +84,10 @@ import {
   SignalRealtimeSupervisor,
 } from "../../platforms/signal/realtime/session.js";
 import { buildSignalRawEventsFromMessages } from "../../platforms/signal/sync/events.js";
-import { inspectSlackHelper } from "../../platforms/slack/helper/binary.js";
+import {
+  inspectSlackHelper,
+  warmSlackHelperInspection,
+} from "../../platforms/slack/helper/binary.js";
 import {
   type SlackRealtimeEventEnvelope,
   type SlackRealtimeStatus,
@@ -99,6 +102,7 @@ import {
   getWhatsAppStoreDir,
   inspectWhatsAppHelper,
 } from "../../platforms/whatsapp/helper/binary.js";
+import { warmWhatsAppHelperInspection } from "../../platforms/whatsapp/helper/pair.js";
 import { readWhatsAppHelperStatus } from "../../platforms/whatsapp/helper/status.js";
 import {
   type WhatsAppRealtimeStatus,
@@ -798,6 +802,16 @@ function mergeRawEventInsertResults(
 export async function insertRawEventsYielding(
   db: Pick<CuedDatabase, "insertRawEvents">,
   events: ProviderRawEventInput[],
+  hooks: {
+    /** Checked after every yield: the world may have changed while other work ran. */
+    assertStillWanted?: () => void;
+    /**
+     * Called in the same turn as each insert, before anything else can run. Whatever must be
+     * in place before another reader sees those rows (message-hook registration, which has
+     * to precede any projection of them) belongs here, not after the whole bundle.
+     */
+    onInserted?: (inserted: RawEventInsertResult) => void;
+  } = {},
 ): Promise<RawEventInsertResult> {
   let result = EMPTY_RAW_EVENT_INSERT_RESULT;
   let offset = 0;
@@ -806,16 +820,30 @@ export async function insertRawEventsYielding(
     do {
       const slice = events.slice(offset, offset + INGEST_INSERT_SLICE_EVENTS);
       offset += slice.length;
-      result = mergeRawEventInsertResults(result, db.insertRawEvents(slice));
+      const inserted = db.insertRawEvents(slice);
+      hooks.onInserted?.(inserted);
+      result = mergeRawEventInsertResults(result, inserted);
     } while (
       offset < events.length &&
       performance.now() - sliceStartedAt < INGEST_INSERT_SLICE_BUDGET_MS
     );
     if (offset < events.length) {
       await new Promise<void>((resolve) => setImmediate(resolve));
+      hooks.assertStillWanted?.();
     }
   }
   return result;
+}
+
+/**
+ * The run this ingest belongs to no longer exists or is no longer ours: the source was reset,
+ * or the lease was reclaimed. Whatever it fetched must not be recorded as progress.
+ */
+export class IngestRunSupersededError extends Error {
+  constructor(runId: string) {
+    super(`Ingest run ${runId} was superseded`);
+    this.name = "IngestRunSupersededError";
+  }
 }
 
 function resolveCliEntrypoint(): string {
@@ -1739,7 +1767,6 @@ export async function runDaemon(): Promise<void> {
     slowSectionMs: positiveEnvNumber("CUED_STALL_SECTION_MS"),
     reportIntervalMs: positiveEnvNumber("CUED_STALL_REPORT_INTERVAL_MS"),
   });
-  stallMonitor.start();
   const telemetry = new DaemonTelemetryQueue(db);
   const startedAt = now();
   const runOwnerId = `daemon:${process.pid}:${startedAt}`;
@@ -3608,6 +3635,9 @@ export async function runDaemon(): Promise<void> {
   };
   const runBootstrap = async () => {
     try {
+      // Status and capability checks read each helper's version synchronously. Look them up
+      // here, without blocking, so those reads never have to spawn anything.
+      await Promise.all([warmSlackHelperInspection(), warmWhatsAppHelperInspection()]);
       const { localIntegrationStates } = await readModel.refreshLocalAccess({ maxAgeMs: 0 });
       try {
         await refreshManagedIntegrationStates(db, { localIntegrationStates });
@@ -3630,6 +3660,14 @@ export async function runDaemon(): Promise<void> {
       }
       scheduleUpdateCheck(false);
       completeBootstrap("ready");
+      // Build one snapshot now, so the first one a client asks for is not the one that pays
+      // for cold code paths and first-time file reads.
+      void buildOnboardingSnapshot(db, {
+        installGlobalSkill: false,
+        globalSkillMonitor: readModel.skill,
+        localAccess: readModel.localAccess ?? undefined,
+        aggregates: readModel.aggregates ?? undefined,
+      }).catch(() => undefined);
     } catch (error) {
       daemonLogger.warn("daemon bootstrap failed", error);
       completeBootstrap("failed", error);
@@ -3643,6 +3681,29 @@ export async function runDaemon(): Promise<void> {
     const sleepWatch = setInterval(() => sleepDetector.check(), 1_000);
     const ingestStartedAt = now();
     const runClaim = { ownerId: currentRun.owner_id, attempt: currentRun.attempt };
+    const assertRunStillOwned = () => {
+      if (!db.updateRunProgress(currentRun.id, { leaseMs: INGEST_RUN_LEASE_MS, claim: runClaim })) {
+        throw new IngestRunSupersededError(currentRun.id);
+      }
+    };
+    const ingestInsertHooks = {
+      assertStillWanted: assertRunStillOwned,
+      // Register message hooks as each slice lands. Inserting yields between slices, and a
+      // projection run that starts meanwhile must find the hooks for the rows it covers.
+      onInserted: (inserted: RawEventInsertResult) => {
+        if (inserted.firstInsertedRowId == null || inserted.lastInsertedRowId == null) {
+          return;
+        }
+        queueMessageReceivedHooks(
+          { startRowId: inserted.firstInsertedRowId, endRowId: inserted.lastInsertedRowId },
+          collectInboundMessageHookPayloads(
+            currentRun.id,
+            inserted.insertedRows,
+            isInboundMessageEvent,
+          ),
+        );
+      },
+    };
     daemonLogger.info("ingest run started", {
       runId: currentRun.id,
       platform: currentRun.platform,
@@ -3811,13 +3872,18 @@ export async function runDaemon(): Promise<void> {
         let hasMore = false;
         let lastCompletedAt = now();
         do {
-          db.updateRunProgress(currentRun.id, { leaseMs: INGEST_RUN_LEASE_MS, claim: runClaim });
+          // Checked on both sides of the fetch: before, so a reset or reclaimed run stops asking
+          // for pages; after, because the helper can take a while and everything below (rows,
+          // proof, cursor) would otherwise be written back over what the reset just deleted.
+          // Each check also renews the lease.
+          assertRunStillOwned();
           const pageFetchStartedAt = now();
           const page = await session.resync({
             cursor,
             sinceMs,
             limit: 1000,
           });
+          assertRunStillOwned();
           adapterFetchMs += now() - pageFetchStartedAt;
           pageCount += 1;
           const pageCoverage = summarizeWhatsAppMessageCoverage(page.messages ?? []);
@@ -3843,9 +3909,9 @@ export async function runDaemon(): Promise<void> {
           cursor = page.nextCursor ?? null;
 
           const pageInsertStartedAt = now();
-          const pageInsertResult = await insertRawEventsYielding(db, rawEvents);
+          const pageInsertResult = await insertRawEventsYielding(db, rawEvents, ingestInsertHooks);
           rawEventInsertMs += now() - pageInsertStartedAt;
-          db.updateRunProgress(currentRun.id, { leaseMs: INGEST_RUN_LEASE_MS, claim: runClaim });
+          assertRunStillOwned();
           insertResult = mergeRawEventInsertResults(insertResult, pageInsertResult);
         } while (hasMore && pageCount < pageBudget);
 
@@ -3907,7 +3973,9 @@ export async function runDaemon(): Promise<void> {
               )
             : await runAdapter(platform, accountKey, envOverrides);
         adapterFetchMs = now() - adapterStartedAt;
-        db.updateRunProgress(currentRun.id, { leaseMs: INGEST_RUN_LEASE_MS, claim: runClaim });
+        // The fetch can take a long time. If the source was reset or the run reclaimed while it
+        // ran, recording this bundle and its cursor would skip whatever was deleted.
+        assertRunStillOwned();
         sourceAccounts = bundle.sourceAccounts as typeof sourceAccounts;
         bundleSourceCursor =
           (bundle.sourceCursor as Record<string, unknown> | undefined | null) ?? null;
@@ -3923,6 +3991,7 @@ export async function runDaemon(): Promise<void> {
         insertResult = await insertRawEventsYielding(
           db,
           withRawEventAcquisitionMode(bundle.rawEvents, "sync"),
+          ingestInsertHooks,
         );
         rawEventInsertMs = now() - rawEventInsertStartedAt;
         const bundleProofs = Array.isArray(bundle.proofs) ? bundle.proofs : [];
@@ -3974,20 +4043,6 @@ export async function runDaemon(): Promise<void> {
         scheduleSearchIndexDrain();
       }
       const afterRealtimeProjection = now();
-      const inboundMessages = collectInboundMessageHookPayloads(
-        currentRun.id,
-        insertResult.insertedRows,
-        isInboundMessageEvent,
-      );
-      queueMessageReceivedHooks(
-        insertResult.firstInsertedRowId != null && insertResult.lastInsertedRowId != null
-          ? {
-              startRowId: insertResult.firstInsertedRowId,
-              endRowId: insertResult.lastInsertedRowId,
-            }
-          : null,
-        inboundMessages,
-      );
       const projection = db.getProjectionBacklog();
       const checkpointSyncMode = resolveCheckpointSyncMode(
         currentRun.run_type,
@@ -4127,6 +4182,14 @@ export async function runDaemon(): Promise<void> {
         ...(runDiagnostics ? { diagnostics: runDiagnostics } : {}),
       });
     } catch (error) {
+      if (error instanceof IngestRunSupersededError) {
+        daemonLogger.info("ingest run abandoned after losing its claim", {
+          runId: currentRun.id,
+          platform: currentRun.platform,
+          accountKey: currentRun.account_key,
+        });
+        return;
+      }
       if (error instanceof SyncInterruptedBySleep || sleepDetector.check()) {
         db.deferRun(currentRun.id, now() + 10_000, runClaim);
         daemonLogger.info("ingest run deferred after sleep", {
@@ -4457,6 +4520,11 @@ export async function runDaemon(): Promise<void> {
     noteForegroundRequest: () => {
       lastForegroundRequestAt = now();
     },
+    discardMessageHooksForPlatform: (platform) => {
+      projectionMessageHooks.discard(
+        (payload) => (payload.message as { platform?: unknown } | undefined)?.platform === platform,
+      );
+    },
   };
   const server = createServer((socket) => {
     handleSocket(socket, requestContext);
@@ -4469,6 +4537,9 @@ export async function runDaemon(): Promise<void> {
       resolve();
     });
   });
+  // Watch for stalls from the moment requests can arrive. Opening the database and running
+  // migrations before this point is synchronous by design, and nobody is waiting on it.
+  stallMonitor.start();
   scheduleIngestDrain();
   scheduleProjectionDrain();
   scheduleSearchIndexDrain();
@@ -4692,6 +4763,8 @@ type DaemonRequestContext = {
   refreshManagedIntegrationsInBackground: (reason: string) => void;
   stallMonitor: StallMonitor;
   noteForegroundRequest: () => void;
+  /** Drops message hooks still waiting on projection for a platform whose rows are gone. */
+  discardMessageHooksForPlatform: (platform: string) => void;
 };
 
 function handleSocket(socket: Socket, context: DaemonRequestContext): void {
@@ -5259,18 +5332,21 @@ async function dispatchRequest(
           ok: true,
           result: runQueueService.queueRebuild(),
         };
-      case "reset":
-        return {
-          id: request.id,
-          ok: true,
-          result: runQueueService.resetSource(request.source),
-        };
+      case "reset": {
+        const result = runQueueService.resetSource(request.source);
+        // The reset deleted the rows these hooks were waiting on. Left queued, the next full
+        // rebuild would announce messages that are no longer in the database.
+        context.discardMessageHooksForPlatform(result.source);
+        return { id: request.id, ok: true, result };
+      }
       case "subscribe":
         // handleSocket answers this itself: a subscription belongs to the connection.
         return { id: request.id, ok: false, error: "subscribe is handled per connection" };
       default:
         return {
-          id: request satisfies never,
+          // `request` is `never` here only for the compiler: an unknown command from a newer
+          // or older client still needs its own id echoed, or it can never match the reply.
+          id: (request satisfies never as { id?: unknown }).id?.toString() ?? "unknown",
           ok: false,
           error: "Unsupported command",
         };

@@ -1,8 +1,9 @@
-import { execFile, execFileSync } from "node:child_process";
+import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
+import { readHelperVersionOutput, warmHelperVersionOutput } from "../../core/helper-version.js";
 
 const execFileAsync = promisify(execFile);
 const SLACK_HELPER_BINARY_NAME = "cued-slack-helper";
@@ -76,10 +77,10 @@ export function inspectSlackHelper(): SlackHelperInspection {
   }
 
   try {
-    const stdout = execFileSync(helperPath, ["version"], {
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "pipe"],
-    });
+    const stdout = readHelperVersionOutput(helperPath);
+    if (stdout == null) {
+      throw new Error("Slack helper did not report a version");
+    }
     const parsed = JSON.parse(stdout) as { version?: unknown; protocolVersion?: unknown };
     const version = typeof parsed.version === "string" ? parsed.version : null;
     const protocolVersion =
@@ -98,6 +99,11 @@ export function inspectSlackHelper(): SlackHelperInspection {
       versionSupported: false,
     };
   }
+}
+
+/** Has the answer `inspectSlackHelper` needs ready before anything asks synchronously. */
+export function warmSlackHelperInspection(): Promise<void> {
+  return warmHelperVersionOutput(resolveSlackHelperBinary());
 }
 
 export async function readSlackHelperStatus(): Promise<SlackHelperStatus> {

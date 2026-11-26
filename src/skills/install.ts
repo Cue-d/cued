@@ -269,7 +269,7 @@ function listedSkillStatus(
 
 function unverifiedSkillStatus(
   sourcePath: string,
-  npxPath: string,
+  npxPath: string | null,
   error: unknown,
 ): GlobalCuedSkillStatusResult {
   const formatted = formatInstallError(error);
@@ -380,7 +380,10 @@ export class GlobalCuedSkillMonitor {
       return;
     }
     this.lastRefreshStartedAt = nowMs;
+    // Nothing awaits this promise, so nothing in it may reject: an unhandled rejection takes
+    // the whole daemon down. Any failure becomes an "unknown" status instead.
     this.refreshing = this.verify(sourcePath, ensureInstalled)
+      .catch((error) => unverifiedSkillStatus(sourcePath, null, error))
       .then((status) => {
         const changed = JSON.stringify(status) !== JSON.stringify(this.cached);
         this.cached = status;
@@ -388,6 +391,7 @@ export class GlobalCuedSkillMonitor {
           this.options.onChange?.(status);
         }
       })
+      .catch(() => undefined)
       .finally(() => {
         this.refreshing = null;
       });

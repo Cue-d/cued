@@ -56,6 +56,24 @@ describe("database worker", () => {
     }
   });
 
+  it("returns BLOB columns in the shape JSON gives a Buffer", async () => {
+    const db = createDb();
+    try {
+      const [row] = await new InlineDbWorker(db).run("sql", "SELECT x'0102' AS bytes, 'a' AS text");
+      // A worker thread hands back a plain typed array, which would serialize as
+      // {"0":1,"1":2}; the job converts it first so `cued sql` output does not change.
+      expect(JSON.parse(JSON.stringify(row))).toEqual({
+        bytes: { type: "Buffer", data: [1, 2] },
+        text: "a",
+      });
+      expect(JSON.stringify(row)).toBe(
+        JSON.stringify(db.executeReadOnlySql("SELECT x'0102' AS bytes, 'a' AS text")[0]),
+      );
+    } finally {
+      db.close();
+    }
+  });
+
   it("falls back to inline, and stays there, when the worker thread cannot run", async () => {
     const db = createDb();
     try {

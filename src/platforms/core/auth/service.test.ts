@@ -330,6 +330,42 @@ describe("IntegrationAuthService", () => {
     db.close();
   });
 
+  it("launches one sign-in when the same connect is requested twice while the first is pending", async () => {
+    const db = createDb();
+    // Looking for reusable desktop auth takes a while; a second request arrives meanwhile.
+    let finishImport: (value: unknown[]) => void = () => undefined;
+    importSlackDesktopAuthMock.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finishImport = resolve;
+        }),
+    );
+    const activeAuthSessions = new Map<
+      string,
+      { child: ChildProcess; platform: "slack"; accountKey: string }
+    >();
+
+    const first = new IntegrationAuthService(db).connectManaged(
+      "slack",
+      "pending-slack-new",
+      activeAuthSessions,
+    );
+    const second = new IntegrationAuthService(db).connectManaged(
+      "slack",
+      "pending-slack-new",
+      activeAuthSessions,
+    );
+    finishImport([]);
+    const [firstResult, secondResult] = await Promise.all([first, second]);
+
+    expect(startAuthSessionMock).toHaveBeenCalledTimes(1);
+    expect(importSlackDesktopAuthMock).toHaveBeenCalledTimes(1);
+    expect(secondResult.authSession?.id).toBe(firstResult.authSession?.id);
+    expect(db.listAuthSessions(10)).toHaveLength(1);
+
+    db.close();
+  });
+
   it("reuses slack pending discovery only when desktop import authenticates a new workspace", async () => {
     const db = createDb();
     upsertAuthenticatedSlack(db, "T_EXISTING", "Existing");

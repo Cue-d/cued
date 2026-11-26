@@ -140,6 +140,31 @@ describe("sync run history", () => {
     }
   });
 
+  it("stops keeping a latest run for an account the user removed", () => {
+    const db = createDb();
+    try {
+      registerAccount(db, "slack", "T1");
+      insertRun(db, { id: "removed-latest", status: "completed", ageDays: 30, withError: true });
+      expect(db.pruneSyncRunHistory({ limit: 100, nowMs: NOW })).toBe(0);
+
+      // Removal leaves the integration row behind as a tombstone.
+      db.upsertIntegrationState({
+        platform: "slack",
+        accountKey: "T1",
+        authState: "cancelled",
+        enabled: false,
+        connectionKind: "browser-session",
+        metadata: { userRemoved: true },
+      });
+      // If the background purge never ran (the daemon restarted), retention finishes the job.
+      expect(db.pruneSyncRunHistory({ limit: 100, nowMs: NOW })).toBe(1);
+      expect(runIds(db)).toEqual([]);
+      expect(errorRunIds(db)).toEqual([]);
+    } finally {
+      db.close();
+    }
+  });
+
   it("prunes in bounded batches, oldest first", () => {
     const db = createDb();
     try {

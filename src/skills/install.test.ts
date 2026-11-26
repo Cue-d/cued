@@ -286,6 +286,26 @@ describe("global skill monitor", () => {
     expect(monitor.status()).toEqual(expect.objectContaining({ installed: true }));
   });
 
+  it("reports an unknown status, and does not reject, when verification itself throws", async () => {
+    execFileAsyncMock.mockRejectedValue(new Error("spawn failed"));
+    // A file where the NVM versions directory should be: listing it throws.
+    const home = createHome({ installed: false });
+    mkdirSync(join(home, ".nvm", "versions"), { recursive: true });
+    writeFileSync(join(home, ".nvm", "versions", "node"), "not a directory");
+    vi.mocked(homedir).mockReturnValue(home);
+    const changes: Array<{ status: string }> = [];
+    const monitor = new GlobalCuedSkillMonitor({
+      home,
+      onChange: (status) => changes.push(status),
+    });
+
+    monitor.status();
+    // Nothing awaits the background check; a rejection here would be unhandled and fatal.
+    await expect(monitor.settled()).resolves.toBeUndefined();
+    expect(monitor.status().installed).toBe(false);
+    expect(changes.every((status) => status.status !== "installed")).toBe(true);
+  });
+
   it("does not launch a second verification while the last one is recent", async () => {
     stubNpx(() => NOT_LISTED);
     const monitor = new GlobalCuedSkillMonitor({ home: createHome({ installed: false }) });
