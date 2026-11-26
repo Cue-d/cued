@@ -24,10 +24,11 @@ import {
   mkdtempSync,
   readFileSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from "node:fs";
 import { createConnection, type Socket } from "node:net";
-import { tmpdir } from "node:os";
+import { tmpdir, userInfo } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { performance } from "node:perf_hooks";
 import { fileURLToPath } from "node:url";
@@ -581,6 +582,16 @@ async function snapshotDatabase(
     for (const target of targets) {
       detach.run(target.platform, target.accountKey);
     }
+    // Work that was queued or running when the copy was taken must not run here: the daemon
+    // would drain it at startup and sync from the live sources.
+    copy
+      .prepare(
+        `UPDATE sync_runs
+         SET status = 'failed', finished_at = ?, owner_id = NULL, lease_expires_at = NULL,
+             error_code = 'benchmark_copy'
+         WHERE status IN ('queued', 'ingesting', 'projecting')`,
+      )
+      .run(Date.now());
     // The copy must not report itself as the real install.
     copy
       .prepare(
@@ -606,8 +617,22 @@ function readStallReports(daemonLogPath: string): string[] {
     .map((line) => `  ${line.slice(0, 320)}`);
 }
 
+/**
+ * The fixture cache lives under the temp directory, which other users can write to on some
+ * systems. Keep it in a directory only this user owns, and refuse one that is not.
+ */
+function privateFixtureRoot(): string {
+  const root = join(tmpdir(), `cued-perf-fixture-${userInfo().uid}`);
+  mkdirSync(root, { recursive: true, mode: 0o700 });
+  const stat = statSync(root);
+  if (stat.uid !== userInfo().uid || (stat.mode & 0o022) !== 0) {
+    throw new Error(`Refusing to use fixture cache ${root}: not private to this user`);
+  }
+  return root;
+}
+
 async function ensureFixture(scale: number): Promise<string> {
-  const fixtureDir = join(tmpdir(), "cued-perf-fixture", `v${FIXTURE_VERSION}-scale${scale}`);
+  const fixtureDir = join(privateFixtureRoot(), `v${FIXTURE_VERSION}-scale${scale}`);
   const dbPath = join(fixtureDir, "local.db");
   const readyMarker = join(fixtureDir, "ready");
   if (existsSync(readyMarker) && existsSync(dbPath)) {
@@ -695,20 +720,30 @@ class StallProbe {
   private running = true;
   private readonly loop: Promise<void>;
   private sampleWaiters: Array<() => void> = [];
+  private pingStartedAt: number | null = null;
+  /** Set once the daemon has gone a full timeout without answering, or hung up. */
+  unresponsive = false;
 
-  constructor(private readonly connection: DaemonConnection) {
+  constructor(
+    private readonly connection: DaemonConnection,
+    private readonly sampleTimeoutMs: number,
+  ) {
     this.loop = this.run();
   }
 
   private async run(): Promise<void> {
     while (this.running) {
-      const startedAt = performance.now();
+      this.pingStartedAt = performance.now();
       try {
         await this.connection.request("ping");
       } catch {
+        // The daemon hung up. There will be no more samples; nobody should wait for one.
+        this.unresponsive = this.running;
+        this.running = false;
         break;
       }
-      this.samples.push(performance.now() - startedAt);
+      this.samples.push(performance.now() - this.pingStartedAt);
+      this.pingStartedAt = null;
       this.releaseWaiters();
       await sleep(2);
     }
@@ -729,7 +764,17 @@ class StallProbe {
    */
   async take(): Promise<Stats> {
     if (this.running) {
-      await new Promise<void>((resolveSample) => this.sampleWaiters.push(resolveSample));
+      const landed = await withTimeout(
+        new Promise<void>((resolveSample) => this.sampleWaiters.push(resolveSample)),
+        this.sampleTimeoutMs,
+      );
+      if (landed === "timeout") {
+        // Still no pong: the stall is at least this long, and the run cannot go on.
+        this.unresponsive = true;
+        if (this.pingStartedAt != null) {
+          this.samples.push(performance.now() - this.pingStartedAt);
+        }
+      }
     }
     const stats = summarize(this.samples);
     this.samples = [];
@@ -886,6 +931,8 @@ async function main(): Promise<void> {
     contactsJsonPath,
     JSON.stringify(
       Array.from({ length: SYNC_CONTACT_COUNT }, (_, index) => ({
+        // Without a source id every contact projects onto the same identity.
+        sourceId: `perf-sync-contact-${index}`,
         displayName: `Perf Sync Contact ${index}`,
         company: "Cued",
         phoneNumbers: [`+1415${String(5_550_000 + index).padStart(7, "0")}`],
@@ -900,6 +947,9 @@ async function main(): Promise<void> {
     // Synthetic address book; the real one is never read.
     CUED_CONTACTS_JSON_PATH: contactsJsonPath,
     CUED_IMESSAGE_DB_PATH: join(home, "disabled", "chat.db"),
+    // An inherited CUED_SIGNAL_DIR would otherwise win over the benchmark home, and removing
+    // a Signal account in --db mode would delete the real account directory.
+    CUED_SIGNAL_DIR: join(home, "integrations", "signal"),
     // Sign-in is launched for real, but against a browser that does not exist: the daemon's
     // part (everything up to spawning the sign-in process) is measured and no window opens.
     CUED_CHROMIUM_EXECUTABLE_PATH: join(home, "disabled", "chromium"),
@@ -930,7 +980,7 @@ async function main(): Promise<void> {
     startupMs = await waitForDaemon(socketPath, child);
     const probeConnection = await DaemonConnection.connect(socketPath);
     const requestConnection = await DaemonConnection.connect(socketPath);
-    const probe = new StallProbe(probeConnection);
+    const probe = new StallProbe(probeConnection, options.requestTimeoutMs);
 
     const measure = async (
       name: string,
@@ -968,11 +1018,16 @@ async function main(): Promise<void> {
         }
         aborted = true;
       }
+      // A timed-out daemon never answers the in-flight ping; do not wait on it.
+      const stall = timedOut ? summarize([options.requestTimeoutMs]) : await probe.take();
+      if (probe.unresponsive) {
+        timedOut = true;
+        aborted = true;
+      }
       results.push({
         name,
         roundTrip: latencies.length > 0 ? summarize(latencies) : null,
-        // A timed-out daemon never answers the in-flight ping; do not wait on it.
-        stall: timedOut ? summarize([options.requestTimeoutMs]) : await probe.take(),
+        stall,
         timedOut,
         gated: scenarioOptions.gated ?? true,
         roundTripGated: scenarioOptions.roundTripGated ?? true,
@@ -981,8 +1036,9 @@ async function main(): Promise<void> {
 
     await measure("startup settle (5s)", async () => sleep(5_000));
     await measure("idle (3s)", async () => sleep(3_000));
-    await measure("onboarding snapshot x20", async (request) => {
-      for (let index = 0; index < 20; index += 1) {
+    // Enough samples that p95 is a percentile rather than the single slowest request.
+    await measure("onboarding snapshot x100", async (request) => {
+      for (let index = 0; index < 100; index += 1) {
         await request("onboarding-snapshot");
       }
     });
@@ -1018,34 +1074,49 @@ async function main(): Promise<void> {
 
     // How long after a mutation a subscribed UI learns it should re-read. Builds that predate
     // subscriptions reject the command; the UI then had to poll, so there is nothing to time.
-    const subscriber = await DaemonConnection.connect(socketPath);
-    const subscribed = await withTimeout(subscriber.request("subscribe"), 2_000);
-    if (subscribed !== "timeout" && subscribed.ok && !aborted) {
-      await sleep(200);
+    if (!aborted) {
+      const subscriber = await DaemonConnection.connect(socketPath);
       await probe.take();
+      const subscribed = await withTimeout(subscriber.request("subscribe"), 2_000);
       const notifyLatencies: number[] = [];
-      for (let index = 0; index < 10; index += 1) {
-        const notified = subscriber.nextEvent();
-        const startedAt = performance.now();
-        await requestConnection.request(
-          index % 2 === 0 ? "integrations-disable" : "integrations-enable",
-          options.toggleTarget,
-        );
-        if ((await withTimeout(notified, 5_000)) !== "timeout") {
-          notifyLatencies.push(performance.now() - startedAt);
+      // Only an explicit refusal means "this build cannot push"; silence is a failure.
+      const supported = subscribed === "timeout" || subscribed.ok;
+      if (subscribed !== "timeout" && subscribed.ok) {
+        await sleep(200);
+        for (let index = 0; index < 10; index += 1) {
+          const notified = subscriber.nextEvent();
+          const startedAt = performance.now();
+          const changed = await withTimeout(
+            requestConnection.request(
+              index % 2 === 0 ? "integrations-disable" : "integrations-enable",
+              options.toggleTarget,
+            ),
+            options.requestTimeoutMs,
+          );
+          if (changed === "timeout") {
+            aborted = true;
+            break;
+          }
+          if ((await withTimeout(notified, 5_000)) !== "timeout") {
+            notifyLatencies.push(performance.now() - startedAt);
+          }
+          await sleep(50);
         }
-        await sleep(50);
       }
-      results.push({
-        name: "change notification x10",
-        roundTrip: summarize(notifyLatencies),
-        stall: await probe.take(),
-        timedOut: notifyLatencies.length < 10,
-        gated: true,
-        roundTripGated: true,
-      });
+      if (supported) {
+        const stall = await probe.take();
+        aborted ||= probe.unresponsive;
+        results.push({
+          name: "change notification x10",
+          roundTrip: notifyLatencies.length > 0 ? summarize(notifyLatencies) : null,
+          stall,
+          timedOut: notifyLatencies.length < 10,
+          gated: true,
+          roundTripGated: true,
+        });
+      }
+      subscriber.close();
     }
-    subscriber.close();
 
     if (!aborted) {
       const spawnSamples: number[] = [];
@@ -1091,13 +1162,19 @@ async function main(): Promise<void> {
           const deadline = performance.now() + 120_000;
           while (performance.now() < deadline) {
             await sleep(250);
-            const response = await requestConnection.request("sql", {
-              query: `SELECT
+            const response = await withTimeout(
+              requestConnection.request("sql", {
+                query: `SELECT
               (SELECT COUNT(*) FROM sync_runs WHERE status IN ('queued', 'ingesting', 'projecting')) AS active,
               (SELECT COALESCE(MAX(rowid), 0) FROM raw_events)
                 - (SELECT projection_watermark FROM projection_state) AS pending,
               (SELECT COUNT(*) FROM raw_events WHERE platform = 'contacts') AS ingested`,
-            });
+              }),
+              10_000,
+            );
+            if (response === "timeout") {
+              continue;
+            }
             const row = (response.result as Array<Record<string, number>> | undefined)?.[0];
             if (row && row.active === 0 && row.pending <= 0 && (row.ingested ?? 0) > 0) {
               return;
