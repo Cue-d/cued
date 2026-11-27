@@ -119,6 +119,42 @@ if find "$RUNTIME_PATH/dist" -type f \( -name '*.test.js' -o -name '*.js.map' \)
   exit 1
 fi
 
+# The runtime is bundled (scripts/bundle-cued-runtime.mjs): every process or thread entry
+# point must exist at the path code starts it from, and node_modules holds only the packages
+# that cannot be bundled.
+entry_points="$(CUED_RUNTIME_BUNDLER="$ROOT_DIR/scripts/bundle-cued-runtime.mjs" node --input-type=module -e '
+  // A file URL, so a checkout path containing "#" or "?" is not read as a fragment or query.
+  import { pathToFileURL } from "node:url";
+  const { RUNTIME_ENTRY_POINTS } = await import(pathToFileURL(process.env.CUED_RUNTIME_BUNDLER).href);
+  for (const entry of RUNTIME_ENTRY_POINTS) console.log(entry.replace(/\.ts$/, ".js"));
+')"
+if [[ -z "$entry_points" ]]; then
+  echo "Could not read the runtime entry points from scripts/bundle-cued-runtime.mjs" >&2
+  exit 1
+fi
+while IFS= read -r entry_point; do
+  if [[ ! -f "$RUNTIME_PATH/dist/$entry_point" ]]; then
+    echo "Bundled runtime is missing entry point dist/$entry_point" >&2
+    exit 1
+  fi
+done <<< "$entry_points"
+
+shipped_packages="$(cd "$RUNTIME_PATH/node_modules" && find . -mindepth 1 -maxdepth 1 | sed 's|^\./||' | sort | tr '\n' ' ')"
+if [[ "$shipped_packages" != "better-sqlite3-multiple-ciphers bindings file-uri-to-path playwright-core " ]]; then
+  echo "Unexpected packages in bundled node_modules: $shipped_packages" >&2
+  exit 1
+fi
+
+if [[ ! -f "$RUNTIME_PATH/node_modules/better-sqlite3-multiple-ciphers/build/Release/better_sqlite3.node" ]]; then
+  echo "Bundled runtime is missing the better-sqlite3 native addon" >&2
+  exit 1
+fi
+
+if find "$RUNTIME_PATH" \( -type l -o -name '*.d.ts' -o -name '*.map' -o -name '*.ts' \) | grep -q .; then
+  echo "Bundled runtime contains symlinks, TypeScript sources, declarations or source maps" >&2
+  exit 1
+fi
+
 BUNDLE_VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$INFO_PLIST")"
 if [[ "$BUNDLE_VERSION" != "$EXPECTED_VERSION" ]]; then
   echo "Bundle version mismatch: expected $EXPECTED_VERSION, found $BUNDLE_VERSION" >&2

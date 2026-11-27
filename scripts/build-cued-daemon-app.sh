@@ -31,14 +31,13 @@ APP_ICON_SOURCE="$ROOT_DIR/native/macos/CuedNative/Resources/AppIcon.icns"
 TRAY_ICON_SOURCE="$ROOT_DIR/native/macos/CuedNative/Resources/trayIconTemplate.png"
 CUED_MARK_SOURCE="$ROOT_DIR/native/macos/CuedNative/Resources/cued-mark.png"
 NODE_PATH="${CUED_NODE_PATH:-$(command -v node)}"
-RUNTIME_SYMLINK_PRUNER="$ROOT_DIR/dist/macos/runtime-symlinks.js"
+RUNTIME_BUNDLER="$ROOT_DIR/scripts/bundle-cued-runtime.mjs"
 GOOGLE_OAUTH_CLIENT_SOURCE="${CUED_BUNDLED_GOOGLE_OAUTH_CLIENT_FILE:-}"
 APP_VERSION="$("$NODE_PATH" -p "require(process.argv[1]).version" "$ROOT_DIR/package.json")"
 NODE_VERSION="$("$NODE_PATH" -p 'process.versions.node')"
 NODE_ARCH="$("$NODE_PATH" -p 'process.arch === "arm64" ? "arm64" : "x64"')"
 RELEASE_CHANNEL="${CUED_RELEASE_CHANNEL:-internal}"
 DAEMON_COMMAND="${CUED_DAEMON_COMMAND:-\"\$CUED_APP_PATH/Contents/Resources/cued-cli\" daemon}"
-BETTER_SQLITE3_BINDING_SOURCE="$(find "$ROOT_DIR/node_modules/.pnpm" -path "*/better-sqlite3-multiple-ciphers/build/Release/better_sqlite3.node" | head -n 1)"
 DEPLOY_STAGING_DIR="$(mktemp -d "${TMPDIR:-/tmp}/cued-runtime.XXXXXX")"
 
 cleanup() {
@@ -192,30 +191,10 @@ sign_nested_code_containers() {
   done < <(find "$APP_BUNDLE/Contents" -type f -path '*/Contents/Info.plist' -print0 | sort -rz)
 }
 
-copy_better_sqlite3_binary() {
-  local built_binary
-  local staged_module_dir
-
-  built_binary="$(find "$ROOT_DIR/node_modules/.pnpm" -path '*/better-sqlite3-multiple-ciphers/build/Release/better_sqlite3.node' -print -quit)"
-  staged_module_dir="$(find "$DEPLOY_STAGING_DIR/node_modules/.pnpm" -path '*/node_modules/better-sqlite3-multiple-ciphers' -type d -print -quit)"
-
-  if [[ -z "$built_binary" ]]; then
-    echo "Could not locate the built better_sqlite3.node in node_modules" >&2
-    exit 1
-  fi
-
-  if [[ -z "$staged_module_dir" ]]; then
-    echo "Could not locate better-sqlite3-multiple-ciphers in the deploy staging directory" >&2
-    exit 1
-  fi
-
-  mkdir -p "$staged_module_dir/build/Release"
-  cp "$built_binary" "$staged_module_dir/build/Release/better_sqlite3.node"
-}
-
 mkdir -p "$APP_DIST_DIR"
 
-pnpm --dir "$ROOT_DIR" build >/dev/null
+# The bundler does not type-check; keep a type error from shipping.
+pnpm --dir "$ROOT_DIR" typecheck >/dev/null
 swift build --package-path "$SWIFT_PACKAGE_DIR" -c release >/dev/null
 SWIFT_RESOURCE_BUNDLES=("$SWIFT_PACKAGE_DIR"/.build/*/release/*.bundle)
 NODE_RUNTIME_SOURCE_DIR="$(bash "$NODE_RUNTIME_FETCH_SCRIPT" "$NODE_VERSION" "$NODE_ARCH")"
@@ -223,11 +202,13 @@ if [[ "${CUED_BUNDLE_SIGNAL:-0}" == "1" ]]; then
   bash "$SIGNAL_FETCH_SCRIPT" >/dev/null
 fi
 mkdir -p "$(dirname "$SLACK_HELPER_SOURCE")"
-(cd "$ROOT_DIR/native/helpers/slack-go" && GOWORK=off go build -o "$SLACK_HELPER_SOURCE" .) >/dev/null
+# -s -w drops the symbol table and DWARF; panics still name functions and lines.
+GO_RELEASE_FLAGS=(-trimpath -ldflags="-s -w")
+(cd "$ROOT_DIR/native/helpers/slack-go" && GOWORK=off go build "${GO_RELEASE_FLAGS[@]}" -o "$SLACK_HELPER_SOURCE" .) >/dev/null
 mkdir -p "$(dirname "$WHATSAPP_HELPER_SOURCE")"
-(cd "$ROOT_DIR/native/helpers/whatsapp-go" && GOWORK=off go build -o "$WHATSAPP_HELPER_SOURCE" .) >/dev/null
-npm_config_ignore_scripts=true pnpm --dir "$ROOT_DIR" --filter . deploy --legacy --prod "$DEPLOY_STAGING_DIR" >/dev/null
-copy_better_sqlite3_binary
+(cd "$ROOT_DIR/native/helpers/whatsapp-go" && GOWORK=off go build "${GO_RELEASE_FLAGS[@]}" -o "$WHATSAPP_HELPER_SOURCE" .) >/dev/null
+# Bundled JS entry points plus the few packages that cannot be bundled (see the script).
+"$NODE_PATH" "$RUNTIME_BUNDLER" "$DEPLOY_STAGING_DIR" >/dev/null
 
 rm -rf "$APP_BUNDLE"
 mkdir -p \
@@ -246,6 +227,8 @@ for resource_bundle in "${SWIFT_RESOURCE_BUNDLES[@]}"; do
   cp -R "$resource_bundle" "$RESOURCES_DIR/$bundle_name"
 done
 cp "$NODE_RUNTIME_SOURCE_DIR/bin/node" "$RUNTIME_NODE_BIN_DIR/node"
+# Local symbols only serve native debuggers; exported ones, which addons link against, stay.
+strip -x "$RUNTIME_NODE_BIN_DIR/node" 2>/dev/null
 cp "$NODE_RUNTIME_SOURCE_DIR/LICENSE" "$RUNTIME_NODE_ROOT/LICENSE"
 # Node embeds its standard library; npm/Corepack are build tools, not runtime dependencies.
 chmod +x "$RUNTIME_NODE_BIN_DIR/node"
@@ -257,60 +240,6 @@ cp "$SLACK_HELPER_SOURCE" "$HELPERS_DIR/cued-slack-helper"
 chmod +x "$HELPERS_DIR/cued-slack-helper"
 cp "$WHATSAPP_HELPER_SOURCE" "$HELPERS_DIR/cued-whatsapp-helper"
 chmod +x "$HELPERS_DIR/cued-whatsapp-helper"
-
-if [[ -z "$BETTER_SQLITE3_BINDING_SOURCE" ]]; then
-  echo "better-sqlite3-multiple-ciphers native binding not found in node_modules" >&2
-  exit 1
-fi
-BETTER_SQLITE3_RUNTIME_DIR="$(find "$RUNTIME_DIR/node_modules/.pnpm" -maxdepth 3 -type d -path "*/better-sqlite3-multiple-ciphers" | head -n 1)"
-if [[ -z "$BETTER_SQLITE3_RUNTIME_DIR" ]]; then
-  echo "better-sqlite3-multiple-ciphers package missing from deployed runtime" >&2
-  exit 1
-fi
-mkdir -p "$BETTER_SQLITE3_RUNTIME_DIR/build/Release"
-cp "$BETTER_SQLITE3_BINDING_SOURCE" "$BETTER_SQLITE3_RUNTIME_DIR/build/Release/better_sqlite3.node"
-
-# Remove symlinks that escape the bundled runtime or no longer resolve after deploy.
-"$NODE_PATH" "$RUNTIME_SYMLINK_PRUNER" "$RUNTIME_DIR" >/dev/null
-# `pnpm deploy --legacy --prod` can still leave a handful of dangling package links behind.
-find -L "$RUNTIME_DIR" -type l -exec rm -f {} +
-rm -rf "$RUNTIME_DIR/node_modules/cued" "$RUNTIME_DIR/node_modules/@cued/app"
-# The bundled CLI only needs compiled JS, package metadata, and production
-# dependencies. Repo maintenance surfaces either duplicate separately staged
-# resources or are only useful for development/CI.
-rm -rf \
-  "$RUNTIME_DIR/native" \
-  "$RUNTIME_DIR/scripts" \
-  "$RUNTIME_DIR/src" \
-  "$RUNTIME_DIR/skills" \
-  "$RUNTIME_DIR/docs" \
-  "$RUNTIME_DIR/bin" \
-  "$RUNTIME_DIR/google-oauth-assets" \
-  "$RUNTIME_DIR/packaging" \
-  "$RUNTIME_DIR/.cued-smoke" \
-  "$RUNTIME_DIR/.github" \
-  "$RUNTIME_DIR/.husky" \
-  "$RUNTIME_DIR/.turbo" \
-  "$RUNTIME_DIR/AGENTS.md" \
-  "$RUNTIME_DIR/CLAUDE.md" \
-  "$RUNTIME_DIR/CODE_OF_CONDUCT.md" \
-  "$RUNTIME_DIR/CONTRIBUTING.md" \
-  "$RUNTIME_DIR/PRIVACY.md" \
-  "$RUNTIME_DIR/ROADMAP.md" \
-  "$RUNTIME_DIR/README.md" \
-  "$RUNTIME_DIR/SECURITY.md" \
-  "$RUNTIME_DIR/biome.json" \
-  "$RUNTIME_DIR/pnpm-workspace.yaml" \
-  "$RUNTIME_DIR/tsconfig.json" \
-  "$RUNTIME_DIR/tsconfig.base.json" \
-  "$RUNTIME_DIR/tsconfig.build.json" \
-  "$RUNTIME_DIR/vitest.config.ts" \
-  "$RUNTIME_DIR/.env.example" \
-  "$RUNTIME_DIR/.nvmrc"
-if [[ -d "$RUNTIME_DIR/dist" ]]; then
-  find "$RUNTIME_DIR/dist" -type f \( -name '*.test.js' -o -name '*.js.map' \) -delete
-  find "$RUNTIME_DIR/dist" -type d -name '__tests__' -prune -exec rm -rf {} +
-fi
 
 mkdir -p "$RESOURCES_DIR/scripts"
 cp "$SIGNAL_FETCH_SCRIPT" "$RESOURCES_DIR/scripts/fetch-signal-cli-macos.sh"

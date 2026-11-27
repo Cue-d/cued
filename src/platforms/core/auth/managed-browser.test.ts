@@ -134,11 +134,7 @@ describe("chromium-runtime.json", () => {
   it("pins the Chromium build that the bundled Playwright drives", () => {
     const pinned = readChromiumRuntimeManifest({});
     const require = createRequire(import.meta.url);
-    const playwrightCore = dirname(
-      require.resolve("playwright-core/package.json", {
-        paths: [dirname(require.resolve("playwright/package.json"))],
-      }),
-    );
+    const playwrightCore = dirname(require.resolve("playwright-core/package.json"));
     const browsers = JSON.parse(readFileSync(join(playwrightCore, "browsers.json"), "utf8")) as {
       browsers: Array<{ name: string; revision: string; browserVersion: string }>;
     };

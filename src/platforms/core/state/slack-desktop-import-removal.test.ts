@@ -37,7 +37,7 @@ vi.mock("node:child_process", async (importOriginal) => {
   };
 });
 
-vi.mock("playwright", () => ({
+vi.mock("playwright-core", () => ({
   chromium: {
     connectOverCDP: connectOverCDPMock,
   },
