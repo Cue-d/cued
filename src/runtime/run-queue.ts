@@ -12,56 +12,58 @@ type RunQueueSchedulers = {
   wakeProjection?: () => void;
 };
 
+export type SyncRunQueueResult = {
+  /** Whether any run was queued or brought forward. */
+  queued: boolean;
+  runId: string | null;
+  runIds: string[];
+  /** The `platform:account` targets a run was queued or brought forward for. */
+  targets: string[];
+  /** Targets skipped because a run of theirs is already queued or running. */
+  alreadyQueued: string[];
+  message: string;
+};
+
 export class RunQueueService {
   constructor(
     private readonly db: CuedDatabase,
     private readonly schedulers: RunQueueSchedulers = {},
   ) {}
 
-  private listManualSyncTargets(source: AdapterPlatform): string[] {
+  private listManualSyncTargets(source?: AdapterPlatform): string[] {
     const syncCapableTargets = this.db
       .listEnabledSyncTargets()
       .filter(
         (target): target is { platform: AdapterPlatform; account_key: string } =>
-          isAdapterPlatform(target.platform) && target.platform === source,
+          isAdapterPlatform(target.platform) && (source == null || target.platform === source),
       )
       .map((target) => `${target.platform}:${target.account_key}`);
-    if (syncCapableTargets.length > 0) {
-      return [...new Set(syncCapableTargets)];
-    }
+    const syncCapablePlatforms = new Set(
+      syncCapableTargets.map((targetKey) => targetKey.slice(0, targetKey.indexOf(":"))),
+    );
 
+    // A platform with a sync-capable account syncs those accounts; otherwise its enabled,
+    // authenticated accounts are tried, as their sync capability may only be stale.
     const authenticatedTargets = this.db
       .listIntegrationStates()
       .filter(
         (integration) =>
-          integration.platform === source &&
+          isAdapterPlatform(integration.platform) &&
+          (source == null || integration.platform === source) &&
+          !syncCapablePlatforms.has(integration.platform) &&
           integration.enabled === 1 &&
           (integration.auth_state === "authenticated" || integration.auth_state === "authorized"),
       )
       .map((integration) => `${integration.platform}:${integration.account_key}`);
-    return [...new Set(authenticatedTargets)];
+    return [...new Set([...syncCapableTargets, ...authenticatedTargets])];
   }
 
-  queueSyncRun(source?: string): {
-    queued: boolean;
-    runId: string | null;
-    runIds: string[];
-    targets: string[];
-  } {
-    const expeditedAllSourceRunIds: string[] = [];
-    if (!source) {
-      for (const target of this.db.listEnabledSyncTargets()) {
-        if (isAdapterPlatform(target.platform)) {
-          const expedited = this.db.expeditePowerDeferredSyncRun(
-            target.platform,
-            target.account_key,
-          );
-          if (expedited) {
-            expeditedAllSourceRunIds.push(expedited);
-          }
-        }
-      }
-    }
+  /**
+   * Queues a sync for one source's connected accounts, or for every connected account when no
+   * source is given. A target that already has a run queued or running gets no second one; a
+   * battery-delayed run of its is brought forward instead.
+   */
+  queueSyncRun(source?: string): SyncRunQueueResult {
     if (source === "whatsapp-desktop") {
       const accountKey = getDefaultAccountKeyForPlatform("whatsapp");
       if (this.db.hasQueuedOrRunningRun("whatsapp", accountKey)) {
@@ -69,7 +71,9 @@ export class RunQueueService {
           queued: false,
           runId: null,
           runIds: [],
-          targets: ["whatsapp-desktop"],
+          targets: [],
+          alreadyQueued: ["whatsapp-desktop"],
+          message: "A WhatsApp sync is already queued or running.",
         };
       }
       const runId = this.db.queueSyncRun({
@@ -85,76 +89,64 @@ export class RunQueueService {
         runId,
         runIds: [runId],
         targets: ["whatsapp-desktop"],
+        alreadyQueued: [],
+        message: "Queued a WhatsApp Desktop sync.",
       };
     }
 
     if (source && !isAdapterPlatform(source)) {
       throw new Error(`Unsupported sync source: ${source}`);
     }
+    const sourcePlatform = source && isAdapterPlatform(source) ? source : undefined;
 
-    if (source && isAdapterPlatform(source)) {
-      const targets = this.listManualSyncTargets(source);
-
-      if (targets.length > 0) {
-        const queuedTargets: string[] = [];
-        const expeditedRunIds: string[] = [];
-        const runInputs = targets.flatMap((targetKey) => {
-          const parsedTarget = parseRunTargetKey(targetKey);
-          if (!parsedTarget) {
-            return [];
-          }
-          const { platform, accountKey } = parsedTarget;
-          if (!platform || !accountKey || !isAdapterPlatform(platform)) {
-            return [];
-          }
-          if (this.db.hasQueuedOrRunningRun(platform, accountKey)) {
-            const expedited = this.db.expeditePowerDeferredSyncRun(platform, accountKey);
-            if (expedited) {
-              expeditedRunIds.push(expedited);
-              queuedTargets.push(targetKey);
-            }
-            return [];
-          }
-
-          queuedTargets.push(targetKey);
-          return [
-            {
-              platform,
-              accountKey,
-              runType: "sync" as const,
-              trigger: "cli",
-              details: { source: platform, accountKey },
-            },
-          ];
-        });
-
-        const runIds = [...expeditedRunIds, ...this.db.queueSyncRuns(runInputs)];
-        if (runIds.length > 0) {
-          this.schedulers.wakeIngest?.();
-        }
-
-        return {
-          queued: runIds.length > 0,
-          runId: runIds[0] ?? null,
-          runIds,
-          targets: queuedTargets,
-        };
+    const queuedTargets: string[] = [];
+    const alreadyQueued: string[] = [];
+    const expeditedRunIds: string[] = [];
+    const runInputs = this.listManualSyncTargets(sourcePlatform).flatMap((targetKey) => {
+      const parsedTarget = parseRunTargetKey(targetKey);
+      if (!parsedTarget) {
+        return [];
       }
+      const { platform, accountKey } = parsedTarget;
+      if (this.db.hasQueuedOrRunningRun(platform, accountKey)) {
+        const expedited = this.db.expeditePowerDeferredSyncRun(platform, accountKey);
+        if (expedited) {
+          expeditedRunIds.push(expedited);
+          queuedTargets.push(targetKey);
+        } else {
+          alreadyQueued.push(targetKey);
+        }
+        return [];
+      }
+
+      queuedTargets.push(targetKey);
+      return [
+        {
+          platform,
+          accountKey,
+          runType: "sync" as const,
+          trigger: "cli",
+          details: { source: platform, accountKey },
+        },
+      ];
+    });
+
+    const runIds = [...expeditedRunIds, ...this.db.queueSyncRuns(runInputs)];
+    if (runIds.length > 0) {
+      this.schedulers.wakeIngest?.();
     }
 
-    const runId = this.db.queueSyncRun({
-      platform: source && isAdapterPlatform(source) ? source : null,
-      runType: "sync",
-      trigger: "cli",
-      details: { source: source ?? null },
-    });
-    this.schedulers.wakeIngest?.();
-
     return {
-      queued: true,
-      runId,
-      runIds: [runId, ...expeditedAllSourceRunIds],
-      targets: source ? [source] : [],
+      queued: runIds.length > 0,
+      runId: runIds[0] ?? null,
+      runIds,
+      targets: queuedTargets,
+      alreadyQueued,
+      message: describeSyncRunQueueResult(
+        sourcePlatform,
+        queuedTargets.length,
+        alreadyQueued.length,
+      ),
     };
   }
 
@@ -293,6 +285,26 @@ export class RunQueueService {
       projection,
     };
   }
+}
+
+function describeSyncRunQueueResult(
+  source: string | undefined,
+  queuedCount: number,
+  alreadyQueuedCount: number,
+): string {
+  const scope = source ? `${source} ` : "";
+  if (queuedCount === 0 && alreadyQueuedCount === 0) {
+    return `No connected ${scope}account to sync.`;
+  }
+  if (queuedCount === 0) {
+    return alreadyQueuedCount === 1
+      ? `A sync is already queued or running for the connected ${scope}account.`
+      : `A sync is already queued or running for all ${alreadyQueuedCount} connected ${scope}accounts.`;
+  }
+  const queued = `Queued a sync for ${queuedCount} ${scope}account${queuedCount === 1 ? "" : "s"}`;
+  return alreadyQueuedCount === 0
+    ? `${queued}.`
+    : `${queued}; ${alreadyQueuedCount} already had one queued or running.`;
 }
 
 function parseRunTargetKey(
