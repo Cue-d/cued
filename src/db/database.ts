@@ -2817,7 +2817,7 @@ export class CuedDatabase {
   expeditePowerDeferredSyncRun(
     platform: Platform,
     accountKey: string,
-    originTrigger: "cli" | "integration_authenticated" = "cli",
+    originTrigger = "cli",
   ): string | null {
     return this.db.transaction((tx) => {
       const run = tx

@@ -1087,6 +1087,11 @@ function queueNativeTriggeredSync(
         return;
       }
       if (db.hasQueuedOrRunningRun(platform, accountKey)) {
+        // A history page waiting only because of battery power would hold this catch-up
+        // back until its delay ran out.
+        if (db.expeditePowerDeferredSyncRun(platform, accountKey, trigger)) {
+          wakeIngest();
+        }
         return;
       }
 
@@ -4274,7 +4279,9 @@ export async function runDaemon(): Promise<void> {
         const continuationDelayMs = historyContinuationDelayMs({
           baseMs: baseContinuationDelayMs,
           originTrigger,
-          syncMode: checkpointSyncMode,
+          // What this run fetched. The checkpoint's mode is "full" whenever more remains,
+          // which would also slow an incremental catch-up that ran past its page budget.
+          syncMode: bundleSyncMode,
           liveCoverage: hasConnectedRealtime(platform, accountKey),
           continuationReason: bundleContinuation?.reason,
           power: readHostPowerState(),

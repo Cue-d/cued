@@ -55,7 +55,11 @@ describe("RunQueueService", () => {
     });
     const queue = new RunQueueService(db);
     if (command === "resume") queue.queueSyncResume([{ platform: "slack", accountKey: "T1" }]);
-    else queue.queueSyncRun(command === "all" ? undefined : "slack");
+    else {
+      const result = queue.queueSyncRun(command === "all" ? undefined : "slack");
+      // The caller is told which run it brought forward.
+      expect(result.runIds).toContain(runId);
+    }
     const claimed = db.claimNextQueuedRun(["sync_resume"], "ingesting");
     expect(claimed?.id).toBe(runId);
     expect(JSON.parse(claimed?.details_json ?? "{}")).toEqual({

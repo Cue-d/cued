@@ -48,10 +48,17 @@ export class RunQueueService {
     runIds: string[];
     targets: string[];
   } {
+    const expeditedAllSourceRunIds: string[] = [];
     if (!source) {
       for (const target of this.db.listEnabledSyncTargets()) {
         if (isAdapterPlatform(target.platform)) {
-          this.db.expeditePowerDeferredSyncRun(target.platform, target.account_key);
+          const expedited = this.db.expeditePowerDeferredSyncRun(
+            target.platform,
+            target.account_key,
+          );
+          if (expedited) {
+            expeditedAllSourceRunIds.push(expedited);
+          }
         }
       }
     }
@@ -146,7 +153,7 @@ export class RunQueueService {
     return {
       queued: true,
       runId,
-      runIds: [runId],
+      runIds: [runId, ...expeditedAllSourceRunIds],
       targets: source ? [source] : [],
     };
   }

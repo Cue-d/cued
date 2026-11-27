@@ -180,8 +180,9 @@ describe("push paths drive", () => {
       watcherRunning: (name: string) => running.includes(name),
       realtimeConnected: false,
     });
-    expect(autoSyncPushPath("imessage", watchers(["imessage", "callhistory"]))).toBe("healthy");
-    expect(autoSyncPushPath("imessage", watchers(["imessage"]))).toBe("down");
+    // Running watchers do not make iMessage push-covered: they miss ordinary writes.
+    expect(autoSyncPushPath("imessage", watchers(["imessage", "callhistory"]))).toBe("down");
+    expect(autoSyncPushPath("imessage", watchers([]))).toBe("down");
     expect(autoSyncPushPath("contacts", watchers(["contacts"]))).toBe("healthy");
     expect(autoSyncPushPath("contacts", watchers([]))).toBe("down");
     for (const platform of ["whatsapp", "signal", "linkedin", "discord"]) {
