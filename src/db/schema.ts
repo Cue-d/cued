@@ -6,8 +6,6 @@ import {
   CONVERSATION_TYPE_VALUES,
   INTEGRATION_AUTH_STATE_VALUES,
   INTEGRATION_LAUNCH_STRATEGY_VALUES,
-  JOB_KIND_VALUES,
-  JOB_STATUS_VALUES,
   PLATFORM_VALUES,
   RAW_EVENT_ENTITY_KIND_VALUES,
   SYNC_MODE_VALUES,
@@ -21,11 +19,6 @@ function textEnum<const TValues extends readonly [string, ...string[]]>(
 ) {
   return text(name, { enum: values });
 }
-
-export const schemaMigrations = sqliteTable("schema_migrations", {
-  id: text("id").primaryKey(),
-  appliedAt: integer("applied_at").notNull(),
-});
 
 export const sourceAccounts = sqliteTable("source_accounts", {
   id: text("id").primaryKey(),
@@ -105,27 +98,6 @@ export const syncRuns = sqliteTable("sync_runs", {
   lastProgressAt: integer("last_progress_at"),
   errorCode: text("error_code"),
   detailsJson: text("details_json"),
-});
-
-export const jobs = sqliteTable("jobs", {
-  id: text("id").primaryKey(),
-  kind: textEnum("kind", JOB_KIND_VALUES).notNull(),
-  platform: textEnum("platform", PLATFORM_VALUES),
-  accountKey: text("account_key"),
-  priority: integer("priority").notNull(),
-  status: textEnum("status", JOB_STATUS_VALUES).notNull(),
-  trigger: text("trigger").notNull(),
-  queuedAt: integer("queued_at").notNull(),
-  scheduledAt: integer("scheduled_at").notNull(),
-  startedAt: integer("started_at"),
-  finishedAt: integer("finished_at"),
-  attempt: integer("attempt").notNull(),
-  ownerId: text("owner_id"),
-  leaseExpiresAt: integer("lease_expires_at"),
-  lastProgressAt: integer("last_progress_at"),
-  checkpointJson: text("checkpoint_json"),
-  progressJson: text("progress_json"),
-  errorJson: text("error_json"),
 });
 
 export const syncRunErrors = sqliteTable("sync_run_errors", {
@@ -485,24 +457,6 @@ export const authSessions = sqliteTable("auth_sessions", {
   keychainAccount: text("keychain_account"),
   resultSummaryJson: text("result_summary_json"),
   errorSummary: text("error_summary"),
-  createdAt: integer("created_at").notNull(),
-  updatedAt: integer("updated_at").notNull(),
-});
-
-export const outboundMessages = sqliteTable("outbound_messages", {
-  id: text("id").primaryKey(),
-  platform: textEnum("platform", PLATFORM_VALUES).notNull(),
-  accountKey: text("account_key").notNull(),
-  target: text("target").notNull(),
-  threadId: text("thread_id"),
-  text: text("text").notNull(),
-  status: text("status").notNull(),
-  attemptCount: integer("attempt_count").notNull(),
-  scheduledFor: integer("scheduled_for").notNull(),
-  startedAt: integer("started_at"),
-  finishedAt: integer("finished_at"),
-  lastError: text("last_error"),
-  metadataJson: text("metadata_json"),
   createdAt: integer("created_at").notNull(),
   updatedAt: integer("updated_at").notNull(),
 });
