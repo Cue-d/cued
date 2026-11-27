@@ -212,8 +212,10 @@ function initializeLockFile(fd: number, metadata: SingletonLockMetadata): void {
 }
 
 function writeLockFile(fd: number, metadata: SingletonLockMetadata, slot: number): void {
+  // The lease describes a live process, not durable data: other processes see the write as
+  // soon as it returns, and after a crash or power loss the owner is gone whatever the file
+  // says. Flushing to disk on every heartbeat only costs I/O. (The app's lease does the same.)
   writeLockSlot(fd, metadata, slot);
-  fsyncSync(fd);
 }
 
 function writeLockSlot(fd: number, metadata: SingletonLockMetadata, slot: number): void {

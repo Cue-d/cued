@@ -176,6 +176,11 @@ import { SyncRunMaintenance } from "./maintenance.js";
 import { DaemonReadModel } from "./read-model.js";
 import { StallMonitor } from "./stall-monitor.js";
 import { AutoSyncPacing } from "./sync-pacing.js";
+import {
+  BusyRetryingTimerJob,
+  SQLITE_BUSY_SKIPPED,
+  withoutWaitingForWriteLock,
+} from "./write-lock.js";
 
 const DAEMON_VERSION = getCurrentAppVersion();
 const DEFAULT_AUTOSYNC_INTERVAL_MS = 60_000;
@@ -218,6 +223,9 @@ const PROJECTION_RETRY_DELAY_MS = 5_000;
 // which means the background checkpointer has stopped keeping up.
 const WAL_BACKSTOP_AUTOCHECKPOINT_PAGES = 20_000;
 const WAL_CHECKPOINT_POLL_MS = 1_000;
+// With nothing written since the last look, the checkpoint poll backs off up to this interval.
+// Any write brings it back to WAL_CHECKPOINT_POLL_MS at the next look.
+const WAL_CHECKPOINT_IDLE_POLL_MAX_MS = 30_000;
 const WAL_CHECKPOINT_MIN_CHANGED_ROWS = 200;
 const WAL_CHECKPOINT_MAX_INTERVAL_MS = 10 * 60_000;
 // Background cleanup waits this long after the last request before taking the write lock again.
@@ -229,10 +237,20 @@ const DEFAULT_AUTOSYNC_SCHEDULER_TICK_MS = 15_000;
 const DEFAULT_SYNC_CONTINUE_DELAY_MS = 15_000;
 const DEFAULT_SIGNAL_RECONNECT_SYNC_COOLDOWN_MS = 5 * 60_000;
 const DAEMON_STATUS_BUSY_TIMEOUT_MS = 100;
-const MENU_BAR_STATUS_WRITE_INTERVAL_MS = 15_000;
+// Jobs that run on a timer on the daemon thread never wait for the write lock. Every request
+// waits behind whatever the thread is doing, so a job that finds a worker holding the lock
+// skips at once and tries again TIMER_JOB_BUSY_RETRY_MS later instead.
+const TIMER_JOB_BUSY_TIMEOUT_MS = 0;
+const TIMER_JOB_BUSY_RETRY_MS = 1_000;
+// How often the daemon refreshes its row in daemon_state and rewrites the menu bar status file
+// when nothing else has. The app treats the row as live for 120 s (appDaemonHeartbeatGraceMs);
+// the lock file, renewed every SINGLETON_LOCK_HEARTBEAT_MS, is what it checks first.
+const DAEMON_STATUS_HEARTBEAT_MS = 60_000;
 const MENU_BAR_STATUS_EVENT_DEBOUNCE_MS = 500;
 const MENU_BAR_STATUS_EVENT_MIN_INTERVAL_MS = 5_000;
-const DAEMON_STATUS_CACHE_MAX_AGE_MS = 30_000;
+// The status file is rewritten on every change the daemon knows of and at least every
+// DAEMON_STATUS_HEARTBEAT_MS, so a file younger than this is the daemon's current view.
+const DAEMON_STATUS_CACHE_MAX_AGE_MS = DAEMON_STATUS_HEARTBEAT_MS + 30_000;
 const UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
 const UPDATE_SHUTDOWN_GRACE_MS = 30_000;
 // Well after startup, and after an update's helper has finished its health check.
@@ -1054,7 +1072,7 @@ function queueNativeTriggeredSync(
   wakeIngest: () => void,
 ): void {
   try {
-    db.withBusyTimeoutSync(DAEMON_STATUS_BUSY_TIMEOUT_MS, () => {
+    db.withBusyTimeoutSync(TIMER_JOB_BUSY_TIMEOUT_MS, () => {
       const integration = db.getIntegrationState(platform, accountKey);
       if (!integration || integration.enabled !== 1 || integration.sync_capable !== 1) {
         return;
@@ -1083,7 +1101,7 @@ function queueNativeTriggeredSync(
     });
     setTimeout(() => {
       queueNativeTriggeredSync(db, platform, accountKey, trigger, wakeIngest);
-    }, QUEUE_DRAIN_RETRY_DELAY_MS);
+    }, TIMER_JOB_BUSY_RETRY_MS);
   }
 }
 
@@ -2652,8 +2670,18 @@ export async function runDaemon(): Promise<void> {
       scheduleIngestDrain(QUEUE_DRAIN_RETRY_DELAY_MS);
       return;
     }
+    const deferWhileBusy = () => {
+      daemonLogger.warn("ingest drain deferred because SQLite is busy");
+      scheduleIngestDrain(TIMER_JOB_BUSY_RETRY_MS);
+    };
     if (activeIngestRuns.size === 0) {
-      const nextProjectionRunAt = db.getNextQueuedRunScheduledAt(["project", "rebuild"]);
+      const nextProjectionRunAt = withoutWaitingForWriteLock(db, () =>
+        db.getNextQueuedRunScheduledAt(["project", "rebuild"]),
+      );
+      if (nextProjectionRunAt === SQLITE_BUSY_SKIPPED) {
+        deferWhileBusy();
+        return;
+      }
       if (nextProjectionRunAt != null && nextProjectionRunAt <= now()) {
         scheduleProjectionDrain();
         scheduleIngestDrain(QUEUE_DRAIN_RETRY_DELAY_MS);
@@ -2661,16 +2689,26 @@ export async function runDaemon(): Promise<void> {
       }
     }
     while (activeIngestRuns.size < ingestConcurrency) {
-      const currentRun = db.claimNextQueuedRun(["sync", "sync_resume"], "ingesting", {
-        ownerId: runOwnerId,
-        leaseMs: INGEST_RUN_LEASE_MS,
-        excludedRunIds: [...activeIngestRuns.keys()],
-      });
+      const currentRun = withoutWaitingForWriteLock(db, () =>
+        db.claimNextQueuedRun(["sync", "sync_resume"], "ingesting", {
+          ownerId: runOwnerId,
+          leaseMs: INGEST_RUN_LEASE_MS,
+          excludedRunIds: [...activeIngestRuns.keys()],
+        }),
+      );
+      if (currentRun === SQLITE_BUSY_SKIPPED) {
+        deferWhileBusy();
+        break;
+      }
       if (!currentRun) {
-        const nextClaimableAt = db.getNextClaimableRunAt(["sync", "sync_resume"], "ingesting", [
-          ...activeIngestRuns.keys(),
-        ]);
-        if (nextClaimableAt != null) {
+        const nextClaimableAt = withoutWaitingForWriteLock(db, () =>
+          db.getNextClaimableRunAt(["sync", "sync_resume"], "ingesting", [
+            ...activeIngestRuns.keys(),
+          ]),
+        );
+        if (nextClaimableAt === SQLITE_BUSY_SKIPPED) {
+          deferWhileBusy();
+        } else if (nextClaimableAt != null) {
           scheduleIngestDrain(Math.max(QUEUE_DRAIN_RETRY_DELAY_MS, nextClaimableAt - now()));
         }
         break;
@@ -2730,7 +2768,7 @@ export async function runDaemon(): Promise<void> {
     const claimableProjectionRunTypes =
       activeIngestRuns.size > 0 ? (["project"] as const) : (["project", "rebuild"] as const);
     try {
-      currentRun = db.withBusyTimeoutSync(DAEMON_STATUS_BUSY_TIMEOUT_MS, () =>
+      currentRun = db.withBusyTimeoutSync(TIMER_JOB_BUSY_TIMEOUT_MS, () =>
         db.claimNextQueuedRun([...claimableProjectionRunTypes], "projecting", {
           ownerId: runOwnerId,
           leaseMs: PROJECTION_RUN_LEASE_MS,
@@ -2741,13 +2779,13 @@ export async function runDaemon(): Promise<void> {
         throw error;
       }
       daemonLogger.warn("projection drain skipped because SQLite is busy");
-      scheduleProjectionDrain(QUEUE_DRAIN_RETRY_DELAY_MS);
+      scheduleProjectionDrain(TIMER_JOB_BUSY_RETRY_MS);
       return;
     }
     if (!currentRun) {
       let nextScheduledAt: number | null = null;
       try {
-        nextScheduledAt = db.withBusyTimeoutSync(DAEMON_STATUS_BUSY_TIMEOUT_MS, () =>
+        nextScheduledAt = db.withBusyTimeoutSync(TIMER_JOB_BUSY_TIMEOUT_MS, () =>
           db.getNextClaimableRunAt([...claimableProjectionRunTypes], "projecting"),
         );
       } catch (error) {
@@ -2755,7 +2793,7 @@ export async function runDaemon(): Promise<void> {
           throw error;
         }
         daemonLogger.warn("projection drain skipped because SQLite is busy");
-        scheduleProjectionDrain(QUEUE_DRAIN_RETRY_DELAY_MS);
+        scheduleProjectionDrain(TIMER_JOB_BUSY_RETRY_MS);
         return;
       }
       if (nextScheduledAt != null) {
@@ -3227,27 +3265,11 @@ export async function runDaemon(): Promise<void> {
     db.setUpdateLastError(null);
   }
 
+  // The lock file is how the app and a second daemon tell this one is alive (stale after
+  // SINGLETON_LOCK_STALE_MS), so it keeps its own short interval. It never touches SQLite. The
+  // daemon_state row is refreshed by the status heartbeat further down.
   const heartbeat = setInterval(() => {
-    try {
-      daemonLease.heartbeat();
-      stallMonitor.section("heartbeat", () =>
-        db.withBusyTimeoutSync(DAEMON_STATUS_BUSY_TIMEOUT_MS, () => {
-          db.upsertDaemonState({
-            pid: process.pid,
-            startedAt,
-            updatedAt: now(),
-            status: "running",
-            version: DAEMON_VERSION,
-            details: daemonIdentity,
-          });
-        }),
-      );
-    } catch (error) {
-      if (!isSqliteBusyError(error)) {
-        throw error;
-      }
-      daemonLogger.warn("heartbeat skipped because SQLite is busy");
-    }
+    daemonLease.heartbeat();
   }, SINGLETON_LOCK_HEARTBEAT_MS);
 
   const realtimeStatuses = () =>
@@ -3304,11 +3326,11 @@ export async function runDaemon(): Promise<void> {
   let checkpointedAtChanges = db.totalChanges();
   let checkpointedAt = now();
   let checkpointInFlight = false;
-  const walCheckpointLoop = setInterval(() => {
+  const maybeCheckpointWal = (totalChanges: number) => {
     if (checkpointInFlight) {
       return;
     }
-    const changedRows = db.totalChanges() - checkpointedAtChanges;
+    const changedRows = totalChanges - checkpointedAtChanges;
     const overdue = changedRows > 0 && now() - checkpointedAt >= WAL_CHECKPOINT_MAX_INTERVAL_MS;
     if (changedRows < WAL_CHECKPOINT_MIN_CHANGED_ROWS && !overdue) {
       return;
@@ -3326,8 +3348,41 @@ export async function runDaemon(): Promise<void> {
       .finally(() => {
         checkpointInFlight = false;
       });
-  }, WAL_CHECKPOINT_POLL_MS);
-  walCheckpointLoop.unref?.();
+  };
+  // Counting rows costs no I/O, but a look every second is a wakeup every second all day.
+  // While nothing is written the interval doubles up to WAL_CHECKPOINT_IDLE_POLL_MAX_MS; the
+  // first look that sees a write returns to WAL_CHECKPOINT_POLL_MS. An overdue checkpoint
+  // (a few rows, then quiet) is still taken within the idle interval of falling due.
+  let walPollChanges = db.totalChanges();
+  let walPollDelayMs = WAL_CHECKPOINT_POLL_MS;
+  let walCheckpointTimer: NodeJS.Timeout | null = null;
+  const pollWalCheckpoint = () => {
+    const totalChanges = db.totalChanges();
+    walPollDelayMs =
+      totalChanges !== walPollChanges
+        ? WAL_CHECKPOINT_POLL_MS
+        : Math.min(walPollDelayMs * 2, WAL_CHECKPOINT_IDLE_POLL_MAX_MS);
+    walPollChanges = totalChanges;
+    maybeCheckpointWal(totalChanges);
+    walCheckpointTimer = setTimeout(pollWalCheckpoint, walPollDelayMs);
+    walCheckpointTimer.unref?.();
+  };
+  walCheckpointTimer = setTimeout(pollWalCheckpoint, walPollDelayMs);
+  walCheckpointTimer.unref?.();
+  // A sync is about to write in bulk on this thread. Left on its idle interval, the poll could
+  // look as much as 30 s later, by which time the log may have grown to the size where SQLite
+  // checkpoints it on this thread instead.
+  const noteBulkWritesStarting = () => {
+    if (walPollDelayMs <= WAL_CHECKPOINT_POLL_MS || shutdownInitiated) {
+      return;
+    }
+    walPollDelayMs = WAL_CHECKPOINT_POLL_MS;
+    if (walCheckpointTimer) {
+      clearTimeout(walCheckpointTimer);
+    }
+    walCheckpointTimer = setTimeout(pollWalCheckpoint, walPollDelayMs);
+    walCheckpointTimer.unref?.();
+  };
 
   const readModel = new DaemonReadModel(db, dbWorker, {
     onChange: (topic) => {
@@ -3356,19 +3411,22 @@ export async function runDaemon(): Promise<void> {
       return;
     }
     try {
-      stallMonitor.section("menu_bar_status_write", () =>
-        db.withBusyTimeoutSync(DAEMON_STATUS_BUSY_TIMEOUT_MS, () => {
+      const written = stallMonitor.section("menu_bar_status_write", () =>
+        withoutWaitingForWriteLock(db, () => {
           writeMenuBarStatusSnapshot(db, { realtime: realtimeStatuses(), bootstrap, aggregates });
         }),
       );
+      if (written === SQLITE_BUSY_SKIPPED) {
+        daemonLogger.warn("menu bar status cache write deferred because SQLite is busy", {
+          reason,
+        });
+        requestMenuBarStatusWrite(reason);
+        return;
+      }
       lastMenuBarStatusWrittenAt = now();
       notifySubscribers("status");
     } catch (error) {
-      if (!isSqliteBusyError(error)) {
-        daemonLogger.warn("menu bar status cache write failed", { reason, error });
-        return;
-      }
-      daemonLogger.warn("menu bar status cache write skipped because SQLite is busy", { reason });
+      daemonLogger.warn("menu bar status cache write failed", { reason, error });
     }
   };
   const refreshMenuBarStatusNow = (reason: string) => {
@@ -3389,7 +3447,36 @@ export async function runDaemon(): Promise<void> {
     }, delayMs);
   };
   writeMenuBarStatus();
-  const menuBarStatusLoop = setInterval(writeMenuBarStatus, MENU_BAR_STATUS_WRITE_INTERVAL_MS);
+
+  // Refreshes the daemon_state row and rewrites the status file. Every change the daemon knows
+  // of already rewrites the file (requestMenuBarStatusWrite); this is the backstop that keeps
+  // the row's updated_at live for the app and catches changes made by other processes.
+  const statusHeartbeat = new BusyRetryingTimerJob({
+    intervalMs: DAEMON_STATUS_HEARTBEAT_MS,
+    busyRetryMs: TIMER_JOB_BUSY_RETRY_MS,
+    run: () => {
+      const written = stallMonitor.section("heartbeat", () =>
+        withoutWaitingForWriteLock(db, () => {
+          db.upsertDaemonState({
+            pid: process.pid,
+            startedAt,
+            updatedAt: now(),
+            status: "running",
+            version: DAEMON_VERSION,
+            details: daemonIdentity,
+          });
+        }),
+      );
+      if (written !== SQLITE_BUSY_SKIPPED) {
+        writeMenuBarStatus("heartbeat");
+      }
+      return written;
+    },
+    onBusy: () => daemonLogger.warn("heartbeat deferred because SQLite is busy"),
+    onRecovered: (retries) =>
+      daemonLogger.info("heartbeat written after SQLite was busy", { retries }),
+  });
+  statusHeartbeat.start();
 
   const hasConnectedRealtime = (platform: Platform, accountKey: string): boolean =>
     [
@@ -3404,12 +3491,21 @@ export async function runDaemon(): Promise<void> {
         status.state === "connected",
     );
 
+  const autoSyncBusyRetries = new Map<string, NodeJS.Timeout>();
   const queueAutoSyncRuns = (trigger: string) => {
     if (isUpdateShutdownRequested) {
       return;
     }
+    const pendingRetry = autoSyncBusyRetries.get(trigger);
+    if (pendingRetry) {
+      clearTimeout(pendingRetry);
+      autoSyncBusyRetries.delete(trigger);
+    }
+    // Outside the transaction: a run queued for one account still needs the ingest queue
+    // woken if the lock turns out to be busy when the next account is queued.
+    let queuedAny = false;
     try {
-      db.withBusyTimeoutSync(DAEMON_STATUS_BUSY_TIMEOUT_MS, () => {
+      db.withBusyTimeoutSync(TIMER_JOB_BUSY_TIMEOUT_MS, () => {
         if (trigger === "scheduler" && bootstrap.state !== "ready") {
           return;
         }
@@ -3424,7 +3520,6 @@ export async function runDaemon(): Promise<void> {
           }
         }
         const autoSyncTargets = getAutoSyncTargets(db);
-        let queuedAny = false;
         const queuedAt = now();
         for (const target of autoSyncTargets) {
           if (trigger === "scheduler") {
@@ -3474,16 +3569,23 @@ export async function runDaemon(): Promise<void> {
           lastAutoSyncQueuedAt.set(`${target.platform}:${target.accountKey}`, queuedAt);
           queuedAny = true;
         }
-
-        if (queuedAny) {
-          schedulers.wakeIngest();
-        }
       });
     } catch (error) {
       if (!isSqliteBusyError(error)) {
         throw error;
       }
-      daemonLogger.warn("autosync queue skipped because SQLite is busy", { trigger });
+      daemonLogger.warn("autosync queue deferred because SQLite is busy", { trigger });
+      autoSyncBusyRetries.set(
+        trigger,
+        setTimeout(() => {
+          autoSyncBusyRetries.delete(trigger);
+          stallMonitor.section("auto_sync_scheduler", () => queueAutoSyncRuns(trigger));
+        }, TIMER_JOB_BUSY_RETRY_MS),
+      );
+    } finally {
+      if (queuedAny) {
+        schedulers.wakeIngest();
+      }
     }
   };
 
@@ -3676,6 +3778,7 @@ export async function runDaemon(): Promise<void> {
   async function processIngestRun(
     currentRun: NonNullable<ReturnType<typeof db.claimNextQueuedRun>>,
   ) {
+    noteBulkWritesStarting();
     const sleepDetector = new SleepInterruptionDetector();
     const sleepWatch = setInterval(() => sleepDetector.check(), 1_000);
     const ingestStartedAt = now();
@@ -4581,13 +4684,20 @@ export async function runDaemon(): Promise<void> {
     shutdownInitiated = true;
     daemonLogger.info("daemon shutting down", { pid: process.pid });
     clearInterval(heartbeat);
-    clearInterval(menuBarStatusLoop);
+    statusHeartbeat.stop();
     clearInterval(schedulerLoop);
+    for (const retry of autoSyncBusyRetries.values()) {
+      clearTimeout(retry);
+    }
+    autoSyncBusyRetries.clear();
     clearInterval(updateLoop);
     updateArtifactRetention.stop();
     syncRunMaintenance.stop();
     stallMonitor.stop();
-    clearInterval(walCheckpointLoop);
+    if (walCheckpointTimer) {
+      clearTimeout(walCheckpointTimer);
+      walCheckpointTimer = null;
+    }
     for (const subscriber of subscribers) {
       subscriber.destroy();
     }
@@ -4809,6 +4919,7 @@ function handleSocket(socket: Socket, context: DaemonRequestContext): void {
       buffer = buffer.slice(newlineIndex + 1);
 
       if (line.length > 0) {
+        context.stallMonitor.noteActivity();
         let request: DaemonRequest | null = null;
         try {
           request = JSON.parse(line) as DaemonRequest;
