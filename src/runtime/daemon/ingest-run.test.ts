@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { AdapterWorkerError } from "../../platforms/core/runner.js";
-import { isAdapterAuthInvalidation } from "./server.js";
+import { isAdapterAuthInvalidation } from "./ingest-run.js";
 
 describe("adapter auth invalidation", () => {
   it.each([

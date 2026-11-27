@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
+import { IngestRunSupersededError } from "./ingest-run.js";
 import { insertRawEventsYielding } from "./raw-events.js";
-import { IngestRunSupersededError } from "./server.js";
 
 describe("yielding raw event insert", () => {
   it("inserts a bundle in slices, lets other work run between them, and merges the results", async () => {

@@ -47,7 +47,7 @@ import {
   selectAdapterInvocationProofs,
 } from "../../platforms/core/invocation.js";
 import { isAdapterPlatform } from "../../platforms/core/registry.js";
-import { isAdapterWorkerError, runAdapter } from "../../platforms/core/runner.js";
+import { runAdapter } from "../../platforms/core/runner.js";
 import { refreshLocalIntegrationStates } from "../../platforms/core/state/local-refresh.js";
 import { invalidateIntegrationAuth } from "../../platforms/core/state/mutations.js";
 import { refreshManagedIntegrationStates } from "../../platforms/core/state/refresh.js";
@@ -90,6 +90,12 @@ import {
   shouldSkipConnectedDiscordSchedulerSync,
 } from "./auto-sync-targets.js";
 import { safeEmitHookEvent } from "./hook-events.js";
+import {
+  IngestRunSupersededError,
+  type IngestTiming,
+  isAdapterAuthInvalidation,
+  resolveCheckpointSyncMode,
+} from "./ingest-run.js";
 import {
   isNativeWatcherRunning,
   nextNativeWatcherRestart,
@@ -194,54 +200,6 @@ const discordLogger = createLogger("discord");
 const slackLogger = createLogger("slack");
 const signalLogger = createLogger("signal");
 const whatsAppLogger = createLogger("whatsapp");
-
-type IngestTiming = {
-  adapterFetchMs: number;
-  rawEventInsertMs: number;
-  realtimeProjectionMs: number;
-  checkpointUpdateMs: number;
-  webhookReadyMs: number;
-  totalMs: number;
-  insertedRawEvents: number;
-};
-
-export function isAdapterAuthInvalidation(
-  platform: string | null,
-  error: unknown,
-): platform is "linkedin" | "slack" | "gmail" {
-  return (
-    (platform === "linkedin" || platform === "slack" || platform === "gmail") &&
-    isAdapterWorkerError(error, "auth_invalid")
-  );
-}
-
-/**
- * The run this ingest belongs to no longer exists or is no longer ours: the source was reset,
- * or the lease was reclaimed. Whatever it fetched must not be recorded as progress.
- */
-export class IngestRunSupersededError extends Error {
-  constructor(runId: string) {
-    super(`Ingest run ${runId} was superseded`);
-    this.name = "IngestRunSupersededError";
-  }
-}
-
-function resolveCheckpointSyncMode(
-  runType: "sync" | "sync_resume",
-  priorSyncMode: string | null | undefined,
-  bundleSyncMode: string | null | undefined,
-  hasMore: boolean,
-): "full" | "incremental" {
-  if (hasMore) {
-    return "full";
-  }
-
-  if (runType === "sync_resume" || priorSyncMode === "full") {
-    return "incremental";
-  }
-
-  return bundleSyncMode === "incremental" ? "incremental" : "full";
-}
 
 export async function runDaemon(): Promise<void> {
   const daemonLease = await acquireDaemonLease();
