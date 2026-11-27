@@ -2321,4 +2321,21 @@ export const MIGRATIONS: Migration[] = [
       updated_at INTEGER NOT NULL
     );`,
   },
+  {
+    // A one-to-one conversation without a name of its own is named after its participants,
+    // and follows them when a contact is renamed; a name the platform supplied stays. Existing
+    // names equal to the participant names are taken as derived.
+    id: "0028_conversation_name_is_derived",
+    apply: (db) => {
+      if (!tableExists(db, "conversations")) return;
+      addColumnIfMissing(db, "conversations", "name_is_derived INTEGER NOT NULL DEFAULT 0");
+      db.exec(`
+        UPDATE conversations
+        SET name_is_derived = 1
+        WHERE type = 'dm'
+          AND name IS NOT NULL
+          AND name = participant_names
+      `);
+    },
+  },
 ];

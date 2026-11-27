@@ -1817,6 +1817,7 @@ export async function runDaemon(): Promise<void> {
   };
   const stallMonitor = new StallMonitor({
     onStall: (report) => daemonLogger.warn("event loop stalled", report),
+    onSuspended: (report) => daemonLogger.info("event loop suspended", report),
     stallThresholdMs: positiveEnvNumber("CUED_STALL_THRESHOLD_MS"),
     slowSectionMs: positiveEnvNumber("CUED_STALL_SECTION_MS"),
     reportIntervalMs: positiveEnvNumber("CUED_STALL_REPORT_INTERVAL_MS"),
