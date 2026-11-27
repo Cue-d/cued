@@ -3328,6 +3328,17 @@ export async function runDaemon(): Promise<void> {
     return whatsAppRealtimeReconcilePromise;
   };
 
+  // The host discards the daemon's output, so without these a failure nothing awaited would
+  // end the process with no trace. A rejected promise is logged and the daemon carries on;
+  // after an exception its state cannot be trusted, so it exits and the host restarts it.
+  process.on("unhandledRejection", (reason) => {
+    daemonLogger.error("unhandled promise rejection", reason);
+  });
+  process.on("uncaughtException", (error) => {
+    daemonLogger.error("uncaught exception; exiting", error);
+    process.exit(1);
+  });
+
   db.recoverInProgressRuns();
   const daemonIdentity = getDaemonIdentity();
   daemonLogger.info("daemon starting", {
@@ -3840,6 +3851,12 @@ export async function runDaemon(): Promise<void> {
   };
   const runBootstrap = async () => {
     try {
+      try {
+        // A sign-in left unfinished by the previous daemon can never report back.
+        reconcileAbandonedAuthSessions(db, { ownerGone: true });
+      } catch (error) {
+        daemonLogger.warn("could not cancel sign-ins left by the previous daemon", error);
+      }
       // Status and capability checks read each helper's version synchronously. Look them up
       // here, without blocking, so those reads never have to spawn anything.
       await Promise.all([warmSlackHelperInspection(), warmWhatsAppHelperInspection()]);

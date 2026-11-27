@@ -1,3 +1,4 @@
+import { spawn } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -2009,6 +2010,48 @@ process.exit(44);
       "Superseded by a newer auth session request",
     );
     expect(second.authSession.state).toBe("requested");
+    db.close();
+  });
+
+  it("cancels every unfinished sign-in after a restart and stops only its own process", async () => {
+    const db = createDb();
+    const orphaned = requestIntegrationAccess(db, "slack", "pending-slack-test");
+    // Stands in for the sign-in worker the previous daemon started for this session.
+    const worker = spawn(process.execPath, [
+      "-e",
+      "setInterval(() => {}, 1000)",
+      "--",
+      orphaned.authSession.id,
+    ]);
+    const unrelated = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"]);
+    try {
+      markAuthSessionInProgress(db, orphaned.authSession.id, worker.pid ?? 0);
+      const reusedPid = requestIntegrationAccess(db, "gmail", "pending-gmail-test");
+      markAuthSessionInProgress(db, reusedPid.authSession.id, unrelated.pid ?? 0);
+      const workerExit = new Promise((resolve) => worker.once("exit", resolve));
+
+      // With its owner still running, a live sign-in is left alone.
+      expect(reconcileAbandonedAuthSessions(db)).toBe(0);
+      expect(reconcileAbandonedAuthSessions(db, { ownerGone: true })).toBe(2);
+      await workerExit;
+
+      expect(db.getAuthSession(orphaned.authSession.id)).toMatchObject({
+        state: "cancelled",
+        native_pid: null,
+        error_summary: "Cued restarted before this sign-in finished",
+      });
+      expect(db.getIntegrationState("slack", "pending-slack-test")).toMatchObject({
+        auth_state: "cancelled",
+        enabled: 0,
+      });
+      expect(db.getAuthSession(reusedPid.authSession.id)?.state).toBe("cancelled");
+      // A process that was not started for the session is not touched.
+      expect(unrelated.exitCode).toBeNull();
+      expect(unrelated.signalCode).toBeNull();
+    } finally {
+      worker.kill("SIGKILL");
+      unrelated.kill("SIGKILL");
+    }
     db.close();
   });
 

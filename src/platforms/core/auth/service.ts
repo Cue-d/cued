@@ -1,6 +1,9 @@
 import type { ChildProcess } from "node:child_process";
 import process from "node:process";
+import { setTimeout as delay } from "node:timers/promises";
+import { createLogger } from "../../../core/logging.js";
 import type { CuedDatabase } from "../../../db/database.js";
+import { isSqliteBusyError } from "../../../db/sqlite.js";
 import {
   errorTelemetryProperties,
   safeTelemetryValue,
@@ -51,6 +54,14 @@ type ConnectLifecycle = {
 };
 
 const GMAIL_PENDING_ACCOUNT_KEY_PREFIX = "pending-gmail-";
+
+const authLogger = createLogger("auth");
+
+/**
+ * How a sign-in's result is written while another writer holds the database: a short wait per
+ * try, so the daemon's thread is never held, and tries spread over ten minutes.
+ */
+const AUTH_RESULT_WRITE = { busyTimeoutMs: 50, retryDelayMs: 500, attempts: 1_200 };
 
 function assertConnectPreflight(platform: string) {
   const normalized = parsePlatform(platform.trim().toLowerCase());
@@ -314,6 +325,13 @@ export class IntegrationAuthService {
         }
         lifecycle.onRuntimeStateChanged?.();
       })
+      .catch((error) => {
+        authLogger.error("sign-in result could not be recorded", {
+          sessionId: running.id,
+          platform: running.platform,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      })
       .finally(() => {
         activeAuthSessions.delete(running.id);
       });
@@ -396,6 +414,23 @@ export class IntegrationAuthService {
     return null;
   }
 
+  /**
+   * Runs a database write, waiting its turn while a projection or ingest transaction holds
+   * the database. A sign-in can end at any moment, and its result must not be lost to one.
+   */
+  private async writeWhenFree<T>(write: () => T): Promise<T> {
+    for (let attempt = 1; ; attempt += 1) {
+      try {
+        return this.db.withBusyTimeoutSync(AUTH_RESULT_WRITE.busyTimeoutMs, write);
+      } catch (error) {
+        if (!isSqliteBusyError(error) || attempt >= AUTH_RESULT_WRITE.attempts) {
+          throw error;
+        }
+        await delay(AUTH_RESULT_WRITE.retryDelayMs);
+      }
+    }
+  }
+
   private async completeAndSchedule(
     sessionId: string,
     input: Parameters<typeof completeAuthSession>[2],
@@ -404,7 +439,9 @@ export class IntegrationAuthService {
     integration: ReturnType<typeof getIntegrationSummary> | null;
     authSession: ReturnType<typeof getAuthSessionSummary>;
   }> {
-    const completed = completeAuthSession(this.db, sessionId, input);
+    const completed = await this.writeWhenFree(() =>
+      completeAuthSession(this.db, sessionId, input),
+    );
     let integration = completed.integration;
     if (integration?.authState === "authenticated") {
       await this.telemetry("integration_setup_completed", {
@@ -413,7 +450,7 @@ export class IntegrationAuthService {
         stage: "authenticated",
         platform: integration.platform,
       });
-      refreshPersistedRequestableIntegrationStates(this.db);
+      await this.writeWhenFree(() => refreshPersistedRequestableIntegrationStates(this.db));
       integration = getIntegrationSummary(this.db, integration.platform, integration.accountKey);
     } else if (
       completed.authSession?.state === "failed" ||
@@ -440,26 +477,23 @@ export class IntegrationAuthService {
       (lifecycle.shouldQueueAuthenticatedSync?.(integration.platform, integration.accountKey) ??
         true)
     ) {
-      if (!this.db.hasQueuedOrRunningRun(integration.platform, integration.accountKey)) {
-        this.db.queueSyncRun({
-          platform: integration.platform,
-          accountKey: integration.accountKey,
-          runType: "sync",
-          trigger: "integration_authenticated",
-          details: {
-            source: integration.platform,
-            accountKey: integration.accountKey,
+      const { platform, accountKey } = integration;
+      const queued = await this.writeWhenFree(() => {
+        if (!this.db.hasQueuedOrRunningRun(platform, accountKey)) {
+          this.db.queueSyncRun({
+            platform,
+            accountKey,
+            runType: "sync",
             trigger: "integration_authenticated",
-          },
-        });
-        lifecycle.wakeIngest?.();
-      } else if (
-        this.db.expeditePowerDeferredSyncRun(
-          integration.platform,
-          integration.accountKey,
-          "integration_authenticated",
-        )
-      ) {
+            details: { source: platform, accountKey, trigger: "integration_authenticated" },
+          });
+          return true;
+        }
+        return Boolean(
+          this.db.expeditePowerDeferredSyncRun(platform, accountKey, "integration_authenticated"),
+        );
+      });
+      if (queued) {
         lifecycle.wakeIngest?.();
       }
     }

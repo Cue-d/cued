@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CuedDatabase } from "../../../db/database.js";
+import { openSqliteDatabase } from "../../../db/sqlite.js";
 import type { SlackHelperInspection } from "../../slack/helper/binary.js";
 import { IntegrationAuthService } from "./service.js";
 
@@ -326,6 +327,69 @@ describe("IntegrationAuthService", () => {
     expect(result.authSession?.id).toBe(sessionId);
     expect(startAuthSessionMock).not.toHaveBeenCalled();
     expect(db.listAuthSessions(10)).toHaveLength(1);
+
+    db.close();
+  });
+
+  it("records how a sign-in ended once a busy database frees up", async () => {
+    const db = createDb();
+    importSlackDesktopAuthMock.mockResolvedValue([]);
+    let finish: (result: { state: "cancelled"; errorSummary: string }) => void = () => undefined;
+    startAuthSessionMock.mockImplementationOnce(() => ({
+      child: { pid: process.pid } as ChildProcess,
+      completion: new Promise((resolve) => {
+        finish = resolve;
+      }),
+    }));
+    const unhandled = vi.fn();
+    process.on("unhandledRejection", unhandled);
+    const stateChanges = vi.fn();
+    const activeAuthSessions = new Map<
+      string,
+      { child: ChildProcess; platform: "slack"; accountKey: string }
+    >();
+
+    const started = await new IntegrationAuthService(db).connectManaged(
+      "slack",
+      "pending-slack-new",
+      activeAuthSessions,
+      { onRuntimeStateChanged: stateChanges },
+    );
+    const sessionId = started.authSession?.id ?? "";
+
+    // A projection or ingest transaction holds the database when the window is closed.
+    const otherWriter = openSqliteDatabase(db.dbPath);
+    otherWriter.exec("BEGIN IMMEDIATE");
+    try {
+      finish({ state: "cancelled", errorSummary: "auth_window_closed" });
+      await new Promise((resolve) => setTimeout(resolve, 800));
+      expect(db.getAuthSession(sessionId)?.state).toBe("in_progress");
+      expect(activeAuthSessions.size).toBe(1);
+    } finally {
+      otherWriter.exec("ROLLBACK");
+      otherWriter.close();
+    }
+
+    await vi.waitFor(() => expect(db.getAuthSession(sessionId)?.state).toBe("cancelled"), {
+      timeout: 5_000,
+    });
+    await vi.waitFor(() => expect(activeAuthSessions.size).toBe(0));
+    expect(db.getIntegrationState("slack", "pending-slack-new")).toMatchObject({
+      auth_state: "cancelled",
+      enabled: 0,
+    });
+    expect(stateChanges).toHaveBeenCalledTimes(1);
+    process.off("unhandledRejection", unhandled);
+    expect(unhandled).not.toHaveBeenCalled();
+
+    // The account can be connected again straight away.
+    const again = await new IntegrationAuthService(db).connectManaged(
+      "slack",
+      "pending-slack-next",
+      activeAuthSessions,
+    );
+    expect(again.authSession?.id).not.toBe(sessionId);
+    expect(again.authSession?.state).toBe("in_progress");
 
     db.close();
   });

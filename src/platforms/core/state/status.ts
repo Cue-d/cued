@@ -130,6 +130,7 @@ const GMAIL_PENDING_ACCOUNT_KEY_PREFIX = "pending-gmail-";
 const AUTH_SESSION_STALE_AFTER_MS = 15 * 60 * 1000;
 const AUTH_SESSION_ABANDONED_ERROR = "Auth session ended before Cued received a completion event";
 const AUTH_SESSION_EXPIRED_ERROR = "Auth session expired before completion";
+const AUTH_SESSION_ORPHANED_ERROR = "Cued restarted before this sign-in finished";
 
 export interface IntegrationStatusOptions {
   includeLiveLocalIntegrations?: boolean;
@@ -371,9 +372,37 @@ function processExists(pid: number | null): boolean {
   }
 }
 
+/**
+ * Stops the process still running an orphaned sign-in, so its window does not stay open with
+ * nothing listening for the result. The pid may have been reused since, so only a process
+ * started for this session is stopped.
+ */
+function stopOrphanedAuthProcess(session: Pick<AuthSessionRow, "id" | "native_pid">): void {
+  const pid = session.native_pid;
+  if (!pid || pid === process.pid || !processExists(pid)) {
+    return;
+  }
+  try {
+    const args = execFileSync("/bin/ps", ["-o", "args=", "-p", String(pid)], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+    if (args.includes(session.id)) {
+      process.kill(pid, "SIGTERM");
+    }
+  } catch {
+    // It ended in the meantime.
+  }
+}
+
+/**
+ * Cancels sign-ins that can no longer finish: their process is gone, or they have run too
+ * long. With `ownerGone`, every unfinished sign-in is cancelled, because the daemon that
+ * started it (and was waiting for its result) no longer exists.
+ */
 export function reconcileAbandonedAuthSessions(
   db: CuedDatabase,
-  options: { staleAfterMs?: number; nowMs?: number } = {},
+  options: { staleAfterMs?: number; nowMs?: number; ownerGone?: boolean } = {},
 ): number {
   const timestamp = options.nowMs ?? now();
   const staleAfterMs = options.staleAfterMs ?? AUTH_SESSION_STALE_AFTER_MS;
@@ -387,11 +416,18 @@ export function reconcileAbandonedAuthSessions(
     const startedAt = session.started_at ?? session.requested_at;
     const processMissing = session.state === "in_progress" && !processExists(session.native_pid);
     const timedOut = timestamp - startedAt >= staleAfterMs;
-    if (!processMissing && !timedOut) {
+    if (!options.ownerGone && !processMissing && !timedOut) {
       continue;
     }
+    if (options.ownerGone) {
+      stopOrphanedAuthProcess(session);
+    }
 
-    const errorSummary = processMissing ? AUTH_SESSION_ABANDONED_ERROR : AUTH_SESSION_EXPIRED_ERROR;
+    const errorSummary = processMissing
+      ? AUTH_SESSION_ABANDONED_ERROR
+      : timedOut
+        ? AUTH_SESSION_EXPIRED_ERROR
+        : AUTH_SESSION_ORPHANED_ERROR;
     db.updateAuthSessionState({
       id: session.id,
       state: "cancelled",
