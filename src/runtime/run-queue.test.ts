@@ -132,6 +132,8 @@ describe("RunQueueService", () => {
       runId: result.runIds[0] ?? null,
       runIds: expect.any(Array),
       targets: ["slack:T_ENABLED_TWO"],
+      alreadyQueued: ["slack:T_ENABLED_ONE"],
+      message: "Queued a sync for 1 slack account; 1 already had one queued or running.",
     });
     expect(result.runIds).toHaveLength(1);
 
@@ -170,6 +172,8 @@ describe("RunQueueService", () => {
       runId: result.runIds[0] ?? null,
       runIds: expect.any(Array),
       targets: ["linkedin:default"],
+      alreadyQueued: [],
+      message: "Queued a sync for 1 linkedin account.",
     });
     expect(result.runIds).toHaveLength(1);
 
@@ -185,29 +189,107 @@ describe("RunQueueService", () => {
     db.close();
   });
 
-  it("preserves the legacy platform-only queue when no explicit sync targets exist", () => {
+  it("queues nothing for a source with no connected account", () => {
     const db = createDb();
-    const queue = new RunQueueService(db);
+    const wakes: string[] = [];
+    const queue = new RunQueueService(db, { wakeIngest: () => wakes.push("ingest") });
 
-    const result = queue.queueSyncRun("slack");
+    expect(queue.queueSyncRun("slack")).toEqual({
+      queued: false,
+      runId: null,
+      runIds: [],
+      targets: [],
+      alreadyQueued: [],
+      message: "No connected slack account to sync.",
+    });
+    expect(db.listRecentRuns(1)).toEqual([]);
+    expect(wakes).toEqual([]);
 
+    db.close();
+  });
+
+  it("queues every connected account when no source is given", () => {
+    const db = createDb();
+    const connect = (
+      platform: "slack" | "linkedin" | "gmail" | "imessage",
+      accountKey: string,
+      overrides: { authState?: string; enabled?: boolean; syncCapable?: boolean } = {},
+    ) =>
+      db.upsertIntegrationState({
+        platform,
+        accountKey,
+        displayName: accountKey,
+        authState: (overrides.authState ?? "authenticated") as never,
+        enabled: overrides.enabled ?? true,
+        connectionKind: "browser-session",
+        syncCapable: overrides.syncCapable ?? true,
+      });
+    connect("slack", "T_ONE");
+    connect("slack", "T_TWO");
+    connect("slack", "T_STALE", { syncCapable: false });
+    connect("slack", "T_DISABLED", { enabled: false });
+    connect("linkedin", "default", { syncCapable: false });
+    connect("gmail", "needs-auth", { authState: "needs_auth", syncCapable: false });
+    connect("imessage", "local", { authState: "authorized" });
+    const runningId = db.queueSyncRun({
+      platform: "slack",
+      accountKey: "T_TWO",
+      runType: "sync",
+      trigger: "scheduler",
+      details: null,
+    });
+    const wakes: string[] = [];
+    const queue = new RunQueueService(db, { wakeIngest: () => wakes.push("ingest") });
+
+    const result = queue.queueSyncRun();
+
+    // The same targets as naming each source in turn: Slack's sync-capable accounts, and
+    // LinkedIn's authenticated account although its sync capability is stale.
     expect(result).toEqual({
       queued: true,
-      runId: result.runIds[0] ?? null,
-      runIds: expect.any(Array),
-      targets: ["slack"],
+      runId: result.runIds[0],
+      runIds: [expect.any(String), expect.any(String), expect.any(String)],
+      targets: ["imessage:local", "slack:T_ONE", "linkedin:default"],
+      alreadyQueued: ["slack:T_TWO"],
+      message: "Queued a sync for 3 accounts; 1 already had one queued or running.",
     });
-    expect(result.runIds).toHaveLength(1);
+    expect(result.runIds).not.toContain(runningId);
+    expect(wakes).toEqual(["ingest"]);
 
-    const [run] = db.listRecentRuns(1);
-    expect(run).toMatchObject({
-      platform: "slack",
-      account_key: null,
-      trigger: "cli",
-      run_type: "sync",
-      status: "queued",
+    const claimed: string[] = [];
+    for (;;) {
+      const run = db.claimNextQueuedRun(["sync"], "ingesting");
+      if (!run) break;
+      claimed.push(`${run.platform}:${run.account_key}`);
+    }
+    expect(claimed.sort()).toEqual(
+      ["imessage:local", "linkedin:default", "slack:T_ONE", "slack:T_TWO"].sort(),
+    );
+
+    // Everything is now queued or running, so a second request adds nothing.
+    expect(queue.queueSyncRun()).toMatchObject({
+      queued: false,
+      runIds: [],
+      targets: [],
+      alreadyQueued: ["imessage:local", "slack:T_ONE", "slack:T_TWO", "linkedin:default"],
+      message: "A sync is already queued or running for all 4 connected accounts.",
     });
+    expect(wakes).toEqual(["ingest"]);
 
+    db.close();
+  });
+
+  it("queues nothing when no source is given and nothing is connected", () => {
+    const db = createDb();
+    expect(new RunQueueService(db).queueSyncRun()).toEqual({
+      queued: false,
+      runId: null,
+      runIds: [],
+      targets: [],
+      alreadyQueued: [],
+      message: "No connected account to sync.",
+    });
+    expect(db.listRecentRuns(1)).toEqual([]);
     db.close();
   });
 
@@ -231,6 +313,8 @@ describe("RunQueueService", () => {
       runId: result.runIds[0] ?? null,
       runIds: expect.any(Array),
       targets: ["slack:workspace:team"],
+      alreadyQueued: [],
+      message: "Queued a sync for 1 slack account.",
     });
     expect(result.runIds).toHaveLength(1);
 

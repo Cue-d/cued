@@ -10,6 +10,7 @@ import {
   insertRawEventsYielding,
   isAdapterAuthInvalidation,
   isDisconnectedSocketError,
+  localSyncSourcesToRecheck,
   requestWhatsAppHistoryBackfillOnce,
   shouldDeferContinuationProjection,
   shouldProjectIngestRunInline,
@@ -267,6 +268,30 @@ describe("adaptive projection scheduling", () => {
     expect(getAdaptiveProjectionContinueDelayMs(5_000)).toBe(0);
     expect(getAdaptiveProjectionContinueDelayMs(25_000)).toBe(0);
     expect(getAdaptiveProjectionContinueDelayMs(100_000)).toBe(0);
+  });
+});
+
+describe("local access before a manual sync", () => {
+  const db = (targets: Array<{ platform: string; account_key: string }>) => ({
+    listEnabledSyncTargets: () => targets as never,
+  });
+
+  it("rechecks the local sources a sync covers that are not syncable yet", () => {
+    const contactsOnly = db([{ platform: "contacts", account_key: "local" }]);
+    expect(localSyncSourcesToRecheck(db([]), undefined)).toEqual(["contacts", "imessage"]);
+    expect(localSyncSourcesToRecheck(contactsOnly, undefined)).toEqual(["imessage"]);
+    expect(localSyncSourcesToRecheck(db([]), "contacts")).toEqual(["contacts"]);
+    expect(localSyncSourcesToRecheck(contactsOnly, "imessage")).toEqual(["imessage"]);
+  });
+
+  it("rechecks nothing when the covered local sources are syncable or none is covered", () => {
+    const both = db([
+      { platform: "contacts", account_key: "local" },
+      { platform: "imessage", account_key: "local" },
+    ]);
+    expect(localSyncSourcesToRecheck(both, undefined)).toEqual([]);
+    expect(localSyncSourcesToRecheck(db([]), "slack")).toEqual([]);
+    expect(localSyncSourcesToRecheck(db([]), "whatsapp-desktop")).toEqual([]);
   });
 });
 

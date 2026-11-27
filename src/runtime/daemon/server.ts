@@ -55,6 +55,7 @@ import {
 import { isAdapterPlatform, listAutoSyncPlatforms } from "../../platforms/core/registry.js";
 import { isAdapterWorkerError, runAdapter } from "../../platforms/core/runner.js";
 import { loadIntegrationSecret } from "../../platforms/core/secrets/keychain.js";
+import { refreshLocalIntegrationStates } from "../../platforms/core/state/local-refresh.js";
 import { invalidateIntegrationAuth } from "../../platforms/core/state/mutations.js";
 import { refreshManagedIntegrationStates } from "../../platforms/core/state/refresh.js";
 import {
@@ -444,6 +445,26 @@ function getConfiguredRealtimePlatforms(): Set<AdapterPlatform> | null {
       .map((value) => value.trim())
       .filter(isAdapterPlatform),
   );
+}
+
+const LOCAL_ACCESS_SYNC_SOURCES = ["contacts", "imessage"] as const;
+
+/**
+ * The Contacts and Messages sources a manual sync of `source` covers that the saved state does
+ * not hold syncable. Their access may have been granted since the daemon last looked.
+ */
+export function localSyncSourcesToRecheck(
+  db: Pick<ReturnType<typeof openCuedDatabase>, "listEnabledSyncTargets">,
+  source: string | undefined,
+): Array<(typeof LOCAL_ACCESS_SYNC_SOURCES)[number]> {
+  const covered = LOCAL_ACCESS_SYNC_SOURCES.filter(
+    (platform) => source == null || source === platform,
+  );
+  if (covered.length === 0) {
+    return [];
+  }
+  const syncable = new Set(db.listEnabledSyncTargets().map((target) => target.platform));
+  return covered.filter((platform) => !syncable.has(platform));
 }
 
 export function getAutoSyncTargets(
@@ -4709,6 +4730,18 @@ export async function runDaemon(): Promise<void> {
     requestSignalRealtimeReconcile();
     requestWhatsAppRealtimeReconcile();
   };
+  const recheckLocalAccessForManualSync = async (source: string | undefined) => {
+    if (localSyncSourcesToRecheck(db, source).length === 0) {
+      return;
+    }
+    try {
+      const { localIntegrationStates } = await readModel.refreshLocalAccess({ maxAgeMs: 0 });
+      refreshLocalIntegrationStates(db, localIntegrationStates);
+      reconcileLocalWatchers();
+    } catch (error) {
+      daemonLogger.warn("local access check before a manual sync failed", error);
+    }
+  };
   let managedIntegrationRefresh: Promise<void> | null = null;
   const refreshManagedIntegrationsInBackground = (reason: string) => {
     // Only the app asks for this, when it opens: poll every account once at its normal
@@ -4766,6 +4799,7 @@ export async function runDaemon(): Promise<void> {
     realtimeStatuses,
     subscribe,
     refreshManagedIntegrationsInBackground,
+    recheckLocalAccessForManualSync,
     stallMonitor,
     noteForegroundRequest: () => {
       lastForegroundRequestAt = now();
@@ -5022,6 +5056,7 @@ type DaemonRequestContext = {
   realtimeStatuses: () => RealtimeSessionStatuses;
   subscribe: (socket: Socket) => void;
   refreshManagedIntegrationsInBackground: (reason: string) => void;
+  recheckLocalAccessForManualSync: (source: string | undefined) => Promise<void>;
   stallMonitor: StallMonitor;
   noteForegroundRequest: () => void;
   /** Drops message hooks still waiting on projection for a platform whose rows are gone. */
@@ -5138,6 +5173,7 @@ async function dispatchRequest(
     readModel,
     realtimeStatuses,
     refreshManagedIntegrationsInBackground,
+    recheckLocalAccessForManualSync,
   } = context;
   try {
     const runQueueService = new RunQueueService(db, schedulers);
@@ -5553,6 +5589,9 @@ async function dispatchRequest(
           }),
         };
       case "sync-run":
+        // Access granted outside the app (`cued permissions request`) is not in the saved
+        // state until something looks again.
+        await recheckLocalAccessForManualSync(request.source);
         return {
           id: request.id,
           ok: true,
