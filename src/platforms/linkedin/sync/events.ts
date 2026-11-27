@@ -282,10 +282,6 @@ export function isLinkedInMessageEdited(message: Message): boolean {
   return message.messageBodyRenderFormat === "EDITED";
 }
 
-export function isLinkedInSystemMessage(message: Message): boolean {
-  return message.messageBodyRenderFormat === "SYSTEM";
-}
-
 export function conversationSourceKey(conversationUrn: string): string {
   return `linkedin:${normalizeConversationUrn(conversationUrn)}`;
 }

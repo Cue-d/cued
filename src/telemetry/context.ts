@@ -26,15 +26,6 @@ export function durationBucket(durationMs: number): string {
   return "gte_10m";
 }
 
-export function attemptBucket(attempt: number | null | undefined): string | undefined {
-  if (attempt == null || !Number.isFinite(attempt) || attempt < 0) {
-    return undefined;
-  }
-  if (attempt <= 1) return "first";
-  if (attempt <= 3) return "retry_2_3";
-  return "retry_4_plus";
-}
-
 export function errorTelemetryProperties(
   error: unknown,
   fallbackCode = "unknown_error",
