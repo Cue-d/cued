@@ -79,7 +79,7 @@ export interface WhatsAppDesktopImportOptions {
   observedBase?: number;
 }
 
-export function defaultWhatsAppDesktopSourcePath(): string {
+function defaultWhatsAppDesktopSourcePath(): string {
   return join(homedir(), "Library", "Group Containers", "group.net.whatsapp.WhatsApp.shared");
 }
 

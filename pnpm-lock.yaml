@@ -27,9 +27,6 @@ importers:
       '@biomejs/biome':
         specifier: ^2.4.6
         version: 2.4.6
-      '@types/better-sqlite3':
-        specifier: ^7.6.13
-        version: 7.6.13
       '@types/node':
         specifier: ^24.19.4
         version: 24.19.4
@@ -1631,12 +1628,14 @@ snapshots:
   '@types/better-sqlite3@7.6.13':
     dependencies:
       '@types/node': 20.19.29
+    optional: true
 
   '@types/estree@1.0.8': {}
 
   '@types/node@20.19.29':
     dependencies:
       undici-types: 6.21.0
+    optional: true
 
   '@types/node@24.19.4':
     dependencies:
@@ -2198,7 +2197,8 @@ snapshots:
 
   typescript@5.9.3: {}
 
-  undici-types@6.21.0: {}
+  undici-types@6.21.0:
+    optional: true
 
   undici-types@7.24.6: {}
 

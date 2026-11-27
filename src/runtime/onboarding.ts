@@ -67,7 +67,6 @@ export async function buildOnboardingSnapshot(
   db: CuedDatabase,
   options: {
     refreshManagedIntegrations?: boolean;
-    refreshPermissions?: boolean;
     installGlobalSkill?: boolean;
     /**
      * Long-lived callers pass a monitor so the skill check never blocks: it answers from the
@@ -94,10 +93,7 @@ export async function buildOnboardingSnapshot(
 
   const permissions = options.localAccess
     ? { permissions: [...options.localAccess.permissions] }
-    : await buildPermissionStatus({
-        mode: options.refreshPermissions ? "active" : "passive",
-        db,
-      });
+    : await buildPermissionStatus();
   permissions.permissions.push({
     key: "diagnostics",
     status: isTelemetryEnabled(db) ? "granted" : "disabled",

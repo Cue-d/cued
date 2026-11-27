@@ -12,7 +12,6 @@
     "prepare": "husky",
     "dev": "tsx src/cli.ts",
     "build": "tsc -p tsconfig.build.json",
-    "build:native:macos": "swift build --package-path native/macos/CuedNative -c release",
     "build:app:macos": "bash scripts/build-cued-daemon-app.sh",
     "build:tarball:macos": "bash scripts/build-cued-tarball.sh",
     "check:app-quality": "pnpm check:biome && pnpm build && pnpm typecheck && pnpm test",
@@ -50,7 +49,6 @@
   },
   "devDependencies": {
     "@biomejs/biome": "^2.4.6",
-    "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^24.19.4",
     "esbuild": "^0.27.0",
     "husky": "^9.1.7",

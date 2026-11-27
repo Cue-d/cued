@@ -388,11 +388,7 @@ final class RootWindowController: NSWindowController {
     guard let result = daemonSupervisor.runCLI(arguments: arguments) else {
       return nil
     }
-    guard result.status == 0,
-          let data = result.stdout.data(using: .utf8) else {
-      return nil
-    }
-    return try? JSONDecoder().decode(type, from: data)
+    return decodeCLIJSON(type, status: result.status, stdout: result.stdout)
   }
 
   private nonisolated static func fastRootSnapshot(
@@ -598,10 +594,7 @@ final class RootWindowController: NSWindowController {
       }.value
       let installResult: SkillInstallResponse? =
         installCommandResult.flatMap { result in
-          guard result.status == 0, let data = result.stdout.data(using: .utf8) else {
-            return nil
-          }
-          return try? JSONDecoder().decode(SkillInstallResponse.self, from: data)
+          decodeCLIJSON(SkillInstallResponse.self, status: result.status, stdout: result.stdout)
         }
       let installFailed = ((installCommandResult?.status ?? 1) != 0 || installResult?.ok == false)
 
@@ -931,10 +924,6 @@ final class RootWindowController: NSWindowController {
       return false
     }
     return !pendingLivePermissionKeys.isDisjoint(with: liveRefreshPermissionKeys)
-  }
-
-  private func trackLivePermissionRequests(flags: [String]) {
-    trackLivePermissionKeys(permissionKeys(for: flags))
   }
 
   private func trackLivePermissionKeys(_ keys: Set<String>) {

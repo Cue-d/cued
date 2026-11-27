@@ -27,7 +27,7 @@ import { performance } from "node:perf_hooks";
  * 150-210 ms a minute, nearly all of it a 10 ms event-loop sampling timer. The targets leave
  * room for noise and one more slow timer, and fail on anything that polls at sub-second rates.
  */
-export const RESTING_TARGETS = {
+const RESTING_TARGETS = {
   /** CPU time the daemon may use per minute at rest (top reports it in 10 ms steps). */
   cpuMsPerMinute: 60,
   /** Context switches per second at rest. */
@@ -53,7 +53,7 @@ export type RestingCostResult = {
 type ProcessCounters = { cpuMs: number; contextSwitches: number; idleWakeups: number | null };
 
 /** Reads a process's cumulative CPU time and context switches. */
-export function readProcessCounters(pid: number): ProcessCounters {
+function readProcessCounters(pid: number): ProcessCounters {
   if (process.platform === "linux") {
     // utime and stime are fields 14 and 15, after the parenthesised command name.
     const stat = readFileSync(`/proc/${pid}/stat`, "utf8");
@@ -86,7 +86,7 @@ export function readProcessCounters(pid: number): ProcessCounters {
 }
 
 /** Parses top's TIME column: `MM:SS.cc`, `HH:MM:SS`, or `H:MM:SS.cc`. */
-export function parseCpuTime(value: string): number {
+function parseCpuTime(value: string): number {
   const parts = value.split(":").map(Number);
   if (parts.length === 0 || parts.some((part) => !Number.isFinite(part))) {
     throw new Error(`Unrecognised CPU time: ${value}`);
@@ -95,7 +95,7 @@ export function parseCpuTime(value: string): number {
 }
 
 /** Parses a top counter; top appends `+` or `-` to show the direction of change. */
-export function parseCounter(value: string): number {
+function parseCounter(value: string): number {
   const parsed = Number(value.replace(/[+-]$/, ""));
   if (!Number.isFinite(parsed)) {
     throw new Error(`Unrecognised counter: ${value}`);

@@ -61,7 +61,7 @@ export interface SlackHelperStatus {
   protocolVersion: number | null;
 }
 
-export function isSlackHelperProtocolSupported(protocolVersion: number | null): boolean {
+function isSlackHelperProtocolSupported(protocolVersion: number | null): boolean {
   return protocolVersion === SUPPORTED_SLACK_HELPER_PROTOCOL_VERSION;
 }
 

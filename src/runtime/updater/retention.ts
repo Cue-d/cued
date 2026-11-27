@@ -44,9 +44,9 @@ const DOWNLOAD_DIR_ENTRIES = new Set([
 ]);
 const SQLITE_SIDECARS = ["", "-wal", "-shm", "-journal"];
 
-export const DEFAULT_MIN_AGE_MS = 60 * 60 * 1000;
+const DEFAULT_MIN_AGE_MS = 60 * 60 * 1000;
 /** A pending rollback older than this outlived its helper, which gives up within minutes. */
-export const STALE_PENDING_ROLLBACK_MS = 24 * 60 * 60 * 1000;
+const STALE_PENDING_ROLLBACK_MS = 24 * 60 * 60 * 1000;
 
 export type UpdateArtifactRetentionOptions = {
   backupsDir: string;
