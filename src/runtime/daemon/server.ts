@@ -51,6 +51,7 @@ import { runAdapter } from "../../platforms/core/runner.js";
 import { refreshLocalIntegrationStates } from "../../platforms/core/state/local-refresh.js";
 import { invalidateIntegrationAuth } from "../../platforms/core/state/mutations.js";
 import { refreshManagedIntegrationStates } from "../../platforms/core/state/refresh.js";
+import { reconcileAbandonedAuthSessions } from "../../platforms/core/state/status.js";
 import type { SyncContinuation } from "../../platforms/core/sync.js";
 import { isDiscordAuthInvalidationError } from "../../platforms/discord/api/client.js";
 import { warmSlackHelperInspection } from "../../platforms/slack/helper/binary.js";
@@ -195,6 +196,7 @@ export async function runDaemon(): Promise<void> {
   };
   const stallMonitor = new StallMonitor({
     onStall: (report) => daemonLogger.warn("event loop stalled", report),
+    onSuspended: (report) => daemonLogger.info("event loop suspended", report),
     stallThresholdMs: positiveEnvNumber("CUED_STALL_THRESHOLD_MS"),
     slowSectionMs: positiveEnvNumber("CUED_STALL_SECTION_MS"),
     reportIntervalMs: positiveEnvNumber("CUED_STALL_REPORT_INTERVAL_MS"),
@@ -400,6 +402,17 @@ export async function runDaemon(): Promise<void> {
   const { nativeWatchers, reconcileLocalWatchers, stopLocalWatchers } = createLocalWatchers({
     db,
     queueDebouncedNativeSync,
+  });
+
+  // The host discards the daemon's output, so without these a failure nothing awaited would
+  // end the process with no trace. A rejected promise is logged and the daemon carries on;
+  // after an exception its state cannot be trusted, so it exits and the host restarts it.
+  process.on("unhandledRejection", (reason) => {
+    daemonLogger.error("unhandled promise rejection", reason);
+  });
+  process.on("uncaughtException", (error) => {
+    daemonLogger.error("uncaught exception; exiting", error);
+    process.exit(1);
   });
 
   db.recoverInProgressRuns();
@@ -831,6 +844,12 @@ export async function runDaemon(): Promise<void> {
   };
   const runBootstrap = async () => {
     try {
+      try {
+        // A sign-in left unfinished by the previous daemon can never report back.
+        reconcileAbandonedAuthSessions(db, { ownerGone: true });
+      } catch (error) {
+        daemonLogger.warn("could not cancel sign-ins left by the previous daemon", error);
+      }
       // Status and capability checks read each helper's version synchronously. Look them up
       // here, without blocking, so those reads never have to spawn anything.
       await Promise.all([warmSlackHelperInspection(), warmWhatsAppHelperInspection()]);

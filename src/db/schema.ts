@@ -320,6 +320,8 @@ export const conversations = sqliteTable("conversations", {
   removalReason: text("removal_reason"),
   service: text("service"),
   name: text("name"),
+  /** 1 when `name` was derived from the participants' names rather than supplied by the platform. */
+  nameIsDerived: integer("name_is_derived").notNull().default(0),
   topic: text("topic"),
   participantNames: text("participant_names"),
   lastMessageId: text("last_message_id"),

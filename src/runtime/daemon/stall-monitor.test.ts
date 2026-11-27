@@ -1,11 +1,17 @@
 import { describe, expect, it } from "vitest";
-import { StallMonitor, type StallReport } from "./stall-monitor.js";
+import type { HostSleepState } from "../../core/system-sleep.js";
+import { StallMonitor, type StallReport, type SuspensionReport } from "./stall-monitor.js";
 
 function block(ms: number): void {
   const until = performance.now() + ms;
   while (performance.now() < until) {
     // Busy-wait: the point is to hold the event loop.
   }
+}
+
+/** Holds the event loop without using the CPU, as a sleeping machine or a stopped process does. */
+function pause(ms: number): void {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
 
 /** Report windows in these tests are tens of ms, so a busy test runner can keep one "active". */
@@ -118,5 +124,98 @@ describe("stall monitor", () => {
     expect(reports).toHaveLength(1);
     expect(reports[0]?.maxStallMs).toBeGreaterThanOrEqual(120);
     expect(reports[0]?.slowSections.map((section) => section.name)).toEqual(["heartbeat"]);
+  });
+
+  describe("telling a suspension from a stall", () => {
+    const awake: HostSleepState = { sleeping: false, lastWakeAt: 0 };
+
+    async function watch(
+      host: () => HostSleepState | null,
+      hold: () => void,
+    ): Promise<{ stalls: StallReport[]; suspensions: SuspensionReport[] }> {
+      const stalls: StallReport[] = [];
+      const suspensions: SuspensionReport[] = [];
+      const monitor = new StallMonitor({
+        onStall: (report) => stalls.push(report),
+        onSuspended: (report) => suspensions.push(report),
+        readHostSleepState: host,
+        reportIntervalMs: 50,
+        stallThresholdMs: 200,
+      });
+      monitor.start();
+      try {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        hold();
+        await new Promise((resolve) => setTimeout(resolve, 800));
+      } finally {
+        monitor.stop();
+      }
+      return { stalls, suspensions };
+    }
+
+    it("reports a gap the machine slept through once, as a suspension", async () => {
+      let host = awake;
+      const { stalls, suspensions } = await watch(
+        () => host,
+        () => {
+          pause(400);
+          host = { sleeping: false, lastWakeAt: Date.now() };
+        },
+      );
+      expect(stalls).toEqual([]);
+      expect(suspensions).toHaveLength(1);
+      expect(suspensions[0]?.suspendedMs).toBeGreaterThanOrEqual(400);
+    });
+
+    it("reports a gap as a suspension while the host still says the machine is asleep", async () => {
+      const { stalls, suspensions } = await watch(
+        () => ({ sleeping: true, lastWakeAt: 0 }),
+        () => pause(400),
+      );
+      expect(stalls).toEqual([]);
+      expect(suspensions).toHaveLength(1);
+    });
+
+    it("reports a gap the process was stopped for as a suspension", async () => {
+      const { stalls, suspensions } = await watch(
+        () => awake,
+        () => {
+          pause(400);
+          process.kill(process.pid, "SIGCONT");
+        },
+      );
+      expect(stalls).toEqual([]);
+      expect(suspensions).toHaveLength(1);
+    });
+
+    it("still reports a synchronous wait while the machine was awake", async () => {
+      // A busy SQLite lock or a synchronous child process holds the loop without the CPU.
+      const { stalls, suspensions } = await watch(
+        () => awake,
+        () => pause(400),
+      );
+      expect(suspensions).toEqual([]);
+      expect(stalls).toHaveLength(1);
+      expect(stalls[0]?.maxStallMs).toBeGreaterThanOrEqual(400);
+    });
+
+    it("reports a synchronous wait as a stall when no host app can vouch for a sleep", async () => {
+      const { stalls, suspensions } = await watch(
+        () => null,
+        () => pause(400),
+      );
+      expect(suspensions).toEqual([]);
+      expect(stalls).toHaveLength(1);
+    });
+
+    it("reports the full length of a block that used the CPU, whatever the host says", async () => {
+      const { stalls, suspensions } = await watch(
+        () => ({ sleeping: true, lastWakeAt: Date.now() }),
+        () => block(400),
+      );
+      expect(suspensions).toEqual([]);
+      expect(stalls).toHaveLength(1);
+      expect(stalls[0]?.maxStallMs).toBeGreaterThanOrEqual(400);
+    });
   });
 });

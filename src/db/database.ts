@@ -473,6 +473,14 @@ export class CuedDatabase {
     return this.db.transaction(run, { behavior: "immediate" });
   }
 
+  /**
+   * Runs several of this class's writes as one write transaction: all of them happen or none
+   * does, and a busy database is refused before anything is written.
+   */
+  writeAtomically<T>(run: () => T): T {
+    return this.writeTransaction(() => run());
+  }
+
   migrate(): void {
     for (const migration of MIGRATIONS) {
       const alreadyApplied = this.sqlite
