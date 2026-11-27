@@ -53,13 +53,8 @@ import { invalidateIntegrationAuth } from "../../platforms/core/state/mutations.
 import { refreshManagedIntegrationStates } from "../../platforms/core/state/refresh.js";
 import type { SyncContinuation } from "../../platforms/core/sync.js";
 import { isDiscordAuthInvalidationError } from "../../platforms/discord/api/client.js";
-import { DiscordRealtimeSupervisor } from "../../platforms/discord/realtime/session.js";
-import { LinkedInRealtimeSupervisor } from "../../platforms/linkedin/realtime/session.js";
-import { SignalRealtimeSupervisor } from "../../platforms/signal/realtime/session.js";
 import { warmSlackHelperInspection } from "../../platforms/slack/helper/binary.js";
-import { SlackRealtimeSupervisor } from "../../platforms/slack/realtime/session.js";
 import { warmWhatsAppHelperInspection } from "../../platforms/whatsapp/helper/pair.js";
-import { WhatsAppRealtimeSupervisor } from "../../platforms/whatsapp/realtime/session.js";
 import { buildWhatsAppRawEventsFromSnapshot } from "../../platforms/whatsapp/sync/events.js";
 import {
   addWhatsAppResyncStats,
@@ -98,11 +93,7 @@ import {
 } from "./ingest-run.js";
 import { isNativeWatcherRunning, shouldBootstrapLocalIntegrations } from "./local-watchers.js";
 import { SyncRunMaintenance } from "./maintenance.js";
-import {
-  createDebouncedSyncEnqueuer,
-  createLocalWatchers,
-  queueNativeTriggeredSync,
-} from "./native-watchers.js";
+import { createDebouncedSyncEnqueuer, createLocalWatchers } from "./native-watchers.js";
 import { createProjectionRunner } from "./projection-runner.js";
 import {
   getAdaptiveProjectionBatchSize,
@@ -120,14 +111,8 @@ import {
 } from "./raw-events.js";
 import { DaemonReadModel } from "./read-model.js";
 import { createRealtimeIngest } from "./realtime-ingest.js";
-import {
-  blockDiscordIntegration,
-  collectDesiredDiscordSessions,
-  collectDesiredLinkedInSessions,
-  collectDesiredSignalSessions,
-  collectDesiredSlackSessions,
-  collectDesiredWhatsAppSessions,
-} from "./realtime-sessions.js";
+import { blockDiscordIntegration } from "./realtime-sessions.js";
+import { createRealtimeSupervisors } from "./realtime-supervisors.js";
 import { type DaemonRequestContext, handleSocket } from "./request-handler.js";
 import { createSearchIndexDrain } from "./search-index-drain.js";
 import {
@@ -186,10 +171,6 @@ import {
 } from "./write-lock.js";
 
 const daemonLogger = createLogger("daemon");
-const linkedInLogger = createLogger("linkedin");
-const discordLogger = createLogger("discord");
-const slackLogger = createLogger("slack");
-const signalLogger = createLogger("signal");
 const whatsAppLogger = createLogger("whatsapp");
 
 export async function runDaemon(): Promise<void> {
@@ -246,20 +227,8 @@ export async function runDaemon(): Promise<void> {
   let ingestDrainDueAt: number | null = null;
   const lastAutoSyncQueuedAt = new Map<string, number>();
   const autoSyncPacing = new AutoSyncPacing();
-  const lastSignalReconnectSyncQueuedAt = new Map<string, number>();
   const lastContinuationProjectionQueuedAt = new Map<string, number>();
   const projectionMessageHooks = new ProjectionMessageHookBarrier();
-  const suppressNextSignalReconnectSync = new Set<string>();
-  let discordRealtimeReconcilePromise: Promise<void> | null = null;
-  let discordRealtimeReconcileQueued = false;
-  let linkedInRealtimeReconcilePromise: Promise<void> | null = null;
-  let linkedInRealtimeReconcileQueued = false;
-  let slackRealtimeReconcilePromise: Promise<void> | null = null;
-  let slackRealtimeReconcileQueued = false;
-  let signalRealtimeReconcilePromise: Promise<void> | null = null;
-  let signalRealtimeReconcileQueued = false;
-  let whatsAppRealtimeReconcilePromise: Promise<void> | null = null;
-  let whatsAppRealtimeReconcileQueued = false;
   let updateCheckPromise: Promise<void> | null = null;
   let isUpdateShutdownRequested = false;
   let updateShutdownRequestedAt: number | null = null;
@@ -296,25 +265,6 @@ export async function runDaemon(): Promise<void> {
     await projectionMessageHooks.releaseCompletedRange(range, async (payload) => {
       await safeEmitHookEvent("message.received", payload);
     });
-  };
-
-  const runSignalSyncExclusively = async <T>(
-    accountKey: string,
-    task: () => Promise<T>,
-  ): Promise<T> => {
-    const activeSession = signalRealtime.getSession(accountKey);
-    if (!activeSession) {
-      return await task();
-    }
-
-    suppressNextSignalReconnectSync.add(accountKey);
-    await signalRealtime.stopSession(accountKey);
-
-    try {
-      return await task();
-    } finally {
-      requestSignalRealtimeReconcile();
-    }
   };
 
   const drainIngestQueue = () => {
@@ -417,256 +367,40 @@ export async function runDaemon(): Promise<void> {
     wakeSearchIndex: (delayMs?: number) => scheduleSearchIndexDrain(delayMs),
   };
   const queueDebouncedNativeSync = createDebouncedSyncEnqueuer(db, schedulers.wakeIngest);
-  const discordRealtime = new DiscordRealtimeSupervisor({
-    onEvent: (accountKey, event) => {
-      autoSyncPacing.reset(`discord:${accountKey}`);
-      void handleDiscordRealtimeEvent(accountKey, event);
-    },
-    onAuthInvalidated: (accountKey, _status, reason) => {
-      blockDiscordIntegration(db, accountKey, reason);
-      requestDiscordRealtimeReconcile();
-    },
-    onConnected: (accountKey, _status, reconnected) => {
-      if (!reconnected) {
-        return;
-      }
-      queueNativeTriggeredSync(
-        db,
-        "discord",
-        accountKey,
-        "discord_realtime_reconnected",
-        schedulers.wakeIngest,
-      );
-    },
-  });
-  const slackRealtime = new SlackRealtimeSupervisor({
-    onEvent: (accountKey, event) => {
-      autoSyncPacing.reset(`slack:${accountKey}`);
-      void handleSlackRealtimeEvent(accountKey, event);
-    },
-    onConnected: (accountKey, _status, reconnected) => {
-      if (!reconnected) {
-        return;
-      }
-      queueNativeTriggeredSync(
-        db,
-        "slack",
-        accountKey,
-        "slack_realtime_reconnected",
-        schedulers.wakeIngest,
-      );
-    },
+  const {
+    discordRealtime,
+    slackRealtime,
+    linkedInRealtime,
+    signalRealtime,
+    whatsAppRealtime,
+    requestDiscordRealtimeReconcile,
+    requestSlackRealtimeReconcile,
+    requestLinkedInRealtimeReconcile,
+    requestSignalRealtimeReconcile,
+    requestWhatsAppRealtimeReconcile,
+    runSignalSyncExclusively,
+  } = createRealtimeSupervisors({
+    db,
+    schedulers,
+    autoSyncPacing,
+    shouldRunRealtimePlatform,
+    signalReconnectSyncCooldownMs,
+    // The ingest handlers are created further down, once projection and search indexing exist.
+    // Supervisors only call them for session events, which start after the daemon is listening.
+    handleSlackRealtimeEvent: (accountKey, event) => handleSlackRealtimeEvent(accountKey, event),
+    handleDiscordRealtimeEvent: (accountKey, event) =>
+      handleDiscordRealtimeEvent(accountKey, event),
+    ingestLinkedInRealtimeEnvelope: (accountKey, envelope, userEntityUrn) =>
+      ingestLinkedInRealtimeEnvelope(accountKey, envelope, userEntityUrn),
+    ingestSignalRealtimeMessages: (accountKey, messages) =>
+      ingestSignalRealtimeMessages(accountKey, messages),
+    handleWhatsAppRealtimeEvent: (accountKey, event) =>
+      handleWhatsAppRealtimeEvent(accountKey, event),
   });
   const { nativeWatchers, reconcileLocalWatchers, stopLocalWatchers } = createLocalWatchers({
     db,
     queueDebouncedNativeSync,
   });
-  const linkedInRealtime = new LinkedInRealtimeSupervisor({
-    onEvent: (accountKey, event, userEntityUrn) => {
-      autoSyncPacing.reset(`linkedin:${accountKey}`);
-      void ingestLinkedInRealtimeEnvelope(accountKey, event, userEntityUrn);
-    },
-    onConnected: (accountKey, _status, reconnected) => {
-      if (!reconnected) {
-        return;
-      }
-      queueNativeTriggeredSync(
-        db,
-        "linkedin",
-        accountKey,
-        "linkedin_realtime_reconnected",
-        schedulers.wakeIngest,
-      );
-    },
-  });
-  const signalRealtime = new SignalRealtimeSupervisor({
-    onMessage: (accountKey, message) => {
-      autoSyncPacing.reset(`signal:${accountKey}`);
-      void ingestSignalRealtimeMessages(accountKey, [message]);
-    },
-    onConnected: (accountKey, _status, reconnected) => {
-      if (!reconnected) {
-        return;
-      }
-      if (suppressNextSignalReconnectSync.has(accountKey)) {
-        suppressNextSignalReconnectSync.delete(accountKey);
-        return;
-      }
-      const queuedAt = now();
-      const lastQueuedAt = lastSignalReconnectSyncQueuedAt.get(accountKey) ?? 0;
-      if (queuedAt - lastQueuedAt < signalReconnectSyncCooldownMs) {
-        return;
-      }
-      lastSignalReconnectSyncQueuedAt.set(accountKey, queuedAt);
-      queueNativeTriggeredSync(
-        db,
-        "signal",
-        accountKey,
-        "signal_realtime_reconnected",
-        schedulers.wakeIngest,
-      );
-    },
-  });
-  const whatsAppRealtime = new WhatsAppRealtimeSupervisor({
-    recoverMissingSession: () => requestWhatsAppRealtimeReconcile(),
-    onEvent: (accountKey, event) => {
-      autoSyncPacing.reset(`whatsapp:${accountKey}`);
-      void handleWhatsAppRealtimeEvent(accountKey, event);
-    },
-    onConnected: (accountKey, _status, reconnected) => {
-      if (!reconnected) {
-        return;
-      }
-      queueNativeTriggeredSync(
-        db,
-        "whatsapp",
-        accountKey,
-        "whatsapp_realtime_reconnected",
-        schedulers.wakeIngest,
-      );
-    },
-  });
-
-  const reconcileSlackRealtimeSessions = async () => {
-    const { desired, degraded } = await collectDesiredSlackSessions(db);
-    slackRealtime.reconcile(desired, degraded);
-  };
-
-  const reconcileDiscordRealtimeSessions = async () => {
-    const { desired, degraded } = await collectDesiredDiscordSessions(db);
-    discordRealtime.reconcile(desired, degraded);
-  };
-
-  const requestDiscordRealtimeReconcile = () => {
-    if (!shouldRunRealtimePlatform("discord")) {
-      discordRealtime.stopAll();
-      return;
-    }
-    if (discordRealtimeReconcilePromise) {
-      discordRealtimeReconcileQueued = true;
-      return;
-    }
-
-    discordRealtimeReconcilePromise = reconcileDiscordRealtimeSessions()
-      .catch((error) => {
-        discordLogger.warn("realtime reconcile failed", error);
-      })
-      .finally(() => {
-        discordRealtimeReconcilePromise = null;
-        if (discordRealtimeReconcileQueued) {
-          discordRealtimeReconcileQueued = false;
-          requestDiscordRealtimeReconcile();
-        }
-      });
-  };
-
-  const requestSlackRealtimeReconcile = () => {
-    if (!shouldRunRealtimePlatform("slack")) {
-      slackRealtime.stopAll();
-      return;
-    }
-    if (slackRealtimeReconcilePromise) {
-      slackRealtimeReconcileQueued = true;
-      return;
-    }
-
-    slackRealtimeReconcilePromise = reconcileSlackRealtimeSessions()
-      .catch((error) => {
-        slackLogger.warn("realtime reconcile failed", error);
-      })
-      .finally(() => {
-        slackRealtimeReconcilePromise = null;
-        if (slackRealtimeReconcileQueued) {
-          slackRealtimeReconcileQueued = false;
-          requestSlackRealtimeReconcile();
-        }
-      });
-  };
-
-  const reconcileLinkedInRealtimeSessions = async () => {
-    const { desired, degraded } = await collectDesiredLinkedInSessions(db);
-    linkedInRealtime.reconcile(desired, degraded);
-  };
-
-  const requestLinkedInRealtimeReconcile = () => {
-    if (!shouldRunRealtimePlatform("linkedin")) {
-      linkedInRealtime.stopAll();
-      return;
-    }
-    if (linkedInRealtimeReconcilePromise) {
-      linkedInRealtimeReconcileQueued = true;
-      return;
-    }
-
-    linkedInRealtimeReconcilePromise = reconcileLinkedInRealtimeSessions()
-      .catch((error) => {
-        linkedInLogger.warn("realtime reconcile failed", error);
-      })
-      .finally(() => {
-        linkedInRealtimeReconcilePromise = null;
-        if (linkedInRealtimeReconcileQueued) {
-          linkedInRealtimeReconcileQueued = false;
-          requestLinkedInRealtimeReconcile();
-        }
-      });
-  };
-
-  const reconcileSignalRealtimeSessions = async () => {
-    const { desired, degraded } = await collectDesiredSignalSessions(db);
-    signalRealtime.reconcile(desired, degraded);
-  };
-
-  const requestSignalRealtimeReconcile = () => {
-    if (!shouldRunRealtimePlatform("signal")) {
-      signalRealtime.stopAll();
-      return;
-    }
-    if (signalRealtimeReconcilePromise) {
-      signalRealtimeReconcileQueued = true;
-      return;
-    }
-
-    signalRealtimeReconcilePromise = reconcileSignalRealtimeSessions()
-      .catch((error) => {
-        signalLogger.warn("realtime reconcile failed", error);
-      })
-      .finally(() => {
-        signalRealtimeReconcilePromise = null;
-        if (signalRealtimeReconcileQueued) {
-          signalRealtimeReconcileQueued = false;
-          requestSignalRealtimeReconcile();
-        }
-      });
-  };
-
-  const reconcileWhatsAppRealtimeSessions = async () => {
-    const { desired, degraded } = await collectDesiredWhatsAppSessions(db);
-    whatsAppRealtime.reconcile(desired, degraded);
-  };
-
-  const requestWhatsAppRealtimeReconcile = () => {
-    if (!shouldRunRealtimePlatform("whatsapp")) {
-      whatsAppRealtime.stopAll();
-      return;
-    }
-    if (whatsAppRealtimeReconcilePromise) {
-      whatsAppRealtimeReconcileQueued = true;
-      return whatsAppRealtimeReconcilePromise;
-    }
-
-    whatsAppRealtimeReconcilePromise = reconcileWhatsAppRealtimeSessions()
-      .catch((error) => {
-        whatsAppLogger.warn("realtime reconcile failed", error);
-      })
-      .finally(() => {
-        whatsAppRealtimeReconcilePromise = null;
-        if (whatsAppRealtimeReconcileQueued) {
-          whatsAppRealtimeReconcileQueued = false;
-          requestWhatsAppRealtimeReconcile();
-        }
-      });
-    return whatsAppRealtimeReconcilePromise;
-  };
 
   db.recoverInProgressRuns();
   const daemonIdentity = getDaemonIdentity();
