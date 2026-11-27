@@ -1,5 +1,5 @@
 import type { ChildProcess } from "node:child_process";
-import { existsSync, type FSWatcher, rmSync } from "node:fs";
+import { existsSync, rmSync } from "node:fs";
 import { createConnection, createServer, type Socket } from "node:net";
 import process from "node:process";
 import {
@@ -96,20 +96,12 @@ import {
   isAdapterAuthInvalidation,
   resolveCheckpointSyncMode,
 } from "./ingest-run.js";
-import {
-  isNativeWatcherRunning,
-  nextNativeWatcherRestart,
-  shouldBootstrapLocalIntegrations,
-  shouldRunLocalWatcher as shouldRunLocalWatcherForState,
-} from "./local-watchers.js";
+import { isNativeWatcherRunning, shouldBootstrapLocalIntegrations } from "./local-watchers.js";
 import { SyncRunMaintenance } from "./maintenance.js";
 import {
   createDebouncedSyncEnqueuer,
-  type NativeWatcherName,
+  createLocalWatchers,
   queueNativeTriggeredSync,
-  startCallHistoryWatcher,
-  startContactsWatcher,
-  startIMessageWatcher,
 } from "./native-watchers.js";
 import { createProjectionRunner } from "./projection-runner.js";
 import {
@@ -194,7 +186,6 @@ import {
 } from "./write-lock.js";
 
 const daemonLogger = createLogger("daemon");
-const nativeWatchLogger = createLogger("native-watch");
 const linkedInLogger = createLogger("linkedin");
 const discordLogger = createLogger("discord");
 const slackLogger = createLogger("slack");
@@ -259,11 +250,6 @@ export async function runDaemon(): Promise<void> {
   const lastContinuationProjectionQueuedAt = new Map<string, number>();
   const projectionMessageHooks = new ProjectionMessageHookBarrier();
   const suppressNextSignalReconnectSync = new Set<string>();
-  const nativeWatchers = new Map<NativeWatcherName, FSWatcher | ChildProcess>();
-  const nativeWatcherRestarts = new Map<
-    NativeWatcherName,
-    { failures: number; timer: NodeJS.Timeout | null }
-  >();
   let discordRealtimeReconcilePromise: Promise<void> | null = null;
   let discordRealtimeReconcileQueued = false;
   let linkedInRealtimeReconcilePromise: Promise<void> | null = null;
@@ -471,104 +457,10 @@ export async function runDaemon(): Promise<void> {
       );
     },
   });
-  const stopNativeWatcher = (watcher: FSWatcher | ChildProcess) => {
-    if ("close" in watcher && typeof watcher.close === "function") {
-      watcher.close();
-      return;
-    }
-    if ("kill" in watcher && typeof watcher.kill === "function") {
-      watcher.kill("SIGTERM");
-    }
-  };
-  const shouldStartLocalWatcher = (platform: "contacts" | "imessage") => {
-    return shouldRunLocalWatcherForState(
-      db.getAppMetadata(),
-      db.getIntegrationState(platform, "local"),
-    );
-  };
-  const cancelNativeWatcherRestart = (platform: NativeWatcherName) => {
-    const restart = nativeWatcherRestarts.get(platform);
-    if (restart?.timer) {
-      clearTimeout(restart.timer);
-    }
-    nativeWatcherRestarts.delete(platform);
-  };
-  // A helper that stops on its own is started again after a delay that grows while it keeps
-  // stopping. Its first line on restart queues a sync, which picks up what it missed.
-  const scheduleNativeWatcherRestart = (
-    platform: NativeWatcherName,
-    watcher: ChildProcess,
-    startedAt: number,
-  ) => {
-    if (nativeWatchers.get(platform) !== watcher) {
-      return;
-    }
-    const restart = nativeWatcherRestarts.get(platform) ?? { failures: 0, timer: null };
-    const next = nextNativeWatcherRestart(restart.failures, Date.now() - startedAt);
-    if (restart.timer) {
-      clearTimeout(restart.timer);
-    }
-    restart.failures = next.failures;
-    restart.timer = setTimeout(() => {
-      restart.timer = null;
-      reconcileLocalWatchers();
-    }, next.delayMs);
-    restart.timer.unref?.();
-    nativeWatcherRestarts.set(platform, restart);
-    nativeWatchLogger.warn("native watcher stopped; restarting", {
-      platform,
-      code: watcher.exitCode,
-      signal: watcher.signalCode,
-      delayMs: next.delayMs,
-    });
-  };
-  const reconcileLocalWatchers = () => {
-    if (process.platform !== "darwin") {
-      return;
-    }
-
-    const desiredPlatforms = [
-      ...(shouldStartLocalWatcher("imessage") ? (["imessage", "callhistory"] as const) : []),
-      ...(shouldStartLocalWatcher("contacts") ? (["contacts"] as const) : []),
-    ];
-
-    for (const [platform, watcher] of nativeWatchers.entries()) {
-      if (desiredPlatforms.includes(platform)) {
-        continue;
-      }
-      stopNativeWatcher(watcher);
-      nativeWatchers.delete(platform);
-    }
-    for (const platform of [...nativeWatcherRestarts.keys()]) {
-      if (!desiredPlatforms.includes(platform)) {
-        cancelNativeWatcherRestart(platform);
-      }
-    }
-
-    for (const platform of desiredPlatforms) {
-      const existing = nativeWatchers.get(platform);
-      if (existing && isNativeWatcherRunning(existing)) {
-        continue;
-      }
-      // A watcher that stopped waits for its restart; until then the scheduler polls its source.
-      if (nativeWatcherRestarts.get(platform)?.timer) {
-        continue;
-      }
-      const watcher =
-        platform === "imessage"
-          ? startIMessageWatcher(db, queueDebouncedNativeSync)
-          : platform === "callhistory"
-            ? startCallHistoryWatcher(db, queueDebouncedNativeSync)
-            : startContactsWatcher(db, queueDebouncedNativeSync);
-      if (watcher) {
-        nativeWatchers.set(platform, watcher);
-        if ("exitCode" in watcher) {
-          const startedAt = Date.now();
-          watcher.once("close", () => scheduleNativeWatcherRestart(platform, watcher, startedAt));
-        }
-      }
-    }
-  };
+  const { nativeWatchers, reconcileLocalWatchers, stopLocalWatchers } = createLocalWatchers({
+    db,
+    queueDebouncedNativeSync,
+  });
   const linkedInRealtime = new LinkedInRealtimeSupervisor({
     onEvent: (accountKey, event, userEntityUrn) => {
       autoSyncPacing.reset(`linkedin:${accountKey}`);
@@ -1139,12 +1031,7 @@ export async function runDaemon(): Promise<void> {
   };
 
   const stopRealtimeAndWatchers = () => {
-    for (const watcher of nativeWatchers.values()) {
-      stopNativeWatcher(watcher);
-    }
-    for (const platform of [...nativeWatcherRestarts.keys()]) {
-      cancelNativeWatcherRestart(platform);
-    }
+    stopLocalWatchers();
     discordRealtime.stopAll();
     slackRealtime.stopAll();
     nativeWatchers.clear();
