@@ -154,8 +154,12 @@ fi
 if [[ "$PUBLISH" -eq 1 ]]; then
   [[ -n "$NOTES_FILE" ]] || die "--publish needs --notes-file with the release notes"
 fi
-if [[ -n "$NOTES_FILE" && ! -s "$NOTES_FILE" ]]; then
-  die "notes file '$NOTES_FILE' does not exist or is empty"
+if [[ -n "$NOTES_FILE" ]]; then
+  # The script changes directory below; keep the path the caller meant.
+  if [[ "$NOTES_FILE" != /* ]]; then
+    NOTES_FILE="$PWD/$NOTES_FILE"
+  fi
+  [[ -s "$NOTES_FILE" ]] || die "notes file '$NOTES_FILE' does not exist or is empty"
 fi
 
 # --- Preflight: host and tools --------------------------------------------------------------
@@ -223,6 +227,13 @@ if [[ "$PUBLISH" -eq 1 ]]; then
   if gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
     die "release $TAG already exists on $REPO"
   fi
+  # A tag can exist on GitHub without a release. `gh release create` would reuse it and ignore
+  # --target, attaching these binaries to whatever commit the stray tag points at.
+  if remote_tag="$(gh api "repos/$REPO/git/ref/tags/$TAG" --jq .object.sha 2>&1)"; then
+    die "tag $TAG already exists on $REPO (at ${remote_tag:0:12}) without a release; delete it or pick a new version"
+  elif [[ "$remote_tag" != *"HTTP 404"* ]]; then
+    die "could not check whether tag $TAG exists on $REPO: $remote_tag"
+  fi
   git fetch --quiet origin main
   git merge-base --is-ancestor "$COMMIT" origin/main ||
     die "HEAD ($COMMIT) is not on origin/main; merge and push the release commit first"
@@ -260,8 +271,13 @@ done
 
 # --- Publish (explicit only) ------------------------------------------------------------------
 
+# The tag is created first, at the commit that was built, and without force: if it appeared
+# since preflight, this fails instead of publishing against someone else's tag. The release
+# is then created with --verify-tag, so it can only use that tag.
+tag_args=(api --method POST "repos/$REPO/git/refs"
+  -f "ref=refs/tags/$TAG" -f "sha=$COMMIT" --silent)
 gh_args=(release create "$TAG" "${RELEASE_ASSETS[@]}"
-  --repo "$REPO" --target "$COMMIT" --title "Cued $VERSION")
+  --repo "$REPO" --verify-tag --title "Cued $VERSION")
 if [[ "$CHANNEL" == "prerelease" || "$STAGED" -eq 1 ]]; then
   gh_args+=(--prerelease)
 fi
@@ -271,13 +287,18 @@ if [[ "$PUBLISH" -eq 0 ]]; then
   printf 'Artifacts:\n'
   printf '  %s\n' "${RELEASE_ASSETS[@]}"
   printf 'To publish these exact artifacts:\n  gh'
+  printf ' %q' "${tag_args[@]}"
+  printf '\n  gh'
   printf ' %q' "${gh_args[@]}" --notes-file "<notes.md>"
   printf '\n'
   exit 0
 fi
 
 log "Publish $TAG to $REPO"
-gh "${gh_args[@]}" --notes-file "$NOTES_FILE"
+gh "${tag_args[@]}" ||
+  die "could not create tag $TAG at ${COMMIT:0:12} on $REPO (does it already exist?); nothing was published"
+gh "${gh_args[@]}" --notes-file "$NOTES_FILE" ||
+  die "tag $TAG was created at ${COMMIT:0:12} but the release was not; fix the cause and rerun the 'gh release create' step, or delete the tag"
 printf 'release: published %s\n' "$TAG"
 if [[ "$STAGED" -eq 1 ]]; then
   printf 'Staged as a GitHub prerelease: stable installs are not offered it yet. To promote:\n'

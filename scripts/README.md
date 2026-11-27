@@ -138,8 +138,8 @@ Never commit these values or paste them into issues, PRs or logs.
    version rules, Apple Silicon macOS and required tools, a clean working tree, the tag not
    already existing, the environment variables above, the signing identity present in the
    keychain, the notary profile usable (`xcrun notarytool history`), the OAuth client file
-   valid (stable). With `--publish`, also `gh auth status`, no existing GitHub release for the
-   tag, and `HEAD` already on `origin/main`. `--preflight-only` stops here.
+   valid (stable). With `--publish`, also `gh auth status`, no existing GitHub release or tag
+   for the version, and `HEAD` already on `origin/main`. `--preflight-only` stops here.
 2. **Quality gate**: `pnpm check:ci-local` (skip with `--skip-checks` only if it already
    passed on this commit).
 3. **Build, sign, notarize**: `build-cued-release-artifacts.sh` builds `Cued.app`, signs every
@@ -149,10 +149,11 @@ Never commit these values or paste them into issues, PRs or logs.
 4. **Validate** the signed app again with `validate-cued-release-artifact.sh`.
 5. **Metadata**: `build-cued-release-metadata.mjs` writes `release.json` and `SHA256SUMS`
    (and refuses an ad-hoc signed app).
-6. **Publish, only with `--publish`**: `gh release create v<version>` with the four files
-   above, `--target` set to the built commit, `--prerelease` for the prerelease channel, and
-   your `--notes-file`. Without `--publish` the script prints the exact `gh` command instead,
-   so you can inspect the artifacts first.
+6. **Publish, only with `--publish`**: creates the tag `v<version>` on GitHub at the built
+   commit (without force, so an existing tag stops the release), then
+   `gh release create v<version> --verify-tag` with the four files above, `--prerelease` for
+   the prerelease channel or `--staged`, and your `--notes-file`. Without `--publish` the
+   script prints the exact `gh` commands instead, so you can inspect the artifacts first.
 
 ### Verifying the result
 
