@@ -3,7 +3,7 @@ import { existsSync, type FSWatcher, rmSync, watch } from "node:fs";
 import { createConnection, createServer, type Socket } from "node:net";
 import { basename, dirname } from "node:path";
 import process from "node:process";
-import { getCurrentAppVersion, getCurrentReleaseChannel } from "../../core/app-metadata.js";
+import { getCurrentAppVersion } from "../../core/app-metadata.js";
 import {
   CUED_BACKUPS_DIR,
   CUED_BROWSER_DIR,
@@ -32,7 +32,6 @@ import {
 import {
   type AdapterPlatform,
   getDefaultAccountKeyForPlatform,
-  type HostOS,
   isPlatform,
   type Platform,
   type ProviderRawEventInput,
@@ -46,7 +45,6 @@ import {
   ResilientDbWorker,
   ThreadDbWorker,
 } from "../../db/db-worker.js";
-import type { StatusAggregates } from "../../db/db-worker-jobs.js";
 import { scheduleLegacyBrowserProfileCleanup } from "../../platforms/core/auth/legacy-browser-profiles.js";
 import {
   buildAdapterInvocationEnv,
@@ -148,7 +146,6 @@ import { fetchAttachment, listAttachments, searchAttachments } from "../attachme
 import { buildPermissionStatus } from "../doctor.js";
 import { emitHookEvent } from "../hooks.js";
 import type { DaemonEvent, DaemonEventTopic, DaemonRequest, DaemonResponse } from "../ipc.js";
-import { readMenuBarStatusCache, writeMenuBarStatusCache } from "../menu-bar-status-cache.js";
 import { collectInboundMessageHookPayloads } from "../message-hooks.js";
 import { resolveMacOSNativeBinary } from "../native-binary.js";
 import { buildOnboardingSnapshot, transitionOnboarding } from "../onboarding.js";
@@ -166,11 +163,9 @@ import type { ProjectionWorkerMessage, ProjectionWorkerSuccess } from "../projec
 import { RunQueueService } from "../run-queue.js";
 import {
   buildDoctorSnapshot,
-  buildMenuBarDaemonStatusSnapshot,
   collectRealtimeSessionStatuses,
   type DaemonBootstrapSnapshot,
   type RealtimeSessionStatuses,
-  realtimeSessionFields,
 } from "../status.js";
 import { pruneUpdateArtifacts, scheduleUpdateArtifactRetention } from "../updater/retention.js";
 import { checkForUpdates } from "../updater/service.js";
@@ -240,6 +235,14 @@ import {
 } from "./settings.js";
 import { StallMonitor } from "./stall-monitor.js";
 import {
+  buildDaemonBusyStatusSnapshot,
+  DAEMON_VERSION,
+  getAppStatusMetadata,
+  getDaemonIdentity,
+  readCachedDaemonStatusSnapshot,
+  writeMenuBarStatusSnapshot,
+} from "./status-snapshot.js";
+import {
   AutoSyncPacing,
   autoSyncPushPath,
   historyContinuationDelayMs,
@@ -252,7 +255,6 @@ import {
   withoutWaitingForWriteLock,
 } from "./write-lock.js";
 
-const DAEMON_VERSION = getCurrentAppVersion();
 type NativeWatcherName = "contacts" | "imessage" | "callhistory";
 const daemonLogger = createLogger("daemon");
 const hooksLogger = createLogger("hooks");
@@ -262,71 +264,6 @@ const discordLogger = createLogger("discord");
 const slackLogger = createLogger("slack");
 const signalLogger = createLogger("signal");
 const whatsAppLogger = createLogger("whatsapp");
-
-function getAppStatusMetadata(db: { getAppMetadata: () => unknown }): {
-  hostOs: HostOS;
-  version: string;
-  releaseChannel: string;
-  install: unknown;
-} {
-  return {
-    hostOs:
-      process.platform === "darwin" ? "macos" : process.platform === "win32" ? "windows" : "linux",
-    version: DAEMON_VERSION,
-    releaseChannel: getCurrentReleaseChannel(),
-    install: db.getAppMetadata(),
-  };
-}
-
-function getFallbackAppStatusMetadata(): {
-  hostOs: HostOS;
-  version: string;
-  releaseChannel: string;
-  install: null;
-} {
-  return {
-    hostOs:
-      process.platform === "darwin" ? "macos" : process.platform === "win32" ? "windows" : "linux",
-    version: DAEMON_VERSION,
-    releaseChannel: getCurrentReleaseChannel(),
-    install: null,
-  };
-}
-
-function writeMenuBarStatusSnapshot(
-  db: CuedDatabase,
-  options: {
-    realtime: RealtimeSessionStatuses;
-    bootstrap: DaemonBootstrapSnapshot;
-    aggregates: StatusAggregates;
-  },
-): void {
-  const snapshot = buildMenuBarDaemonStatusSnapshot(db, {
-    app: getAppStatusMetadata(db),
-    realtime: options.realtime,
-    socketPath: CUED_SOCKET_PATH,
-    bootstrap: options.bootstrap,
-    aggregates: options.aggregates,
-  });
-  writeMenuBarStatusCache(snapshot);
-}
-
-function readCachedDaemonStatusSnapshot(options?: {
-  maxAgeMs?: number;
-}): Record<string, unknown> | null {
-  return readMenuBarStatusCache(options)?.snapshot ?? null;
-}
-
-function getDaemonIdentity(): {
-  executablePath: string;
-  appPath?: string;
-} {
-  const appPath = process.env.CUED_APP_PATH?.trim() || undefined;
-  return {
-    executablePath: process.execPath,
-    appPath,
-  };
-}
 
 type QueueSchedulers = {
   wakeIngest: (delayMs?: number) => void;
@@ -798,38 +735,6 @@ function runProjectionWorkerProcess(
       );
     });
   });
-}
-
-function buildDaemonBusyStatusSnapshot(options: {
-  realtime: RealtimeSessionStatuses;
-  socketPath: string;
-  bootstrap: DaemonBootstrapSnapshot;
-  dbPath: string;
-  error: unknown;
-}) {
-  return {
-    app: getFallbackAppStatusMetadata(),
-    bootstrap: options.bootstrap,
-    daemon: {
-      pid: process.pid,
-      started_at: null,
-      updated_at: now(),
-      status: "running",
-      version: DAEMON_VERSION,
-      details_json: JSON.stringify(getDaemonIdentity()),
-    },
-    daemonDbBusy: true,
-    daemonDbBusyError:
-      options.error instanceof Error ? options.error.message : String(options.error),
-    overview: null,
-    projection: null,
-    checkpoints: [],
-    recentRuns: [],
-    ...realtimeSessionFields(options.realtime),
-    integrations: [],
-    socketPath: options.socketPath,
-    dbPath: options.dbPath,
-  };
 }
 
 function resolveCheckpointSyncMode(
