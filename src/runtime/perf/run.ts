@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
@@ -25,6 +26,9 @@ import {
 } from "../projection/projector.js";
 
 const require = createRequire(import.meta.url);
+
+// The benchmark databases are throwaway: never consult or create the Keychain database key.
+process.env.CUED_DB_KEY = randomBytes(32).toString("hex");
 const { DatabaseSync } = require("node:sqlite") as typeof import("node:sqlite");
 
 const ITERATIONS = 5;
@@ -760,6 +764,9 @@ async function main(): Promise<void> {
       await benchmarkScenario("imessage_incremental_sync", () => {
         buildIMessageSyncBundle({
           path: imessageFixture.dbPath,
+          // A path inside the fixture that does not exist: the scenario must never read the
+          // machine's own call history (and sandboxes or missing Full Disk Access cannot open it).
+          callHistoryPath: join(imessageFixture.dir, "CallHistory.storedata"),
           lastRowId: 1,
           limit: 2500,
           env: { CUED_IMESSAGE_DB_PATH: imessageFixture.dbPath },

@@ -9,22 +9,61 @@ export interface HostSleepState {
   lastWakeAt: number;
 }
 
-export function readHostSleepState(): HostSleepState | null {
+export interface HostPowerState {
+  onBattery: boolean;
+  lowPowerMode: boolean;
+}
+
+/** The host's published file, or null when it is missing, malformed or its host has exited. */
+function readHostStateFile(): Record<string, unknown> | null {
   try {
     const state = JSON.parse(readFileSync(join(CUED_HOME, "power-state.json"), "utf8"));
-    if (
-      !Number.isInteger(state.pid) ||
-      state.pid <= 0 ||
-      typeof state.sleeping !== "boolean" ||
-      !Number.isFinite(state.lastWakeAt) ||
-      state.lastWakeAt < 0
-    )
+    if (!state || typeof state !== "object" || !Number.isInteger(state.pid) || state.pid <= 0) {
       return null;
+    }
     process.kill(state.pid, 0);
-    return { sleeping: state.sleeping, lastWakeAt: state.lastWakeAt };
+    return state;
   } catch {
     return null;
   }
+}
+
+function parseSleepState(state: Record<string, unknown> | null): HostSleepState | null {
+  if (
+    !state ||
+    typeof state.sleeping !== "boolean" ||
+    typeof state.lastWakeAt !== "number" ||
+    !Number.isFinite(state.lastWakeAt) ||
+    state.lastWakeAt < 0
+  )
+    return null;
+  return { sleeping: state.sleeping, lastWakeAt: state.lastWakeAt };
+}
+
+function parsePowerState(state: Record<string, unknown> | null): HostPowerState | null {
+  if (!state || typeof state.onBattery !== "boolean" || typeof state.lowPowerMode !== "boolean") {
+    return null;
+  }
+  return { onBattery: state.onBattery, lowPowerMode: state.lowPowerMode };
+}
+
+export function readHostSleepState(): HostSleepState | null {
+  return parseSleepState(readHostStateFile());
+}
+
+/**
+ * Battery and Low Power Mode as the host app last published them. Null (treated as AC power)
+ * without a running host, or from a host too old to publish them: unknown power never slows
+ * sync down.
+ */
+export function readHostPowerState(): HostPowerState | null {
+  return parsePowerState(readHostStateFile());
+}
+
+/** Both, from one read of the file. */
+export function readHostState(): { sleep: HostSleepState | null; power: HostPowerState | null } {
+  const state = readHostStateFile();
+  return { sleep: parseSleepState(state), power: parsePowerState(state) };
 }
 
 export function shouldDeferSyncForSleep(state = readHostSleepState()): boolean {

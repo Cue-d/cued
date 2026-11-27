@@ -21,13 +21,22 @@ import {
   SLACK_PENDING_ACCOUNT_KEY_PREFIX,
   selectSlackWorkspaceCredentials,
 } from "../../slack/auth/workspace-selection.js";
-import { BrowserUnavailableError, launchFirstAvailableBrowser } from "./browser-launch.js";
+import {
+  BrowserUnavailableError,
+  describeBrowserSetupFailure,
+  launchFirstAvailableBrowser,
+} from "./browser-launch.js";
 import { type AuthBrowser, authBrowserProfileDir, listAuthBrowsers } from "./browser-resolver.js";
+import {
+  browserSetupFromDownload,
+  createBrowserSetupReporter,
+  formatBrowserSetupLine,
+} from "./browser-setup.js";
 import {
   type ChromiumAuthFailureCode,
   classifyChromiumAuthWaitFailure,
 } from "./chromium-failure.js";
-import { type BrowserDownloadProgress, installManagedChromium } from "./managed-browser.js";
+import { installManagedChromium } from "./managed-browser.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -190,28 +199,30 @@ async function bringAuthBrowserToFront(profileDir: string): Promise<void> {
   }
 }
 
-function createDownloadReporter(): (progress: BrowserDownloadProgress) => void {
-  let lastStage = "";
-  let lastReportAt = 0;
-  return (progress) => {
-    const now = Date.now();
-    if (progress.stage === lastStage && now - lastReportAt < 1_000) return;
-    lastStage = progress.stage;
-    lastReportAt = now;
-    process.stderr.write(`${JSON.stringify({ browserDownload: progress })}\n`);
-  };
-}
+const reportBrowserSetup = createBrowserSetupReporter((progress) => {
+  process.stderr.write(`${formatBrowserSetupLine(progress)}\n`);
+});
 
 async function launchAuthContext(
   baseProfileDir: string,
 ): Promise<{ context: BrowserContext; browser: AuthBrowser; profileDir: string }> {
   const configured = Boolean(process.env.CUED_CHROMIUM_EXECUTABLE_PATH?.trim());
+  reportBrowserSetup({ stage: "finding", receivedBytes: null, totalBytes: null, error: null });
   const { result, browser } = await launchFirstAvailableBrowser({
     candidates: listAuthBrowsers(),
     installManaged: configured
       ? null
-      : () => installManagedChromium({ onProgress: createDownloadReporter() }),
+      : () =>
+          installManagedChromium({
+            onProgress: (progress) => reportBrowserSetup(browserSetupFromDownload(progress)),
+          }),
     launch: async (candidate) => {
+      reportBrowserSetup({
+        stage: "launching",
+        receivedBytes: null,
+        totalBytes: null,
+        error: null,
+      });
       const profileDir = authBrowserProfileDir(baseProfileDir, candidate);
       mkdirSync(profileDir, { recursive: true, mode: 0o700 });
       const context = await chromium.launchPersistentContext(profileDir, {
@@ -223,6 +234,7 @@ async function launchAuthContext(
       return { context, profileDir };
     },
   });
+  reportBrowserSetup({ stage: "ready", receivedBytes: null, totalBytes: null, error: null });
   return { ...result, browser };
 }
 
@@ -587,13 +599,20 @@ async function run(): Promise<void> {
       ({ context, browser, profileDir } = await launchAuthContext(args.profileDir));
     } catch (error) {
       if (!(error instanceof BrowserUnavailableError)) throw error;
+      const browserSetup = {
+        stage: "failed",
+        receivedBytes: null,
+        totalBytes: null,
+        error: describeBrowserSetupFailure(error),
+      } as const;
+      reportBrowserSetup(browserSetup);
       process.stdout.write(
         JSON.stringify(
           buildChromiumFailureResult({
             args,
             errorCode: "browser_unavailable",
             stage: "browser_launch",
-            pageSummary: { browserAttempts: error.attempts },
+            pageSummary: { browserAttempts: error.attempts, browserSetup },
             errorSummary: error.message,
           }),
         ),

@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { shouldBootstrapLocalIntegrations, shouldRunLocalWatcher } from "./local-watchers.js";
+import {
+  isNativeWatcherRunning,
+  shouldBootstrapLocalIntegrations,
+  shouldRunLocalWatcher,
+} from "./local-watchers.js";
 
 describe("shouldBootstrapLocalIntegrations", () => {
   it("keeps local bootstrap work off before onboarding is complete", () => {
@@ -46,5 +50,17 @@ describe("shouldRunLocalWatcher", () => {
         { enabled: 1, auth_state: "not_determined" },
       ),
     ).toBe(false);
+  });
+});
+
+describe("native watcher liveness", () => {
+  it("counts a running helper or a file watcher, not an exited or killed helper", () => {
+    expect(isNativeWatcherRunning(undefined)).toBe(false);
+    expect(isNativeWatcherRunning({ close: () => undefined })).toBe(true);
+    const helper = { exitCode: null, signalCode: null, killed: false };
+    expect(isNativeWatcherRunning(helper)).toBe(true);
+    expect(isNativeWatcherRunning({ ...helper, exitCode: 1 })).toBe(false);
+    expect(isNativeWatcherRunning({ ...helper, signalCode: "SIGTERM" as const })).toBe(false);
+    expect(isNativeWatcherRunning({ ...helper, killed: true })).toBe(false);
   });
 });

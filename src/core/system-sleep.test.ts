@@ -4,7 +4,9 @@ const { readFile } = vi.hoisted(() => ({ readFile: vi.fn() }));
 vi.mock("node:fs", () => ({ readFileSync: readFile }));
 
 import {
+  readHostPowerState,
   readHostSleepState,
+  readHostState,
   SleepInterruptionDetector,
   shouldDeferSyncForSleep,
 } from "./system-sleep.js";
@@ -69,5 +71,47 @@ describe("system sleep", () => {
     }
     vi.setSystemTime(Date.now() + 60_000);
     expect(detector.check()).toBe(true);
+  });
+});
+
+describe("host power state", () => {
+  it("reads battery and Low Power Mode from a live host's file", () => {
+    readFile.mockReturnValue(
+      JSON.stringify({
+        pid: process.pid,
+        sleeping: false,
+        lastWakeAt: 5,
+        onBattery: true,
+        lowPowerMode: false,
+      }),
+    );
+    expect(readHostPowerState()).toEqual({ onBattery: true, lowPowerMode: false });
+    expect(readHostState()).toEqual({
+      sleep: { sleeping: false, lastWakeAt: 5 },
+      power: { onBattery: true, lowPowerMode: false },
+    });
+  });
+
+  it("treats an older host, a stopped host or a missing file as unknown power", () => {
+    publish(false);
+    expect(readHostPowerState()).toBeNull();
+    expect(readHostSleepState()).toEqual({ sleeping: false, lastWakeAt: 0 });
+    readFile.mockReturnValue(
+      JSON.stringify({
+        pid: 123,
+        sleeping: false,
+        lastWakeAt: 0,
+        onBattery: true,
+        lowPowerMode: true,
+      }),
+    );
+    vi.spyOn(process, "kill").mockImplementation(() => {
+      throw new Error("ESRCH");
+    });
+    expect(readHostPowerState()).toBeNull();
+    readFile.mockImplementation(() => {
+      throw new Error("ENOENT");
+    });
+    expect(readHostState()).toEqual({ sleep: null, power: null });
   });
 });

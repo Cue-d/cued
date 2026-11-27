@@ -46,6 +46,8 @@ type ConnectLifecycle = {
   shouldQueueAuthenticatedSync?: (platform: Platform, accountKey: string) => boolean;
   wakeIngest?: () => void;
   onRuntimeStateChanged?: () => void;
+  /** Sign-in browser progress changed (finding, downloading, launching). Must be cheap. */
+  onRuntimeProgress?: () => void;
 };
 
 const GMAIL_PENDING_ACCOUNT_KEY_PREFIX = "pending-gmail-";
@@ -261,7 +263,9 @@ export class IntegrationAuthService {
       requested.integration.platform,
       requested.integration.accountKey,
     );
-    const runtime = startAuthSession(this.db, requested.authSession, integration);
+    const runtime = startAuthSession(this.db, requested.authSession, integration, {
+      onProgress: lifecycle.onRuntimeProgress,
+    });
     const running = markAuthSessionInProgress(
       this.db,
       requested.authSession.id,
@@ -448,6 +452,14 @@ export class IntegrationAuthService {
             trigger: "integration_authenticated",
           },
         });
+        lifecycle.wakeIngest?.();
+      } else if (
+        this.db.expeditePowerDeferredSyncRun(
+          integration.platform,
+          integration.accountKey,
+          "integration_authenticated",
+        )
+      ) {
         lifecycle.wakeIngest?.();
       }
     }

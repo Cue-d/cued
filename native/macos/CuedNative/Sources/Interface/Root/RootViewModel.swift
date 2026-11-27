@@ -248,6 +248,8 @@ public final class RootViewModel: ObservableObject {
   @Published public var agentTargetStatuses = defaultAgentTargetStatuses()
   @Published public var agentLaunchFeedback: AgentLaunchFeedback?
   @Published public var hasLoadedSnapshot = false
+  /// Set while a sign-in window waits on a browser, or just failed to get one.
+  @Published public var signInBrowser: SignInBrowserStatus?
   @Published public private(set) var refreshSequence = 0
 
   public let pageWidth: CGFloat = RootViewModel.windowWidth
@@ -296,8 +298,12 @@ public final class RootViewModel: ObservableObject {
     globalSkill: SkillStatus,
     relationshipSummary: RelationshipSummary,
     allIntegrations: [IntegrationStatus],
-    integrations: [IntegrationStatus]
+    integrations: [IntegrationStatus],
+    signInBrowser: SignInBrowserStatus? = nil
   ) {
+    if self.signInBrowser != signInBrowser {
+      self.signInBrowser = signInBrowser
+    }
     let normalizedPermissions = buildPermissionStatuses(permissions)
     permissionStatuses = normalizedPermissions
     globalSkillStatus = globalSkill

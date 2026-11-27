@@ -6,8 +6,10 @@ import process from "node:process";
 import { getCurrentAppVersion, getCurrentReleaseChannel } from "../../core/app-metadata.js";
 import {
   CUED_BACKUPS_DIR,
+  CUED_BROWSER_DIR,
   CUED_DAEMON_LOCK_PATH,
   CUED_DB_PATH,
+  CUED_HOME,
   CUED_SOCKET_PATH,
   CUED_UPDATE_DOWNLOADS_DIR,
   CUED_UPDATE_ROLLBACK_DIR,
@@ -21,6 +23,8 @@ import {
   type SingletonLockMetadata,
 } from "../../core/singleton-lock.js";
 import {
+  readHostPowerState,
+  readHostState,
   SleepInterruptionDetector,
   SyncInterruptedBySleep,
   shouldDeferSyncForSleep,
@@ -43,6 +47,7 @@ import {
   ThreadDbWorker,
 } from "../../db/db-worker.js";
 import type { StatusAggregates } from "../../db/db-worker-jobs.js";
+import { scheduleLegacyBrowserProfileCleanup } from "../../platforms/core/auth/legacy-browser-profiles.js";
 import {
   buildAdapterInvocationEnv,
   selectAdapterInvocationProofs,
@@ -169,13 +174,20 @@ import {
 import { pruneUpdateArtifacts, scheduleUpdateArtifactRetention } from "../updater/retention.js";
 import { checkForUpdates } from "../updater/service.js";
 import {
+  isNativeWatcherRunning,
   shouldBootstrapLocalIntegrations,
   shouldRunLocalWatcher as shouldRunLocalWatcherForState,
 } from "./local-watchers.js";
 import { SyncRunMaintenance } from "./maintenance.js";
 import { DaemonReadModel } from "./read-model.js";
 import { StallMonitor } from "./stall-monitor.js";
-import { AutoSyncPacing } from "./sync-pacing.js";
+import {
+  AutoSyncPacing,
+  autoSyncPushPath,
+  historyContinuationDelayMs,
+  isScheduledSyncDue,
+  SchedulerWakeDetector,
+} from "./sync-pacing.js";
 import {
   BusyRetryingTimerJob,
   SQLITE_BUSY_SKIPPED,
@@ -256,6 +268,7 @@ const UPDATE_SHUTDOWN_GRACE_MS = 30_000;
 // Well after startup, and after an update's helper has finished its health check.
 const UPDATE_ARTIFACT_RETENTION_START_DELAY_MS = 10 * 60_000;
 const UPDATE_ARTIFACT_RETENTION_INTERVAL_MS = 6 * 60 * 60 * 1000;
+const LEGACY_BROWSER_PROFILE_CLEANUP_RETRY_MS = 60 * 60_000;
 const QUEUE_DRAIN_RETRY_DELAY_MS = 1_000;
 const INGEST_RUN_LEASE_MS = 15 * 60_000;
 const PROJECTION_WORKER_TIMEOUT_MS = 30 * 60_000;
@@ -1078,6 +1091,11 @@ function queueNativeTriggeredSync(
         return;
       }
       if (db.hasQueuedOrRunningRun(platform, accountKey)) {
+        // A history page waiting only because of battery power would hold this catch-up
+        // back until its delay ran out.
+        if (db.expeditePowerDeferredSyncRun(platform, accountKey, trigger)) {
+          wakeIngest();
+        }
         return;
       }
 
@@ -3022,9 +3040,11 @@ export async function runDaemon(): Promise<void> {
     }
 
     for (const platform of desiredPlatforms) {
-      if (nativeWatchers.has(platform)) {
+      const existing = nativeWatchers.get(platform);
+      if (existing && isNativeWatcherRunning(existing)) {
         continue;
       }
+      // A watcher that exited is replaced; until then the scheduler polls its source.
       const watcher =
         platform === "imessage"
           ? startIMessageWatcher(db, queueDebouncedNativeSync)
@@ -3491,6 +3511,20 @@ export async function runDaemon(): Promise<void> {
         status.state === "connected",
     );
 
+  const hasConnectedSlackRealtime = (accountKey: string): boolean =>
+    slackRealtime
+      .getStatuses()
+      .some((status) => status.accountKey === accountKey && status.state === "connected");
+  const autoSyncPushPathFor = (platform: AdapterPlatform, accountKey: string) =>
+    autoSyncPushPath(platform, {
+      watcherRunning: (watcher) => isNativeWatcherRunning(nativeWatchers.get(watcher)),
+      realtimeConnected:
+        platform === "slack"
+          ? hasConnectedSlackRealtime(accountKey)
+          : hasConnectedRealtime(platform, accountKey),
+    });
+  const schedulerWakeDetector = new SchedulerWakeDetector(getAutoSyncSchedulerTickMs());
+
   const autoSyncBusyRetries = new Map<string, NodeJS.Timeout>();
   const queueAutoSyncRuns = (trigger: string) => {
     if (isUpdateShutdownRequested) {
@@ -3521,24 +3555,26 @@ export async function runDaemon(): Promise<void> {
         }
         const autoSyncTargets = getAutoSyncTargets(db);
         const queuedAt = now();
+        // One read of the host's file per tick: power for the caps, wake time for the reset.
+        const host = trigger === "scheduler" ? readHostState() : null;
+        if (host && schedulerWakeDetector.check(queuedAt, host.sleep?.lastWakeAt)) {
+          autoSyncPacing.resetAll();
+        }
         for (const target of autoSyncTargets) {
           if (trigger === "scheduler") {
             const targetKey = `${target.platform}:${target.accountKey}`;
             const lastQueuedAt = lastAutoSyncQueuedAt.get(targetKey) ?? startedAt;
-            const realtimeConnected = hasConnectedRealtime(target.platform, target.accountKey);
             const configuredInterval =
               process.env.CUED_AUTOSYNC_INTERVAL_MS != null ||
               process.env[`CUED_AUTOSYNC_INTERVAL_${target.platform.toUpperCase()}_MS`] != null;
-            if (
-              queuedAt - lastQueuedAt <
-              (configuredInterval
-                ? getAutoSyncIntervalMs(target.platform)
-                : autoSyncPacing.interval(
-                    targetKey,
-                    getAutoSyncIntervalMs(target.platform),
-                    realtimeConnected,
-                  ))
-            ) {
+            const intervalMs = configuredInterval
+              ? getAutoSyncIntervalMs(target.platform)
+              : autoSyncPacing.interval(targetKey, {
+                  baseMs: getAutoSyncIntervalMs(target.platform),
+                  push: autoSyncPushPathFor(target.platform, target.accountKey),
+                  power: host?.power ?? null,
+                });
+            if (!isScheduledSyncDue({ nowMs: queuedAt, lastQueuedAt, intervalMs })) {
               continue;
             }
           }
@@ -4233,9 +4269,27 @@ export async function runDaemon(): Promise<void> {
       if (platform === "signal") {
         requestSignalRealtimeReconcile();
       }
-      autoSyncPacing.record(`${platform}:${accountKey}`, insertResult.insertedCount, bundleHasMore);
+      const originTrigger =
+        typeof runDetails?.originTrigger === "string"
+          ? runDetails.originTrigger
+          : currentRun.trigger;
+      autoSyncPacing.record(`${platform}:${accountKey}`, {
+        insertedEvents: insertResult.insertedCount,
+        hasMore: bundleHasMore,
+        trigger: originTrigger,
+      });
       if (bundleHasMore && !db.hasQueuedOrRunningRun(currentRun.platform, accountKey)) {
-        const continuationDelayMs = getSyncContinueDelayMsForPlatform(currentRun.platform);
+        const baseContinuationDelayMs = getSyncContinueDelayMsForPlatform(currentRun.platform);
+        const continuationDelayMs = historyContinuationDelayMs({
+          baseMs: baseContinuationDelayMs,
+          originTrigger,
+          // What this run fetched. The checkpoint's mode is "full" whenever more remains,
+          // which would also slow an incremental catch-up that ran past its page budget.
+          syncMode: bundleSyncMode,
+          liveCoverage: hasConnectedRealtime(platform, accountKey),
+          continuationReason: bundleContinuation?.reason,
+          power: readHostPowerState(),
+        });
         db.queueSyncRun({
           platform: currentRun.platform,
           accountKey,
@@ -4246,6 +4300,8 @@ export async function runDaemon(): Promise<void> {
             source: currentRun.platform,
             accountKey,
             trigger: "ingest_continue",
+            originTrigger,
+            powerDeferred: continuationDelayMs > baseContinuationDelayMs,
             ...(bundleContinuation ? { continuation: bundleContinuation } : {}),
           },
         });
@@ -4569,6 +4625,19 @@ export async function runDaemon(): Promise<void> {
     },
   });
 
+  // Profiles of the Chromium Cued used to bundle (hundreds of MB, read by nothing). Removed once,
+  // with asynchronous filesystem calls, never while a sign-in is in progress.
+  const legacyBrowserProfileCleanup = scheduleLegacyBrowserProfileCleanup({
+    cuedHome: CUED_HOME,
+    browserRoot: CUED_BROWSER_DIR,
+    isSignInActive: () =>
+      activeAuthSessions.size > 0 ||
+      db.listAuthSessions(5).some((session) => session.state === "in_progress"),
+    startDelayMs: UPDATE_ARTIFACT_RETENTION_START_DELAY_MS,
+    retryMs: LEGACY_BROWSER_PROFILE_CLEANUP_RETRY_MS,
+    log: (message, details) => daemonLogger.info(message, details),
+  });
+
   let lastForegroundRequestAt = 0;
   const syncRunMaintenance = new SyncRunMaintenance(dbWorker, {
     // History cleanup can always wait. It never contends with a sync or projection for the
@@ -4595,6 +4664,9 @@ export async function runDaemon(): Promise<void> {
   };
   let managedIntegrationRefresh: Promise<void> | null = null;
   const refreshManagedIntegrationsInBackground = (reason: string) => {
+    // Only the app asks for this, when it opens: poll every account once at its normal
+    // interval, and start the idle back-off again.
+    autoSyncPacing.noteAppOpened(now());
     if (managedIntegrationRefresh) {
       return;
     }
@@ -4637,6 +4709,7 @@ export async function runDaemon(): Promise<void> {
       schedulers.wakeProjection();
       refreshMenuBarStatusNow("auth_state_changed");
     },
+    onAuthRuntimeProgress: () => notifySubscribers("status"),
     refreshStatusCacheNow: refreshMenuBarStatusNow,
     shouldRunRealtimePlatform,
     purgeAccountSyncRunHistory: (platform, accountKey, queuedBefore) =>
@@ -4692,6 +4765,7 @@ export async function runDaemon(): Promise<void> {
     autoSyncBusyRetries.clear();
     clearInterval(updateLoop);
     updateArtifactRetention.stop();
+    legacyBrowserProfileCleanup.stop();
     syncRunMaintenance.stop();
     stallMonitor.stop();
     if (walCheckpointTimer) {
@@ -4887,6 +4961,8 @@ type DaemonRequestContext = {
   requestUpdateShutdown: () => { shuttingDown: boolean; requestedAt: number | null };
   isBackgroundWorkActive: () => boolean;
   onAuthRuntimeStateChanged: () => void;
+  /** Sign-in browser progress was recorded; subscribers re-read the snapshot. */
+  onAuthRuntimeProgress: () => void;
   refreshStatusCacheNow: (reason: string) => void;
   shouldRunRealtimePlatform: (platform: AdapterPlatform) => boolean;
   purgeAccountSyncRunHistory: (
@@ -5007,6 +5083,7 @@ async function dispatchRequest(
     requestUpdateShutdown,
     isBackgroundWorkActive,
     onAuthRuntimeStateChanged,
+    onAuthRuntimeProgress,
     refreshStatusCacheNow,
     shouldRunRealtimePlatform,
     purgeAccountSyncRunHistory,
@@ -5261,6 +5338,7 @@ async function dispatchRequest(
           {
             wakeIngest: schedulers.wakeIngest,
             onRuntimeStateChanged: onAuthRuntimeStateChanged,
+            onRuntimeProgress: onAuthRuntimeProgress,
             shouldQueueAuthenticatedSync: (platform) =>
               platform !== "whatsapp" || shouldRunRealtimePlatform("whatsapp"),
             emitAuthenticatedHook: async (platform, accountKey) => {
