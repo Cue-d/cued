@@ -199,6 +199,15 @@ describe("stall monitor", () => {
       expect(stalls[0]?.maxStallMs).toBeGreaterThanOrEqual(400);
     });
 
+    it("reports a synchronous wait as a stall when no host app can vouch for a sleep", async () => {
+      const { stalls, suspensions } = await watch(
+        () => null,
+        () => pause(400),
+      );
+      expect(suspensions).toEqual([]);
+      expect(stalls).toHaveLength(1);
+    });
+
     it("reports the full length of a block that used the CPU, whatever the host says", async () => {
       const { stalls, suspensions } = await watch(
         () => ({ sleeping: true, lastWakeAt: Date.now() }),

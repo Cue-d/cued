@@ -58,9 +58,9 @@ function loopThreadCpuMs(): number {
  * thread working, or waiting on something synchronous, while it should have been turning.
  * A gap in which the thread barely used the CPU is a suspension when there is evidence of
  * one: the process received SIGCONT, or the host app says the machine slept or woke since the
- * window began (or there is no host to ask). Suspensions go to `onSuspended` instead; a
- * low-CPU gap without that evidence (a busy SQLite lock, a synchronous child process) is still
- * a stall.
+ * window began. Suspensions go to `onSuspended` instead; a low-CPU gap without that evidence
+ * (a busy SQLite lock, a synchronous child process) is still a stall, and so is any such gap
+ * when no host app is running to say otherwise.
  */
 export class StallMonitor {
   private readonly histogram = monitorEventLoopDelay({ resolution: HISTOGRAM_RESOLUTION_MS });
@@ -251,9 +251,7 @@ export class StallMonitor {
       const host = (this.options.readHostSleepState ?? readHostSleepState)();
       const suspended =
         this.continuedAt >= windowStartedAt ||
-        host == null ||
-        host.sleeping ||
-        host.lastWakeAt >= windowStartedAt;
+        (host != null && (host.sleeping || host.lastWakeAt >= windowStartedAt));
       if (suspended) {
         this.options.onSuspended?.({
           suspendedMs: stall.maxStallMs,
