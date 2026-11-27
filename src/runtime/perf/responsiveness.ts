@@ -46,13 +46,17 @@ import {
 } from "./large-conversation.js";
 import { formatRestingCost, measureRestingCost, type RestingCostResult } from "./resting-cost.js";
 
-const FIXTURE_VERSION = 3;
+const FIXTURE_VERSION = 4;
 const FIXTURE_DB_KEY = "cued-perf-fixture-key";
 const REAL_SCALE = {
   syncRuns: 1_800_000,
   syncRunErrors: 58_700,
   authSessions: 1_000,
   contacts: 17_600,
+  // Every handle a platform reports for a person is a source mapping, and email threads make
+  // conversations outnumber contacts several times over. The projector loads both on startup.
+  contactSources: 90_000,
+  contactHandles: 40_000,
   conversations: 65_500,
   messages: 500_000,
   rawEvents: 400_000,
@@ -473,10 +477,23 @@ async function buildFixture(dbPath: string, scale: number): Promise<void> {
     `INSERT INTO contacts (id, kind, name, archived, created_at, updated_at)
      VALUES (?, 'person', ?, 0, ?, ?)`,
   );
+  const insertContactSource = sqlite.prepare(
+    `INSERT INTO contact_sources (id, contact_id, platform, account_key, source_entity_key,
+       first_seen_at, last_seen_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+  );
+  const insertContactHandle = sqlite.prepare(
+    `INSERT INTO contact_handles (id, contact_id, type, value, normalized_value, platform,
+       account_key, is_deterministic, created_at, updated_at)
+     VALUES (?, ?, 'email', ?, ?, NULL, NULL, 1, ?, ?)`,
+  );
+  // Real conversations carry a name, a participant list and a preview, which is most of
+  // what reading the table costs.
   const insertConversation = sqlite.prepare(
-    `INSERT INTO conversations (id, platform, account_key, source_conversation_key, type,
-       is_active, unread_count, created_at, updated_at)
-     VALUES (?, ?, ?, ?, 'dm', 1, 0, ?, ?)`,
+    `INSERT INTO conversations (id, platform, account_key, source_conversation_key,
+       native_conversation_key, type, is_active, name, participant_names, last_message_id,
+       last_message_at, last_message_preview, unread_count, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, 'dm', 1, ?, ?, ?, ?, ?, 0, ?, ?)`,
   );
   const insertMessage = sqlite.prepare(
     `INSERT INTO messages (id, platform, account_key, platform_message_id, conversation_id,
@@ -490,6 +507,8 @@ async function buildFixture(dbPath: string, scale: number): Promise<void> {
      VALUES (?, ?, ?, 'message', 'observed', ?, ?, ?, 'message.observed@1')`,
   );
   const contactCount = scaled(REAL_SCALE.contacts, scale);
+  const contactSourceCount = scaled(REAL_SCALE.contactSources, scale);
+  const contactHandleCount = scaled(REAL_SCALE.contactHandles, scale);
   const conversationCount = scaled(REAL_SCALE.conversations, scale);
   const messageCount = scaled(REAL_SCALE.messages, scale);
   const rawEventCount = scaled(REAL_SCALE.rawEvents, scale);
@@ -505,6 +524,29 @@ async function buildFixture(dbPath: string, scale: number): Promise<void> {
     for (let index = 0; index < contactCount; index += 1) {
       insertContact.run(`perf-contact-${index}`, `Perf Contact ${index}`, nowMs, nowMs);
     }
+    for (let index = 0; index < contactSourceCount; index += 1) {
+      const account = accountAt(index);
+      insertContactSource.run(
+        `perf-contact-source-${index}`,
+        `perf-contact-${index % contactCount}`,
+        account.platform,
+        account.accountKey,
+        `perf-source-entity-${index}@example.com`,
+        nowMs,
+        nowMs,
+      );
+    }
+    for (let index = 0; index < contactHandleCount; index += 1) {
+      insertContactHandle.run(
+        `perf-contact-handle-${index}`,
+        `perf-contact-${index % contactCount}`,
+        `Perf-Handle-${index}@example.com`,
+        `perf-handle-${index}@example.com`,
+        nowMs,
+        nowMs,
+      );
+    }
+    const preview = "Synthetic preview of the latest message in this conversation. ".repeat(2);
     for (let index = 0; index < conversationCount; index += 1) {
       const account = accountAt(index);
       insertConversation.run(
@@ -512,6 +554,12 @@ async function buildFixture(dbPath: string, scale: number): Promise<void> {
         account.platform,
         account.accountKey,
         `perf-conversation-key-${index}`,
+        `perf-native-conversation-key-${index}`,
+        `Perf Conversation ${index}`,
+        `Perf Contact ${index % contactCount}, Perf Contact ${(index + 1) % contactCount}, Perf Contact ${(index + 2) % contactCount}`,
+        `perf-message-${index}`,
+        nowMs - index * 1_000,
+        preview,
         nowMs,
         nowMs,
       );
@@ -1349,12 +1397,14 @@ async function main(): Promise<void> {
           (SELECT queued FROM perf_search_reindex_counter) AS queued,
           (SELECT COUNT(*) FROM raw_events WHERE rowid > ${before.rowid ?? 0}) AS stored,
           (SELECT COALESCE(SUM(json_extract(details_json, '$.timings.projectionMs')), 0)
-             FROM sync_runs WHERE run_type = 'project' AND queued_at >= ${startedAt}) AS projection_ms`)) ??
+             FROM sync_runs WHERE run_type = 'project' AND queued_at >= ${startedAt}) AS projection_ms,
+          (SELECT COALESCE(SUM(json_extract(details_json, '$.timings.realtimeProjectionMs')), 0)
+             FROM sync_runs WHERE run_type = 'sync' AND queued_at >= ${startedAt}) AS inline_ms`)) ??
           {};
         const stored = after.stored ?? 0;
         const queued = (after.queued ?? 0) - (before.queued ?? 0);
         report.notes.push(
-          `${stored} raw events stored, ${queued} messages queued for search re-indexing, projection ${formatMs(after.projection_ms ?? 0)}, projection worker peak RSS ${(memory.peakRssBytes / 1024 / 1024).toFixed(0)} MB, ${formatMs(Date.now() - startedAt)} until search caught up`,
+          `${stored} raw events stored, ${queued} messages queued for search re-indexing, projection ${formatMs(after.projection_ms ?? 0)} (inline ${formatMs(after.inline_ms ?? 0)}), projection worker peak RSS ${(memory.peakRssBytes / 1024 / 1024).toFixed(0)} MB, ${formatMs(Date.now() - startedAt)} until search caught up`,
         );
         if (maxQueuedPerEvent != null && queued > maxQueuedPerEvent * Math.max(1, stored)) {
           report.failed = true;
@@ -1364,13 +1414,13 @@ async function main(): Promise<void> {
         }
       };
       // A single message is few enough raw events that the daemon projects it on its own thread.
-      // The first such projection after startup also loads the projection cache, a one-time
-      // cost reported here but held to no target; the gated scenario below is the steady state.
+      // The first such projection after startup used to load the whole projection cache there,
+      // seconds on a real database; it now reads only the keys the batch needs.
       const firstReport: ScenarioReport = { failed: false, notes: [] };
       await measure(
-        "first inline projection after startup (loads cache)",
+        "first inline projection after startup",
         async () => largeConversationSync(largeConversationDeliveryBatch(1), firstReport, 3),
-        { gated: false, roundTripGated: false, report: firstReport },
+        { roundTripGated: false, report: firstReport },
       );
       const singleReport: ScenarioReport = { failed: false, notes: [] };
       await measure(

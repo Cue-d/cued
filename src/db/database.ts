@@ -429,12 +429,18 @@ function buildRawEventValues(event: RawEventInput) {
   };
 }
 
+export type ProjectionCacheStatements = Record<
+  "contactSource" | "deterministicHandle" | "conversation" | "contactName" | "conversationName",
+  Database.Statement
+>;
+
 type DrizzleTransaction = Parameters<Parameters<LocalDrizzleDatabase["transaction"]>[0]>[0];
 
 export class CuedDatabase {
   private readonly sqlite: Database.Database;
   private readonly db: LocalDrizzleDatabase;
   private readonly statusReadCache: StatusReadCache;
+  private projectionCacheStatementsValue: ProjectionCacheStatements | null = null;
 
   constructor(
     public readonly dbPath: string = CUED_DB_PATH,
@@ -3851,100 +3857,31 @@ export class CuedDatabase {
       .run();
   }
 
-  listProjectedContactSourceMap(): Array<{
-    platform: Platform;
-    account_key: string;
-    source_entity_key: string;
-    contact_id: string;
-  }> {
-    return this.db
-      .select({
-        platform: contactSources.platform,
-        account_key: contactSources.accountKey,
-        source_entity_key: contactSources.sourceEntityKey,
-        contact_id: contactSources.contactId,
-      })
-      .from(contactSources)
-      .all() as Array<{
-      platform: Platform;
-      account_key: string;
-      source_entity_key: string;
-      contact_id: string;
-    }>;
-  }
-
-  listDeterministicContactHandles(): Array<{
-    handle_type: string;
-    normalized_value: string;
-    contact_id: string;
-  }> {
-    return this.db
-      .select({
-        handle_type: contactHandles.type,
-        normalized_value: contactHandles.normalizedValue,
-        contact_id: contactHandles.contactId,
-      })
-      .from(contactHandles)
-      .where(eq(contactHandles.isDeterministic, 1))
-      .all() as Array<{
-      handle_type: string;
-      normalized_value: string;
-      contact_id: string;
-    }>;
-  }
-
-  listConversationMap(): Array<{
-    platform: Platform;
-    account_key: string;
-    source_conversation_key: string;
-    conversation_id: string;
-  }> {
-    return this.db
-      .select({
-        platform: conversations.platform,
-        account_key: conversations.accountKey,
-        source_conversation_key: conversations.sourceConversationKey,
-        conversation_id: conversations.id,
-      })
-      .from(conversations)
-      .all() as Array<{
-      platform: Platform;
-      account_key: string;
-      source_conversation_key: string;
-      conversation_id: string;
-    }>;
-  }
-
-  listContactNames(): Array<{
-    contact_id: string;
-    name: string | null;
-  }> {
-    return this.db
-      .select({
-        contact_id: contacts.id,
-        name: contacts.name,
-      })
-      .from(contacts)
-      .all() as Array<{
-      contact_id: string;
-      name: string | null;
-    }>;
-  }
-
-  listConversationNames(): Array<{
-    conversation_id: string;
-    name: string | null;
-  }> {
-    return this.db
-      .select({
-        conversation_id: conversations.id,
-        name: conversations.name,
-      })
-      .from(conversations)
-      .all() as Array<{
-      conversation_id: string;
-      name: string | null;
-    }>;
+  /**
+   * Point lookups behind the projector's read-through cache. Each returns the row a map built
+   * from a scan of the table would have kept for the key: the last one in rowid order.
+   */
+  projectionCacheStatements(): ProjectionCacheStatements {
+    this.projectionCacheStatementsValue ??= {
+      contactSource: this.sqlite.prepare(
+        `SELECT rowid AS row, contact_id AS value FROM contact_sources
+         WHERE platform = ? AND account_key = ? AND source_entity_key = ?
+         ORDER BY rowid DESC LIMIT 1`,
+      ),
+      deterministicHandle: this.sqlite.prepare(
+        `SELECT rowid AS row, contact_id AS value FROM contact_handles
+         WHERE type = ? AND normalized_value = ? AND is_deterministic = 1
+         ORDER BY rowid DESC LIMIT 1`,
+      ),
+      conversation: this.sqlite.prepare(
+        `SELECT rowid AS row, id AS value FROM conversations
+         WHERE platform = ? AND account_key = ? AND source_conversation_key = ?
+         ORDER BY rowid DESC LIMIT 1`,
+      ),
+      contactName: this.sqlite.prepare("SELECT name AS value FROM contacts WHERE id = ?"),
+      conversationName: this.sqlite.prepare("SELECT name AS value FROM conversations WHERE id = ?"),
+    };
+    return this.projectionCacheStatementsValue;
   }
 
   listMessageMap(): Array<{
