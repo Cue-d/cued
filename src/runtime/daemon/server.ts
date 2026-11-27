@@ -1147,9 +1147,11 @@ function startIMessageWatcher(
   _db: ReturnType<typeof openCuedDatabase>,
   queueSync: (platform: AdapterPlatform, accountKey: string, trigger: string) => void,
 ): FSWatcher | ChildProcess | null {
+  // The database the iMessage worker reads.
+  const dbPath = process.env.CUED_IMESSAGE_DB_PATH || DEFAULT_CHAT_DB_PATH;
   const nativeBinary = resolveMacOSNativeBinary(process.env.CUED_IMESSAGE_NATIVE_BINARY);
   if (nativeBinary) {
-    const child = spawn(nativeBinary, ["imessage", "watch", "--db-path", DEFAULT_CHAT_DB_PATH], {
+    const child = spawn(nativeBinary, ["imessage", "watch", "--db-path", dbPath], {
       stdio: ["ignore", "pipe", "pipe"],
       env: process.env,
     });
@@ -1183,11 +1185,11 @@ function startIMessageWatcher(
   }
 
   try {
-    const targetDir = dirname(DEFAULT_CHAT_DB_PATH);
+    const targetDir = dirname(dbPath);
     const watchedNames = new Set([
-      basename(DEFAULT_CHAT_DB_PATH),
-      `${basename(DEFAULT_CHAT_DB_PATH)}-wal`,
-      `${basename(DEFAULT_CHAT_DB_PATH)}-shm`,
+      basename(dbPath),
+      `${basename(dbPath)}-wal`,
+      `${basename(dbPath)}-shm`,
     ]);
 
     return watch(targetDir, (_eventType, filename) => {
