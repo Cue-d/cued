@@ -123,7 +123,9 @@ fi
 # point must exist at the path code starts it from, and node_modules holds only the packages
 # that cannot be bundled.
 entry_points="$(CUED_RUNTIME_BUNDLER="$ROOT_DIR/scripts/bundle-cued-runtime.mjs" node --input-type=module -e '
-  const { RUNTIME_ENTRY_POINTS } = await import(process.env.CUED_RUNTIME_BUNDLER);
+  // A file URL, so a checkout path containing "#" or "?" is not read as a fragment or query.
+  import { pathToFileURL } from "node:url";
+  const { RUNTIME_ENTRY_POINTS } = await import(pathToFileURL(process.env.CUED_RUNTIME_BUNDLER).href);
   for (const entry of RUNTIME_ENTRY_POINTS) console.log(entry.replace(/\.ts$/, ".js"));
 ')"
 if [[ -z "$entry_points" ]]; then
