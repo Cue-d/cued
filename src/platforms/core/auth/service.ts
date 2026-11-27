@@ -30,6 +30,7 @@ import {
   buildIntegrationStatus,
   getAuthSessionSummary,
   getIntegrationSummary,
+  holdAuthSession,
   listRequestableIntegrationPlatforms,
   reconcileAbandonedAuthSessions,
   refreshPersistedRequestableIntegrationStates,
@@ -288,6 +289,9 @@ export class IntegrationAuthService {
       platform: running.platform,
       accountKey: running.accountKey,
     });
+    // Until its result is recorded, the session is not abandoned just because its worker
+    // has exited: that is exactly when the result is being written.
+    const releaseSession = holdAuthSession(running.id);
 
     runtime.completion
       .then(async (result) => {
@@ -334,6 +338,7 @@ export class IntegrationAuthService {
       })
       .finally(() => {
         activeAuthSessions.delete(running.id);
+        releaseSession();
       });
 
     return {

@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { CuedDatabase } from "../../../db/database.js";
 import { openSqliteDatabase } from "../../../db/sqlite.js";
 import type { SlackHelperInspection } from "../../slack/helper/binary.js";
+import { reconcileAbandonedAuthSessions } from "../state/status.js";
 import { IntegrationAuthService } from "./service.js";
 
 const importSlackDesktopAuthMock = vi.hoisted(() => vi.fn());
@@ -390,6 +391,42 @@ describe("IntegrationAuthService", () => {
     );
     expect(again.authSession?.id).not.toBe(sessionId);
     expect(again.authSession?.state).toBe("in_progress");
+
+    db.close();
+  });
+
+  it("keeps a sign-in whose worker has exited until its result is recorded", async () => {
+    const db = createDb();
+    importSlackDesktopAuthMock.mockResolvedValue([]);
+    let finish: (result: { state: "cancelled"; errorSummary: string }) => void = () => undefined;
+    startAuthSessionMock.mockImplementationOnce(() => ({
+      // No such process: the worker has exited and its result is still to be written.
+      child: { pid: 999_999_999 } as ChildProcess,
+      completion: new Promise((resolve) => {
+        finish = resolve;
+      }),
+    }));
+    const activeAuthSessions = new Map<
+      string,
+      { child: ChildProcess; platform: "slack"; accountKey: string }
+    >();
+    const started = await new IntegrationAuthService(db).connectManaged(
+      "slack",
+      "pending-slack-new",
+      activeAuthSessions,
+    );
+    const sessionId = started.authSession?.id ?? "";
+
+    // Listing integrations, or another connect, looks for abandoned sign-ins meanwhile.
+    expect(reconcileAbandonedAuthSessions(db)).toBe(0);
+    expect(db.getAuthSession(sessionId)?.state).toBe("in_progress");
+
+    finish({ state: "cancelled", errorSummary: "auth_window_closed" });
+    await vi.waitFor(() => expect(activeAuthSessions.size).toBe(0));
+    expect(db.getAuthSession(sessionId)).toMatchObject({
+      state: "cancelled",
+      error_summary: "auth_window_closed",
+    });
 
     db.close();
   });

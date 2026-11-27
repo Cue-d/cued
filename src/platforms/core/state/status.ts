@@ -372,6 +372,21 @@ function processExists(pid: number | null): boolean {
   }
 }
 
+/** Sign-ins this process started and whose result it has yet to record. */
+const heldAuthSessionIds = new Set<string>();
+
+/**
+ * Marks a sign-in as this process's own until the returned function is called. Its worker
+ * exiting is then not abandonment: the result is on its way to the database, possibly waiting
+ * for a busy one.
+ */
+export function holdAuthSession(sessionId: string): () => void {
+  heldAuthSessionIds.add(sessionId);
+  return () => {
+    heldAuthSessionIds.delete(sessionId);
+  };
+}
+
 /**
  * Stops the process still running an orphaned sign-in, so its window does not stay open with
  * nothing listening for the result. The pid may have been reused since, so only a process
@@ -414,7 +429,10 @@ export function reconcileAbandonedAuthSessions(
     }
 
     const startedAt = session.started_at ?? session.requested_at;
-    const processMissing = session.state === "in_progress" && !processExists(session.native_pid);
+    const processMissing =
+      session.state === "in_progress" &&
+      !heldAuthSessionIds.has(session.id) &&
+      !processExists(session.native_pid);
     const timedOut = timestamp - startedAt >= staleAfterMs;
     if (!options.ownerGone && !processMissing && !timedOut) {
       continue;
