@@ -171,12 +171,14 @@ export function fillLargeConversation(sqlite: Database.Database, scale: number):
   if (templates.length === 0) {
     throw new Error("Large conversation seed did not project");
   }
+  // The history has been read, as a real chat's has (Messages records when each was read),
+  // so the chat's unread count covers only what the scenarios deliver.
   const insert = sqlite.prepare(
     `INSERT INTO messages (id, platform, account_key, platform_message_id, conversation_id,
        sender_contact_id, sender_source_key, sender_name, conversation_name, sent_at, service,
-       status, is_from_me, content, is_deleted, is_edited, attachment_count, reaction_count,
-       created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, 0, ?, ?)`,
+       status, is_from_me, content, read_at, is_deleted, is_edited, attachment_count,
+       reaction_count, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, 0, ?, ?)`,
   );
   const total = Math.max(1, Math.round(LARGE_CONVERSATION_MESSAGES * scale));
   const nowMs = Date.now();
@@ -199,6 +201,7 @@ export function fillLargeConversation(sqlite: Database.Database, scale: number):
         template.status,
         template.is_from_me,
         `${MESSAGE_TEXT} history ${index}`,
+        sentAt + 60_000,
         sentAt,
         sentAt,
       );

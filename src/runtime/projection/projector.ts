@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import type Database from "better-sqlite3-multiple-ciphers";
 import { eq, type SQL, sql } from "drizzle-orm";
 import type {
   CallPayload,
@@ -36,6 +37,7 @@ import { canonicalizeWhatsAppPayload, projectWhatsAppIdentityAlias } from "./ide
 import {
   createProjectionCacheOverlay,
   type ProjectionCache,
+  ReadThroughLookup,
   type StoredProjectionCache,
 } from "./projection-cache.js";
 
@@ -571,95 +573,111 @@ function sqlValueList(values: readonly (string | number)[]) {
   );
 }
 
-function createProjectionCache(): StoredProjectionCache {
+/** Every way to cut `key` at its colons into `parts` pieces, as the map keys were joined. */
+function colonSplits(key: string, parts: number): string[][] {
+  if (parts === 1) {
+    return [[key]];
+  }
+  const splits: string[][] = [];
+  for (let index = key.indexOf(":"); index >= 0; index = key.indexOf(":", index + 1)) {
+    for (const rest of colonSplits(key.slice(index + 1), parts - 1)) {
+      splits.push([key.slice(0, index), ...rest]);
+    }
+  }
+  return splits;
+}
+
+/**
+ * Looks up a key that joins `parts` columns with colons. A colon inside a column makes the
+ * split ambiguous, so every split is tried and, as in a map filled from a table scan, the
+ * last row wins.
+ */
+function lookupJoinedKey(statement: Database.Statement, key: string, parts: number) {
+  let best: { row: number; value: string } | undefined;
+  for (const split of colonSplits(key, parts)) {
+    const found = statement.get(...split) as { row: number; value: string } | undefined;
+    if (found && (!best || found.row > best.row)) {
+      best = found;
+    }
+  }
+  return best?.value;
+}
+
+function loadContactMergeAliases(db: CuedDatabase): Map<string, string> {
+  const aliases = new Map<string, string>();
+  for (const row of db.listContactMergeAliases()) {
+    aliases.set(row.contact_id, row.canonical_contact_id);
+  }
+  return aliases;
+}
+
+/**
+ * The cache is filled on demand (see ReadThroughLookup): loading it whole cost the first
+ * projection after startup seconds on the daemon's thread. Only the merge aliases, a short
+ * list every lookup resolves through, are loaded up front.
+ */
+function createProjectionCache(db: CuedDatabase): StoredProjectionCache {
+  const contactMergeAliasMap = loadContactMergeAliases(db);
+  for (const row of db
+    .orm()
+    .all<{ former_contact_id: string; canonical_contact_id: string }>(
+      sql`SELECT former_contact_id, canonical_contact_id FROM provider_identity_aliases WHERE former_contact_id IS NOT NULL AND canonical_contact_id IS NOT NULL AND former_contact_id != canonical_contact_id`,
+    )) {
+    contactMergeAliasMap.set(row.former_contact_id, row.canonical_contact_id);
+  }
+  const statements = db.projectionCacheStatements();
+  const canonical = (contactId: string | undefined) =>
+    contactId === undefined
+      ? undefined
+      : (resolveCanonicalContactId({ contactMergeAliasMap }, contactId) ?? contactId);
+  const name = (statement: Database.Statement, id: string) =>
+    (statement.get(id) as { value: string | null } | undefined)?.value;
   return {
-    initialized: false,
-    contactMergeAliasMap: new Map<string, string>(),
+    contactMergeAliasMap,
+    sourceContactMap: new ReadThroughLookup((key) =>
+      canonical(lookupJoinedKey(statements.contactSource, key, 3)),
+    ),
+    deterministicHandleMap: new ReadThroughLookup((key) =>
+      canonical(lookupJoinedKey(statements.deterministicHandle, key, 2)),
+    ),
+    conversationMap: new ReadThroughLookup((key) =>
+      lookupJoinedKey(statements.conversation, key, 3),
+    ),
+    contactNameMap: new ReadThroughLookup((id) => name(statements.contactName, id)),
+    conversationNameMap: new ReadThroughLookup((id) => name(statements.conversationName, id)),
+  };
+}
+
+function getProjectionCache(db: CuedDatabase): StoredProjectionCache {
+  let cache = projectionCaches.get(db);
+  if (!cache) {
+    cache = createProjectionCache(db);
+    projectionCaches.set(db, cache);
+  }
+  return cache;
+}
+
+/** A rebuild starts from empty tables, so its cache starts empty and never reads them. */
+function resetProjectionCache(db: CuedDatabase): StoredProjectionCache {
+  const cache: StoredProjectionCache = {
+    contactMergeAliasMap: loadContactMergeAliases(db),
     sourceContactMap: new Map<string, string>(),
     deterministicHandleMap: new Map<string, string>(),
     conversationMap: new Map<string, string>(),
     contactNameMap: new Map<string, string | null>(),
     conversationNameMap: new Map<string, string | null>(),
   };
-}
-
-function hydrateProjectionCache(db: CuedDatabase, cache: StoredProjectionCache): void {
-  cache.contactMergeAliasMap.clear();
-  cache.sourceContactMap.clear();
-  cache.deterministicHandleMap.clear();
-  cache.conversationMap.clear();
-  cache.contactNameMap.clear();
-  cache.conversationNameMap.clear();
-
-  for (const row of db.listContactMergeAliases()) {
-    cache.contactMergeAliasMap.set(row.contact_id, row.canonical_contact_id);
-  }
-
-  for (const row of db
-    .orm()
-    .all<{ former_contact_id: string; canonical_contact_id: string }>(
-      sql`SELECT former_contact_id, canonical_contact_id FROM provider_identity_aliases WHERE former_contact_id IS NOT NULL AND canonical_contact_id IS NOT NULL AND former_contact_id != canonical_contact_id`,
-    )) {
-    cache.contactMergeAliasMap.set(row.former_contact_id, row.canonical_contact_id);
-  }
-
-  for (const row of db.listProjectedContactSourceMap()) {
-    const canonicalContactId = resolveCanonicalContactId(cache, row.contact_id) ?? row.contact_id;
-    cache.sourceContactMap.set(
-      `${row.platform}:${row.account_key}:${row.source_entity_key}`,
-      canonicalContactId,
-    );
-  }
-
-  for (const row of db.listDeterministicContactHandles()) {
-    const canonicalContactId = resolveCanonicalContactId(cache, row.contact_id) ?? row.contact_id;
-    cache.deterministicHandleMap.set(
-      `${row.handle_type}:${row.normalized_value}`,
-      canonicalContactId,
-    );
-  }
-
-  for (const row of db.listConversationMap()) {
-    cache.conversationMap.set(
-      `${row.platform}:${row.account_key}:${row.source_conversation_key}`,
-      row.conversation_id,
-    );
-  }
-
-  for (const row of db.listContactNames()) {
-    cache.contactNameMap.set(row.contact_id, row.name);
-  }
-
-  for (const row of db.listConversationNames()) {
-    cache.conversationNameMap.set(row.conversation_id, row.name);
-  }
-
-  cache.initialized = true;
-}
-
-function getProjectionCache(db: CuedDatabase): StoredProjectionCache {
-  const existing = projectionCaches.get(db);
-  if (existing) {
-    if (!existing.initialized) {
-      hydrateProjectionCache(db, existing);
-    }
-    return existing;
-  }
-
-  const created = createProjectionCache();
-  hydrateProjectionCache(db, created);
-  projectionCaches.set(db, created);
-  return created;
-}
-
-function resetProjectionCache(db: CuedDatabase): StoredProjectionCache {
-  const cache = createProjectionCache();
-  for (const row of db.listContactMergeAliases()) {
-    cache.contactMergeAliasMap.set(row.contact_id, row.canonical_contact_id);
-  }
-  cache.initialized = true;
   projectionCaches.set(db, cache);
   return cache;
+}
+
+/** After a rolled-back event: what it read may include rows the rollback removed. */
+function forgetLoadedEntries(cache: StoredProjectionCache): void {
+  for (const lookup of Object.values(cache)) {
+    if (lookup instanceof ReadThroughLookup) {
+      lookup.forgetLoaded();
+    }
+  }
 }
 
 function describeRawEventContext(event: RawEventNormalizationContext): string {
@@ -774,7 +792,7 @@ function syncContactNameCache(
 }
 
 function resolveCanonicalContactId(
-  cache: ProjectionCache,
+  cache: Pick<ProjectionCache, "contactMergeAliasMap">,
   contactId: string | null,
 ): string | null {
   if (!contactId) {
@@ -2481,6 +2499,7 @@ function projectEventBatch(
           } catch (error) {
             tx.run(sql.raw(`ROLLBACK TO projection_event_${shapedEvent.rawEvent.rowid}`));
             tx.run(sql.raw(`RELEASE projection_event_${shapedEvent.rawEvent.rowid}`));
+            forgetLoadedEntries(storedCache);
             projectionFailures.push({ event: shapedEvent.rawEvent, error });
           }
         }
