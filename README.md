@@ -262,12 +262,12 @@ Signal downloads its pinned, SHA-256-verified `signal-cli` and Java runtime when
 | `pnpm check:biome`         | Run formatting, lint, and import checks                                            |
 | `pnpm typecheck`           | Type check the root app                                                            |
 | `pnpm test`                | Run the root app tests                                                             |
-| `pnpm test:perf`           | Run synthetic sync/projection latency benchmarks                                   |
-| `pnpm test:perf:daemon-memory` | Run the macOS daemon performance benchmark                                     |
+| `pnpm test:perf:responsiveness` | Responsiveness gate: event-loop stalls and UI latency on an isolated daemon   |
+| `pnpm test:perf`           | Synthetic sync/projection throughput benchmarks                                    |
+| `pnpm test:perf:daemon-memory` | macOS daemon memory, startup and idle CPU benchmark                            |
 | `pnpm build:app:macos`     | Build the local `Cued.app` dev bundle                                              |
-| `pnpm build:dmg:macos`     | Build signed/notarized release artifacts and output the DMG path                   |
 | `pnpm build:tarball:macos` | Build signed/notarized release artifacts and output the Apple Silicon tarball path |
-| `pnpm sign:notarize:macos` | Build signed/notarized release artifacts                                           |
+| `pnpm release:macos`       | Check, build, sign, notarize and (with `--publish`) publish a release              |
 | `pnpm permissions:macos`   | Open/request macOS permissions                                                     |
 
 More detail: [scripts/README.md](scripts/README.md)
@@ -280,7 +280,8 @@ Security reports should go to `theo@cued.so`; see [SECURITY.md](SECURITY.md). Do
 
 ## Daemon Benchmarking
 
-Use the macOS daemon benchmark before and after each residency or scheduler optimization:
+`pnpm test:perf:responsiveness` gates responsiveness (see `AGENTS.md`). For memory and idle
+cost, use the macOS daemon benchmark before and after each residency or scheduler change:
 
 ```bash
 pnpm build
@@ -300,11 +301,12 @@ Recommended workflow:
 Benchmark scenarios:
 
 - `clean_idle` is the required scenario for every memory change.
-- `cloned_profile_idle` is available via `--scenario=cloned`, but it is informational until the cloned-profile startup failure is fixed.
 - `idle_cpu_power` runs a 10-minute post-ready idle sample and captures CPU, process churn, and a best-effort power proxy.
-- `active_sync_projection` runs replay-style sync + projection work and captures active CPU and memory behavior.
+- `active_sync_projection` runs a contacts sync and a rebuild and captures active CPU and memory behavior.
 - `--baseline=...` enables regression checks for startup latency, main RSS, tree RSS, physical footprint, tree RSS spikes, and idle CPU.
 - `--write-baseline=...` updates the checked-in baseline after a merged improvement, not during experiments.
+
+Every run uses a temporary data directory and a throwaway database key; it never reads `~/.cued`.
 
 Summary metrics emitted per scenario:
 
@@ -325,4 +327,4 @@ Summary metrics emitted per scenario:
 - Data stays local in `~/.cued`.
 - Optional hooks live in `~/.cued/hooks.toml`.
 - Internal release artifacts currently target Apple Silicon Macs only.
-- The native macOS package currently has a build check but no dedicated Swift test target.
+- Native macOS tests: `swift test --package-path native/macos/CuedNative`.

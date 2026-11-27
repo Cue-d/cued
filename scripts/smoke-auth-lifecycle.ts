@@ -1,4 +1,5 @@
 import { execFileSync, spawnSync } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -27,6 +28,8 @@ const runId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 const cuedHome =
   process.env.CUED_AUTH_SMOKE_HOME || mkdtempSync(join(tmpdir(), "cued-auth-smoke-"));
 const shadowKeychainService = `so.cued.desktop.smoke.auth.${runId}`;
+// The smoke database is throwaway: never read or create the real Keychain database key.
+const smokeDbKey = process.env.CUED_DB_KEY || randomBytes(32).toString("hex");
 const cleanup = process.env.CUED_AUTH_SMOKE_KEEP_HOME !== "1";
 
 const cases: PlatformCase[] = [
@@ -135,6 +138,7 @@ function runCued(args: string[], extraEnv: Record<string, string> = {}): unknown
     env: {
       ...process.env,
       CUED_HOME: cuedHome,
+      CUED_DB_KEY: smokeDbKey,
       ...extraEnv,
     },
     stdio: ["ignore", "pipe", "pipe"],
