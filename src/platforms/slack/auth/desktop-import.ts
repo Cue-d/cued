@@ -2,7 +2,7 @@ import { type ChildProcess, execFile, execFileSync, spawn } from "node:child_pro
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, join } from "node:path";
-import { chromium } from "playwright";
+import { chromium } from "playwright-core";
 import type { CuedDatabase } from "../../../db/database.js";
 import { storeSlackSession } from "./session-store.js";
 import { SlackSessionVerificationError, verifySlackSession } from "./verify-session.js";

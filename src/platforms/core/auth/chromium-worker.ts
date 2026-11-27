@@ -1,7 +1,13 @@
 import { execFile, execFileSync } from "node:child_process";
 import { mkdirSync } from "node:fs";
 import { promisify } from "node:util";
-import { type BrowserContext, type Cookie, chromium, type Page, type Request } from "playwright";
+import {
+  type BrowserContext,
+  type Cookie,
+  chromium,
+  type Page,
+  type Request,
+} from "playwright-core";
 import { cuedAuthKeychainService } from "../../../core/identity.js";
 import { captureLinkedInSessionData } from "../../linkedin/auth/realtime-capture.js";
 import { buildLinkedInRealtimeAuthResult } from "../../linkedin/auth/session-store.js";

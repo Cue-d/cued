@@ -1,4 +1,4 @@
-import type { Page, Request } from "playwright";
+import type { Page, Request } from "playwright-core";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { captureLinkedInSessionData } from "./realtime-capture.js";
 
