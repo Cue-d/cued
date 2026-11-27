@@ -22,7 +22,7 @@ export function shouldRunLocalWatcher(
 
 /**
  * Whether a started watcher still delivers changes. A helper process that has exited does not,
- * and the scheduler then polls the source again until the watcher is back.
+ * and the scheduler then polls the source again until the watcher is restarted.
  */
 export function isNativeWatcherRunning(
   watcher:
@@ -37,4 +37,32 @@ export function isNativeWatcherRunning(
     return watcher.exitCode == null && watcher.signalCode == null && !watcher.killed;
   }
   return true;
+}
+
+export const NATIVE_WATCHER_RESTART = {
+  /** Delay before restarting a watcher that stopped for the first time. */
+  initialMs: 1_000,
+  /** The delay doubles with each stop in a row, up to this. */
+  maxMs: 5 * 60_000,
+  /** A watcher that ran at least this long before stopping starts again from `initialMs`. */
+  stableMs: 60_000,
+} as const;
+
+/**
+ * When to restart a watcher helper that stopped after running for `ranMs`, given how many
+ * times in a row it had stopped before. A helper that fails on start backs off instead of
+ * being respawned in a loop.
+ */
+export function nextNativeWatcherRestart(
+  previousFailures: number,
+  ranMs: number,
+): { delayMs: number; failures: number } {
+  const failures = ranMs >= NATIVE_WATCHER_RESTART.stableMs ? 0 : previousFailures;
+  return {
+    delayMs: Math.min(
+      NATIVE_WATCHER_RESTART.maxMs,
+      NATIVE_WATCHER_RESTART.initialMs * 2 ** failures,
+    ),
+    failures: failures + 1,
+  };
 }

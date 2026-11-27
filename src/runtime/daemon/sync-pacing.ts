@@ -219,11 +219,11 @@ export function autoSyncPushPath(
     case "contacts":
       return input.watcherRunning("contacts") ? "healthy" : "down";
     case "imessage":
-      // The Messages and call-history watchers observe the databases' directories, so they
-      // fire when a file is created, renamed or removed there. A message appended to the
-      // existing database or its write-ahead log raises nothing. They speed some syncs up
-      // but cannot stand in for polling, so iMessage polls as it always has.
-      return "down";
+      // The account reads both Messages and call history, and each has a watcher on its
+      // database file, write-ahead log and directory. Both must be running to cover it.
+      return input.watcherRunning("imessage") && input.watcherRunning("callhistory")
+        ? "healthy"
+        : "down";
     case "whatsapp":
     case "signal":
     case "linkedin":

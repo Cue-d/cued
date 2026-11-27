@@ -74,6 +74,10 @@ ${FAKE_HELPER_IMESSAGE_LINES}if [ "$1" = "contacts" ] && [ "$2" = "status" ]; th
   echo '{"status":"authorized"}'
   exit 0
 fi
+if [ "$2" = "watch" ]; then
+  echo '{"event":"ready","timestamp":0}'
+  exec sleep 86400
+fi
 exit 1
 `;
 const TARGETS = {

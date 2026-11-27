@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   isNativeWatcherRunning,
+  NATIVE_WATCHER_RESTART,
+  nextNativeWatcherRestart,
   shouldBootstrapLocalIntegrations,
   shouldRunLocalWatcher,
 } from "./local-watchers.js";
@@ -62,5 +64,27 @@ describe("native watcher liveness", () => {
     expect(isNativeWatcherRunning({ ...helper, exitCode: 1 })).toBe(false);
     expect(isNativeWatcherRunning({ ...helper, signalCode: "SIGTERM" as const })).toBe(false);
     expect(isNativeWatcherRunning({ ...helper, killed: true })).toBe(false);
+  });
+});
+
+describe("nextNativeWatcherRestart", () => {
+  it("backs off a watcher that keeps stopping, up to a cap", () => {
+    let failures = 0;
+    const delays: number[] = [];
+    for (let i = 0; i < 12; i++) {
+      const next = nextNativeWatcherRestart(failures, 50);
+      delays.push(next.delayMs);
+      failures = next.failures;
+    }
+    expect(delays.slice(0, 5)).toEqual([1_000, 2_000, 4_000, 8_000, 16_000]);
+    expect(Math.max(...delays)).toBe(NATIVE_WATCHER_RESTART.maxMs);
+    expect(delays.at(-1)).toBe(NATIVE_WATCHER_RESTART.maxMs);
+  });
+
+  it("restarts promptly a watcher that had been running for a while", () => {
+    expect(nextNativeWatcherRestart(9, NATIVE_WATCHER_RESTART.stableMs)).toEqual({
+      delayMs: NATIVE_WATCHER_RESTART.initialMs,
+      failures: 1,
+    });
   });
 });
