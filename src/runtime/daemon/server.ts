@@ -163,13 +163,11 @@ import {
   collectDesiredWhatsAppSessions,
 } from "./realtime-sessions.js";
 import { type DaemonRequestContext, handleSocket } from "./request-handler.js";
+import { createSearchIndexDrain } from "./search-index-drain.js";
 import {
   DAEMON_STATUS_BUSY_TIMEOUT_MS,
   DAEMON_STATUS_HEARTBEAT_MS,
   FOREGROUND_QUIET_PERIOD_MS,
-  FTS_INDEX_PASS_BUDGET_MS,
-  FTS_INDEX_SLICE_GAP_MS,
-  FTS_INDEXING_STALE_AFTER_MS,
   FTS_PROJECTION_THROTTLE_BACKLOG_EVENTS,
   FTS_PROJECTION_THROTTLE_DELAY_MS,
   getAutoSyncIntervalMs,
@@ -423,17 +421,12 @@ export async function runDaemon(): Promise<void> {
   >();
   const activeIngestRuns = new Map<string, Promise<void>>();
   let isProcessingProjection = false;
-  let isProcessingSearchIndex = false;
-  let searchIndexWakePending = false;
   let ingestDrainScheduled = false;
   let projectionDrainScheduled = false;
-  let searchIndexDrainScheduled = false;
   let ingestDrainTimer: NodeJS.Timeout | null = null;
   let projectionDrainTimer: NodeJS.Timeout | null = null;
-  let searchIndexDrainTimer: NodeJS.Timeout | null = null;
   let ingestDrainDueAt: number | null = null;
   let projectionDrainDueAt: number | null = null;
-  let searchIndexDrainDueAt: number | null = null;
   const lastAutoSyncQueuedAt = new Map<string, number>();
   const autoSyncPacing = new AutoSyncPacing();
   const lastSignalReconnectSyncQueuedAt = new Map<string, number>();
@@ -1445,120 +1438,10 @@ export async function runDaemon(): Promise<void> {
     }, normalizedDelayMs);
   };
 
-  let searchIndexPass = { claimed: 0, indexed: 0, failed: 0, swept: 0 };
-  const drainSearchIndexQueue = () => {
-    searchIndexDrainScheduled = false;
-    searchIndexDrainDueAt = null;
-    if (isUpdateShutdownRequested) {
-      return;
-    }
-    if (isProcessingSearchIndex) {
-      // The pass running on the worker may already have looked at the queues and be about to
-      // report them empty. Remember this wake-up, or what was queued meanwhile would wait for
-      // the next unrelated one.
-      searchIndexWakePending = true;
-      return;
-    }
-    if (isProcessingProjection) {
-      scheduleSearchIndexDrain(FTS_PROJECTION_THROTTLE_DELAY_MS);
-      return;
-    }
-    if (bootstrap.state !== "ready") {
-      scheduleSearchIndexDrain(QUEUE_DRAIN_RETRY_DELAY_MS);
-      return;
-    }
-    let projectionBacklog: ReturnType<typeof db.getProjectionBacklog>;
-    try {
-      projectionBacklog = db.withBusyTimeoutSync(DAEMON_STATUS_BUSY_TIMEOUT_MS, () =>
-        db.getProjectionBacklog(),
-      );
-    } catch (error) {
-      if (!isSqliteBusyError(error)) {
-        throw error;
-      }
-      daemonLogger.warn("message FTS index drain skipped because SQLite is busy");
-      scheduleSearchIndexDrain(QUEUE_DRAIN_RETRY_DELAY_MS);
-      return;
-    }
-    if (projectionBacklog.pending_raw_events > FTS_PROJECTION_THROTTLE_BACKLOG_EVENTS) {
-      scheduleSearchIndexDrain(FTS_PROJECTION_THROTTLE_DELAY_MS);
-      return;
-    }
-    isProcessingSearchIndex = true;
-    void dbWorker
-      .run("indexMessageSearch", {
-        budgetMs: FTS_INDEX_PASS_BUDGET_MS,
-        staleBefore: Date.now() - FTS_INDEXING_STALE_AFTER_MS,
-      })
-      .then((pass) => {
-        searchIndexPass.claimed += pass.claimed;
-        searchIndexPass.indexed += pass.indexed;
-        searchIndexPass.failed += pass.failed;
-        searchIndexPass.swept += pass.swept;
-        if (pass.drained) {
-          if (searchIndexPass.claimed > 0 || searchIndexPass.swept > 0) {
-            daemonLogger.info("message FTS index backlog drained", { ...searchIndexPass });
-            requestMenuBarStatusWrite("message_fts_index_completed");
-          }
-          searchIndexPass = { claimed: 0, indexed: 0, failed: 0, swept: 0 };
-        } else {
-          if (pass.claimed > 0 || pass.swept > 0) {
-            requestMenuBarStatusWrite("message_fts_index_progress");
-          }
-          scheduleSearchIndexDrain(FTS_INDEX_SLICE_GAP_MS);
-        }
-      })
-      .catch((error: unknown) => {
-        if (isUpdateShutdownRequested || shutdownInitiated) {
-          return;
-        }
-        if (!isSqliteBusyError(error)) {
-          daemonLogger.error("message FTS index batch failed", {
-            error: error instanceof Error ? error.message : String(error),
-          });
-        } else {
-          daemonLogger.warn("message FTS index drain skipped because SQLite is busy");
-        }
-        scheduleSearchIndexDrain(QUEUE_DRAIN_RETRY_DELAY_MS);
-      })
-      .finally(() => {
-        isProcessingSearchIndex = false;
-        if (searchIndexWakePending) {
-          searchIndexWakePending = false;
-          scheduleSearchIndexDrain(FTS_INDEX_SLICE_GAP_MS);
-        }
-      });
-  };
-
-  const scheduleSearchIndexDrain = (delayMs = 0) => {
-    const normalizedDelayMs = Math.max(0, delayMs);
-    const dueAt = now() + normalizedDelayMs;
-    if (searchIndexDrainScheduled) {
-      if (searchIndexDrainDueAt != null && searchIndexDrainDueAt <= dueAt) {
-        return;
-      }
-      if (searchIndexDrainTimer) {
-        clearTimeout(searchIndexDrainTimer);
-        searchIndexDrainTimer = null;
-      }
-    }
-    searchIndexDrainScheduled = true;
-    searchIndexDrainDueAt = dueAt;
-    if (normalizedDelayMs <= 0) {
-      setImmediate(drainSearchIndexQueue);
-      return;
-    }
-
-    searchIndexDrainTimer = setTimeout(() => {
-      searchIndexDrainTimer = null;
-      stallMonitor.section("drain_search_index_queue", drainSearchIndexQueue);
-    }, normalizedDelayMs);
-  };
-
   const schedulers = {
     wakeIngest: scheduleIngestDrain,
     wakeProjection: scheduleProjectionDrain,
-    wakeSearchIndex: scheduleSearchIndexDrain,
+    wakeSearchIndex: (delayMs?: number) => scheduleSearchIndexDrain(delayMs),
   };
   const queueDebouncedNativeSync = createDebouncedSyncEnqueuer(db, schedulers.wakeIngest);
   const discordRealtime = new DiscordRealtimeSupervisor({
@@ -3235,6 +3118,17 @@ export async function runDaemon(): Promise<void> {
     }
   };
 
+  const { scheduleSearchIndexDrain, stopSearchIndexDrain } = createSearchIndexDrain({
+    db,
+    dbWorker,
+    stallMonitor,
+    bootstrap,
+    isUpdateShutdownRequested: () => isUpdateShutdownRequested,
+    isShutdownInitiated: () => shutdownInitiated,
+    isProcessingProjection: () => isProcessingProjection,
+    requestMenuBarStatusWrite,
+  });
+
   const schedulerLoop = setInterval(() => {
     stallMonitor.section("auto_sync_scheduler", () => queueAutoSyncRuns("scheduler"));
   }, getAutoSyncSchedulerTickMs());
@@ -3443,10 +3337,7 @@ export async function runDaemon(): Promise<void> {
       clearTimeout(projectionDrainTimer);
       projectionDrainTimer = null;
     }
-    if (searchIndexDrainTimer) {
-      clearTimeout(searchIndexDrainTimer);
-      searchIndexDrainTimer = null;
-    }
+    stopSearchIndexDrain();
     if (ingestDrainTimer) {
       clearTimeout(ingestDrainTimer);
       ingestDrainTimer = null;
