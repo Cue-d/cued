@@ -125,6 +125,10 @@ Never commit these values or paste them into issues, PRs or logs.
 - `--channel prerelease`: a GitHub prerelease. The app is built with the `internal` runtime
   channel, and only `internal` builds are offered prereleases by the updater. The version must
   carry a suffix, e.g. `0.2.0-internal.1`.
+- `--channel stable --staged`: the same stable build and plain `X.Y.Z` version, published as a
+  GitHub prerelease. Stable installs skip GitHub prereleases, so nobody is offered it until you
+  promote the same artifacts with `gh release edit vX.Y.Z --prerelease=false --latest`. Use
+  this to try a release on your own machine before everyone gets it.
 - `--version` must equal `version` in `package.json`: bump it in a commit (and merge it to
   `main`) before releasing. The bundle version comes from `package.json`.
 

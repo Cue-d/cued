@@ -24,6 +24,7 @@ CHANNEL=""
 VERSION=""
 NOTES_FILE=""
 PUBLISH=0
+STAGED=0
 PREFLIGHT_ONLY=0
 SKIP_CHECKS=0
 REPO="${CUED_RELEASE_REPO:-Cue-d/cued}"
@@ -44,6 +45,10 @@ Options:
   --notes-file PATH            Release notes (Markdown). Required with --publish.
   --publish                    Create the GitHub release and upload the artifacts. Without this
                                flag nothing leaves the machine except the notarization upload.
+  --staged                     With --channel stable: publish the stable build as a GitHub
+                               prerelease first, so no install is offered it yet. Promote the
+                               same artifacts later with
+                               `gh release edit vX.Y.Z --prerelease=false --latest`.
   --preflight-only             Run the checks and stop before building or signing anything.
   --skip-checks                Skip `pnpm check:ci-local` (only when it already passed on this commit).
   --help                       Show this help.
@@ -95,6 +100,10 @@ while [[ $# -gt 0 ]]; do
       PUBLISH=1
       shift
       ;;
+    --staged)
+      STAGED=1
+      shift
+      ;;
     --preflight-only)
       PREFLIGHT_ONLY=1
       shift
@@ -136,6 +145,10 @@ if [[ "$CHANNEL" == "stable" && "$VERSION" == *-* ]]; then
 fi
 if [[ "$CHANNEL" == "prerelease" && "$VERSION" != *-* ]]; then
   die "prerelease versions need a suffix such as $VERSION-internal.1, or stable installs would see it as final"
+fi
+
+if [[ "$STAGED" -eq 1 && "$CHANNEL" != "stable" ]]; then
+  die "--staged only applies to --channel stable (a prerelease is already hidden from stable installs)"
 fi
 
 if [[ "$PUBLISH" -eq 1 ]]; then
@@ -249,7 +262,7 @@ done
 
 gh_args=(release create "$TAG" "${RELEASE_ASSETS[@]}"
   --repo "$REPO" --target "$COMMIT" --title "Cued $VERSION")
-if [[ "$CHANNEL" == "prerelease" ]]; then
+if [[ "$CHANNEL" == "prerelease" || "$STAGED" -eq 1 ]]; then
   gh_args+=(--prerelease)
 fi
 
@@ -266,3 +279,7 @@ fi
 log "Publish $TAG to $REPO"
 gh "${gh_args[@]}" --notes-file "$NOTES_FILE"
 printf 'release: published %s\n' "$TAG"
+if [[ "$STAGED" -eq 1 ]]; then
+  printf 'Staged as a GitHub prerelease: stable installs are not offered it yet. To promote:\n'
+  printf '  gh release edit %q --repo %q --prerelease=false --latest\n' "$TAG" "$REPO"
+fi
