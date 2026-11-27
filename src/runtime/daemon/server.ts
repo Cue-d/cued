@@ -53,10 +53,7 @@ import { isAdapterWorkerError, runAdapter } from "../../platforms/core/runner.js
 import { refreshLocalIntegrationStates } from "../../platforms/core/state/local-refresh.js";
 import { invalidateIntegrationAuth } from "../../platforms/core/state/mutations.js";
 import { refreshManagedIntegrationStates } from "../../platforms/core/state/refresh.js";
-import {
-  getIntegrationSummary,
-  reconcileAbandonedAuthSessions,
-} from "../../platforms/core/state/status.js";
+import { reconcileAbandonedAuthSessions } from "../../platforms/core/state/status.js";
 import type { SyncContinuation } from "../../platforms/core/sync.js";
 import { isDiscordAuthInvalidationError } from "../../platforms/discord/api/client.js";
 import {
@@ -108,7 +105,6 @@ import { durationBucket, errorTelemetryProperties } from "../../telemetry/contex
 import { DaemonTelemetryQueue } from "../../telemetry/queue.js";
 import { fetchAttachment, listAttachments, searchAttachments } from "../attachments.js";
 import { buildPermissionStatus } from "../doctor.js";
-import { emitHookEvent } from "../hooks.js";
 import type { DaemonEvent, DaemonEventTopic, DaemonRequest, DaemonResponse } from "../ipc.js";
 import { collectInboundMessageHookPayloads } from "../message-hooks.js";
 import { buildOnboardingSnapshot, transitionOnboarding } from "../onboarding.js";
@@ -138,6 +134,7 @@ import {
   localSyncSourcesToRecheck,
   shouldSkipConnectedDiscordSchedulerSync,
 } from "./auto-sync-targets.js";
+import { emitAuthenticatedHook, safeEmitHookEvent } from "./hook-events.js";
 import {
   isNativeWatcherRunning,
   nextNativeWatcherRestart,
@@ -251,7 +248,6 @@ import {
 } from "./write-lock.js";
 
 const daemonLogger = createLogger("daemon");
-const hooksLogger = createLogger("hooks");
 const nativeWatchLogger = createLogger("native-watch");
 const linkedInLogger = createLogger("linkedin");
 const discordLogger = createLogger("discord");
@@ -398,27 +394,6 @@ function resolveCheckpointSyncMode(
   }
 
   return bundleSyncMode === "incremental" ? "incremental" : "full";
-}
-
-async function safeEmitHookEvent(
-  event: "integration.authenticated" | "sync.completed" | "sync.failed" | "message.received",
-  payload: Record<string, unknown>,
-): Promise<void> {
-  try {
-    await emitHookEvent(event, payload);
-  } catch (error) {
-    hooksLogger.warn(`${event} failed`, error);
-  }
-}
-
-async function emitAuthenticatedHook(
-  db: ReturnType<typeof openCuedDatabase>,
-  platform: string,
-  accountKey: string,
-): Promise<void> {
-  await safeEmitHookEvent("integration.authenticated", {
-    integration: getIntegrationSummary(db, platform, accountKey),
-  });
 }
 
 export async function runDaemon(): Promise<void> {
