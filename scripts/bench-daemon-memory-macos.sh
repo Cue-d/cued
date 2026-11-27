@@ -24,11 +24,10 @@ BASELINE_PATH=""
 WRITE_BASELINE_PATH=""
 ARTIFACT_ROOT=""
 ACTIVE_ROOT_PID=""
-CLONED_PROFILE_SEED_DB_PATH=""
 
 usage() {
   cat <<EOF
-Usage: $(basename "$0") [--scenario=clean|cloned|idle_cpu_power|active_sync_projection] [--baseline=PATH] [--write-baseline=PATH]
+Usage: $(basename "$0") [--scenario=clean|idle_cpu_power|active_sync_projection] [--baseline=PATH] [--write-baseline=PATH]
 
 Options:
   --scenario=...         Benchmark scenario to run. Default: clean_idle
@@ -38,14 +37,15 @@ Options:
 
 Scenarios:
   clean_idle             Idle daemon residency with low-noise clean profile.
-  cloned_profile_idle    Idle daemon residency against a cloned ~/.cued profile (informational).
   idle_cpu_power         10-minute idle CPU/process churn sample after daemon is ready.
   active_sync_projection    Replay-driven daemon sync/projection run with CPU + memory sampling.
 
 Notes:
   - This script runs only on macOS.
   - The daemon must already be built at dist/cli.js.
-  - The cloned profile scenario currently tolerates startup failure.
+  - Every run uses its own temporary CUED_HOME, a throwaway database key, no autosync
+    (except contacts from a JSON fixture in active_sync_projection), no realtime sessions
+    and no telemetry. It never reads ~/.cued, the Keychain, Messages or call history.
 EOF
 }
 
@@ -53,9 +53,6 @@ normalize_scenario() {
   case "$1" in
     clean|clean_idle)
       printf '%s\n' "clean_idle"
-      ;;
-    cloned|cloned_profile|cloned_profile_idle)
-      printf '%s\n' "cloned_profile_idle"
       ;;
     idle_cpu_power)
       printf '%s\n' "idle_cpu_power"
@@ -72,7 +69,7 @@ normalize_scenario() {
 
 scenario_run_count() {
   case "$SCENARIO" in
-    clean_idle|cloned_profile_idle)
+    clean_idle)
       printf '%s\n' "$DEFAULT_RUN_COUNT"
       ;;
     idle_cpu_power)
@@ -86,7 +83,7 @@ scenario_run_count() {
 
 scenario_warmup_seconds() {
   case "$SCENARIO" in
-    clean_idle|cloned_profile_idle)
+    clean_idle)
       printf '%s\n' "$DEFAULT_WARMUP_SECONDS"
       ;;
     idle_cpu_power)
@@ -100,7 +97,7 @@ scenario_warmup_seconds() {
 
 scenario_sample_count() {
   case "$SCENARIO" in
-    clean_idle|cloned_profile_idle)
+    clean_idle)
       printf '%s\n' "$DEFAULT_SAMPLE_COUNT"
       ;;
     idle_cpu_power)
@@ -114,7 +111,7 @@ scenario_sample_count() {
 
 scenario_sample_interval_seconds() {
   case "$SCENARIO" in
-    clean_idle|cloned_profile_idle)
+    clean_idle)
       printf '%s\n' "$DEFAULT_SAMPLE_INTERVAL_SECONDS"
       ;;
     idle_cpu_power)
@@ -239,6 +236,10 @@ run_cli_to_file() {
   local disabled_slack_user_data_dir="$home_dir/disabled/SlackData"
   CUED_HOME="$home_dir" \
   CUED_DB_PATH="$home_dir/local.db" \
+  CUED_SIGNAL_DIR="$home_dir/integrations/signal" \
+  CUED_IMESSAGE_DB_PATH="$home_dir/disabled/chat.db" \
+  CUED_CALL_HISTORY_DB_PATH="$home_dir/disabled/CallHistory.storedata" \
+  CUED_CHROMIUM_EXECUTABLE_PATH="$home_dir/disabled/chromium" \
   CUED_SLACK_APP_BINARY="$disabled_slack_app_path" \
   CUED_SLACK_USER_DATA_DIR="$disabled_slack_user_data_dir" \
   node "$DIST_CLI_PATH" "$@" >"$output_path"
@@ -270,10 +271,24 @@ parse_json_field_from_file() {
   ' "$file_path" "$expression"
 }
 
+# The database is encrypted, so read it through the app's own opener with the bench key
+# rather than the sqlite3 CLI.
 sqlite_value() {
   local db_path="$1"
   local query="$2"
-  sqlite3 "$db_path" "$query" | tr -d '\r'
+  (
+    cd "$ROOT_DIR"
+    CUED_HOME="$(dirname "$db_path")" node --input-type=module -e '
+      const { openSqliteDatabase } = await import("./dist/db/sqlite.js");
+      const db = openSqliteDatabase(process.argv[1], { readonly: true });
+      try {
+        const row = db.prepare(process.argv[2]).raw().get();
+        process.stdout.write(row?.[0] == null ? "" : String(row[0]));
+      } finally {
+        db.close();
+      }
+    ' "$db_path" "$query"
+  )
 }
 
 pending_run_count() {
@@ -335,46 +350,7 @@ prepare_home_for_run() {
 EOF
       return
       ;;
-    cloned_profile_idle)
-      if [ -n "$CLONED_PROFILE_SEED_DB_PATH" ]; then
-        sqlite3 "$CLONED_PROFILE_SEED_DB_PATH" ".backup '$home_dir/local.db'"
-        return
-      fi
-
-      if [ ! -f "$HOME/.cued/local.db" ]; then
-        printf '%s\n' "Missing source database at $HOME/.cued/local.db" >&2
-        exit 1
-      fi
-      sqlite3 "$HOME/.cued/local.db" ".backup '$home_dir/local.db'"
-      ;;
   esac
-}
-
-prepare_cloned_profile_seed() {
-  local seed_home_dir
-  if [ "$SCENARIO" != "cloned_profile_idle" ]; then
-    return
-  fi
-
-  seed_home_dir="$ARTIFACT_ROOT/seed-home"
-  prepare_home_for_run "$seed_home_dir"
-  CLONED_PROFILE_SEED_DB_PATH="$seed_home_dir/local.db"
-
-  (
-    cd "$ROOT_DIR"
-    CUED_HOME="$seed_home_dir" \
-    CUED_DB_PATH="$CLONED_PROFILE_SEED_DB_PATH" \
-    node <<'EOF'
-(async () => {
-  const { openCuedDatabase } = await import("./dist/db/database.js");
-  const db = openCuedDatabase(process.env.CUED_DB_PATH);
-  db.close();
-})().catch((error) => {
-  console.error(error);
-  process.exit(1);
-});
-EOF
-  )
 }
 
 wait_for_daemon_ready() {
@@ -556,17 +532,17 @@ for tool in node ps pgrep awk vmmap; do
   fi
 done
 
-if [ "$SCENARIO" = "cloned_profile_idle" ] || [ "$SCENARIO" = "active_sync_projection" ]; then
-  if ! command -v sqlite3 >/dev/null 2>&1; then
-    printf '%s\n' "Missing required tool for $SCENARIO: sqlite3" >&2
-    exit 1
-  fi
-fi
-
 if [ -n "$BASELINE_PATH" ] && [ ! -f "$BASELINE_PATH" ]; then
   printf '%s\n' "Baseline file not found: $BASELINE_PATH" >&2
   exit 1
 fi
+
+# Shared by every daemon and CLI call below: a throwaway database key (never the Keychain's),
+# no realtime sessions, and telemetry sent nowhere.
+CUED_DB_KEY="$(node -e 'process.stdout.write(require("node:crypto").randomBytes(32).toString("hex"))')"
+export CUED_DB_KEY
+export CUED_REALTIME_PLATFORMS=none
+export CUED_TELEMETRY_ENDPOINT="http://127.0.0.1:9/disabled"
 
 ARTIFACT_ROOT="$(mktemp -d "/tmp/cued-daemon-bench.${SCENARIO}.XXXXXX")"
 trap cleanup_artifacts_on_failure EXIT
@@ -576,7 +552,6 @@ WARMUP_SECONDS="$(scenario_warmup_seconds)"
 SAMPLE_COUNT="$(scenario_sample_count)"
 SAMPLE_INTERVAL_SECONDS="$(scenario_sample_interval_seconds)"
 
-prepare_cloned_profile_seed
 
 RUN_SUMMARY_TSV="$ARTIFACT_ROOT/run-summary.tsv"
 printf 'run\tstatus\tstartup_ready_ms\tmain_rss_median_kb\tmain_rss_avg_kb\tmain_rss_max_kb\ttree_rss_median_kb\ttree_rss_avg_kb\ttree_rss_max_kb\tcpu_median_pct\tcpu_p95_pct\tcpu_max_pct\tphysical_footprint_mb\tphysical_footprint_peak_mb\tproc_count_median\tproc_churn_count\tpower_proxy_status\tpower_proxy_raw\n' >"$RUN_SUMMARY_TSV"
@@ -595,6 +570,10 @@ for run_number in $(seq 1 "$RUN_COUNT"); do
   DAEMON_ENV=(
     "CUED_HOME=$HOME_DIR"
     "CUED_DB_PATH=$HOME_DIR/local.db"
+    "CUED_SIGNAL_DIR=$HOME_DIR/integrations/signal"
+    "CUED_IMESSAGE_DB_PATH=$HOME_DIR/disabled/chat.db"
+    "CUED_CALL_HISTORY_DB_PATH=$HOME_DIR/disabled/CallHistory.storedata"
+    "CUED_CHROMIUM_EXECUTABLE_PATH=$HOME_DIR/disabled/chromium"
     "CUED_SLACK_APP_BINARY=$DISABLED_SLACK_APP_PATH"
     "CUED_SLACK_USER_DATA_DIR=$DISABLED_SLACK_USER_DATA_DIR"
   )
@@ -603,6 +582,8 @@ for run_number in $(seq 1 "$RUN_COUNT"); do
       "CUED_AUTOSYNC_PLATFORMS=contacts"
       "CUED_CONTACTS_JSON_PATH=$HOME_DIR/contacts-benchmark.json"
     )
+  else
+    DAEMON_ENV+=("CUED_AUTOSYNC_PLATFORMS=none")
   fi
 
   env "${DAEMON_ENV[@]}" node "$DIST_CLI_PATH" daemon >"$RUN_DIR/daemon.out" 2>&1 &
@@ -613,19 +594,12 @@ for run_number in $(seq 1 "$RUN_COUNT"); do
     printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
       "$run_number" "startup_failed" 0 0 0 0 0 0 0 0 0 0 0 0 0 0 "unavailable" "" >>"$RUN_SUMMARY_TSV"
 
-    if [ "$SCENARIO" = "clean_idle" ] || [ "$SCENARIO" = "idle_cpu_power" ] || [ "$SCENARIO" = "active_sync_projection" ]; then
-      printf '%s\n' "Daemon failed to start during $SCENARIO. See $RUN_DIR/daemon.out." >&2
-      exit 1
-    fi
-
-    SCENARIO_STATUS="startup_failed"
-    SCENARIO_NOTE="cloned profile startup failed; informational scenario only"
-    cleanup_active_tree
-    break
+    printf '%s\n' "Daemon failed to start during $SCENARIO. See $RUN_DIR/daemon.out." >&2
+    exit 1
   fi
 
   case "$SCENARIO" in
-    clean_idle|cloned_profile_idle|idle_cpu_power)
+    clean_idle|idle_cpu_power)
       collect_fixed_interval_samples "$RUN_DIR" "$WARMUP_SECONDS" "$SAMPLE_COUNT" "$SAMPLE_INTERVAL_SECONDS"
       ;;
     active_sync_projection)
@@ -676,25 +650,9 @@ if awk -F '\t' 'NR > 1 && $2 == "ok" { found = 1 } END { exit(found ? 0 : 1) }' 
   PROC_COUNT_MEDIAN="$(median_of_file "$ARTIFACT_ROOT/proc-count-median.txt")"
   PROC_CHURN_COUNT="$(max_of_file "$ARTIFACT_ROOT/proc-churn-count.txt")"
 else
-  if [ "$SCENARIO" != "cloned_profile_idle" ] || [ "$SCENARIO_STATUS" != "startup_failed" ]; then
-    printf '%s\n' "No successful benchmark runs completed." >&2
-    exit 1
-  fi
-
-  STARTUP_READY_MS="0"
-  MAIN_RSS_MEDIAN_MB="0.0"
-  MAIN_RSS_AVG_MB="0.0"
-  MAIN_RSS_MAX_MB="0.0"
-  TREE_RSS_MEDIAN_MB="0.0"
-  TREE_RSS_AVG_MB="0.0"
-  TREE_RSS_MAX_MB="0.0"
-  CPU_MEDIAN_PCT="0.00"
-  CPU_P95_PCT="0.00"
-  CPU_MAX_PCT="0.00"
-  PHYSICAL_FOOTPRINT_MB="0.0"
-  PHYSICAL_FOOTPRINT_PEAK_MB="0.0"
-  PROC_COUNT_MEDIAN="0"
-  PROC_CHURN_COUNT="0"
+  printf '%s
+' "No successful benchmark runs completed." >&2
+  exit 1
 fi
 
 SUMMARY_JSON_PATH="$ARTIFACT_ROOT/summary.json"

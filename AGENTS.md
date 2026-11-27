@@ -1,8 +1,10 @@
 # Cued Codebase Guide
 
+This is the single guide for agents working in this repository. `CLAUDE.md` only points here.
+
 ## What This Is
 
-Cued is a local-only message and contact datastore for agents.
+Cued is a local-first message and contact datastore for agents.
 
 Current runtime:
 
@@ -16,7 +18,7 @@ repo root app (daemon, CLI, sync orchestration, projection)
 ~/.cued/local.db
 ```
 
-## Active Code
+## Repository Layout
 
 ```text
 src/                Local daemon and CLI
@@ -26,44 +28,49 @@ native/
   helpers/
     slack-go/       Native Slack helper
     whatsapp-go/    Native WhatsApp helper
-scripts/            Packaging plus bundled runtime/helper fetch scripts
+scripts/            Packaging, release, benchmark and permission helpers (see scripts/README.md)
+skills/cued/        Agent skill bundled into Cued.app
 ```
 
-Signal support ships as a bundled `signal-cli` payload fetched by `scripts/fetch-signal-cli-macos.sh` and staged into the app bundle.
+Signal's `signal-cli` and Java runtime are downloaded (pinned, SHA-256 verified) the first time
+Signal is connected and stored under `~/.cued/helpers/signal-cli`. Set `CUED_BUNDLE_SIGNAL=1`
+for `pnpm build:app:macos` to stage it into the app bundle instead
+(`scripts/fetch-signal-cli-macos.sh`).
 
-The Electron app and legacy shared packages are gone. Do not add new code against `@cued/*` packages.
+The Electron app and the old shared/cloud package layer are gone.
 
-## Behaviors
+## Development Rules
 
 ### DO
 
-- Treat the repo root app as the canonical runtime.
-- Keep data local to `~/.cued/local.db`.
-- Prefer app-local utilities in `src/` instead of recreating a package layer.
-- Run relevant tests when changing daemon, CLI, sync, or DB behavior.
+- Treat the repo root app as the source of truth for runtime behavior.
+- Keep data flow local, in `~/.cued/local.db`.
+- Prefer app-local modules in `src/` over rebuilding a package abstraction.
+- Run the relevant tests before shipping changes (daemon, CLI, sync and DB behavior: `pnpm test`).
 - Run `swift build --package-path native/macos/CuedNative -c release` when changing the macOS host.
 
 ### DON'T
 
-- Don't reintroduce Electron-only architecture.
-- Don't add Convex/cloud assumptions to the active runtime.
-- Don't modify generated or build output in `native/macos/dist/`.
+- Don't reintroduce Electron-only architecture or `@cued/*` shared packages.
+- Don't add cloud sync, Convex, or web/mobile assumptions to the runtime.
+- Don't modify generated app bundles or build output in `native/macos/dist/`.
 
 ## Key Files
 
-| Feature               | Files                                                                                                      |
-| --------------------- | ---------------------------------------------------------------------------------------------------------- |
-| CLI entrypoint        | `src/cli.ts`                                                                                               |
-| Daemon server         | `src/runtime/daemon/`                                                                                      |
-| Platform auth/state   | `src/platforms/core/auth/`, `src/platforms/core/state/`                                                    |
-| Platform implementations | `src/platforms/`                                                                                         |
-| Database layer        | `src/db/`                                                                                                  |
-| Diagnostics           | `src/runtime/doctor.ts`                                                                                    |
-| macOS install helpers | `src/macos/install.ts`                                                                                     |
-| Helper binaries       | `native/helpers/slack-go/`, `native/helpers/whatsapp-go/`, `scripts/fetch-signal-cli-macos.sh`            |
-| App bundle build      | `scripts/build-cued-daemon-app.sh`                                                                         |
-| DMG/signing           | `scripts/build-cued-dmg.sh`, `scripts/sign-and-notarize-cued-app.sh`                                       |
-| Native host           | `native/macos/CuedNative/Sources/CuedNative/`                                                              |
+| Feature                  | Files                                                                                         |
+| ------------------------ | --------------------------------------------------------------------------------------------- |
+| CLI entrypoint           | `src/cli.ts`                                                                                  |
+| Setup flow               | `src/setup.ts`                                                                                |
+| Daemon                   | `src/runtime/daemon/`                                                                         |
+| Platform auth/state      | `src/platforms/core/auth/`, `src/platforms/core/state/`                                       |
+| Platform implementations | `src/platforms/`                                                                              |
+| Database                 | `src/db/`                                                                                     |
+| Diagnostics              | `src/runtime/doctor.ts`                                                                       |
+| macOS install helpers    | `src/macos/install.ts`                                                                        |
+| Helper binaries          | `native/helpers/slack-go/`, `native/helpers/whatsapp-go/`, `scripts/fetch-signal-cli-macos.sh` |
+| App bundle build         | `scripts/build-cued-daemon-app.sh`                                                            |
+| Release (entry point)    | `scripts/release-cued-macos.sh` (steps and credentials: `scripts/README.md`, "Releasing")     |
+| Native host              | `native/macos/CuedNative/Sources/CuedNative/`                                                 |
 
 ## Commands
 
@@ -85,6 +92,8 @@ swift build --package-path native/macos/CuedNative -c release
 swift test --package-path native/macos/CuedNative
 ```
 
+`pnpm check:ci-local` (run by the pre-push hook) is `pnpm check:app-quality` plus the Swift build.
+
 ## Responsiveness
 
 The daemon is single-threaded and its SQLite calls are synchronous, so anything slow on its
@@ -105,10 +114,14 @@ than run synchronously, and unavoidable work on the thread is done in slices of 
 milliseconds. When the loop does stall, the daemon logs `event loop stalled` with what it was
 running.
 
+Other benchmarks (projection throughput, daemon memory) are listed in `scripts/README.md`,
+"Benchmarks".
+
 ## Common Issues
 
-| Problem                             | Solution                                                         |
-| ----------------------------------- | ---------------------------------------------------------------- |
-| "Error accessing messages database" | Grant Full Disk Access to the app or terminal                    |
-| "Contacts access denied"            | Grant Contacts access in System Settings                         |
-| Native helper issues                | Rebuild the macOS app bundle and rerun `cued permissions doctor` |
+| Problem                          | Solution                                                                  |
+| -------------------------------- | ------------------------------------------------------------------------- |
+| Messages DB access fails         | Grant Full Disk Access to the app or terminal                             |
+| Contacts access denied           | Grant Contacts access in System Settings                                  |
+| Permission prompts do not appear | Run `pnpm permissions:macos -- --all` or `cued permissions request --all` |
+| Native helper issues             | Rebuild the macOS app bundle and rerun `cued permissions doctor`          |
