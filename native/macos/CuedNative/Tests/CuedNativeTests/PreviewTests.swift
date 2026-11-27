@@ -13,6 +13,8 @@ final class PreviewTests: XCTestCase {
         "permissions-granted",
         "platforms-fresh",
         "platforms-mixed",
+        "platforms-browser-download",
+        "platforms-browser-failed",
         "use-cases",
         "application-home",
       ]

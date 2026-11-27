@@ -40,6 +40,7 @@ describe("onboarding permission refresh", () => {
     getProjectionBacklog: () => ({ pending_raw_events: 0 }),
     countObservedPhoneCalls: () => 0,
     getAppSetting: vi.fn().mockReturnValue(null),
+    listAuthSessions: () => [],
   };
 
   afterEach(() => {

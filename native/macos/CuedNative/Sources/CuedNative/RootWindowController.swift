@@ -15,6 +15,7 @@ struct RootSnapshotResponse: Decodable {
   let relationshipSummary: RelationshipSummary?
   let integrations: [IntegrationStatus]?
   let setupIntegrations: [IntegrationStatus]
+  let signInBrowser: SignInBrowserStatus?
 }
 
 private let liveRefreshPermissionKeys: Set<String> = ["contacts", "full_disk_access"]
@@ -231,7 +232,8 @@ final class RootWindowController: NSWindowController {
               globalSkill: self.viewModel.globalSkillStatus,
               relationshipSummary: fastSnapshot.relationshipSummary,
               allIntegrations: fastSnapshot.integrations,
-              integrations: fastSnapshot.integrations
+              integrations: fastSnapshot.integrations,
+              signInBrowser: self.viewModel.signInBrowser
             )
             self.viewModel.isRefreshing = true
           }
@@ -278,7 +280,8 @@ final class RootWindowController: NSWindowController {
           globalSkill: snapshot.globalSkill,
           relationshipSummary: snapshot.relationshipSummary ?? RelationshipSummary(),
           allIntegrations: self.cachedAllIntegrations,
-          integrations: setupIntegrations
+          integrations: setupIntegrations,
+          signInBrowser: snapshot.signInBrowser
         )
         self.schedulePermissionRefresh()
         self.schedulePendingAuthRefreshIfNeeded()

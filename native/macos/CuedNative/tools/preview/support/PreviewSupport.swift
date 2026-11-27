@@ -50,6 +50,8 @@ public enum Preview {
     PreviewCase(name: "permissions-granted", page: 1),
     PreviewCase(name: "platforms-fresh", page: 2),
     PreviewCase(name: "platforms-mixed", page: 2),
+    PreviewCase(name: "platforms-browser-download", page: 2),
+    PreviewCase(name: "platforms-browser-failed", page: 2),
     PreviewCase(name: "use-cases", page: 3),
     PreviewCase(name: "application-home", page: 4),
   ]
@@ -115,7 +117,8 @@ public enum Preview {
       globalSkill: fixture.globalSkill,
       relationshipSummary: fixture.relationshipSummary,
       allIntegrations: fixture.integrations,
-      integrations: fixture.setupIntegrations
+      integrations: fixture.setupIntegrations,
+      signInBrowser: fixture.signInBrowser
     )
     viewModel.applyAgentTargetStatuses(fixture.agentTargetStatuses)
     return viewModel
@@ -127,7 +130,8 @@ private struct PreviewFixture {
 
   var permissions: [PermissionStatus] {
     switch name {
-    case "permissions-granted", "platforms-mixed":
+    case "permissions-granted", "platforms-mixed", "platforms-browser-download",
+      "platforms-browser-failed":
       return [
         permission("contacts", "granted", "Contacts access is granted", ["--contacts"]),
         permission("full_disk_access", "granted", "Full Disk Access is granted", ["--full-disk-access"]),
@@ -163,8 +167,33 @@ private struct PreviewFixture {
         integration("slack", "T123", "Cued HQ", "check_failed", true, nil),
         integration("whatsapp", "default", "WhatsApp", "in_progress", true, nil),
       ]
+    case "platforms-browser-download":
+      return [integration("linkedin", "default", "LinkedIn", "in_progress", true, nil)]
     default:
       return []
+    }
+  }
+
+  /// A Mac with no supported browser: the first sign-in downloads Cued's own Chromium.
+  var signInBrowser: SignInBrowserStatus? {
+    switch name {
+    case "platforms-browser-download":
+      return SignInBrowserStatus(
+        platform: "linkedin",
+        accountKey: "default",
+        stage: "downloading",
+        receivedBytes: 42 * 1024 * 1024,
+        totalBytes: 167 * 1024 * 1024
+      )
+    case "platforms-browser-failed":
+      return SignInBrowserStatus(
+        platform: "slack",
+        accountKey: "pending-slack-preview",
+        stage: "failed",
+        error: "The downloaded sign-in browser did not match its expected checksum, so it was not used. Try again, or install Google Chrome, Microsoft Edge, Brave Browser or Chromium."
+      )
+    default:
+      return nil
     }
   }
 

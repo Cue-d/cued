@@ -6,8 +6,10 @@ import process from "node:process";
 import { getCurrentAppVersion, getCurrentReleaseChannel } from "../../core/app-metadata.js";
 import {
   CUED_BACKUPS_DIR,
+  CUED_BROWSER_DIR,
   CUED_DAEMON_LOCK_PATH,
   CUED_DB_PATH,
+  CUED_HOME,
   CUED_SOCKET_PATH,
   CUED_UPDATE_DOWNLOADS_DIR,
   CUED_UPDATE_ROLLBACK_DIR,
@@ -45,6 +47,7 @@ import {
   ThreadDbWorker,
 } from "../../db/db-worker.js";
 import type { StatusAggregates } from "../../db/db-worker-jobs.js";
+import { scheduleLegacyBrowserProfileCleanup } from "../../platforms/core/auth/legacy-browser-profiles.js";
 import {
   buildAdapterInvocationEnv,
   selectAdapterInvocationProofs,
@@ -265,6 +268,7 @@ const UPDATE_SHUTDOWN_GRACE_MS = 30_000;
 // Well after startup, and after an update's helper has finished its health check.
 const UPDATE_ARTIFACT_RETENTION_START_DELAY_MS = 10 * 60_000;
 const UPDATE_ARTIFACT_RETENTION_INTERVAL_MS = 6 * 60 * 60 * 1000;
+const LEGACY_BROWSER_PROFILE_CLEANUP_RETRY_MS = 60 * 60_000;
 const QUEUE_DRAIN_RETRY_DELAY_MS = 1_000;
 const INGEST_RUN_LEASE_MS = 15 * 60_000;
 const PROJECTION_WORKER_TIMEOUT_MS = 30 * 60_000;
@@ -4621,6 +4625,19 @@ export async function runDaemon(): Promise<void> {
     },
   });
 
+  // Profiles of the Chromium Cued used to bundle (hundreds of MB, read by nothing). Removed once,
+  // with asynchronous filesystem calls, never while a sign-in is in progress.
+  const legacyBrowserProfileCleanup = scheduleLegacyBrowserProfileCleanup({
+    cuedHome: CUED_HOME,
+    browserRoot: CUED_BROWSER_DIR,
+    isSignInActive: () =>
+      activeAuthSessions.size > 0 ||
+      db.listAuthSessions(5).some((session) => session.state === "in_progress"),
+    startDelayMs: UPDATE_ARTIFACT_RETENTION_START_DELAY_MS,
+    retryMs: LEGACY_BROWSER_PROFILE_CLEANUP_RETRY_MS,
+    log: (message, details) => daemonLogger.info(message, details),
+  });
+
   let lastForegroundRequestAt = 0;
   const syncRunMaintenance = new SyncRunMaintenance(dbWorker, {
     // History cleanup can always wait. It never contends with a sync or projection for the
@@ -4692,6 +4709,7 @@ export async function runDaemon(): Promise<void> {
       schedulers.wakeProjection();
       refreshMenuBarStatusNow("auth_state_changed");
     },
+    onAuthRuntimeProgress: () => notifySubscribers("status"),
     refreshStatusCacheNow: refreshMenuBarStatusNow,
     shouldRunRealtimePlatform,
     purgeAccountSyncRunHistory: (platform, accountKey, queuedBefore) =>
@@ -4747,6 +4765,7 @@ export async function runDaemon(): Promise<void> {
     autoSyncBusyRetries.clear();
     clearInterval(updateLoop);
     updateArtifactRetention.stop();
+    legacyBrowserProfileCleanup.stop();
     syncRunMaintenance.stop();
     stallMonitor.stop();
     if (walCheckpointTimer) {
@@ -4942,6 +4961,8 @@ type DaemonRequestContext = {
   requestUpdateShutdown: () => { shuttingDown: boolean; requestedAt: number | null };
   isBackgroundWorkActive: () => boolean;
   onAuthRuntimeStateChanged: () => void;
+  /** Sign-in browser progress was recorded; subscribers re-read the snapshot. */
+  onAuthRuntimeProgress: () => void;
   refreshStatusCacheNow: (reason: string) => void;
   shouldRunRealtimePlatform: (platform: AdapterPlatform) => boolean;
   purgeAccountSyncRunHistory: (
@@ -5062,6 +5083,7 @@ async function dispatchRequest(
     requestUpdateShutdown,
     isBackgroundWorkActive,
     onAuthRuntimeStateChanged,
+    onAuthRuntimeProgress,
     refreshStatusCacheNow,
     shouldRunRealtimePlatform,
     purgeAccountSyncRunHistory,
@@ -5316,6 +5338,7 @@ async function dispatchRequest(
           {
             wakeIngest: schedulers.wakeIngest,
             onRuntimeStateChanged: onAuthRuntimeStateChanged,
+            onRuntimeProgress: onAuthRuntimeProgress,
             shouldQueueAuthenticatedSync: (platform) =>
               platform !== "whatsapp" || shouldRunRealtimePlatform("whatsapp"),
             emitAuthenticatedHook: async (platform, accountKey) => {

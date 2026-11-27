@@ -3,6 +3,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import {
   getManagedChromium,
+  MANAGED_CHROMIUM_ID,
   managedBrowserRoot,
   readChromiumRuntimeManifest,
 } from "./managed-browser.js";
@@ -27,6 +28,18 @@ const INSTALLED_BROWSERS = [
   { id: "microsoft-edge", name: "Microsoft Edge" },
   { id: "brave-browser", name: "Brave Browser" },
 ] as const;
+
+const CONFIGURED_BROWSER_ID = "configured";
+
+/**
+ * Every name a sign-in browser's profile directory can have inside an account's profile
+ * directory (see `authBrowserProfileDir`). Nothing else in that directory is used.
+ */
+export const AUTH_BROWSER_PROFILE_IDS: ReadonlySet<string> = new Set([
+  ...INSTALLED_BROWSERS.map((browser) => browser.id),
+  MANAGED_CHROMIUM_ID,
+  CONFIGURED_BROWSER_ID,
+]);
 
 export interface BrowserLookup {
   env?: NodeJS.ProcessEnv;
@@ -70,7 +83,7 @@ export function listAuthBrowsers(lookup: BrowserLookup = {}): AuthBrowser[] {
   if (configured) {
     return [
       {
-        id: "configured",
+        id: CONFIGURED_BROWSER_ID,
         name: "Configured browser",
         executablePath: configured,
         source: "configured",

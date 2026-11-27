@@ -2,7 +2,11 @@ import type { ChildProcess } from "node:child_process";
 import type { AuthSessionState, Platform } from "../../../core/types/provider.js";
 import type { CuedDatabase } from "../../../db/database.js";
 import type { AuthSessionSummary, IntegrationStateSummary } from "../state/types.js";
-import { runChromiumAuthSessionSync, startChromiumAuthSession } from "./chromium.js";
+import {
+  type ChromiumAuthHooks,
+  runChromiumAuthSessionSync,
+  startChromiumAuthSession,
+} from "./chromium.js";
 import { runNativeAuthSessionSync, startNativeAuthSession } from "./native.js";
 import { runOAuthAuthSessionSync, startOAuthAuthSession } from "./oauth.js";
 import { runQrNativeAuthSessionSync, startQrNativeAuthSession } from "./qr-native.js";
@@ -27,10 +31,11 @@ export function startAuthSession(
   db: CuedDatabase,
   session: AuthSessionSummary,
   integration: IntegrationStateSummary,
+  hooks: ChromiumAuthHooks = {},
 ): AuthRuntimeHandle {
   switch (integration.runtimeKind) {
     case "chromium":
-      return startChromiumAuthSession(db, session, integration);
+      return startChromiumAuthSession(db, session, integration, hooks);
     case "qr_native":
       return startQrNativeAuthSession(db, session, integration);
     case "native":

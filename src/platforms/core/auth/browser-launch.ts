@@ -1,5 +1,8 @@
 import { type AuthBrowser, NO_BROWSER_REMEDIATION } from "./browser-resolver.js";
 
+/** The attempt recorded when Cued's own Chromium could not be downloaded. */
+const DOWNLOAD_ATTEMPT = "Chromium download";
+
 export interface BrowserLaunchAttempt {
   browser: string;
   error: string;
@@ -60,7 +63,7 @@ export async function launchFirstAvailableBrowser<T>(input: {
   try {
     managed = await input.installManaged();
   } catch (error) {
-    attempts.push({ browser: "Chromium download", error: firstLine(error) });
+    attempts.push({ browser: DOWNLOAD_ATTEMPT, error: firstLine(error) });
     throw new BrowserUnavailableError(
       attempts,
       attempts.length > 1
@@ -71,4 +74,20 @@ export async function launchFirstAvailableBrowser<T>(input: {
   const fallback = await tryEach([managed]);
   if (fallback) return fallback;
   throw new BrowserUnavailableError(attempts, "No browser could be opened for the sign-in window.");
+}
+
+/**
+ * One sentence for the app: why no sign-in window opened and what to do. A failed download or
+ * checksum is named as such, since trying again can fix it; otherwise the full reason is kept.
+ */
+export function describeBrowserSetupFailure(error: BrowserUnavailableError): string {
+  const download = error.attempts.find((attempt) => attempt.browser === DOWNLOAD_ATTEMPT);
+  if (!download) return error.message;
+  const alternative =
+    "Try again, or install Google Chrome, Microsoft Edge, Brave Browser or Chromium.";
+  if (/checksum/i.test(download.error)) {
+    return `The downloaded sign-in browser did not match its expected checksum, so it was not used. ${alternative}`;
+  }
+  const detail = download.error.replace(/\.$/, "");
+  return `The sign-in browser could not be downloaded (${detail}). ${alternative}`;
 }
