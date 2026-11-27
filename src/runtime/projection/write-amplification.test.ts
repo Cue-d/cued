@@ -284,6 +284,124 @@ describe("projection write amplification", () => {
     expect(t.searchCount("conversation_name:Launch")).toBe(0);
   });
 
+  describe("one-to-one conversation names", () => {
+    const conversationName = (t: ReturnType<typeof setup>, key: string) =>
+      t.db
+        .orm()
+        .get<{ name: string | null; name_is_derived: number }>(
+          sql`SELECT name, name_is_derived FROM conversations WHERE source_conversation_key = ${key}`,
+        );
+    const messageConversationNames = (t: ReturnType<typeof setup>, key: string) =>
+      t.db
+        .orm()
+        .all<{ conversation_name: string | null; count: number }>(
+          sql`SELECT conversation_name, COUNT(*) AS count FROM messages WHERE platform_message_id LIKE ${`${key}-%`} GROUP BY 1`,
+        );
+
+    function seedDms(t: ReturnType<typeof setup>, messages: number) {
+      seedGroup(t, 30);
+      t.contact("fay@example.com", "Fay Original");
+      t.conversation("dm-fay", null, ["fay@example.com"], "dm");
+      // A platform that names its one-to-one conversations, as an email thread is by its subject.
+      t.conversation("dm-named", "Quarterly Planning", ["fay@example.com"], "dm");
+      t.conversation("group-fay", "Fay Fans", ["fay@example.com", members[0]!]);
+      for (const key of ["dm-fay", "dm-named", "group-fay"]) {
+        for (let index = 0; index < messages; index += 1) {
+          t.message(key, `${key}-${index}`, index % 2 === 0 ? "fay@example.com" : null);
+        }
+      }
+      projectPendingRawEvents(t.db);
+      t.drain();
+    }
+
+    it("follows a renamed contact in a name derived from the participant, and in search", () => {
+      const t = setup();
+      seedDms(t, 20);
+      expect(conversationName(t, "dm-fay")).toEqual({ name: "Fay Original", name_is_derived: 1 });
+      expect(t.searchCount("conversation_name:Original")).toBe(20);
+
+      t.contact("fay@example.com", "Fay Renamed");
+      projectPendingRawEvents(t.db);
+      t.drain();
+
+      expect(conversationName(t, "dm-fay")).toEqual({ name: "Fay Renamed", name_is_derived: 1 });
+      expect(messageConversationNames(t, "dm-fay")).toEqual([
+        { conversation_name: "Fay Renamed", count: 20 },
+      ]);
+      expect(t.searchCount("conversation_name:Renamed")).toBe(20);
+      expect(t.searchCount("conversation_name:Original")).toBe(0);
+    });
+
+    it("keeps a platform-supplied one-to-one name and a group name when the contact is renamed", () => {
+      const t = setup();
+      seedDms(t, 20);
+
+      t.contact("fay@example.com", "Fay Renamed");
+      projectPendingRawEvents(t.db);
+      t.drain();
+
+      expect(conversationName(t, "dm-named")).toEqual({
+        name: "Quarterly Planning",
+        name_is_derived: 0,
+      });
+      expect(conversationName(t, "group-fay")).toEqual({ name: "Fay Fans", name_is_derived: 0 });
+      expect(messageConversationNames(t, "dm-named")).toEqual([
+        { conversation_name: "Quarterly Planning", count: 20 },
+      ]);
+      expect(t.searchCount("conversation_name:Quarterly")).toBe(20);
+      expect(t.searchCount("conversation_name:Fans")).toBe(20);
+      // The participant list follows the rename everywhere.
+      expect(t.searchCount("participant_names:Renamed")).toBe(60);
+    });
+
+    it("hands a large one-to-one conversation's rename to the search drain", () => {
+      const t = setup();
+      seedDms(t, 600);
+
+      t.contact("fay@example.com", "Fay Renamed");
+      projectPendingRawEvents(t.db);
+      expect(t.queuedConversations()).toHaveLength(3);
+      t.drain();
+
+      expect(messageConversationNames(t, "dm-fay")).toEqual([
+        { conversation_name: "Fay Renamed", count: 600 },
+      ]);
+      expect(t.searchCount("conversation_name:Renamed")).toBe(600);
+      expect(t.searchCount("conversation_name:Original")).toBe(0);
+    });
+
+    it("marks existing names when the column is added", () => {
+      const t = setup();
+      seedDms(t, 5);
+      // Fay's conversation went stale before the migration: renamed, but the name kept.
+      t.contact("dee@example.com", "Dee Renamed");
+      projectPendingRawEvents(t.db);
+      const raw = t.db.orm();
+      raw.run(
+        sql`UPDATE conversations SET name = 'Dee Stale' WHERE source_conversation_key = 'dm-1'`,
+      );
+      raw.run(sql`ALTER TABLE conversations DROP COLUMN name_is_derived`);
+      raw.run(sql`DELETE FROM schema_migrations WHERE id = '0028_conversation_name_is_derived'`);
+      t.db.migrate();
+
+      expect(conversationName(t, "dm-fay")).toEqual({ name: "Fay Original", name_is_derived: 1 });
+      expect(conversationName(t, "dm-named")?.name_is_derived).toBe(0);
+      expect(conversationName(t, "group-fay")?.name_is_derived).toBe(0);
+      // A name that no longer matches its participants cannot be told from a platform's...
+      expect(conversationName(t, "dm-1")).toEqual({ name: "Dee Stale", name_is_derived: 0 });
+
+      t.contact("fay@example.com", "Fay Renamed");
+      projectPendingRawEvents(t.db);
+      expect(conversationName(t, "dm-fay")?.name).toBe("Fay Renamed");
+      expect(conversationName(t, "dm-named")?.name).toBe("Quarterly Planning");
+
+      // ...until the platform next reports the conversation without a name of its own.
+      t.conversation("dm-1", null, ["dee@example.com"], "dm");
+      projectPendingRawEvents(t.db);
+      expect(conversationName(t, "dm-1")).toEqual({ name: "Dee Renamed", name_is_derived: 1 });
+    });
+  });
+
   it("walks a queued conversation along an index", () => {
     const t = setup();
     const plan = t.db
