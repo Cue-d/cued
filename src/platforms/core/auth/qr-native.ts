@@ -36,8 +36,9 @@ export interface QrNativeAuthHandle {
   completion: Promise<QrNativeAuthResult>;
 }
 
-function startAuthSentinelProcess(): ChildProcess {
-  return spawn(process.execPath, ["-e", "setInterval(() => {}, 2147483647)"], {
+/** Stands for the sign-in while it runs. Its arguments name the session it belongs to. */
+function startAuthSentinelProcess(sessionId: string): ChildProcess {
+  return spawn(process.execPath, ["-e", "setInterval(() => {}, 2147483647)", "--", sessionId], {
     stdio: "ignore",
   });
 }
@@ -245,7 +246,7 @@ export function startQrNativeAuthSession(
       typeof integration.metadata?.configDir === "string"
         ? integration.metadata.configDir
         : getSignalConfigDir(session.accountKey);
-    const child = startAuthSentinelProcess();
+    const child = startAuthSentinelProcess(session.id);
     const completion = (async (): Promise<QrNativeAuthResult> => {
       await ensureSignalCliAvailable();
       if (child.exitCode !== null || child.signalCode !== null || child.killed) {
@@ -383,7 +384,7 @@ export function startQrNativeAuthSession(
       typeof integration.metadata?.storeDir === "string"
         ? integration.metadata.storeDir
         : getWhatsAppStoreDir(session.accountKey);
-    const child = startAuthSentinelProcess();
+    const child = startAuthSentinelProcess(session.id);
     const completion = (async (): Promise<QrNativeAuthResult> => {
       const inspected = inspectWhatsAppHelper();
       if (!inspected.helperPath) {

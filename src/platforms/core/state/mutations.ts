@@ -285,7 +285,19 @@ function resolveCompletedKeychainAccount(
   return accountKey;
 }
 
+/**
+ * Records how a sign-in ended, on the session and on its account, as one transaction. A busy
+ * database refuses it before anything is written, so the caller can simply try again.
+ */
 export function completeAuthSession(
+  db: CuedDatabase,
+  sessionId: string,
+  input: CompletedAuthSessionInput,
+): CompletedAuthSessionSummary {
+  return db.writeAtomically(() => completeAuthSessionWrites(db, sessionId, input));
+}
+
+function completeAuthSessionWrites(
   db: CuedDatabase,
   sessionId: string,
   input: CompletedAuthSessionInput,
