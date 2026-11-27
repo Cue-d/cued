@@ -29,6 +29,11 @@ import {
   resolveInstalledAppPath,
 } from "./macos/install.js";
 import { getAuthBrowserStatus } from "./platforms/core/auth/browser-resolver.js";
+import {
+  browserSetupFromDownload,
+  createBrowserSetupReporter,
+  describeBrowserSetup,
+} from "./platforms/core/auth/browser-setup.js";
 import { installManagedChromium } from "./platforms/core/auth/managed-browser.js";
 import { IntegrationAuthService } from "./platforms/core/auth/service.js";
 import {
@@ -470,18 +475,12 @@ async function main(): Promise<void> {
         printJson(getAuthBrowserStatus());
         return;
       case "install": {
-        let lastPercent = -1;
+        const report = createBrowserSetupReporter((progress) => {
+          process.stderr.write(`${describeBrowserSetup(progress)}\n`);
+        });
         const browser = await installManagedChromium({
           onProgress: (progress) => {
-            if (progress.stage !== "downloading" || !progress.totalBytes) {
-              process.stderr.write(`${progress.stage}\n`);
-              return;
-            }
-            const percent = Math.floor((progress.receivedBytes / progress.totalBytes) * 100);
-            if (percent >= lastPercent + 10) {
-              lastPercent = percent;
-              process.stderr.write(`downloading ${percent}%\n`);
-            }
+            if (progress.stage !== "installed") report(browserSetupFromDownload(progress));
           },
         });
         printJson(browser);

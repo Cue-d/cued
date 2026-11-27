@@ -2,13 +2,18 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
+  AUTH_BROWSER_PROFILE_IDS,
   authBrowserProfileDir,
   getAuthBrowserStatus,
   installedBrowserCandidates,
   listAuthBrowsers,
   readAppVersion,
 } from "./browser-resolver.js";
-import { managedChromiumInstallDir, readChromiumRuntimeManifest } from "./managed-browser.js";
+import {
+  MANAGED_CHROMIUM_ID,
+  managedChromiumInstallDir,
+  readChromiumRuntimeManifest,
+} from "./managed-browser.js";
 
 const home = "/Users/example";
 // tests/setup.ts points CUED_HOME at a per-run temporary directory.
@@ -106,5 +111,21 @@ describe("readAppVersion", () => {
     );
     expect(readAppVersion(executable)).toBe("150.0.1.2");
     expect(readAppVersion("/nonexistent/MacOS/Fake")).toBeNull();
+  });
+});
+
+describe("AUTH_BROWSER_PROFILE_IDS", () => {
+  // Old-profile cleanup keeps exactly these names in an account directory, so every browser a
+  // sign-in can open must be listed.
+  it("names every browser a sign-in window can open", () => {
+    const ids = [
+      ...installedBrowserCandidates(home).map((candidate) => candidate.id),
+      ...listAuthBrowsers({ env: { ...env, CUED_CHROMIUM_EXECUTABLE_PATH: "/x" } }).map(
+        (browser) => browser.id,
+      ),
+      MANAGED_CHROMIUM_ID,
+    ];
+    for (const id of ids) expect(AUTH_BROWSER_PROFILE_IDS.has(id)).toBe(true);
+    expect([...AUTH_BROWSER_PROFILE_IDS].sort()).toEqual([...new Set(ids)].sort());
   });
 });

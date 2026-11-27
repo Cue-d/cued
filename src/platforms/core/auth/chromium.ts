@@ -6,6 +6,7 @@ import type { AuthSessionState, Platform } from "../../../core/types/provider.js
 import type { CuedDatabase } from "../../../db/database.js";
 import { parseSlackCaptureDiagnostic } from "../../slack/auth/capture-diagnostics.js";
 import type { AuthSessionSummary, IntegrationStateSummary } from "../state/types.js";
+import { type BrowserSetupProgress, parseBrowserSetupLine } from "./browser-setup.js";
 
 export interface ChromiumAuthResult {
   sessionId: string;
@@ -88,39 +89,53 @@ function buildWorkerArgs(
   ];
 }
 
-/** The worker reports Chromium download progress on stderr while no browser is available. */
-export function parseBrowserDownloadProgress(line: string): Record<string, unknown> | null {
-  if (!line.startsWith('{"browserDownload"')) return null;
-  try {
-    const parsed = JSON.parse(line) as { browserDownload?: unknown };
-    return parsed.browserDownload && typeof parsed.browserDownload === "object"
-      ? (parsed.browserDownload as Record<string, unknown>)
-      : null;
-  } catch {
-    return null;
-  }
+export interface ChromiumAuthHooks {
+  /** Called after sign-in browser progress is recorded, so the app can be told to re-read. */
+  onProgress?: () => void;
 }
 
-export function recordBrowserDownloadProgress(
+/** Setup updates for the same stage closer together than this are dropped by the daemon too. */
+const BROWSER_SETUP_RECORD_INTERVAL_MS = 500;
+
+/**
+ * Keeps the sign-in session's browser setup progress (finding a browser, downloading one,
+ * launching it) on the in-progress auth session, where status readers and the app see it. The
+ * worker already sends at most one update a second per stage; this drops anything closer than
+ * half a second as well, so a misbehaving worker cannot turn progress into a write per chunk.
+ */
+export function createBrowserSetupRecorder(
   db: CuedDatabase,
   session: AuthSessionSummary,
-  progress: Record<string, unknown>,
-): void {
-  try {
-    if (db.getAuthSession(session.id)?.state !== "in_progress") return;
-    db.updateAuthSessionState({
-      id: session.id,
-      state: "in_progress",
-      resultSummary: {
-        provider: session.platform,
-        runtime: "chromium",
-        stage: "browser_download",
-        browserDownload: progress,
-      },
-    });
-  } catch {
-    // Progress is informational; the sign-in continues without it.
-  }
+  hooks: ChromiumAuthHooks = {},
+  now: () => number = Date.now,
+): (progress: BrowserSetupProgress) => void {
+  let lastStage: string | null = null;
+  let lastRecordedAt = 0;
+  return (progress) => {
+    const at = now();
+    if (progress.stage === lastStage && at - lastRecordedAt < BROWSER_SETUP_RECORD_INTERVAL_MS) {
+      return;
+    }
+    lastStage = progress.stage;
+    lastRecordedAt = at;
+    try {
+      if (db.getAuthSession(session.id)?.state !== "in_progress") return;
+      db.updateAuthSessionState({
+        id: session.id,
+        state: "in_progress",
+        resultSummary: {
+          provider: session.platform,
+          runtime: "chromium",
+          stage: "browser_setup",
+          browserSetup: progress,
+        },
+      });
+    } catch {
+      // Progress is informational; the sign-in continues without it.
+      return;
+    }
+    hooks.onProgress?.();
+  };
 }
 
 function parseChromiumAuthOutput(stdout: string): ChromiumAuthResult {
@@ -131,6 +146,7 @@ export function startChromiumAuthSession(
   db: CuedDatabase,
   session: AuthSessionSummary,
   integration: IntegrationStateSummary,
+  hooks: ChromiumAuthHooks = {},
 ): ChromiumAuthHandle {
   const child = spawn(process.execPath, buildWorkerArgs(db, session, integration), {
     stdio: ["ignore", "pipe", "pipe"],
@@ -139,10 +155,11 @@ export function startChromiumAuthSession(
 
   const stdoutChunks: Buffer[] = [];
   child.stdout.on("data", (chunk) => stdoutChunks.push(Buffer.from(chunk)));
+  const recordBrowserSetup = createBrowserSetupRecorder(db, session, hooks);
   createInterface({ input: child.stderr }).on("line", (line: string) => {
-    const download = parseBrowserDownloadProgress(line);
-    if (download) {
-      recordBrowserDownloadProgress(db, session, download);
+    const setup = parseBrowserSetupLine(line);
+    if (setup) {
+      recordBrowserSetup(setup);
       return;
     }
     const event = parseSlackCaptureDiagnostic(line);

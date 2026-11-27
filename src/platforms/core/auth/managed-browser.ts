@@ -35,6 +35,8 @@ export interface BrowserDownloadProgress {
   totalBytes: number | null;
 }
 
+export const MANAGED_CHROMIUM_ID = "managed-chromium";
+
 export function managedBrowserRoot(env: NodeJS.ProcessEnv = process.env): string {
   return join(resolveCuedHome(env), "browsers");
 }
@@ -76,7 +78,7 @@ export function managedChromiumInstallDir(
 
 function managedBrowser(manifest: ChromiumRuntimeManifest, executablePath: string): AuthBrowser {
   return {
-    id: "managed-chromium",
+    id: MANAGED_CHROMIUM_ID,
     name: "Chromium (downloaded by Cued)",
     executablePath,
     source: "managed",
