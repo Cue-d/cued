@@ -51,7 +51,7 @@ export function whatsappMessageSourceKey(message: WhatsAppMessageSnapshot): stri
   return `${normalizeWhatsAppJid(message.chatJID)}:${message.messageID}`;
 }
 
-export function whatsappCallSourceKey(call: WhatsAppCallSnapshot): string {
+function whatsappCallSourceKey(call: WhatsAppCallSnapshot): string {
   return `${normalizeWhatsAppJid(call.chatJID)}:${call.callID}`;
 }
 
@@ -147,7 +147,7 @@ function bestContactName(contact: WhatsAppContactSnapshot): string {
   );
 }
 
-export function buildWhatsAppContactEvent(
+function buildWhatsAppContactEvent(
   contact: WhatsAppContactSnapshot,
   accountKey: string,
   observedAt: number,
@@ -189,7 +189,7 @@ export function buildWhatsAppContactEvent(
   };
 }
 
-export function buildWhatsAppChatEvent(
+function buildWhatsAppChatEvent(
   chat: WhatsAppChatSnapshot,
   accountKey: string,
   observedAt: number,
@@ -342,7 +342,7 @@ function normalizeCallStatus(value: string): CallStatus {
   }
 }
 
-export function buildWhatsAppCallEvent(
+function buildWhatsAppCallEvent(
   call: WhatsAppCallSnapshot,
   accountKey: string,
   observedAt: number,

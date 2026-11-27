@@ -104,11 +104,11 @@ export function getBuiltAppPath(): string {
   return join(repoRoot(), "native", "macos", "dist", APP_NAME);
 }
 
-export function getDefaultInstallAppPath(): string {
+function getDefaultInstallAppPath(): string {
   return join("/Applications", APP_NAME);
 }
 
-export function getFallbackInstallAppPath(): string {
+function getFallbackInstallAppPath(): string {
   return join(homedir(), "Applications", APP_NAME);
 }
 
@@ -123,7 +123,7 @@ export function resolveInstalledAppPath(): string | null {
   return resolveInstalledAppPathFromCandidates(candidates);
 }
 
-export function buildMacOSAppBundle(): { appPath: string } {
+function buildMacOSAppBundle(): { appPath: string } {
   const bundledAppPath = currentAppPath();
   if (bundledAppPath) {
     return { appPath: bundledAppPath };
@@ -191,7 +191,7 @@ export function getCLISymlinkStatus(): {
   }
 }
 
-export function installMacOSAppFromSource(
+function installMacOSAppFromSource(
   sourcePath: string,
   destinationPath?: string,
 ): {
@@ -331,7 +331,7 @@ export function getLegacyLaunchAgentStatus(): LegacyLaunchAgentStatus {
   }
 }
 
-export function removeLegacyLaunchAgent(): {
+function removeLegacyLaunchAgent(): {
   plistPath: string;
   bootedOut: boolean;
   removed: boolean;

@@ -14,11 +14,11 @@ import {
   discordSourceKey,
 } from "../types.js";
 
-export function discordDedupeKey(seed: string): string {
+function discordDedupeKey(seed: string): string {
   return createHash("sha256").update(seed).digest("hex");
 }
 
-export function discordTimestampMs(value: string | null | undefined): number | null {
+function discordTimestampMs(value: string | null | undefined): number | null {
   if (!value) {
     return null;
   }

@@ -8,8 +8,8 @@
 import type Database from "better-sqlite3-multiple-ciphers";
 import type { Platform } from "../core/types/provider.js";
 
-export const SYNC_RUN_COMPLETED_RETENTION_MS = 3 * 24 * 60 * 60 * 1000;
-export const SYNC_RUN_FAILED_RETENTION_MS = 14 * 24 * 60 * 60 * 1000;
+const SYNC_RUN_COMPLETED_RETENTION_MS = 3 * 24 * 60 * 60 * 1000;
+const SYNC_RUN_FAILED_RETENTION_MS = 14 * 24 * 60 * 60 * 1000;
 
 export interface IntegrationProjectionCount {
   platform: Platform;

@@ -61,7 +61,7 @@ export interface DiscordStoredCredentials {
   globalName?: string | null;
 }
 
-export const DISCORD_DM_CHANNEL_TYPES = new Set([1, 3]);
+const DISCORD_DM_CHANNEL_TYPES = new Set([1, 3]);
 
 export function isDiscordDmChannel(channel: Pick<DiscordChannel, "type">): boolean {
   return DISCORD_DM_CHANNEL_TYPES.has(channel.type);

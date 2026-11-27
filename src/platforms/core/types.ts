@@ -23,7 +23,7 @@ export const PLATFORM_HELPER_REQUIREMENT_VALUES = [
 ] as const;
 export type PlatformHelperRequirement = (typeof PLATFORM_HELPER_REQUIREMENT_VALUES)[number];
 
-export const PLATFORM_FEATURE_VALUES = [
+const PLATFORM_FEATURE_VALUES = [
   "receive",
   "realtime_ingest",
   "full_history_sync",
@@ -37,7 +37,7 @@ export const PLATFORM_FEATURE_VALUES = [
 ] as const;
 export type PlatformFeature = (typeof PLATFORM_FEATURE_VALUES)[number];
 
-export const PLATFORM_FEATURE_SUPPORT_VALUES = ["yes", "partial", "no"] as const;
+const PLATFORM_FEATURE_SUPPORT_VALUES = ["yes", "partial", "no"] as const;
 export type PlatformFeatureSupport = (typeof PLATFORM_FEATURE_SUPPORT_VALUES)[number];
 
 export type PlatformFutureFeatureNotes = Record<string, never>;
@@ -54,7 +54,7 @@ type PlatformDefinition = {
   helperRequirements: readonly PlatformHelperRequirement[];
 };
 
-export const PLATFORM_DEFINITIONS = {
+const PLATFORM_DEFINITIONS = {
   contacts: {
     adapter: true,
     defaultAccountKey: "local",
@@ -143,7 +143,7 @@ export const PLATFORM_DEFINITIONS = {
   },
 } as const satisfies Record<Platform, PlatformDefinition>;
 
-export const PLATFORM_FEATURE_MATRIX = {
+const PLATFORM_FEATURE_MATRIX = {
   contacts: {
     receive: "no",
     realtime_ingest: "yes",
@@ -414,7 +414,7 @@ export function getPlatformFutureFeatureNotes(platform: Platform): PlatformFutur
   return {};
 }
 
-export function isIntegrationAuthState(value: string): value is IntegrationAuthState {
+function isIntegrationAuthState(value: string): value is IntegrationAuthState {
   return integrationAuthStateSet.has(value);
 }
 
@@ -425,7 +425,7 @@ export function parseIntegrationAuthState(
   return value && isIntegrationAuthState(value) ? value : fallback;
 }
 
-export function isIntegrationRuntimeKind(value: string): value is IntegrationRuntimeKind {
+function isIntegrationRuntimeKind(value: string): value is IntegrationRuntimeKind {
   return integrationRuntimeKindSet.has(value);
 }
 

@@ -97,7 +97,7 @@ export function getTelemetryStatus(db: CuedDatabase): {
   };
 }
 
-export function getTelemetrySalt(db: CuedDatabase): string {
+function getTelemetrySalt(db: CuedDatabase): string {
   return db.getOrCreateAppSetting(TELEMETRY_SETTING_KEYS.salt, () =>
     randomBytes(32).toString("base64url"),
   );

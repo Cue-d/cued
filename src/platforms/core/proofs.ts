@@ -122,7 +122,7 @@ const PROOF_KIND_CONTRACTS: SyncProofKindContract[] = [
   },
 ];
 
-export function getSyncProofKindContract(
+function getSyncProofKindContract(
   platform: Platform,
   proof: Pick<SyncProofInput, "proofKind" | "scope">,
 ): SyncProofKindContract | null {

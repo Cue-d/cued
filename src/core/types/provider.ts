@@ -7,7 +7,7 @@ import type {
 
 export * from "../../platforms/core/types.js";
 
-export const CONTACT_FIELD_NAME_VALUES = ["company", "display_name", "photo_url"] as const;
+const CONTACT_FIELD_NAME_VALUES = ["company", "display_name", "photo_url"] as const;
 export type ContactFieldName = (typeof CONTACT_FIELD_NAME_VALUES)[number];
 
 export type ContactFields = Partial<Record<ContactFieldName, string | null | undefined>>;
@@ -173,17 +173,11 @@ export const SYNC_PROOF_STATUS_VALUES = [
 ] as const;
 export type SyncProofStatus = (typeof SYNC_PROOF_STATUS_VALUES)[number];
 
-export const SYNC_SCOPE_KIND_VALUES = [
-  "account",
-  "folder",
-  "label",
-  "conversation",
-  "thread",
-] as const;
+const SYNC_SCOPE_KIND_VALUES = ["account", "folder", "label", "conversation", "thread"] as const;
 export type StandardSyncScopeKind = (typeof SYNC_SCOPE_KIND_VALUES)[number];
 export type SyncScopeKind = StandardSyncScopeKind | (string & {});
 
-export const SYNC_PROOF_KIND_VALUES = [
+const SYNC_PROOF_KIND_VALUES = [
   "discovery",
   "messages",
   "replies",

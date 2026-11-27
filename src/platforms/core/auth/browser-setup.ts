@@ -111,7 +111,7 @@ function readBytes(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null;
 }
 
-export function readBrowserSetup(value: unknown): BrowserSetupProgress | null {
+function readBrowserSetup(value: unknown): BrowserSetupProgress | null {
   if (!value || typeof value !== "object") return null;
   const record = value as Record<string, unknown>;
   if (typeof record.stage !== "string" || !BROWSER_SETUP_STAGES.has(record.stage)) return null;
