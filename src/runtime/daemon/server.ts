@@ -184,6 +184,12 @@ import {
   startIMessageWatcher,
 } from "./native-watchers.js";
 import {
+  getAdaptiveProjectionBatchSize,
+  getAdaptiveProjectionContinueDelayMs,
+  shouldDeferContinuationProjection,
+  shouldProjectIngestRunInline,
+} from "./projection-scheduling.js";
+import {
   EMPTY_RAW_EVENT_INSERT_RESULT,
   insertRawEventsYielding,
   isInboundMessageEvent,
@@ -198,7 +204,6 @@ import {
   DAEMON_STATUS_CACHE_MAX_AGE_MS,
   DAEMON_STATUS_HEARTBEAT_MS,
   DEFAULT_DISCORD_DM_POLL_MS,
-  DEFAULT_INLINE_PROJECTION_MAX_RAW_EVENTS,
   FOREGROUND_QUIET_PERIOD_MS,
   FTS_INDEX_PASS_BUDGET_MS,
   FTS_INDEX_SLICE_GAP_MS,
@@ -215,7 +220,6 @@ import {
   getDiscordRealtimeEnabled,
   getIngestConcurrency,
   getProjectionBatchSize,
-  getProjectionContinueDelayMs,
   getRealtimeProjectionBatchSize,
   getRealtimeProjectionEnabled,
   getSignalReconnectSyncCooldownMs,
@@ -228,7 +232,6 @@ import {
   MENU_BAR_STATUS_EVENT_DEBOUNCE_MS,
   MENU_BAR_STATUS_EVENT_MIN_INTERVAL_MS,
   now,
-  PROJECTION_BACKLOG_TIERS,
   PROJECTION_RETRY_DELAY_MS,
   PROJECTION_RUN_LEASE_MS,
   PROJECTION_WORKER_TIMEOUT_MS,
@@ -349,62 +352,6 @@ export function isAdapterAuthInvalidation(
   return (
     (platform === "linkedin" || platform === "slack" || platform === "gmail") &&
     isAdapterWorkerError(error, "auth_invalid")
-  );
-}
-
-export function shouldProjectIngestRunInline(input: {
-  platform: Platform;
-  runType: "sync" | "sync_resume";
-  realtimeProjectionEnabled: boolean;
-  firstInsertedRowId: number | null;
-  lastInsertedRowId: number | null;
-  insertedRawEvents: number;
-}): boolean {
-  return (
-    input.platform !== "discord" &&
-    input.runType !== "sync_resume" &&
-    input.realtimeProjectionEnabled &&
-    input.firstInsertedRowId != null &&
-    input.lastInsertedRowId != null &&
-    input.insertedRawEvents > 0 &&
-    input.insertedRawEvents <= DEFAULT_INLINE_PROJECTION_MAX_RAW_EVENTS
-  );
-}
-
-export function getAdaptiveProjectionBatchSize(pendingRawEvents: number): number {
-  const baseBatchSize = getProjectionBatchSize();
-  const tier = PROJECTION_BACKLOG_TIERS.find(
-    (candidate) => pendingRawEvents >= candidate.minEvents,
-  );
-  return Math.max(baseBatchSize, tier?.batchSize ?? baseBatchSize);
-}
-
-export function getAdaptiveProjectionContinueDelayMs(pendingRawEvents: number): number {
-  const configured = process.env.CUED_PROJECTION_CONTINUE_DELAY_MS;
-  if (configured != null) {
-    return getProjectionContinueDelayMs();
-  }
-  const tier = PROJECTION_BACKLOG_TIERS.find(
-    (candidate) => pendingRawEvents >= candidate.minEvents && candidate.continueDelayMs != null,
-  );
-  return tier?.continueDelayMs ?? getProjectionContinueDelayMs();
-}
-
-export function shouldDeferContinuationProjection(input: {
-  hasMore: boolean;
-  pendingRawEvents: number;
-  lastProjectionQueuedAt: number;
-  nowMs: number;
-  intervalMs?: number;
-  backlogEvents?: number;
-}): boolean {
-  const intervalMs = input.intervalMs ?? getContinuationProjectionIntervalMs();
-  const backlogEvents = input.backlogEvents ?? getContinuationProjectionBacklogEvents();
-  return (
-    input.hasMore &&
-    input.pendingRawEvents > 0 &&
-    input.pendingRawEvents < backlogEvents &&
-    input.nowMs - input.lastProjectionQueuedAt < intervalMs
   );
 }
 
