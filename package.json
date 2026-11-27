@@ -12,7 +12,6 @@
     "prepare": "husky",
     "dev": "tsx src/cli.ts",
     "build": "tsc -p tsconfig.build.json",
-    "build:native:macos": "swift build --package-path native/macos/CuedNative -c release",
     "build:app:macos": "bash scripts/build-cued-daemon-app.sh",
     "build:tarball:macos": "bash scripts/build-cued-tarball.sh",
     "check:app-quality": "pnpm check:biome && pnpm build && pnpm typecheck && pnpm test",
