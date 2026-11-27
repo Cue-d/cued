@@ -117,7 +117,7 @@ function firstExistingNpxPath(shellNpxPath: string | null): string | null {
   return candidates.find((candidate) => existsSync(candidate)) ?? null;
 }
 
-export function resolveNpxPath(): string | null {
+function resolveNpxPath(): string | null {
   return firstExistingNpxPath(resolveShellNpxPath());
 }
 
@@ -307,7 +307,7 @@ export function getGlobalCuedSkillStatus(): GlobalCuedSkillStatusResult {
 }
 
 /** Filesystem-only install check: answers in microseconds and never spawns a process. */
-export function probeGlobalCuedSkillInstallPath(home = homedir()): string | null {
+function probeGlobalCuedSkillInstallPath(home = homedir()): string | null {
   return hasSkillDefinition(join(home, ...GLOBAL_SKILLS_DIR_SEGMENTS, CUED_SKILL_NAME))
     ? join("~", ...GLOBAL_SKILLS_DIR_SEGMENTS, CUED_SKILL_NAME)
     : null;

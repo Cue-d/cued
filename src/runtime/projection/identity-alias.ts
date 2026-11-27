@@ -21,7 +21,7 @@ type Changes = {
 };
 
 // Only authenticated WhatsApp LID mappings have defined migration semantics.
-export function assertWhatsAppAlias(platform: string, payload: ContactAliasPayload): void {
+function assertWhatsAppAlias(platform: string, payload: ContactAliasPayload): void {
   if (
     platform !== "whatsapp" ||
     !/^whatsapp:\d+@lid$/.test(payload.aliasSourceEntityKey) ||

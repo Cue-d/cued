@@ -23,7 +23,7 @@ export const PLATFORM_HELPER_REQUIREMENT_VALUES = [
 ] as const;
 export type PlatformHelperRequirement = (typeof PLATFORM_HELPER_REQUIREMENT_VALUES)[number];
 
-export const PLATFORM_FEATURE_VALUES = [
+const PLATFORM_FEATURE_VALUES = [
   "receive",
   "realtime_ingest",
   "full_history_sync",
@@ -37,7 +37,7 @@ export const PLATFORM_FEATURE_VALUES = [
 ] as const;
 export type PlatformFeature = (typeof PLATFORM_FEATURE_VALUES)[number];
 
-export const PLATFORM_FEATURE_SUPPORT_VALUES = ["yes", "partial", "no"] as const;
+const PLATFORM_FEATURE_SUPPORT_VALUES = ["yes", "partial", "no"] as const;
 export type PlatformFeatureSupport = (typeof PLATFORM_FEATURE_SUPPORT_VALUES)[number];
 
 export type PlatformFutureFeatureNotes = Record<string, never>;
@@ -54,7 +54,7 @@ type PlatformDefinition = {
   helperRequirements: readonly PlatformHelperRequirement[];
 };
 
-export const PLATFORM_DEFINITIONS = {
+const PLATFORM_DEFINITIONS = {
   contacts: {
     adapter: true,
     defaultAccountKey: "local",
@@ -143,7 +143,7 @@ export const PLATFORM_DEFINITIONS = {
   },
 } as const satisfies Record<Platform, PlatformDefinition>;
 
-export const PLATFORM_FEATURE_MATRIX = {
+const PLATFORM_FEATURE_MATRIX = {
   contacts: {
     receive: "no",
     realtime_ingest: "yes",
@@ -278,17 +278,6 @@ export const SYNC_RUN_STATUS_VALUES = [
 ] as const;
 export type SyncRunStatus = (typeof SYNC_RUN_STATUS_VALUES)[number];
 
-export const JOB_KIND_VALUES = ["auth", "ingest", "project", "index", "cleanup", "status"] as const;
-
-export const JOB_STATUS_VALUES = [
-  "queued",
-  "running",
-  "retry_wait",
-  "completed",
-  "failed",
-  "canceled",
-] as const;
-
 export const RAW_EVENT_ENTITY_KIND_VALUES = [
   "contact",
   "conversation",
@@ -363,7 +352,6 @@ const adapterPlatformSet = new Set<string>(ADAPTER_PLATFORM_VALUES);
 const requestableIntegrationPlatformSet = new Set<string>(REQUESTABLE_INTEGRATION_PLATFORM_VALUES);
 const integrationAuthStateSet = new Set<string>(INTEGRATION_AUTH_STATE_VALUES);
 const integrationRuntimeKindSet = new Set<string>(INTEGRATION_RUNTIME_KIND_VALUES);
-const hostOsSet = new Set<string>(HOST_OS_VALUES);
 
 export function isPlatform(value: string): value is Platform {
   return platformSet.has(value);
@@ -381,14 +369,6 @@ export function isRequestableIntegrationPlatform(
 
 export function parsePlatform(value: string): Platform | null {
   return isPlatform(value) ? value : null;
-}
-
-export function isHostOS(value: string): value is HostOS {
-  return hostOsSet.has(value);
-}
-
-export function parseHostOS(value: string | null | undefined): HostOS | null {
-  return value && isHostOS(value) ? value : null;
 }
 
 export function getDefaultAccountKeyForPlatform(platform: Platform): string {
@@ -423,13 +403,6 @@ export function getPlatformHelperRequirements(
   return PLATFORM_DEFINITIONS[platform].helperRequirements;
 }
 
-export function getPlatformFeatureSupport(
-  platform: Platform,
-  feature: PlatformFeature,
-): PlatformFeatureSupport {
-  return PLATFORM_FEATURE_MATRIX[platform][feature];
-}
-
 export function getPlatformFeatureMatrixRow(
   platform: Platform,
 ): Readonly<Record<PlatformFeature, PlatformFeatureSupport>> {
@@ -441,7 +414,7 @@ export function getPlatformFutureFeatureNotes(platform: Platform): PlatformFutur
   return {};
 }
 
-export function isIntegrationAuthState(value: string): value is IntegrationAuthState {
+function isIntegrationAuthState(value: string): value is IntegrationAuthState {
   return integrationAuthStateSet.has(value);
 }
 
@@ -452,7 +425,7 @@ export function parseIntegrationAuthState(
   return value && isIntegrationAuthState(value) ? value : fallback;
 }
 
-export function isIntegrationRuntimeKind(value: string): value is IntegrationRuntimeKind {
+function isIntegrationRuntimeKind(value: string): value is IntegrationRuntimeKind {
   return integrationRuntimeKindSet.has(value);
 }
 

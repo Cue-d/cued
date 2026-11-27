@@ -183,7 +183,7 @@ async function buildWhatsAppManagedState(
   };
 }
 
-export async function refreshDesktopImportedIntegrations(db: CuedDatabase): Promise<{
+async function refreshDesktopImportedIntegrations(db: CuedDatabase): Promise<{
   refreshed: number;
   integrations: IntegrationStateSummary[];
 }> {

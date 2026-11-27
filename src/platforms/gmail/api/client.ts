@@ -60,7 +60,7 @@ export interface GmailAttachment {
   size?: number;
 }
 
-export class GmailApiError extends Error {
+class GmailApiError extends Error {
   constructor(
     public readonly status: number,
     public readonly responseBody: unknown,
@@ -90,7 +90,7 @@ export function isGmailNotFoundError(error: unknown): boolean {
   return error instanceof GmailApiError && error.status === 404;
 }
 
-export function readGmailSecret(accountKey: string): StoredGmailCredentials {
+function readGmailSecret(accountKey: string): StoredGmailCredentials {
   const stdout = execFileSync(
     "security",
     ["find-generic-password", "-s", GMAIL_KEYCHAIN_SERVICE, "-a", accountKey, "-w"],

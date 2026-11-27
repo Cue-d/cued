@@ -21,7 +21,7 @@ import type {
   ImsSyncBatch,
 } from "../../platforms/imessage/types.js";
 
-export const LARGE_CONVERSATION_MESSAGES = 110_000;
+const LARGE_CONVERSATION_MESSAGES = 110_000;
 /** chat.db ROWID of the large chat and of the first message the scenarios deliver. */
 const LARGE_CHAT_ID = 900_001;
 const FIRST_SCENARIO_ROWID = 5_000_000;

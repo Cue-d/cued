@@ -58,7 +58,7 @@ function summarizeIntegrationCapability(
   };
 }
 
-export const REQUESTABLE_INTEGRATIONS: Record<string, RequestableIntegrationConfig> = {
+const REQUESTABLE_INTEGRATIONS: Record<string, RequestableIntegrationConfig> = {
   slack: {
     connectionKind: "browser-session",
     runtimeKind: "chromium",
@@ -159,7 +159,7 @@ export function listRequestableIntegrationPlatforms(): Platform[] {
   return [...REQUESTABLE_INTEGRATION_PLATFORM_VALUES];
 }
 
-export function deriveRuntimeKind(row: IntegrationRowLike): IntegrationRuntimeKind {
+function deriveRuntimeKind(row: IntegrationRowLike): IntegrationRuntimeKind {
   const metadata = safeParseJsonRecord(row.metadata_json, "integration_states.metadata_json") ?? {};
   const fromMetadata = parseIntegrationRuntimeKind(
     typeof metadata.runtimeKind === "string" ? metadata.runtimeKind : null,
@@ -234,7 +234,7 @@ export function addSupportedByDaemonMetadata(
   };
 }
 
-export function normalizePersistedRequestableIntegrationRow(row: IntegrationStateRow): {
+function normalizePersistedRequestableIntegrationRow(row: IntegrationStateRow): {
   syncCapable: boolean;
   metadata: Record<string, unknown> | null;
 } | null {
@@ -517,7 +517,7 @@ export function deleteKeychainSecret(
   }
 }
 
-export function summarizeAuthSessions(rows: AuthSessionRow[]): AuthSessionSummary[] {
+function summarizeAuthSessions(rows: AuthSessionRow[]): AuthSessionSummary[] {
   return rows.map((row) => ({
     id: row.id,
     platform: row.platform,
@@ -540,7 +540,7 @@ export function summarizeAuthSessions(rows: AuthSessionRow[]): AuthSessionSummar
   }));
 }
 
-export function summarizeIntegrationStates(
+function summarizeIntegrationStates(
   db: CuedDatabase,
   rows: IntegrationStateRow[],
   options: { includeDiagnostics?: boolean } = {},
@@ -604,7 +604,7 @@ export function summarizeIntegrationStates(
   });
 }
 
-export function summarizeManagedIntegrationState(
+function summarizeManagedIntegrationState(
   db: CuedDatabase,
   integration: ManagedIntegrationState,
   options: { includeDiagnostics?: boolean } = {},
@@ -941,24 +941,6 @@ export function resolveCompletedMetadata(
   return {
     ...metadata,
     browserProfileDir: targetProfileDir,
-  };
-}
-
-export function getPlatformRuntimeDefaults(platform: Platform): {
-  runtimeKind: IntegrationRuntimeKind;
-  accountKey: string;
-} {
-  const runtimeKind =
-    platform === "contacts" || platform === "imessage"
-      ? "native"
-      : platform === "signal" || platform === "whatsapp"
-        ? "qr_native"
-        : platform === "gmail"
-          ? "oauth"
-          : "chromium";
-  return {
-    runtimeKind,
-    accountKey: getDefaultAccountKeyForPlatform(platform),
   };
 }
 

@@ -771,7 +771,6 @@ async function main(): Promise<void> {
             printJson(
               await buildOnboardingSnapshot(db, {
                 refreshManagedIntegrations: refreshManaged,
-                refreshPermissions,
               }),
             );
             return;

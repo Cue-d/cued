@@ -122,11 +122,7 @@ const PROOF_KIND_CONTRACTS: SyncProofKindContract[] = [
   },
 ];
 
-export function listSyncProofKindContracts(platform?: AdapterPlatform): SyncProofKindContract[] {
-  return PROOF_KIND_CONTRACTS.filter((contract) => !platform || contract.platform === platform);
-}
-
-export function getSyncProofKindContract(
+function getSyncProofKindContract(
   platform: Platform,
   proof: Pick<SyncProofInput, "proofKind" | "scope">,
 ): SyncProofKindContract | null {
