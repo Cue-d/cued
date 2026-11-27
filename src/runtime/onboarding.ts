@@ -1,6 +1,10 @@
 import { getCurrentAppVersion } from "../core/app-metadata.js";
 import type { CuedDatabase, IntegrationProjectionCount } from "../db/database.js";
 import type { LocalAccess, StatusAggregates } from "../db/db-worker-jobs.js";
+import {
+  readSignInBrowserState,
+  type SignInBrowserState,
+} from "../platforms/core/auth/browser-setup.js";
 import { refreshManagedIntegrationStates } from "../platforms/core/state/refresh.js";
 import { buildIntegrationStatus } from "../platforms/core/state/status.js";
 import { isPlatform } from "../platforms/core/types.js";
@@ -46,6 +50,8 @@ export interface OnboardingSnapshot {
   integrations: ReturnType<typeof buildIntegrationStatus>["integrations"];
   setupIntegrations: ReturnType<typeof buildIntegrationStatus>["setupIntegrations"];
   relationshipSummary: RelationshipSummary;
+  /** Set while a sign-in window waits on a browser (or a download of one), or just failed to. */
+  signInBrowser: SignInBrowserState | null;
 }
 
 export interface RelationshipSummary {
@@ -154,6 +160,7 @@ export async function buildOnboardingSnapshot(
     setupIntegrations,
     relationshipSummary:
       cachedRelationship ?? buildDatabaseRelationshipSummary(db, fallbackOverview),
+    signInBrowser: readSignInBrowserState(db),
   };
 }
 

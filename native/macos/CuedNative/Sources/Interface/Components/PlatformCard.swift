@@ -50,9 +50,40 @@ extension RootView {
           accountRow(configuration, integration: integration)
         }
       }
+
+      if let status = platformSignInBrowserStatus(for: configuration, showsAccountRows: shouldShowAccountControls) {
+        if status.isFailed {
+          signInBrowserFailure(status) {
+            onConnectIntegration(status.platform, status.accountKey)
+          }
+        } else {
+          signInBrowserProgress(status)
+            .padding(.leading, 40)
+        }
+      }
     }
     .padding(.vertical, 2)
     .opacity(shouldDimCard ? 0.7 : 1.0)
+  }
+
+  /// Sign-in browser state that belongs on the card itself rather than under an account: a
+  /// failure (the account may be gone from the list by then), or progress for an account the
+  /// card does not list.
+  func platformSignInBrowserStatus(
+    for configuration: PlatformConfig,
+    showsAccountRows: Bool
+  ) -> SignInBrowserStatus? {
+    guard let status = viewModel.signInBrowser, status.platform == configuration.platform else {
+      return nil
+    }
+    if status.isFailed {
+      return status
+    }
+    let listed = showsAccountRows && visibleAccounts(for: configuration).contains {
+      status.matches(platform: $0.platform, accountKey: $0.accountKey)
+        && ($0.authState == "requested" || $0.authState == "in_progress")
+    }
+    return listed ? nil : status
   }
 
   func showsAccountRows(for configuration: PlatformConfig) -> Bool {
@@ -125,6 +156,12 @@ extension RootView {
           .foregroundStyle(.secondary)
           .fixedSize(horizontal: false, vertical: true)
           .textSelection(.enabled)
+        if let status = viewModel.signInBrowser,
+           !status.isFailed,
+           status.matches(platform: integration.platform, accountKey: integration.accountKey),
+           integration.authState == "requested" || integration.authState == "in_progress" {
+          signInBrowserProgress(status)
+        }
       }
 
       Spacer(minLength: 12)
