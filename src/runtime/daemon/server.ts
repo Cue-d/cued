@@ -174,6 +174,7 @@ import {
 import { pruneUpdateArtifacts, scheduleUpdateArtifactRetention } from "../updater/retention.js";
 import { checkForUpdates } from "../updater/service.js";
 import {
+  createWatcherSyncTrigger,
   isNativeWatcherRunning,
   nextNativeWatcherRestart,
   shouldBootstrapLocalIntegrations,
@@ -245,7 +246,6 @@ const WAL_CHECKPOINT_MAX_INTERVAL_MS = 10 * 60_000;
 const FOREGROUND_QUIET_PERIOD_MS = 2_000;
 const DEFAULT_CONTINUATION_PROJECTION_INTERVAL_MS = 2_000;
 const DEFAULT_CONTINUATION_PROJECTION_BACKLOG_EVENTS = 500;
-const NATIVE_WATCH_DEBOUNCE_MS = 1_500;
 type NativeWatcherName = "contacts" | "imessage" | "callhistory";
 const DEFAULT_AUTOSYNC_SCHEDULER_TICK_MS = 15_000;
 const DEFAULT_SYNC_CONTINUE_DELAY_MS = 15_000;
@@ -1079,26 +1079,31 @@ async function emitAuthenticatedHook(
   });
 }
 
+/**
+ * Queues a sync for a change reported outside the scheduler. Answers "busy" when a sync of
+ * the account is already under way, since that run may have read before the change.
+ */
 function queueNativeTriggeredSync(
   db: ReturnType<typeof openCuedDatabase>,
   platform: AdapterPlatform,
   accountKey: string,
   trigger: string,
   wakeIngest: () => void,
-): void {
+): "taken" | "busy" {
   try {
-    db.withBusyTimeoutSync(TIMER_JOB_BUSY_TIMEOUT_MS, () => {
+    return db.withBusyTimeoutSync(TIMER_JOB_BUSY_TIMEOUT_MS, () => {
       const integration = db.getIntegrationState(platform, accountKey);
       if (!integration || integration.enabled !== 1 || integration.sync_capable !== 1) {
-        return;
+        return "taken";
       }
       if (db.hasQueuedOrRunningRun(platform, accountKey)) {
         // A history page waiting only because of battery power would hold this catch-up
         // back until its delay ran out.
         if (db.expeditePowerDeferredSyncRun(platform, accountKey, trigger)) {
           wakeIngest();
+          return "taken";
         }
-        return;
+        return "busy";
       }
 
       db.queueSyncRun({
@@ -1109,6 +1114,7 @@ function queueNativeTriggeredSync(
         details: { source: platform, accountKey, trigger },
       });
       wakeIngest();
+      return "taken";
     });
   } catch (error) {
     if (!isSqliteBusyError(error)) {
@@ -1122,6 +1128,7 @@ function queueNativeTriggeredSync(
     setTimeout(() => {
       queueNativeTriggeredSync(db, platform, accountKey, trigger, wakeIngest);
     }, TIMER_JOB_BUSY_RETRY_MS);
+    return "taken";
   }
 }
 
@@ -1129,21 +1136,11 @@ function createDebouncedSyncEnqueuer(
   db: ReturnType<typeof openCuedDatabase>,
   wakeIngest: () => void,
 ): (platform: AdapterPlatform, accountKey: string, trigger: string) => void {
-  const timers = new Map<string, NodeJS.Timeout>();
-
-  return (platform, accountKey, trigger) => {
-    const key = `${platform}:${accountKey}`;
-    const existing = timers.get(key);
-    if (existing) {
-      clearTimeout(existing);
-    }
-
-    const timer = setTimeout(() => {
-      timers.delete(key);
-      queueNativeTriggeredSync(db, platform, accountKey, trigger, wakeIngest);
-    }, NATIVE_WATCH_DEBOUNCE_MS);
-    timers.set(key, timer);
-  };
+  const trigger = createWatcherSyncTrigger();
+  return (platform, accountKey, reason) =>
+    trigger(`${platform}:${accountKey}`, () =>
+      queueNativeTriggeredSync(db, platform, accountKey, reason, wakeIngest),
+    );
 }
 
 function startIMessageWatcher(
