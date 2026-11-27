@@ -1,4 +1,5 @@
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -9,7 +10,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { authBrowserProfileDir, installedBrowserCandidates } from "./browser-resolver.js";
 import {
@@ -108,6 +109,30 @@ describe("pruneLegacyBrowserProfiles", () => {
     // The lock link is Chromium's own and is unlinked; any other link is left alone.
     expect(existsSync(join(account, "Linked Cache"))).toBe(true);
     expect(readdirSync(account)).not.toContain("SingletonLock");
+  });
+
+  it("keeps the profile recognisable when an entry cannot be removed, and finishes on the retry", async () => {
+    const { cuedHome, browserRoot, account } = fixture();
+    const locked = join(account, "Locked Cache");
+    write(join(locked, "data"), "x".repeat(10));
+    // A directory that cannot be written to cannot have its entries removed.
+    chmodSync(locked, 0o500);
+    const options = { cuedHome, browserRoot, isSignInActive: () => false };
+    try {
+      const first = await pruneLegacyBrowserProfiles(options);
+      // Paths are reported canonical (/private/var on macOS), so compare the name.
+      expect(first.failed.map((failure) => basename(failure.path))).toEqual(["Locked Cache"]);
+      expect(existsSync(join(account, "Local State"))).toBe(true);
+      expect(existsSync(join(browserRoot, LEGACY_PROFILES_MARKER))).toBe(false);
+    } finally {
+      chmodSync(locked, 0o700);
+    }
+
+    const second = await pruneLegacyBrowserProfiles(options);
+    expect(second.failed).toEqual([]);
+    expect(existsSync(locked)).toBe(false);
+    expect(existsSync(join(account, "Local State"))).toBe(false);
+    expect(existsSync(join(browserRoot, LEGACY_PROFILES_MARKER))).toBe(true);
   });
 
   it("refuses a browser directory that resolves outside the data directory", async () => {

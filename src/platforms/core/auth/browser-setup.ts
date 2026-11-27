@@ -1,5 +1,6 @@
 import { safeParseJsonRecord } from "../../../db/codecs.js";
 import type { CuedDatabase } from "../../../db/database.js";
+import { isUserRemovedIntegrationRow } from "../state/status.js";
 import type { Platform } from "../types.js";
 import type { BrowserDownloadProgress } from "./managed-browser.js";
 
@@ -165,6 +166,9 @@ export function readSignInBrowserState(
     setup?.stage === "failed" &&
     now - (latest.finished_at ?? latest.updated_at) < SIGN_IN_BROWSER_FAILURE_VISIBLE_MS
   ) {
+    // The account was removed since: there is nothing left to try again.
+    const integration = db.getIntegrationState(latest.platform, latest.account_key);
+    if (integration && isUserRemovedIntegrationRow(integration)) return null;
     return { ...base, ...setup, error: setup.error ?? latest.error_summary };
   }
   return null;

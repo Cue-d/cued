@@ -170,7 +170,11 @@ async function pruneAccountDir(
       Number(b.name === LEGACY_PROFILE_MARKER_ENTRY),
   );
   let removedAny = false;
+  let failedAny = false;
   for (const entry of entries) {
+    // Something could not be removed: keep `Local State`, or the retry would no longer
+    // recognise this directory as an old profile and would leave the rest behind.
+    if (failedAny && entry.name === LEGACY_PROFILE_MARKER_ENTRY) continue;
     const path = join(accountDir, entry.name);
     const stats = await lstatOrNull(path);
     if (!stats) continue;
@@ -193,6 +197,7 @@ async function pruneAccountDir(
       result.removedEntries += 1;
       removedAny = true;
     } catch (error) {
+      failedAny = true;
       result.failed.push({ path, error: error instanceof Error ? error.message : String(error) });
     }
   }

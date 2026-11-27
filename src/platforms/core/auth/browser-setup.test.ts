@@ -8,6 +8,7 @@ import {
   completeAuthSession,
   connectIntegration,
   markAuthSessionInProgress,
+  removeIntegration,
 } from "../state/mutations.js";
 import {
   BrowserUnavailableError,
@@ -256,6 +257,23 @@ describe("sign-in browser state", () => {
       sessionId: retry.authSession.id,
       stage: "finding",
     });
+    db.close();
+  });
+
+  it("stops offering a retry once the account is removed", () => {
+    const { db, running } = setup();
+    completeAuthSession(db, running.id, {
+      state: "failed",
+      resultSummary: {
+        errorCode: "browser_unavailable",
+        browserSetup: { stage: "failed", receivedBytes: null, totalBytes: null, error: "no" },
+      },
+      errorSummary: "no browser",
+    });
+    expect(readSignInBrowserState(db)?.stage).toBe("failed");
+
+    removeIntegration(db, "linkedin", "default");
+    expect(readSignInBrowserState(db)).toBeNull();
     db.close();
   });
 
