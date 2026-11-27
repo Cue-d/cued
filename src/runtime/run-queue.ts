@@ -48,6 +48,13 @@ export class RunQueueService {
     runIds: string[];
     targets: string[];
   } {
+    if (!source) {
+      for (const target of this.db.listEnabledSyncTargets()) {
+        if (isAdapterPlatform(target.platform)) {
+          this.db.expeditePowerDeferredSyncRun(target.platform, target.account_key);
+        }
+      }
+    }
     if (source === "whatsapp-desktop") {
       const accountKey = getDefaultAccountKeyForPlatform("whatsapp");
       if (this.db.hasQueuedOrRunningRun("whatsapp", accountKey)) {
@@ -83,6 +90,7 @@ export class RunQueueService {
 
       if (targets.length > 0) {
         const queuedTargets: string[] = [];
+        const expeditedRunIds: string[] = [];
         const runInputs = targets.flatMap((targetKey) => {
           const parsedTarget = parseRunTargetKey(targetKey);
           if (!parsedTarget) {
@@ -93,6 +101,11 @@ export class RunQueueService {
             return [];
           }
           if (this.db.hasQueuedOrRunningRun(platform, accountKey)) {
+            const expedited = this.db.expeditePowerDeferredSyncRun(platform, accountKey);
+            if (expedited) {
+              expeditedRunIds.push(expedited);
+              queuedTargets.push(targetKey);
+            }
             return [];
           }
 
@@ -108,7 +121,7 @@ export class RunQueueService {
           ];
         });
 
-        const runIds = this.db.queueSyncRuns(runInputs);
+        const runIds = [...expeditedRunIds, ...this.db.queueSyncRuns(runInputs)];
         if (runIds.length > 0) {
           this.schedulers.wakeIngest?.();
         }
@@ -158,6 +171,10 @@ export class RunQueueService {
         continue;
       }
       if (this.db.hasQueuedOrRunningRun(platform, accountKey)) {
+        const expedited = this.db.expeditePowerDeferredSyncRun(platform, accountKey);
+        if (expedited) {
+          runIds.push(expedited);
+        }
         continue;
       }
 

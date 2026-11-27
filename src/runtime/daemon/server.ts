@@ -21,6 +21,8 @@ import {
   type SingletonLockMetadata,
 } from "../../core/singleton-lock.js";
 import {
+  readHostPowerState,
+  readHostState,
   SleepInterruptionDetector,
   SyncInterruptedBySleep,
   shouldDeferSyncForSleep,
@@ -169,13 +171,20 @@ import {
 import { pruneUpdateArtifacts, scheduleUpdateArtifactRetention } from "../updater/retention.js";
 import { checkForUpdates } from "../updater/service.js";
 import {
+  isNativeWatcherRunning,
   shouldBootstrapLocalIntegrations,
   shouldRunLocalWatcher as shouldRunLocalWatcherForState,
 } from "./local-watchers.js";
 import { SyncRunMaintenance } from "./maintenance.js";
 import { DaemonReadModel } from "./read-model.js";
 import { StallMonitor } from "./stall-monitor.js";
-import { AutoSyncPacing } from "./sync-pacing.js";
+import {
+  AutoSyncPacing,
+  autoSyncPushPath,
+  historyContinuationDelayMs,
+  isScheduledSyncDue,
+  SchedulerWakeDetector,
+} from "./sync-pacing.js";
 import {
   BusyRetryingTimerJob,
   SQLITE_BUSY_SKIPPED,
@@ -3022,9 +3031,11 @@ export async function runDaemon(): Promise<void> {
     }
 
     for (const platform of desiredPlatforms) {
-      if (nativeWatchers.has(platform)) {
+      const existing = nativeWatchers.get(platform);
+      if (existing && isNativeWatcherRunning(existing)) {
         continue;
       }
+      // A watcher that exited is replaced; until then the scheduler polls its source.
       const watcher =
         platform === "imessage"
           ? startIMessageWatcher(db, queueDebouncedNativeSync)
@@ -3491,6 +3502,20 @@ export async function runDaemon(): Promise<void> {
         status.state === "connected",
     );
 
+  const hasConnectedSlackRealtime = (accountKey: string): boolean =>
+    slackRealtime
+      .getStatuses()
+      .some((status) => status.accountKey === accountKey && status.state === "connected");
+  const autoSyncPushPathFor = (platform: AdapterPlatform, accountKey: string) =>
+    autoSyncPushPath(platform, {
+      watcherRunning: (watcher) => isNativeWatcherRunning(nativeWatchers.get(watcher)),
+      realtimeConnected:
+        platform === "slack"
+          ? hasConnectedSlackRealtime(accountKey)
+          : hasConnectedRealtime(platform, accountKey),
+    });
+  const schedulerWakeDetector = new SchedulerWakeDetector(getAutoSyncSchedulerTickMs());
+
   const autoSyncBusyRetries = new Map<string, NodeJS.Timeout>();
   const queueAutoSyncRuns = (trigger: string) => {
     if (isUpdateShutdownRequested) {
@@ -3521,24 +3546,26 @@ export async function runDaemon(): Promise<void> {
         }
         const autoSyncTargets = getAutoSyncTargets(db);
         const queuedAt = now();
+        // One read of the host's file per tick: power for the caps, wake time for the reset.
+        const host = trigger === "scheduler" ? readHostState() : null;
+        if (host && schedulerWakeDetector.check(queuedAt, host.sleep?.lastWakeAt)) {
+          autoSyncPacing.resetAll();
+        }
         for (const target of autoSyncTargets) {
           if (trigger === "scheduler") {
             const targetKey = `${target.platform}:${target.accountKey}`;
             const lastQueuedAt = lastAutoSyncQueuedAt.get(targetKey) ?? startedAt;
-            const realtimeConnected = hasConnectedRealtime(target.platform, target.accountKey);
             const configuredInterval =
               process.env.CUED_AUTOSYNC_INTERVAL_MS != null ||
               process.env[`CUED_AUTOSYNC_INTERVAL_${target.platform.toUpperCase()}_MS`] != null;
-            if (
-              queuedAt - lastQueuedAt <
-              (configuredInterval
-                ? getAutoSyncIntervalMs(target.platform)
-                : autoSyncPacing.interval(
-                    targetKey,
-                    getAutoSyncIntervalMs(target.platform),
-                    realtimeConnected,
-                  ))
-            ) {
+            const intervalMs = configuredInterval
+              ? getAutoSyncIntervalMs(target.platform)
+              : autoSyncPacing.interval(targetKey, {
+                  baseMs: getAutoSyncIntervalMs(target.platform),
+                  push: autoSyncPushPathFor(target.platform, target.accountKey),
+                  power: host?.power ?? null,
+                });
+            if (!isScheduledSyncDue({ nowMs: queuedAt, lastQueuedAt, intervalMs })) {
               continue;
             }
           }
@@ -4233,9 +4260,25 @@ export async function runDaemon(): Promise<void> {
       if (platform === "signal") {
         requestSignalRealtimeReconcile();
       }
-      autoSyncPacing.record(`${platform}:${accountKey}`, insertResult.insertedCount, bundleHasMore);
+      const originTrigger =
+        typeof runDetails?.originTrigger === "string"
+          ? runDetails.originTrigger
+          : currentRun.trigger;
+      autoSyncPacing.record(`${platform}:${accountKey}`, {
+        insertedEvents: insertResult.insertedCount,
+        hasMore: bundleHasMore,
+        trigger: originTrigger,
+      });
       if (bundleHasMore && !db.hasQueuedOrRunningRun(currentRun.platform, accountKey)) {
-        const continuationDelayMs = getSyncContinueDelayMsForPlatform(currentRun.platform);
+        const baseContinuationDelayMs = getSyncContinueDelayMsForPlatform(currentRun.platform);
+        const continuationDelayMs = historyContinuationDelayMs({
+          baseMs: baseContinuationDelayMs,
+          originTrigger,
+          syncMode: checkpointSyncMode,
+          liveCoverage: hasConnectedRealtime(platform, accountKey),
+          continuationReason: bundleContinuation?.reason,
+          power: readHostPowerState(),
+        });
         db.queueSyncRun({
           platform: currentRun.platform,
           accountKey,
@@ -4246,6 +4289,8 @@ export async function runDaemon(): Promise<void> {
             source: currentRun.platform,
             accountKey,
             trigger: "ingest_continue",
+            originTrigger,
+            powerDeferred: continuationDelayMs > baseContinuationDelayMs,
             ...(bundleContinuation ? { continuation: bundleContinuation } : {}),
           },
         });
@@ -4595,6 +4640,9 @@ export async function runDaemon(): Promise<void> {
   };
   let managedIntegrationRefresh: Promise<void> | null = null;
   const refreshManagedIntegrationsInBackground = (reason: string) => {
+    // Only the app asks for this, when it opens: poll every account once at its normal
+    // interval, and start the idle back-off again.
+    autoSyncPacing.noteAppOpened(now());
     if (managedIntegrationRefresh) {
       return;
     }

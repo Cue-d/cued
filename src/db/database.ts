@@ -2809,6 +2809,45 @@ export class CuedDatabase {
     return this.statusReadCache.read("fts-backlog", () => readMessageFtsIndexBacklog(this.sqlite));
   }
 
+  /**
+   * Brings forward a history page that was only waiting because the machine is on battery, so
+   * a manual sync or a reconnect runs now instead of finding a queued run and doing nothing.
+   * A provider's own retry or back-off delay is never brought forward.
+   */
+  expeditePowerDeferredSyncRun(
+    platform: Platform,
+    accountKey: string,
+    originTrigger: "cli" | "integration_authenticated" = "cli",
+  ): string | null {
+    return this.db.transaction((tx) => {
+      const run = tx
+        .select({ id: syncRuns.id })
+        .from(syncRuns)
+        .where(
+          and(
+            eq(syncRuns.platform, platform),
+            eq(syncRuns.accountKey, accountKey),
+            eq(syncRuns.status, "queued"),
+            eq(syncRuns.runType, "sync_resume"),
+            sql`CASE WHEN json_valid(${syncRuns.detailsJson}) THEN json_extract(${syncRuns.detailsJson}, '$.powerDeferred') ELSE 0 END = 1`,
+          ),
+        )
+        .limit(1)
+        .get();
+      if (!run) {
+        return null;
+      }
+      tx.update(syncRuns)
+        .set({
+          scheduledAt: now(),
+          detailsJson: sql`json_set(${syncRuns.detailsJson}, '$.originTrigger', ${originTrigger}, '$.powerDeferred', json('false'))`,
+        })
+        .where(eq(syncRuns.id, run.id))
+        .run();
+      return run.id;
+    });
+  }
+
   hasQueuedOrRunningRun(platform: Platform, accountKey?: string | null): boolean {
     const accountPredicate = accountKey == null ? sql`1 = 1` : eq(syncRuns.accountKey, accountKey);
     return Boolean(
