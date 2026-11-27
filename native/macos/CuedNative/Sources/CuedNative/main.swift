@@ -914,43 +914,12 @@ struct Command {
 
   @MainActor
   private static func streamIMessageChanges(options: IMessageWatchOptions) throws {
-    let url = URL(fileURLWithPath: options.dbPath)
-    let directoryURL = url.deletingLastPathComponent()
-    guard FileManager.default.fileExists(atPath: directoryURL.path) else {
-      throw CLIError.imessageWatch("messages directory does not exist: \(directoryURL.path)")
-    }
-
-    let fileDescriptor = open(directoryURL.path, O_EVTONLY)
-    guard fileDescriptor >= 0 else {
-      throw CLIError.imessageWatch("unable to watch messages directory: \(directoryURL.path)")
-    }
-
-    try writeJSONLine(WatchEvent(
-      event: "ready",
-      timestamp: Int(Date().timeIntervalSince1970 * 1000)
-    ))
-
-    let source = DispatchSource.makeFileSystemObjectSource(
-      fileDescriptor: fileDescriptor,
-      eventMask: [.write, .extend, .rename, .delete, .attrib],
-      queue: DispatchQueue.main
+    try streamDatabaseChanges(
+      dbPath: options.dbPath,
+      event: "messages_changed",
+      directoryName: "messages directory",
+      error: CLIError.imessageWatch
     )
-    source.setEventHandler {
-      do {
-        try writeJSONLine(WatchEvent(
-          event: "messages_changed",
-          timestamp: Int(Date().timeIntervalSince1970 * 1000)
-        ))
-      } catch {
-        fputs("\(error.localizedDescription)\n", stderr)
-      }
-    }
-    source.setCancelHandler {
-      close(fileDescriptor)
-    }
-    source.resume()
-
-    RunLoop.main.run()
   }
 
   private static func dumpCallHistory(options: CallHistoryDumpOptions) throws -> CallHistorySyncBatch {
@@ -1080,15 +1049,44 @@ struct Command {
 
   @MainActor
   private static func streamCallHistoryChanges(options: CallHistoryWatchOptions) throws {
-    let url = URL(fileURLWithPath: options.dbPath)
-    let directoryURL = url.deletingLastPathComponent()
-    guard FileManager.default.fileExists(atPath: directoryURL.path) else {
-      throw CLIError.callHistory("call history directory does not exist: \(directoryURL.path)")
-    }
+    try streamDatabaseChanges(
+      dbPath: options.dbPath,
+      event: "callhistory_changed",
+      directoryName: "call history directory",
+      error: CLIError.callHistory
+    )
+  }
 
-    let fileDescriptor = open(directoryURL.path, O_EVTONLY)
-    guard fileDescriptor >= 0 else {
-      throw CLIError.callHistory("unable to watch call history directory: \(directoryURL.path)")
+  /// Writes a `ready` line once the database is watched, then one `event` line per coalesced
+  /// change. Exits with status 1 if the database's directory goes away.
+  @MainActor
+  private static func streamDatabaseChanges(
+    dbPath: String,
+    event: String,
+    directoryName: String,
+    error: (String) -> CLIError
+  ) throws {
+    let directoryPath = URL(fileURLWithPath: dbPath).deletingLastPathComponent().path
+    let watcher = SQLiteChangeWatcher(
+      databasePath: dbPath,
+      queue: DispatchQueue.main,
+      onChange: {
+        do {
+          try writeJSONLine(WatchEvent(event: event, timestamp: Int(Date().timeIntervalSince1970 * 1000)))
+        } catch {
+          fputs("\(error.localizedDescription)\n", stderr)
+        }
+      },
+      onDirectoryLost: {
+        fputs("\(directoryName) was removed or renamed: \(directoryPath)\n", stderr)
+        Darwin.exit(1)
+      }
+    )
+    guard FileManager.default.fileExists(atPath: directoryPath) else {
+      throw error("\(directoryName) does not exist: \(directoryPath)")
+    }
+    guard watcher.start() else {
+      throw error("unable to watch \(directoryName): \(directoryPath)")
     }
 
     try writeJSONLine(WatchEvent(
@@ -1096,27 +1094,9 @@ struct Command {
       timestamp: Int(Date().timeIntervalSince1970 * 1000)
     ))
 
-    let source = DispatchSource.makeFileSystemObjectSource(
-      fileDescriptor: fileDescriptor,
-      eventMask: [.write, .extend, .rename, .delete, .attrib],
-      queue: DispatchQueue.main
-    )
-    source.setEventHandler {
-      do {
-        try writeJSONLine(WatchEvent(
-          event: "callhistory_changed",
-          timestamp: Int(Date().timeIntervalSince1970 * 1000)
-        ))
-      } catch {
-        fputs("\(error.localizedDescription)\n", stderr)
-      }
+    withExtendedLifetime(watcher) {
+      RunLoop.main.run()
     }
-    source.setCancelHandler {
-      close(fileDescriptor)
-    }
-    source.resume()
-
-    RunLoop.main.run()
   }
 
   private static func fetchMessageRows(

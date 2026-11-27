@@ -175,7 +175,9 @@ import {
 import { pruneUpdateArtifacts, scheduleUpdateArtifactRetention } from "../updater/retention.js";
 import { checkForUpdates } from "../updater/service.js";
 import {
+  createWatcherSyncTrigger,
   isNativeWatcherRunning,
+  nextNativeWatcherRestart,
   shouldBootstrapLocalIntegrations,
   shouldRunLocalWatcher as shouldRunLocalWatcherForState,
 } from "./local-watchers.js";
@@ -245,7 +247,7 @@ const WAL_CHECKPOINT_MAX_INTERVAL_MS = 10 * 60_000;
 const FOREGROUND_QUIET_PERIOD_MS = 2_000;
 const DEFAULT_CONTINUATION_PROJECTION_INTERVAL_MS = 2_000;
 const DEFAULT_CONTINUATION_PROJECTION_BACKLOG_EVENTS = 500;
-const NATIVE_WATCH_DEBOUNCE_MS = 1_500;
+type NativeWatcherName = "contacts" | "imessage" | "callhistory";
 const DEFAULT_AUTOSYNC_SCHEDULER_TICK_MS = 15_000;
 const DEFAULT_SYNC_CONTINUE_DELAY_MS = 15_000;
 const DEFAULT_SIGNAL_RECONNECT_SYNC_COOLDOWN_MS = 5 * 60_000;
@@ -1098,26 +1100,31 @@ async function emitAuthenticatedHook(
   });
 }
 
+/**
+ * Queues a sync for a change reported outside the scheduler. Answers "busy" when a sync of
+ * the account is already under way, since that run may have read before the change.
+ */
 function queueNativeTriggeredSync(
   db: ReturnType<typeof openCuedDatabase>,
   platform: AdapterPlatform,
   accountKey: string,
   trigger: string,
   wakeIngest: () => void,
-): void {
+): "taken" | "busy" {
   try {
-    db.withBusyTimeoutSync(TIMER_JOB_BUSY_TIMEOUT_MS, () => {
+    return db.withBusyTimeoutSync(TIMER_JOB_BUSY_TIMEOUT_MS, () => {
       const integration = db.getIntegrationState(platform, accountKey);
       if (!integration || integration.enabled !== 1 || integration.sync_capable !== 1) {
-        return;
+        return "taken";
       }
       if (db.hasQueuedOrRunningRun(platform, accountKey)) {
         // A history page waiting only because of battery power would hold this catch-up
         // back until its delay ran out.
         if (db.expeditePowerDeferredSyncRun(platform, accountKey, trigger)) {
           wakeIngest();
+          return "taken";
         }
-        return;
+        return "busy";
       }
 
       db.queueSyncRun({
@@ -1128,6 +1135,7 @@ function queueNativeTriggeredSync(
         details: { source: platform, accountKey, trigger },
       });
       wakeIngest();
+      return "taken";
     });
   } catch (error) {
     if (!isSqliteBusyError(error)) {
@@ -1141,6 +1149,7 @@ function queueNativeTriggeredSync(
     setTimeout(() => {
       queueNativeTriggeredSync(db, platform, accountKey, trigger, wakeIngest);
     }, TIMER_JOB_BUSY_RETRY_MS);
+    return "taken";
   }
 }
 
@@ -1148,30 +1157,22 @@ function createDebouncedSyncEnqueuer(
   db: ReturnType<typeof openCuedDatabase>,
   wakeIngest: () => void,
 ): (platform: AdapterPlatform, accountKey: string, trigger: string) => void {
-  const timers = new Map<string, NodeJS.Timeout>();
-
-  return (platform, accountKey, trigger) => {
-    const key = `${platform}:${accountKey}`;
-    const existing = timers.get(key);
-    if (existing) {
-      clearTimeout(existing);
-    }
-
-    const timer = setTimeout(() => {
-      timers.delete(key);
-      queueNativeTriggeredSync(db, platform, accountKey, trigger, wakeIngest);
-    }, NATIVE_WATCH_DEBOUNCE_MS);
-    timers.set(key, timer);
-  };
+  const trigger = createWatcherSyncTrigger();
+  return (platform, accountKey, reason) =>
+    trigger(`${platform}:${accountKey}`, () =>
+      queueNativeTriggeredSync(db, platform, accountKey, reason, wakeIngest),
+    );
 }
 
 function startIMessageWatcher(
   _db: ReturnType<typeof openCuedDatabase>,
   queueSync: (platform: AdapterPlatform, accountKey: string, trigger: string) => void,
 ): FSWatcher | ChildProcess | null {
+  // The database the iMessage worker reads.
+  const dbPath = process.env.CUED_IMESSAGE_DB_PATH || DEFAULT_CHAT_DB_PATH;
   const nativeBinary = resolveMacOSNativeBinary(process.env.CUED_IMESSAGE_NATIVE_BINARY);
   if (nativeBinary) {
-    const child = spawn(nativeBinary, ["imessage", "watch", "--db-path", DEFAULT_CHAT_DB_PATH], {
+    const child = spawn(nativeBinary, ["imessage", "watch", "--db-path", dbPath], {
       stdio: ["ignore", "pipe", "pipe"],
       env: process.env,
     });
@@ -1197,21 +1198,19 @@ function startIMessageWatcher(
       }
     });
 
-    child.on("exit", (code) => {
-      if (code && code !== 0) {
-        nativeWatchLogger.warn(`imessage watcher exited`, { code });
-      }
+    child.on("error", (error) => {
+      nativeWatchLogger.warn("imessage watcher failed", error);
     });
 
     return child;
   }
 
   try {
-    const targetDir = dirname(DEFAULT_CHAT_DB_PATH);
+    const targetDir = dirname(dbPath);
     const watchedNames = new Set([
-      basename(DEFAULT_CHAT_DB_PATH),
-      `${basename(DEFAULT_CHAT_DB_PATH)}-wal`,
-      `${basename(DEFAULT_CHAT_DB_PATH)}-shm`,
+      basename(dbPath),
+      `${basename(dbPath)}-wal`,
+      `${basename(dbPath)}-shm`,
     ]);
 
     return watch(targetDir, (_eventType, filename) => {
@@ -1262,10 +1261,8 @@ function startCallHistoryWatcher(
       }
     });
 
-    child.on("exit", (code) => {
-      if (code && code !== 0) {
-        nativeWatchLogger.warn("callhistory watcher exited", { code });
-      }
+    child.on("error", (error) => {
+      nativeWatchLogger.warn("callhistory watcher failed", error);
     });
 
     return child;
@@ -1329,10 +1326,8 @@ function startContactsWatcher(
     }
   });
 
-  child.on("exit", (code) => {
-    if (code && code !== 0) {
-      nativeWatchLogger.warn("contacts watcher exited", { code });
-    }
+  child.on("error", (error) => {
+    nativeWatchLogger.warn("contacts watcher failed", error);
   });
 
   return child;
@@ -1867,9 +1862,10 @@ export async function runDaemon(): Promise<void> {
   const lastContinuationProjectionQueuedAt = new Map<string, number>();
   const projectionMessageHooks = new ProjectionMessageHookBarrier();
   const suppressNextSignalReconnectSync = new Set<string>();
-  const nativeWatchers = new Map<
-    "contacts" | "imessage" | "callhistory",
-    FSWatcher | ChildProcess
+  const nativeWatchers = new Map<NativeWatcherName, FSWatcher | ChildProcess>();
+  const nativeWatcherRestarts = new Map<
+    NativeWatcherName,
+    { failures: number; timer: NodeJS.Timeout | null }
   >();
   let discordRealtimeReconcilePromise: Promise<void> | null = null;
   let discordRealtimeReconcileQueued = false;
@@ -3042,6 +3038,42 @@ export async function runDaemon(): Promise<void> {
       db.getIntegrationState(platform, "local"),
     );
   };
+  const cancelNativeWatcherRestart = (platform: NativeWatcherName) => {
+    const restart = nativeWatcherRestarts.get(platform);
+    if (restart?.timer) {
+      clearTimeout(restart.timer);
+    }
+    nativeWatcherRestarts.delete(platform);
+  };
+  // A helper that stops on its own is started again after a delay that grows while it keeps
+  // stopping. Its first line on restart queues a sync, which picks up what it missed.
+  const scheduleNativeWatcherRestart = (
+    platform: NativeWatcherName,
+    watcher: ChildProcess,
+    startedAt: number,
+  ) => {
+    if (nativeWatchers.get(platform) !== watcher) {
+      return;
+    }
+    const restart = nativeWatcherRestarts.get(platform) ?? { failures: 0, timer: null };
+    const next = nextNativeWatcherRestart(restart.failures, Date.now() - startedAt);
+    if (restart.timer) {
+      clearTimeout(restart.timer);
+    }
+    restart.failures = next.failures;
+    restart.timer = setTimeout(() => {
+      restart.timer = null;
+      reconcileLocalWatchers();
+    }, next.delayMs);
+    restart.timer.unref?.();
+    nativeWatcherRestarts.set(platform, restart);
+    nativeWatchLogger.warn("native watcher stopped; restarting", {
+      platform,
+      code: watcher.exitCode,
+      signal: watcher.signalCode,
+      delayMs: next.delayMs,
+    });
+  };
   const reconcileLocalWatchers = () => {
     if (process.platform !== "darwin") {
       return;
@@ -3059,13 +3091,21 @@ export async function runDaemon(): Promise<void> {
       stopNativeWatcher(watcher);
       nativeWatchers.delete(platform);
     }
+    for (const platform of [...nativeWatcherRestarts.keys()]) {
+      if (!desiredPlatforms.includes(platform)) {
+        cancelNativeWatcherRestart(platform);
+      }
+    }
 
     for (const platform of desiredPlatforms) {
       const existing = nativeWatchers.get(platform);
       if (existing && isNativeWatcherRunning(existing)) {
         continue;
       }
-      // A watcher that exited is replaced; until then the scheduler polls its source.
+      // A watcher that stopped waits for its restart; until then the scheduler polls its source.
+      if (nativeWatcherRestarts.get(platform)?.timer) {
+        continue;
+      }
       const watcher =
         platform === "imessage"
           ? startIMessageWatcher(db, queueDebouncedNativeSync)
@@ -3074,6 +3114,10 @@ export async function runDaemon(): Promise<void> {
             : startContactsWatcher(db, queueDebouncedNativeSync);
       if (watcher) {
         nativeWatchers.set(platform, watcher);
+        if ("exitCode" in watcher) {
+          const startedAt = Date.now();
+          watcher.once("close", () => scheduleNativeWatcherRestart(platform, watcher, startedAt));
+        }
       }
     }
   };
@@ -3727,6 +3771,9 @@ export async function runDaemon(): Promise<void> {
   const stopRealtimeAndWatchers = () => {
     for (const watcher of nativeWatchers.values()) {
       stopNativeWatcher(watcher);
+    }
+    for (const platform of [...nativeWatcherRestarts.keys()]) {
+      cancelNativeWatcherRestart(platform);
     }
     discordRealtime.stopAll();
     slackRealtime.stopAll();
