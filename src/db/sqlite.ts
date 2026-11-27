@@ -186,6 +186,12 @@ function migrateDatabaseKeyToCurrentService(): boolean {
   return false;
 }
 
+/** Whether a statement failed because another connection holds the lock it needs. */
+export function isSqliteBusyError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return /sqlite_(busy|locked)|database is locked|database is busy/i.test(message);
+}
+
 export function openSqliteDatabase(
   dbPath: string,
   options: SQLiteOpenOptions = {},

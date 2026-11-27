@@ -1292,6 +1292,7 @@ function projectConversationObservation(
     removalReason?: string | null;
     service?: string | null;
     name?: string | null;
+    nameIsDerived?: number;
     topic?: string | null;
     unreadCount?: number;
   } = {
@@ -1309,6 +1310,7 @@ function projectConversationObservation(
   }
   if (payload.displayName !== undefined) {
     conversationSet.name = normalizeText(payload.displayName);
+    conversationSet.nameIsDerived = 0;
   }
   if (payload.topic !== undefined) {
     conversationSet.topic = normalizeText(payload.topic);
@@ -2232,7 +2234,7 @@ function refreshParticipantNamesForIds(conn: LocalDbExecutor, conversationIds: S
                     AND cp2.is_active = 1
                     AND cp2.is_self = 0
                 ) = 1
-              THEN ${sql.raw(nonEmpty("(SELECT name FROM conversations WHERE id = conversation_participants.conversation_id)"))}
+              THEN ${sql.raw(nonEmpty("(SELECT name FROM conversations WHERE id = conversation_participants.conversation_id AND name_is_derived = 0)"))}
               ELSE NULL
             END AS dm_name,
             ${sql.raw(nonEmpty("conversation_participants.participant_name"))} AS current_name
@@ -2262,14 +2264,19 @@ function refreshParticipantNamesForIds(conn: LocalDbExecutor, conversationIds: S
   }
 }
 
+/**
+ * Names a one-to-one conversation after its participants while it has no name of its own (or
+ * only a raw handle), and keeps that name following them; a name the platform supplied stays.
+ */
 function refreshConversationNamesForIds(conn: LocalDbExecutor, conversationIds: Set<string>): void {
   for (const chunk of chunkArray([...conversationIds], SQL_CHUNK_SIZE)) {
     conn.run(sql`
       UPDATE conversations
-      SET name = participant_names
+      SET name = participant_names, name_is_derived = 1
       WHERE id IN (${sqlValueList(chunk)})
         AND (
-          name IS NULL
+          (name_is_derived = 1 AND name IS NOT participant_names)
+          OR name IS NULL
           OR name = ''
           OR name = source_conversation_key
           OR name GLOB '+*'
