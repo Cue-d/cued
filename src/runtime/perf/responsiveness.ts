@@ -9,9 +9,11 @@
  *   2. Request round trip: latency of the requests the UI sends, over a persistent socket.
  *   3. Legacy transport: the same request by spawning the CLI, which is what the UI paid
  *      before it spoke to the socket directly.
+ *   4. Resting cost: CPU time and wakeups of an idle daemon with no clients (resting-cost.ts).
  *
  * Usage:
  *   pnpm build && pnpm test:perf:responsiveness [--assert] [--scale 0.1] [--cli path/to/cli.js]
+ *     [--resting-window-ms 65000 | --no-resting]
  */
 import { type ChildProcess, spawn, spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
@@ -42,6 +44,7 @@ import {
   SEARCH_REINDEX_COUNTER_SQL,
   seedLargeConversation,
 } from "./large-conversation.js";
+import { formatRestingCost, measureRestingCost, type RestingCostResult } from "./resting-cost.js";
 
 const FIXTURE_VERSION = 3;
 const FIXTURE_DB_KEY = "cued-perf-fixture-key";
@@ -105,6 +108,8 @@ type Options = {
   removeTarget: IntegrationTarget;
   toggleTarget: IntegrationTarget;
   syncScenario: boolean;
+  /** Quiet window for the resting-cost scenario, or 0 to skip it. */
+  restingWindowMs: number;
 };
 
 type IntegrationTarget = { platform: string; accountKey: string };
@@ -160,6 +165,8 @@ function parseOptions(argv: string[]): Options {
     removeTarget: REMOVE_TARGET,
     toggleTarget: TOGGLE_TARGET,
     syncScenario: true,
+    // Long enough to take in one status heartbeat (60 s) as well as the faster timers.
+    restingWindowMs: 65_000,
   };
   for (let index = 0; index < argv.length; index += 1) {
     const flag = argv[index];
@@ -201,6 +208,12 @@ function parseOptions(argv: string[]): Options {
         break;
       case "--toggle":
         options.toggleTarget = parseIntegrationTarget(value());
+        break;
+      case "--resting-window-ms":
+        options.restingWindowMs = Number(value());
+        break;
+      case "--no-resting":
+        options.restingWindowMs = 0;
         break;
       case "--no-sync":
         options.syncScenario = false;
@@ -1016,6 +1029,20 @@ async function main(): Promise<void> {
   });
   delete daemonEnv.VITEST_WORKER_ID;
 
+  // Measured first, on a daemon of its own, while nothing else from this run is busy.
+  const resting: RestingCostResult | null =
+    options.restingWindowMs > 0
+      ? await measureRestingCost({
+          nodePath: options.nodePath,
+          cliPath: options.cliPath,
+          env: daemonEnv,
+          home: join(home, "resting"),
+          dbKey: FIXTURE_DB_KEY,
+          settleMs: 20_000,
+          windowMs: options.restingWindowMs,
+        })
+      : null;
+
   const logPath = join(home, "daemon.out");
   const child = spawn(options.nodePath, [options.cliPath, "daemon"], {
     env: daemonEnv,
@@ -1408,7 +1435,13 @@ async function main(): Promise<void> {
       .join("\n");
     console.log(`\nexternal client (${externalClientPassed ? "ok" : "FAILED"}):\n${summary}`);
   }
-  const passed = printResults(options, startupMs, results, legacySpawn) && externalClientPassed;
+  const passed =
+    printResults(options, startupMs, results, legacySpawn) &&
+    externalClientPassed &&
+    (resting?.passed ?? true);
+  if (resting) {
+    console.log(formatRestingCost(resting));
+  }
   if (stallReports.length > 0) {
     // The daemon's own account of where its event loop went, when it noticed a stall.
     console.log(`\ndaemon stall reports:\n${stallReports.join("\n")}`);
@@ -1416,7 +1449,7 @@ async function main(): Promise<void> {
   if (options.jsonPath) {
     writeFileSync(
       options.jsonPath,
-      `${JSON.stringify({ label: options.label, scale: options.scale, startupMs, targets: TARGETS, results, legacySpawn, passed }, null, 2)}\n`,
+      `${JSON.stringify({ label: options.label, scale: options.scale, startupMs, targets: TARGETS, results, legacySpawn, resting, passed }, null, 2)}\n`,
     );
   }
   if (options.assert && !passed) {
